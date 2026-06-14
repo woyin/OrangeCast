@@ -8,6 +8,7 @@ export interface AppEnv {
   UPLOAD_MAX_BYTES: string;
   UPLOAD_MAX_SECONDS: string;
   OPENAI_API_KEY?: string;
+  AI_PROVIDER?: string;
 }
 
 export function requireEnv(context: { cloudflare?: { env: AppEnv } } | { env?: AppEnv }): AppEnv {

@@ -42,6 +42,30 @@ export function selectRelevantTranscriptChunks(
     });
 }
 
+export interface QuestionAnswerUsageEstimate {
+  inputUnits: number;
+  outputUnits: number;
+  estimatedCost: number;
+}
+
+export type AnswerSourceQuestionResult = Awaited<ReturnType<ChatProvider["answer"]>> & {
+  usage: QuestionAnswerUsageEstimate;
+};
+
+export function estimateQuestionAnswerUsage(input: {
+  question: string;
+  transcriptContext: string;
+  answer: string;
+}): QuestionAnswerUsageEstimate {
+  const inputUnits = Math.ceil((input.question.length + input.transcriptContext.length) / 4);
+  const outputUnits = Math.ceil(input.answer.length / 4);
+  return {
+    inputUnits,
+    outputUnits,
+    estimatedCost: inputUnits * 0.00000015 + outputUnits * 0.0000006,
+  };
+}
+
 export async function answerSourceQuestion(input: {
   provider: ChatProvider;
   question: string;
@@ -50,17 +74,25 @@ export async function answerSourceQuestion(input: {
   segments: TranscriptSegment[];
   analysis: KnowledgeCard;
   maxChars?: number;
-}): Promise<Awaited<ReturnType<ChatProvider["answer"]>>> {
+}): Promise<AnswerSourceQuestionResult> {
   const maxChars = input.maxChars ?? QA_CONTEXT_MAX_CHARS;
   const selectedChunks = selectRelevantTranscriptChunks(input.question, input.segments, maxChars);
   const transcript = (selectedChunks.length > 0
     ? selectedChunks.map(formatChunk).join("\n\n")
     : input.transcriptText).slice(0, maxChars);
 
-  return await input.provider.answer({
+  const answer = await input.provider.answer({
     question: input.question,
     title: input.title,
     transcript,
     analysis: input.analysis,
   });
+  return {
+    ...answer,
+    usage: estimateQuestionAnswerUsage({
+      question: input.question,
+      transcriptContext: transcript,
+      answer: answer.answer,
+    }),
+  };
 }

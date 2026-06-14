@@ -1,13 +1,14 @@
 import type { Db } from "../db.server";
 import type { AppEnv } from "../env.server";
 import { renderKnowledgeCardMarkdown } from "../export/markdown.server";
-import { createMockAnalysisProvider, createMockTranscriptionProvider } from "../providers/mock.server";
+import { getProviders } from "../providers/index.server";
 import type { TranscriptSegment } from "../providers/types.server";
 import { getSourceEpisodeForUser, updateEpisodeStatus } from "../repositories/episodes.server";
 import { createJob, getJobById, markJobFailed, markJobRunning, markJobSucceeded } from "../repositories/jobs.server";
 import { getUploadForUser, updateUploadStatus } from "../repositories/uploads.server";
 import { upsertAnalysisMetadata } from "../repositories/analyses.server";
 import { getTranscriptForSource, upsertTranscriptMetadata } from "../repositories/transcripts.server";
+import { createUsageRecord, type UsageOperation } from "../repositories/usage-records.server";
 import {
   analysisJsonKey,
   analysisMarkdownKey,
@@ -104,11 +105,45 @@ async function readText(env: AppEnv, key: string): Promise<string> {
   return await object.text();
 }
 
+function estimateTextUnits(value: string): number {
+  return Math.ceil(value.length / 4);
+}
+
+function estimatedCost(operation: UsageOperation, inputUnits: number, outputUnits: number): number {
+  if (operation === "transcription") {
+    return inputUnits * 0.0001;
+  }
+
+  return inputUnits * 0.00000015 + outputUnits * 0.0000006;
+}
+
+async function recordUsage(
+  db: Db,
+  message: ProcessingQueueMessage,
+  input: { operation: UsageOperation; provider: string; model: string; inputUnits: number; outputUnits: number },
+): Promise<void> {
+  try {
+    await createUsageRecord(db, {
+      userId: message.userId,
+      sourceType: message.sourceType,
+      sourceId: message.sourceId,
+      provider: input.provider,
+      model: input.model,
+      operation: input.operation,
+      inputUnits: input.inputUnits,
+      outputUnits: input.outputUnits,
+      estimatedCost: estimatedCost(input.operation, input.inputUnits, input.outputUnits),
+    });
+  } catch {
+    // Usage records are best-effort telemetry and must not change processing state.
+  }
+}
+
 async function runTranscribeJob(env: AppEnv, db: Db, message: ProcessingQueueMessage): Promise<void> {
   await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "transcribing");
 
   const source = await getSourceForTranscription(env, db, message.userId, message.sourceType, message.sourceId);
-  const provider = createMockTranscriptionProvider();
+  const provider = getProviders(env).transcription;
   const transcript = await provider.transcribe({ audioUrl: source.audioUrl, sourceTitle: source.title });
 
   const textKey = transcriptTextKey(message.userId, message.sourceType, message.sourceId);
@@ -127,6 +162,14 @@ async function runTranscribeJob(env: AppEnv, db: Db, message: ProcessingQueueMes
     textR2Key: textKey,
     segmentsR2Key: segmentsKey,
     durationSeconds: transcript.durationSeconds,
+  });
+
+  await recordUsage(db, message, {
+    operation: "transcription",
+    provider: transcript.provider,
+    model: transcript.model,
+    inputUnits: transcript.durationSeconds ?? 0,
+    outputUnits: estimateTextUnits(transcript.text),
   });
 
   const analyzeJob = await createJob(db, {
@@ -165,7 +208,7 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
   ]);
   const segments = JSON.parse(segmentsJson) as TranscriptSegment[];
 
-  const provider = createMockAnalysisProvider();
+  const provider = getProviders(env).analysis;
   const analysis = await provider.analyze({ title, transcript: transcriptText, segments });
   const jsonKey = analysisJsonKey(message.userId, message.sourceType, message.sourceId);
   const markdownKey = analysisMarkdownKey(message.userId, message.sourceType, message.sourceId);
@@ -193,6 +236,15 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
 
   await putText(env, jsonKey, JSON.stringify(analysis.card, null, 2), "application/json; charset=utf-8");
   await putText(env, markdownKey, markdown, "text/markdown; charset=utf-8");
+
+  await recordUsage(db, message, {
+    operation: "analysis",
+    provider: analysis.provider,
+    model: analysis.model,
+    inputUnits: estimateTextUnits(`${title}
+${transcriptText}`),
+    outputUnits: estimateTextUnits(JSON.stringify(analysis.card)),
+  });
 
   const succeeded = await markJobSucceeded(db, message.jobId, { provider: analysis.provider, model: analysis.model });
   if (succeeded) {
