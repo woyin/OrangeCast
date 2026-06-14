@@ -9,9 +9,17 @@ import { getSourceEpisodeForUser, type EpisodeRecord } from "../lib/repositories
 import { getTranscriptForSource } from "../lib/repositories/transcripts.server";
 import { createMockChatProvider } from "../lib/providers/mock.server";
 import { answerSourceQuestion } from "../lib/services/qa.server";
+import { renderKnowledgeCardMarkdown } from "../lib/export/markdown.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
 
 export const MAX_QUESTION_LENGTH = 1000;
+
+type AskActionData = {
+  intent: "ask";
+  question: string;
+  answer: Awaited<ReturnType<typeof answerSourceQuestion>> | null;
+  error: string | null;
+};
 
 function parseSourceType(value: string | undefined): SourceType | null {
   if (value === "episode" || value === "upload") return value;
@@ -184,6 +192,16 @@ function sourceStatus(source: SourceRecord): SourceProcessingStatus | string {
   return source.record.processing_status;
 }
 
+function markdownDownloadResponse(markdown: string, title: string): Response {
+  const filename = `${title.replace(/[/:*?\"<>|]/g, "-").trim() || "knowledge-card"}.md`;
+  return new Response(markdown, {
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename.replace(/"/g, "-")}"`,
+    },
+  });
+}
+
 function formatDate(value: string | null): string | null {
   if (!value) return null;
   return new Date(value).toLocaleDateString();
@@ -234,6 +252,44 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
 
   const formData = await request.formData();
   const intent = formData.get("intent");
+
+  if (intent === "download-markdown") {
+    const source = await getOwnedSource(env.DB, userId, sourceType, sourceId);
+    if (!source) throw new Response("Not found", { status: 404 });
+
+    const analysis = await getAnalysisForSource(env.DB, userId, sourceType, sourceId);
+    if (!analysis) throw new Response("Markdown is not available for this source", { status: 404 });
+
+    const includeTranscript = formData.get("includeTranscript") === "on";
+    const title = analysis.title || sourceTitle(source);
+
+    if (!includeTranscript) {
+      const existingMarkdown = await loadTextArtifactIfPresent(env.R2, analysis.markdown_r2_key);
+      if (!existingMarkdown) throw new Response("Markdown artifact is not available", { status: 404 });
+      return markdownDownloadResponse(existingMarkdown, title);
+    }
+
+    const [analysisCard, transcript] = await Promise.all([
+      loadKnowledgeCardArtifactIfPresent(env.R2, analysis.content_json_r2_key),
+      getTranscriptForSource(env.DB, userId, sourceType, sourceId),
+    ]);
+    if (!analysisCard) throw new Response("Analysis artifact is not available", { status: 404 });
+
+    const transcriptText = await loadTextArtifactIfPresent(env.R2, transcript?.text_r2_key);
+    const markdown = renderKnowledgeCardMarkdown(
+      analysisCard,
+      {
+        sourceTitle: sourceTitle(source),
+        sourceType,
+        sourceId,
+        createdAt: analysis.created_at,
+      },
+      { includeTranscriptAppendix: true, transcriptText: transcriptText ?? undefined },
+    );
+
+    return markdownDownloadResponse(markdown, title);
+  }
+
   if (intent !== "ask") {
     throw new Response("Unsupported action", { status: 400 });
   }
@@ -506,7 +562,7 @@ function TranscriptSegments({ segments }: { segments: TranscriptSegment[] | null
 }
 
 function SourceQuestionAnswer() {
-  const data = useActionData<typeof action>();
+  const data = useActionData() as AskActionData | undefined;
 
   return (
     <section>
@@ -604,6 +660,19 @@ export default function SourceDetail() {
           <p>No transcript metadata yet.</p>
         )}
       </section>
+
+      {analysis ? (
+        <section>
+          <h2>Download Markdown</h2>
+          <Form method="post">
+            <input type="hidden" name="intent" value="download-markdown" />
+            <label>
+              <input type="checkbox" name="includeTranscript" /> Include transcript appendix
+            </label>
+            <button type="submit">Download Markdown</button>
+          </Form>
+        </section>
+      ) : null}
 
       <SourceQuestionAnswer />
 
