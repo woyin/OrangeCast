@@ -80,6 +80,38 @@ export async function getUploadForUser(
     .first<UploadRecord>();
 }
 
+export async function claimUploadForProcessing(
+  db: Db,
+  userId: string,
+  uploadId: string,
+): Promise<{ previousStatus: "unprocessed" | "failed" } | null> {
+  const current = await db
+    .prepare(
+      `SELECT processing_status
+       FROM uploads
+       WHERE user_id = ? AND id = ?
+       LIMIT 1`,
+    )
+    .bind(userId, uploadId)
+    .first<{ processing_status: string }>();
+
+  if (current?.processing_status !== "unprocessed" && current?.processing_status !== "failed") {
+    return null;
+  }
+
+  const result = await db
+    .prepare(
+      `UPDATE uploads
+       SET processing_status = 'queued'
+       WHERE user_id = ? AND id = ? AND processing_status = ? AND processing_status IN ('unprocessed', 'failed')`,
+    )
+    .bind(userId, uploadId, current.processing_status)
+    .run();
+
+  if (result.meta.changes === 0) return null;
+  return { previousStatus: current.processing_status };
+}
+
 export async function updateUploadStatus(
   db: Db,
   userId: string,

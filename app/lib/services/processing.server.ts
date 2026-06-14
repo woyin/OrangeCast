@@ -1,8 +1,8 @@
 import type { Db } from "../db.server";
 import type { AppEnv } from "../env.server";
-import { updateEpisodeStatus } from "../repositories/episodes.server";
-import { createJob } from "../repositories/jobs.server";
-import { updateUploadStatus } from "../repositories/uploads.server";
+import { claimEpisodeForProcessing, updateEpisodeStatus } from "../repositories/episodes.server";
+import { createJob, markQueuedJobFailed } from "../repositories/jobs.server";
+import { claimUploadForProcessing, updateUploadStatus } from "../repositories/uploads.server";
 import type {
   ProcessingJobStatus,
   ProcessingJobType,
@@ -11,9 +11,13 @@ import type {
   SourceType,
 } from "../queue/messages.server";
 
+export type EnqueueProcessingResult =
+  | { enqueued: true; jobId: string }
+  | { enqueued: false; reason: "already_processing" | "queue_send_failed" };
+
 export function nextStatusForJob(
   jobType: ProcessingJobType,
-  jobStatus: Exclude<ProcessingJobStatus, "pending">,
+  jobStatus: Exclude<ProcessingJobStatus, "queued">,
 ): SourceProcessingStatus {
   if (jobStatus === "failed") return "failed";
 
@@ -22,6 +26,19 @@ export function nextStatusForJob(
   }
 
   return jobStatus === "running" ? "analyzing" : "processed";
+}
+
+async function claimSourceForProcessing(
+  db: Db,
+  userId: string,
+  sourceType: SourceType,
+  sourceId: string,
+): Promise<{ previousStatus: "unprocessed" | "failed" } | null> {
+  if (sourceType === "episode") {
+    return await claimEpisodeForProcessing(db, userId, sourceId);
+  }
+
+  return await claimUploadForProcessing(db, userId, sourceId);
 }
 
 async function updateSourceStatus(
@@ -45,10 +62,11 @@ export async function enqueueProcessingForSource(
   userId: string,
   sourceType: SourceType,
   sourceId: string,
-): Promise<{ jobId: string }> {
-  const job = await createJob(db, { userId, sourceType, sourceId, jobType: "transcribe" });
-  await updateSourceStatus(db, userId, sourceType, sourceId, "queued");
+): Promise<EnqueueProcessingResult> {
+  const claim = await claimSourceForProcessing(db, userId, sourceType, sourceId);
+  if (!claim) return { enqueued: false, reason: "already_processing" };
 
+  const job = await createJob(db, { userId, sourceType, sourceId, jobType: "transcribe" });
   const message: ProcessingQueueMessage = {
     type: "processing.job",
     jobType: "transcribe",
@@ -57,7 +75,14 @@ export async function enqueueProcessingForSource(
     sourceType,
     sourceId,
   };
-  await env.PROCESSING_QUEUE.send(message);
 
-  return { jobId: job.id };
+  try {
+    await env.PROCESSING_QUEUE.send(message);
+  } catch (_error) {
+    await markQueuedJobFailed(db, job.id, "Failed to enqueue processing job");
+    await updateSourceStatus(db, userId, sourceType, sourceId, claim.previousStatus);
+    return { enqueued: false, reason: "queue_send_failed" };
+  }
+
+  return { enqueued: true, jobId: job.id };
 }

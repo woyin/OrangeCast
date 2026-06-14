@@ -1,6 +1,6 @@
 export type SourceType = "episode" | "upload";
 export type ProcessingJobType = "transcribe" | "analyze";
-export type ProcessingJobStatus = "pending" | "running" | "succeeded" | "failed";
+export type ProcessingJobStatus = "queued" | "running" | "succeeded" | "failed";
 export type SourceProcessingStatus =
   | "unprocessed"
   | "queued"

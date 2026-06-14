@@ -19,6 +19,10 @@ export interface ProcessingJobRecord {
 
 const jobColumns = `id, user_id, source_type, source_id, job_type, status, attempt_count, error_message, provider, model, started_at, finished_at, created_at`;
 
+function changed(result: D1Result): boolean {
+  return result.meta.changes > 0;
+}
+
 export async function createJob(
   db: Db,
   input: {
@@ -34,7 +38,7 @@ export async function createJob(
   await db
     .prepare(
       `INSERT INTO processing_jobs (id, user_id, source_type, source_id, job_type, status, attempt_count, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', 0, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'queued', 0, ?)`,
     )
     .bind(id, input.userId, input.sourceType, input.sourceId, input.jobType, now)
     .run();
@@ -48,48 +52,71 @@ export async function createJob(
   return job;
 }
 
-export async function markJobRunning(db: Db, jobId: string): Promise<void> {
-  await db
+export async function markJobRunning(db: Db, jobId: string): Promise<boolean> {
+  const result = await db
     .prepare(
       `UPDATE processing_jobs
        SET status = 'running', attempt_count = attempt_count + 1, error_message = NULL, started_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'queued'`,
     )
     .bind(nowIso(), jobId)
     .run();
+
+  return changed(result);
 }
 
 export async function markJobSucceeded(
   db: Db,
   jobId: string,
   input: { provider?: string | null; model?: string | null } = {},
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const result = await db
     .prepare(
       `UPDATE processing_jobs
        SET status = 'succeeded', provider = ?, model = ?, error_message = NULL, finished_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'running'`,
     )
     .bind(input.provider ?? null, input.model ?? null, nowIso(), jobId)
     .run();
+
+  return changed(result);
 }
 
-export async function markJobFailed(db: Db, jobId: string, errorMessage: string): Promise<void> {
-  await db
+export async function markJobFailed(db: Db, jobId: string, errorMessage: string): Promise<boolean> {
+  const result = await db
     .prepare(
       `UPDATE processing_jobs
        SET status = 'failed', error_message = ?, finished_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'running'`,
     )
     .bind(errorMessage, nowIso(), jobId)
     .run();
+
+  return changed(result);
+}
+
+export async function markQueuedJobFailed(
+  db: Db,
+  jobId: string,
+  errorMessage: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE processing_jobs
+       SET status = 'failed', error_message = ?, finished_at = ?
+       WHERE id = ? AND status = 'queued'`,
+    )
+    .bind(errorMessage, nowIso(), jobId)
+    .run();
+
+  return changed(result);
 }
 
 export async function findPendingJob(
   db: Db,
   input?: { jobType?: ProcessingJobType; sourceType?: SourceType; sourceId?: string },
 ): Promise<ProcessingJobRecord | null> {
-  const clauses = ["status = 'pending'"];
+  const clauses = ["status = 'queued'"];
   const values: string[] = [];
 
   if (input?.jobType) {

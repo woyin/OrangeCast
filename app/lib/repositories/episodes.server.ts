@@ -99,6 +99,38 @@ export async function getSourceEpisodeForUser(
     .first<EpisodeRecord>();
 }
 
+export async function claimEpisodeForProcessing(
+  db: Db,
+  userId: string,
+  episodeId: string,
+): Promise<{ previousStatus: "unprocessed" | "failed" } | null> {
+  const current = await db
+    .prepare(
+      `SELECT processing_status
+       FROM episodes
+       WHERE user_id = ? AND id = ?
+       LIMIT 1`,
+    )
+    .bind(userId, episodeId)
+    .first<{ processing_status: string }>();
+
+  if (current?.processing_status !== "unprocessed" && current?.processing_status !== "failed") {
+    return null;
+  }
+
+  const result = await db
+    .prepare(
+      `UPDATE episodes
+       SET processing_status = 'queued'
+       WHERE user_id = ? AND id = ? AND processing_status = ? AND processing_status IN ('unprocessed', 'failed')`,
+    )
+    .bind(userId, episodeId, current.processing_status)
+    .run();
+
+  if (result.meta.changes === 0) return null;
+  return { previousStatus: current.processing_status };
+}
+
 export async function updateEpisodeStatus(
   db: Db,
   userId: string,

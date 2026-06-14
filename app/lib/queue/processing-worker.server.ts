@@ -1,5 +1,6 @@
 import type { Db } from "../db.server";
 import type { AppEnv } from "../env.server";
+import { markJobRunning } from "../repositories/jobs.server";
 import type { ProcessingQueueMessage } from "./messages.server";
 
 export function isProcessingQueueMessage(value: unknown): value is ProcessingQueueMessage {
@@ -17,13 +18,16 @@ export function isProcessingQueueMessage(value: unknown): value is ProcessingQue
 
 export async function handleProcessingQueueMessage(
   _env: AppEnv,
-  _db: Db,
+  db: Db,
   message: ProcessingQueueMessage,
 ): Promise<void> {
   // Task 6 only defines the typed handler skeleton. Full artifact processing is Task 7.
   if (!isProcessingQueueMessage(message)) {
     throw new Error("Invalid processing queue message");
   }
+
+  const claimed = await markJobRunning(db, message.jobId);
+  if (!claimed) return;
 }
 
 export async function handleProcessingQueueBatch(
