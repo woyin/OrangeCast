@@ -4,6 +4,7 @@ export interface AppEnv {
   PROCESSING_QUEUE: Queue;
   APP_NAME: string;
   SESSION_COOKIE_NAME: string;
+  SESSION_SECRET?: string;
   UPLOAD_MAX_BYTES: string;
   UPLOAD_MAX_SECONDS: string;
   OPENAI_API_KEY?: string;
