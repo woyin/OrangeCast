@@ -1,5 +1,7 @@
 import type { ChatProvider, KnowledgeCard, TranscriptSegment } from "../providers/types.server";
 
+export const QA_CONTEXT_MAX_CHARS = 12000;
+
 function tokenize(input: string): string[] {
   return Array.from(new Set(input.toLowerCase().match(/[a-z0-9]+/g) ?? []));
 }
@@ -24,7 +26,7 @@ function formatChunk(segment: TranscriptSegment): string {
 export function selectRelevantTranscriptChunks(
   question: string,
   segments: TranscriptSegment[],
-  maxChars = 12000,
+  maxChars = QA_CONTEXT_MAX_CHARS,
 ): TranscriptSegment[] {
   const questionTokens = tokenize(question);
   let usedChars = 0;
@@ -47,11 +49,13 @@ export async function answerSourceQuestion(input: {
   transcriptText: string;
   segments: TranscriptSegment[];
   analysis: KnowledgeCard;
+  maxChars?: number;
 }): Promise<Awaited<ReturnType<ChatProvider["answer"]>>> {
-  const selectedChunks = selectRelevantTranscriptChunks(input.question, input.segments);
-  const transcript = selectedChunks.length > 0
+  const maxChars = input.maxChars ?? QA_CONTEXT_MAX_CHARS;
+  const selectedChunks = selectRelevantTranscriptChunks(input.question, input.segments, maxChars);
+  const transcript = (selectedChunks.length > 0
     ? selectedChunks.map(formatChunk).join("\n\n")
-    : input.transcriptText;
+    : input.transcriptText).slice(0, maxChars);
 
   return await input.provider.answer({
     question: input.question,

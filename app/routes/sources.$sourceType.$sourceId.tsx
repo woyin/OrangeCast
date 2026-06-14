@@ -11,6 +11,8 @@ import { createMockChatProvider } from "../lib/providers/mock.server";
 import { answerSourceQuestion } from "../lib/services/qa.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
 
+export const MAX_QUESTION_LENGTH = 1000;
+
 function parseSourceType(value: string | undefined): SourceType | null {
   if (value === "episode" || value === "upload") return value;
   return null;
@@ -239,6 +241,18 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   const question = String(formData.get("question") ?? "").trim();
   if (question.length === 0) {
     return json({ intent: "ask" as const, question, answer: null, error: "Enter a question to ask this source." }, { status: 400 });
+  }
+
+  if (question.length > MAX_QUESTION_LENGTH) {
+    return json(
+      {
+        intent: "ask" as const,
+        question,
+        answer: null,
+        error: `Question must be ${MAX_QUESTION_LENGTH} characters or fewer.`,
+      },
+      { status: 400 },
+    );
   }
 
   const source = await getOwnedSource(env.DB, userId, sourceType, sourceId);
@@ -505,6 +519,7 @@ function SourceQuestionAnswer() {
           name="question"
           defaultValue={data?.intent === "ask" ? data.question : ""}
           rows={3}
+          maxLength={MAX_QUESTION_LENGTH}
           required
         />
         <button type="submit">Ask</button>
