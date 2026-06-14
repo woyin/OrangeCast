@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppEnv } from "../app/lib/env.server";
-import { OpenAIAnalysisProvider } from "../app/lib/providers/openai.server";
+import { getProviders } from "../app/lib/providers/index.server";
+import { OpenAIAnalysisProvider, OpenAITranscriptionProvider } from "../app/lib/providers/openai.server";
 import type { KnowledgeCard } from "../app/lib/providers/types.server";
 
 function openAiEnv(): AppEnv {
@@ -95,6 +96,65 @@ describe("OpenAI analysis provider contract", () => {
     expect(result.model).toBe("gpt-4.1-mini");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.openai.com/v1/responses",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
+
+describe("provider selection safety", () => {
+  test("defaults to mock only for local and test environments", () => {
+    const providers = getProviders({ ...openAiEnv(), AI_PROVIDER: undefined, OPENAI_API_KEY: undefined, ENVIRONMENT: "test" });
+
+    expect(providers.chat).toBeDefined();
+    expect(providers.analysis).toBeDefined();
+    expect(providers.transcription).toBeDefined();
+  });
+
+  test("rejects missing provider in production-like environments", () => {
+    expect(() => getProviders({ ...openAiEnv(), AI_PROVIDER: undefined, ENVIRONMENT: "production" })).toThrow(
+      "AI provider is not configured",
+    );
+  });
+
+  test("rejects unsupported provider values", () => {
+    expect(() => getProviders({ ...openAiEnv(), AI_PROVIDER: "bogus", ENVIRONMENT: "test" })).toThrow(
+      "Unsupported AI provider configuration",
+    );
+  });
+});
+
+describe("OpenAI transcription provider contract", () => {
+  test("transcribes supplied upload audio without fetching an r2 URL", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      expect(String(url)).not.toBe("r2://users/user_1/uploads/upload_1/audio.mp3");
+      if (String(url) !== "https://api.openai.com/v1/audio/transcriptions") {
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }
+      return new Response(
+        JSON.stringify({
+          text: "Uploaded transcript",
+          language: "en",
+          duration: 3,
+          segments: [{ start: 0, end: 3, text: "Uploaded transcript" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new OpenAITranscriptionProvider(openAiEnv());
+
+    const result = await provider.transcribe({
+      sourceTitle: "Upload",
+      audio: new Blob(["audio-bytes"], { type: "audio/mpeg" }),
+      fileName: "upload.mp3",
+      contentType: "audio/mpeg",
+    } as never);
+
+    expect(result.text).toBe("Uploaded transcript");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/audio/transcriptions",
       expect.objectContaining({ method: "POST" }),
     );
   });

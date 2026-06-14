@@ -9,8 +9,21 @@ export interface Providers {
   chat: ChatProvider;
 }
 
+function setupError(message: string): Error & { status: number } {
+  return Object.assign(new Error(message), { status: 500 });
+}
+
+function allowsMockDefault(env: AppEnv): boolean {
+  const environment = (env.ENVIRONMENT ?? env.NODE_ENV ?? "development").toLowerCase();
+  return env.ALLOW_MOCK_PROVIDER === "true" || environment === "development" || environment === "local" || environment === "test";
+}
+
 export function getProviders(env: AppEnv): Providers {
-  const selected = env.AI_PROVIDER ?? "mock";
+  const selected = env.AI_PROVIDER ?? (allowsMockDefault(env) ? "mock" : undefined);
+
+  if (!selected) {
+    throw setupError("AI provider is not configured");
+  }
 
   if (selected === "openai") {
     return {
@@ -28,5 +41,5 @@ export function getProviders(env: AppEnv): Providers {
     };
   }
 
-  throw new Response("Unsupported AI provider configuration", { status: 500 });
+  throw setupError("Unsupported AI provider configuration");
 }

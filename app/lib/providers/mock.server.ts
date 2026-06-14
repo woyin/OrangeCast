@@ -18,9 +18,10 @@ function stableSeconds(input: string): number {
 }
 
 export class MockTranscriptionProvider implements TranscriptionProvider {
-  async transcribe(input: { audioUrl: string; sourceTitle: string }): Promise<TranscriptionResult> {
-    const durationSeconds = stableSeconds(`${input.sourceTitle}:${input.audioUrl}`);
-    const text = `Mock transcript for ${input.sourceTitle}. Audio source: ${input.audioUrl}.`;
+  async transcribe(input: Parameters<TranscriptionProvider["transcribe"]>[0]): Promise<TranscriptionResult> {
+    const sourceLabel = input.audioUrl ?? input.fileName ?? "uploaded-audio";
+    const durationSeconds = stableSeconds(`${input.sourceTitle}:${sourceLabel}`);
+    const text = `Mock transcript for ${input.sourceTitle}. Audio source: ${sourceLabel}.`;
 
     return {
       text,
@@ -33,7 +34,7 @@ export class MockTranscriptionProvider implements TranscriptionProvider {
         {
           startSeconds: Math.min(30, durationSeconds),
           endSeconds: durationSeconds,
-          text: `Audio source: ${input.audioUrl}.`,
+          text: `Audio source: ${sourceLabel}.`,
         },
       ],
       language: "en",

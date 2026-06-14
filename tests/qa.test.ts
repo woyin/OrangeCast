@@ -143,3 +143,167 @@ describe("source detail question action", () => {
     expect(data.error).toBe(`Question must be ${MAX_QUESTION_LENGTH} characters or fewer.`);
   });
 });
+
+
+function d1Result(changes: number): D1Result {
+  return {
+    success: true,
+    results: [],
+    meta: {
+      duration: 0,
+      size_after: 0,
+      rows_read: 0,
+      rows_written: changes,
+      last_row_id: 0,
+      changed_db: changes > 0,
+      changes,
+    },
+  };
+}
+
+function qaActionEnv(overrides: Partial<AppEnv> = {}) {
+  const usageRecords: Array<{ operation: string; provider: string; model: string; inputUnits: number; outputUnits: number; estimatedCost: number }> = [];
+  const artifacts = new Map<string, string>([
+    ["transcripts/text.txt", "Pricing includes usage based tiers."],
+    ["transcripts/segments.json", JSON.stringify([{ startSeconds: 0, endSeconds: 5, text: "Pricing includes usage based tiers." }])],
+    ["analyses/card.json", JSON.stringify(analysis)],
+  ]);
+
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("FROM uploads")) {
+                return {
+                  id: "upload_1",
+                  user_id: "user_1",
+                  original_filename: "Pricing.mp3",
+                  content_type: "audio/mpeg",
+                  size_bytes: 123,
+                  duration_seconds: 5,
+                  r2_object_key: "uploads/audio.mp3",
+                  processing_status: "processed",
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+              if (sql.includes("FROM transcripts")) {
+                return {
+                  id: "trn_1",
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  language: "en",
+                  provider: "mock",
+                  model: "mock-transcriber-v1",
+                  text_r2_key: "transcripts/text.txt",
+                  segments_r2_key: "transcripts/segments.json",
+                  duration_seconds: 5,
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+              if (sql.includes("FROM analyses")) {
+                return {
+                  id: "ana_1",
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  provider: "mock",
+                  model: "mock-analyzer-v1",
+                  title: "Pricing Episode",
+                  summary: "A summary about pricing.",
+                  content_json_r2_key: "analyses/card.json",
+                  markdown_r2_key: "analyses/card.md",
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+              if (sql.includes("FROM usage_records")) {
+                const record = usageRecords.at(-1);
+                return {
+                  id: values[0] as string,
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  provider: record?.provider ?? "mock",
+                  model: record?.model ?? "mock-chat-v1",
+                  operation: record?.operation ?? "chat",
+                  input_units: record?.inputUnits ?? 0,
+                  output_units: record?.outputUnits ?? 0,
+                  estimated_cost: record?.estimatedCost ?? 0,
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+              throw new Error(`Unexpected first SQL: ${sql}`);
+            },
+            async run() {
+              if (sql.includes("INSERT INTO usage_records")) {
+                usageRecords.push({
+                  operation: values[6] as string,
+                  provider: values[4] as string,
+                  model: values[5] as string,
+                  inputUnits: values[7] as number,
+                  outputUnits: values[8] as number,
+                  estimatedCost: values[9] as number,
+                });
+                return d1Result(1);
+              }
+              throw new Error(`Unexpected run SQL: ${sql}`);
+            },
+          };
+        },
+      };
+    },
+  } as unknown as D1Database;
+
+  const env: AppEnv = {
+    DB: db,
+    R2: {
+      async get(key: string) {
+        const value = artifacts.get(key);
+        return value === undefined ? null : ({ text: async () => value } as R2ObjectBody);
+      },
+    } as unknown as R2Bucket,
+    PROCESSING_QUEUE: {} as Queue,
+    APP_NAME: "CloudWisePod",
+    SESSION_COOKIE_NAME: "cloudwise_session",
+    SESSION_SECRET: "test-session-secret",
+    UPLOAD_MAX_BYTES: "104857600",
+    UPLOAD_MAX_SECONDS: "7200",
+    ENVIRONMENT: "test",
+    ...overrides,
+  };
+
+  return { env, usageRecords };
+}
+
+describe("source detail Q&A provider and usage integration", () => {
+  test("successful answers persist chat usage", async () => {
+    const { env, usageRecords } = qaActionEnv({ AI_PROVIDER: "mock" });
+
+    const response = await sourceDetailAction({
+      request: await authenticatedAskRequest(env, "What about pricing?"),
+      context: { env },
+      params: { sourceType: "upload", sourceId: "upload_1" },
+    } as never);
+    const data = await response.json() as { answer: { provider: string; model: string } };
+
+    expect(response.status).toBe(200);
+    expect(data.answer.provider).toBe("mock");
+    expect(usageRecords).toEqual([
+      expect.objectContaining({ operation: "chat", provider: "mock", model: "mock-chat-v1" }),
+    ]);
+    expect(usageRecords[0]?.inputUnits).toBeGreaterThan(0);
+    expect(usageRecords[0]?.outputUnits).toBeGreaterThan(0);
+  });
+
+  test("uses configured provider selection instead of hardcoded mock", async () => {
+    const { env } = qaActionEnv({ AI_PROVIDER: "unsupported-provider" });
+
+    await expect(sourceDetailAction({
+      request: await authenticatedAskRequest(env, "What about pricing?"),
+      context: { env },
+      params: { sourceType: "upload", sourceId: "upload_1" },
+    } as never)).rejects.toMatchObject({ status: 500 });
+  });
+});

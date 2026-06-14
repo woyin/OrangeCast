@@ -4,6 +4,7 @@ import type {
   AnalysisResult,
   ChatProvider,
   KnowledgeCard,
+  TranscriptionInput,
   TranscriptionProvider,
   TranscriptionResult,
 } from "./types.server";
@@ -179,13 +180,18 @@ export class OpenAITranscriptionProvider implements TranscriptionProvider {
     this.apiKey = requireOpenAIKey(env);
   }
 
-  async transcribe(input: { audioUrl: string; sourceTitle: string }): Promise<TranscriptionResult> {
-    const audioResponse = await fetch(input.audioUrl);
-    if (!audioResponse.ok) throw new Error("Audio source could not be fetched for transcription");
-    const audioBlob = await audioResponse.blob();
+  async transcribe(input: TranscriptionInput): Promise<TranscriptionResult> {
+    let audioBlob = input.audio;
+    if (!audioBlob) {
+      if (!input.audioUrl) throw new Error("Audio input is required for transcription");
+      const audioResponse = await fetch(input.audioUrl);
+      if (!audioResponse.ok) throw new Error("Audio source could not be fetched for transcription");
+      audioBlob = await audioResponse.blob();
+    }
+
     const form = new FormData();
     form.set("model", transcriptionModel);
-    form.set("file", audioBlob, `${input.sourceTitle || "audio"}.mp3`);
+    form.set("file", audioBlob, input.fileName ?? `${input.sourceTitle || "audio"}.mp3`);
     form.set("response_format", "verbose_json");
 
     const response = await fetch(transcriptionsEndpoint, {

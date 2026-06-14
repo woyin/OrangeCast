@@ -2,7 +2,7 @@ import type { Db } from "../db.server";
 import type { AppEnv } from "../env.server";
 import { renderKnowledgeCardMarkdown } from "../export/markdown.server";
 import { getProviders } from "../providers/index.server";
-import type { TranscriptSegment } from "../providers/types.server";
+import type { TranscriptionInput, TranscriptSegment } from "../providers/types.server";
 import { getSourceEpisodeForUser, updateEpisodeStatus } from "../repositories/episodes.server";
 import { createJob, getJobById, markJobFailed, markJobRunning, markJobSucceeded } from "../repositories/jobs.server";
 import { getUploadForUser, updateUploadStatus } from "../repositories/uploads.server";
@@ -60,22 +60,40 @@ async function updateSourceStatus(
   await updateUploadStatus(db, userId, sourceId, status);
 }
 
+
+async function r2ObjectToBlob(object: R2ObjectBody, contentType: string): Promise<Blob> {
+  if (typeof object.blob === "function") return await object.blob();
+  const text = await object.text();
+  return new Blob([text], { type: contentType });
+}
+
 async function getSourceForTranscription(
   env: AppEnv,
   db: Db,
   userId: string,
   sourceType: SourceType,
   sourceId: string,
-): Promise<{ title: string; audioUrl: string }> {
+): Promise<{ title: string; transcriptionInput: TranscriptionInput }> {
   if (sourceType === "episode") {
     const episode = await getSourceEpisodeForUser(db, userId, sourceId);
     if (!episode) throw new Error("Source episode not found");
-    return { title: episode.title, audioUrl: episode.audio_url };
+    return { title: episode.title, transcriptionInput: { sourceTitle: episode.title, audioUrl: episode.audio_url } };
   }
 
   const upload = await getUploadForUser(db, userId, sourceId);
   if (!upload) throw new Error("Source upload not found");
-  return { title: upload.original_filename, audioUrl: `r2://${upload.r2_object_key}` };
+  const object = await env.R2.get(upload.r2_object_key);
+  if (!object) throw new Error("Uploaded audio artifact not found");
+  const audio = await r2ObjectToBlob(object, upload.content_type);
+  return {
+    title: upload.original_filename,
+    transcriptionInput: {
+      sourceTitle: upload.original_filename,
+      audio,
+      fileName: upload.original_filename,
+      contentType: upload.content_type,
+    },
+  };
 }
 
 async function getSourceTitle(
@@ -144,7 +162,7 @@ async function runTranscribeJob(env: AppEnv, db: Db, message: ProcessingQueueMes
 
   const source = await getSourceForTranscription(env, db, message.userId, message.sourceType, message.sourceId);
   const provider = getProviders(env).transcription;
-  const transcript = await provider.transcribe({ audioUrl: source.audioUrl, sourceTitle: source.title });
+  const transcript = await provider.transcribe(source.transcriptionInput);
 
   const textKey = transcriptTextKey(message.userId, message.sourceType, message.sourceId);
   const segmentsKey = transcriptSegmentsKey(message.userId, message.sourceType, message.sourceId);

@@ -32,8 +32,16 @@ export interface AnalysisResult {
   model: string;
 }
 
+export type TranscriptionInput = {
+  sourceTitle: string;
+  audioUrl?: string;
+  audio?: Blob;
+  fileName?: string;
+  contentType?: string;
+};
+
 export interface TranscriptionProvider {
-  transcribe(input: { audioUrl: string; sourceTitle: string }): Promise<TranscriptionResult>;
+  transcribe(input: TranscriptionInput): Promise<TranscriptionResult>;
 }
 
 export interface AnalysisProvider {

@@ -7,11 +7,12 @@ import type { KnowledgeCard, TranscriptSegment } from "../lib/providers/types.se
 import { getAnalysisForSource } from "../lib/repositories/analyses.server";
 import { getSourceEpisodeForUser, type EpisodeRecord } from "../lib/repositories/episodes.server";
 import { getTranscriptForSource } from "../lib/repositories/transcripts.server";
-import { createMockChatProvider } from "../lib/providers/mock.server";
+import { getProviders } from "../lib/providers/index.server";
 import { answerSourceQuestion } from "../lib/services/qa.server";
 import { renderKnowledgeCardMarkdown } from "../lib/export/markdown.server";
 import { safeDownloadFilename } from "../lib/export/zip.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
+import { createUsageRecord } from "../lib/repositories/usage-records.server";
 
 export const MAX_QUESTION_LENGTH = 1000;
 
@@ -226,6 +227,35 @@ function formatSize(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+
+async function recordChatUsageIfPossible(
+  db: D1Database,
+  input: {
+    userId: string;
+    sourceType: SourceType;
+    sourceId: string;
+    provider: string;
+    model: string;
+    usage: { inputUnits: number; outputUnits: number; estimatedCost: number };
+  },
+): Promise<void> {
+  try {
+    await createUsageRecord(db, {
+      userId: input.userId,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      provider: input.provider,
+      model: input.model,
+      operation: "chat",
+      inputUnits: input.usage.inputUnits,
+      outputUnits: input.usage.outputUnits,
+      estimatedCost: input.usage.estimatedCost,
+    });
+  } catch {
+    // Usage records are best-effort telemetry and must not block Q&A responses.
+  }
+}
+
 async function getOwnedSource(
   db: D1Database,
   userId: string,
@@ -339,12 +369,21 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   }
 
   const answer = await answerSourceQuestion({
-    provider: createMockChatProvider(),
+    provider: getProviders(env).chat,
     question,
     title: analysisCard.title ?? analysis?.title ?? sourceTitle(source),
     transcriptText,
     segments: transcriptSegments,
     analysis: analysisCard,
+  });
+
+  await recordChatUsageIfPossible(env.DB, {
+    userId,
+    sourceType,
+    sourceId,
+    provider: answer.provider,
+    model: answer.model,
+    usage: answer.usage,
   });
 
   return json({ intent: "ask" as const, question, answer, error: null });
