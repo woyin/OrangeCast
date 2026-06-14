@@ -9,6 +9,7 @@ import { parsePodcastRss } from "../lib/services/rss-parser.server";
 const FEED_FETCH_TIMEOUT_MS = 10_000;
 const MAX_FEED_BYTES = 2 * 1024 * 1024;
 const RSS_FETCH_ERROR = "Could not fetch that RSS feed.";
+const MAX_REDIRECTS = 3;
 
 function parseIpv4(hostname: string): number[] | null {
   const parts = hostname.split(".");
@@ -29,6 +30,8 @@ function isBlockedIpLiteral(hostname: string): boolean {
     ? lowerHostname.slice(1, -1)
     : lowerHostname;
   if (["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(normalized)) return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
 
   const ipv4 = parseIpv4(normalized);
   if (!ipv4) return false;
@@ -111,16 +114,45 @@ async function readResponseTextWithLimit(response: Response): Promise<string> {
   return new TextDecoder().decode(bytes);
 }
 
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function validateRedirectLocation(location: string | null, baseUrl: URL): URL {
+  if (!location) throw new Error(RSS_FETCH_ERROR);
+
+  const redirectUrl = new URL(location, baseUrl);
+  const validated = validateFeedUrl(redirectUrl.toString());
+  if (!validated.ok) throw new Error(RSS_FETCH_ERROR);
+  return validated.url;
+}
+
 async function fetchFeedXml(url: URL): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FEED_FETCH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url.toString(), { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(RSS_FETCH_ERROR);
+    let currentUrl = url;
+
+    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+      const response = await fetch(currentUrl.toString(), {
+        redirect: "manual",
+        signal: controller.signal,
+      });
+
+      if (isRedirectStatus(response.status)) {
+        if (redirectCount === MAX_REDIRECTS) throw new Error(RSS_FETCH_ERROR);
+        currentUrl = validateRedirectLocation(response.headers.get("location"), currentUrl);
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(RSS_FETCH_ERROR);
+      }
+      return await readResponseTextWithLimit(response);
     }
-    return await readResponseTextWithLimit(response);
+
+    throw new Error(RSS_FETCH_ERROR);
   } catch (error) {
     if (error instanceof Error && error.message === "RSS feed is too large.") {
       throw error;
