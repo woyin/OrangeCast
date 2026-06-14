@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { requireUserId } from "../lib/auth.server";
 import { requireEnv } from "../lib/env.server";
 
@@ -17,6 +17,7 @@ export default function Dashboard() {
       <h1>CloudWisePod</h1>
       <p>Podcast knowledge cards on Cloudflare.</p>
       <p>Logged in as {userId}.</p>
+      <p><Link to="/uploads">Uploads</Link></p>
     </main>
   );
 }
