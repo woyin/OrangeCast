@@ -34,6 +34,7 @@ export function exportZipKey(userId: string, exportId: string): string {
 export async function createExportRecord(
   db: Db,
   input: {
+    id?: string;
     userId: string;
     exportType?: ExportType;
     r2ObjectKey?: string;
@@ -41,7 +42,7 @@ export async function createExportRecord(
     expiresAt?: string | null;
   },
 ): Promise<ExportRecord> {
-  const id = newId("exp");
+  const id = input.id ?? newId("exp");
   const r2ObjectKey = input.r2ObjectKey ?? exportZipKey(input.userId, id);
   const now = nowIso();
 

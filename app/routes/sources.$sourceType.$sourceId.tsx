@@ -10,6 +10,7 @@ import { getTranscriptForSource } from "../lib/repositories/transcripts.server";
 import { createMockChatProvider } from "../lib/providers/mock.server";
 import { answerSourceQuestion } from "../lib/services/qa.server";
 import { renderKnowledgeCardMarkdown } from "../lib/export/markdown.server";
+import { safeDownloadFilename } from "../lib/export/zip.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
 
 export const MAX_QUESTION_LENGTH = 1000;
@@ -193,11 +194,11 @@ function sourceStatus(source: SourceRecord): SourceProcessingStatus | string {
 }
 
 function markdownDownloadResponse(markdown: string, title: string): Response {
-  const filename = `${title.replace(/[/:*?\"<>|]/g, "-").trim() || "knowledge-card"}.md`;
+  const filename = safeDownloadFilename(title, "md", "knowledge-card");
   return new Response(markdown, {
     headers: {
       "Content-Type": "text/markdown; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename.replace(/"/g, "-")}"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }

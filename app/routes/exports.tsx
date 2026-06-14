@@ -1,31 +1,47 @@
 import { json, redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
-import { buildMarkdownZip } from "../lib/export/zip.server";
+import { buildMarkdownZip, safeDownloadFilename } from "../lib/export/zip.server";
 import { requireUserId } from "../lib/auth.server";
+import { newId } from "../lib/db.server";
 import { requireEnv } from "../lib/env.server";
 import {
   createExportRecord,
+  exportZipKey,
   getExportForUser,
   listProcessedExportSources,
   listRecentExportsForUser,
   type ProcessedExportSource,
 } from "../lib/repositories/exports.server";
 
+export const MAX_EXPORT_SOURCE_COUNT = 50;
+export const MAX_MARKDOWN_ARTIFACT_BYTES = 1_000_000;
+export const MAX_EXPORT_MARKDOWN_BYTES = 20_000_000;
+
 function sourceKey(source: Pick<ProcessedExportSource, "sourceType" | "sourceId">): string {
   return `${source.sourceType}:${source.sourceId}`;
 }
 
-async function loadTextArtifact(bucket: R2Bucket, key: string): Promise<string> {
+async function loadTextArtifact(bucket: R2Bucket, key: string): Promise<{ text: string; byteLength: number }> {
   const object = await bucket.get(key);
   if (!object) throw new Response("Export source artifact is not available", { status: 404 });
-  return await object.text();
+  if (object.size > MAX_MARKDOWN_ARTIFACT_BYTES) {
+    throw new Response("One selected source is too large to export.", { status: 400 });
+  }
+
+  const text = await object.text();
+  const byteLength = new TextEncoder().encode(text).byteLength;
+  if (byteLength > MAX_MARKDOWN_ARTIFACT_BYTES) {
+    throw new Response("One selected source is too large to export.", { status: 400 });
+  }
+
+  return { text, byteLength };
 }
 
-function zipDownloadResponse(bytes: ArrayBuffer, exportId: string): Response {
-  return new Response(bytes, {
+function zipDownloadResponse(body: BodyInit | null, exportId: string): Response {
+  return new Response(body, {
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="cloudwisepod-export-${exportId}.zip"`,
+      "Content-Disposition": `attachment; filename="${safeDownloadFilename(`cloudwisepod-export-${exportId}`, "zip", "cloudwisepod-export")}"`,
     },
   });
 }
@@ -42,7 +58,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
     const object = await env.R2.get(exportRecord.r2_object_key);
     if (!object) throw new Response("Export file is not available", { status: 404 });
-    return zipDownloadResponse(await object.arrayBuffer(), exportRecord.id);
+    return zipDownloadResponse(object.body, exportRecord.id);
   }
 
   const [sources, exports] = await Promise.all([
@@ -66,6 +82,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (selectedKeys.size === 0) {
     return json({ error: "Select at least one processed source to export." }, { status: 400 });
   }
+  if (selectedKeys.size > MAX_EXPORT_SOURCE_COUNT) {
+    return json({ error: `Select ${MAX_EXPORT_SOURCE_COUNT} or fewer sources per export.` }, { status: 400 });
+  }
 
   const availableSources = await listProcessedExportSources(env.DB, userId);
   const selectedSources = availableSources.filter((source) => selectedKeys.has(sourceKey(source)));
@@ -73,22 +92,39 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (selectedSources.length === 0) {
     return json({ error: "No selected processed sources are available to export." }, { status: 400 });
   }
+  if (selectedSources.length > MAX_EXPORT_SOURCE_COUNT) {
+    return json({ error: `Select ${MAX_EXPORT_SOURCE_COUNT} or fewer sources per export.` }, { status: 400 });
+  }
 
-  const markdownSources = await Promise.all(
-    selectedSources.map(async (source) => ({
+  const markdownSources = [];
+  let totalMarkdownBytes = 0;
+  for (const source of selectedSources) {
+    const artifact = await loadTextArtifact(env.R2, source.markdownR2Key);
+    totalMarkdownBytes += artifact.byteLength;
+    if (totalMarkdownBytes > MAX_EXPORT_MARKDOWN_BYTES) {
+      return json({ error: "Selected sources are too large to export together." }, { status: 400 });
+    }
+    markdownSources.push({
       podcastTitle: source.podcastTitle,
       title: source.title,
-      markdown: await loadTextArtifact(env.R2, source.markdownR2Key),
-    })),
-  );
+      markdown: artifact.text,
+    });
+  }
 
-  const exportRecord = await createExportRecord(env.DB, { userId });
+  const exportId = newId("exp");
+  const r2ObjectKey = exportZipKey(userId, exportId);
   const zipBytes = await buildMarkdownZip(markdownSources);
-  await env.R2.put(exportRecord.r2_object_key, zipBytes, {
+  await env.R2.put(r2ObjectKey, zipBytes, {
     httpMetadata: { contentType: "application/zip" },
   });
 
-  return redirect(`/exports?created=${encodeURIComponent(exportRecord.id)}`);
+  try {
+    const exportRecord = await createExportRecord(env.DB, { id: exportId, userId, r2ObjectKey });
+    return redirect(`/exports?created=${encodeURIComponent(exportRecord.id)}`);
+  } catch (error) {
+    await env.R2.delete(r2ObjectKey);
+    throw error;
+  }
 }
 
 function formatDate(value: string): string {
