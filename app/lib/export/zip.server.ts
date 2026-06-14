@@ -34,21 +34,28 @@ export function exportPathForSource(input: ExportPathInput): string {
   return `${sanitizePathPart(input.podcastTitle)}/${sanitizePathPart(input.title)}.md`;
 }
 
-function uniqueZipPath(path: string, counts: Map<string, number>): string {
-  const count = counts.get(path) ?? 0;
-  counts.set(path, count + 1);
-  if (count === 0) return path;
-
+function uniqueZipPath(path: string, emittedPaths: Set<string>): string {
   const extensionIndex = path.toLowerCase().endsWith(".md") ? path.length - ".md".length : path.length;
-  return `${path.slice(0, extensionIndex)}-${count + 1}${path.slice(extensionIndex)}`;
+  const basename = path.slice(0, extensionIndex);
+  const extension = path.slice(extensionIndex);
+  let candidate = path;
+  let suffix = 2;
+
+  while (emittedPaths.has(candidate)) {
+    candidate = `${basename}-${suffix}${extension}`;
+    suffix += 1;
+  }
+
+  emittedPaths.add(candidate);
+  return candidate;
 }
 
 export async function buildMarkdownZip(sources: MarkdownExportSource[]): Promise<Uint8Array> {
   const zip = new JSZip();
-  const pathCounts = new Map<string, number>();
+  const emittedPaths = new Set<string>();
 
   for (const source of sources) {
-    zip.file(uniqueZipPath(exportPathForSource(source), pathCounts), source.markdown);
+    zip.file(uniqueZipPath(exportPathForSource(source), emittedPaths), source.markdown);
   }
 
   return await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });

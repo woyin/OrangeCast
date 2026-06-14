@@ -71,6 +71,20 @@ describe("buildMarkdownZip", () => {
     await expect(zip.file("Acme/Hello-World.md")?.async("string")).resolves.toBe("first");
     await expect(zip.file("Acme/Hello-World-2.md")?.async("string")).resolves.toBe("second");
   });
+
+  test("does not overwrite generated duplicate suffix paths", async () => {
+    const zipBytes = await buildMarkdownZip([
+      { podcastTitle: "Acme", title: "Hello/World", markdown: "first" },
+      { podcastTitle: "Acme", title: "Hello:World", markdown: "second" },
+      { podcastTitle: "Acme", title: "Hello-World-2", markdown: "third" },
+    ]);
+
+    const zip = await JSZip.loadAsync(zipBytes);
+
+    await expect(zip.file("Acme/Hello-World.md")?.async("string")).resolves.toBe("first");
+    await expect(zip.file("Acme/Hello-World-2.md")?.async("string")).resolves.toBe("second");
+    await expect(zip.file("Acme/Hello-World-2-2.md")?.async("string")).resolves.toBe("third");
+  });
 });
 
 function d1Result(changes = 1): D1Result {
