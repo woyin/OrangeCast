@@ -1,7 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import { markJobFailed, markJobRunning, markJobSucceeded } from "../app/lib/repositories/jobs.server";
+import { handleProcessingQueueMessage } from "../app/lib/queue/processing-worker.server";
 import { enqueueProcessingForSource, nextStatusForJob } from "../app/lib/services/processing.server";
 import type { Db } from "../app/lib/db.server";
+import type { AppEnv } from "../app/lib/env.server";
 import type { SourceProcessingStatus } from "../app/lib/queue/messages.server";
 
 function d1Result(changes: number): D1Result {
@@ -152,6 +154,135 @@ function createProcessingDb(initialStatus: SourceProcessingStatus) {
   return { db, state };
 }
 
+
+function createWorkerTerminalDb(options: { markSucceededChanges: number; markFailedChanges?: number }) {
+  const state = {
+    sourceStatus: "queued" as SourceProcessingStatus,
+    jobs: [{ id: "job_1", status: "queued", error_message: null as string | null }],
+    transcripts: [] as Array<{ text_r2_key: string; segments_r2_key: string }>,
+  };
+
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async first<T>() {
+              if (sql.includes("FROM uploads")) {
+                return {
+                  id: "upload_1",
+                  user_id: "user_1",
+                  original_filename: "Thinking.mp3",
+                  content_type: "audio/mpeg",
+                  size_bytes: 123,
+                  duration_seconds: null,
+                  r2_object_key: "users/user_1/uploads/upload_1/audio.mp3",
+                  processing_status: state.sourceStatus,
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+
+              if (sql.includes("FROM transcripts")) {
+                const transcript = state.transcripts.at(-1);
+                if (!transcript) return null as T;
+                return {
+                  id: "trn_1",
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  language: "en",
+                  provider: "mock",
+                  model: "mock-transcriber-v1",
+                  text_r2_key: transcript.text_r2_key,
+                  segments_r2_key: transcript.segments_r2_key,
+                  duration_seconds: 120,
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+
+              if (sql.includes("FROM processing_jobs")) {
+                const job = state.jobs.at(-1) ?? state.jobs[0];
+                return {
+                  id: job?.id ?? "job_2",
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  job_type: "analyze",
+                  status: job?.status ?? "queued",
+                  attempt_count: 0,
+                  error_message: job?.error_message ?? null,
+                  provider: null,
+                  model: null,
+                  started_at: null,
+                  finished_at: null,
+                  created_at: "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+
+              throw new Error(`Unexpected first SQL: ${sql}`);
+            },
+            async run() {
+              if (sql.includes("UPDATE processing_jobs") && sql.includes("SET status = 'running'")) {
+                const job = state.jobs.find((candidate) => candidate.id === values[1]);
+                if (!job || job.status !== "queued") return d1Result(0);
+                job.status = "running";
+                return d1Result(1);
+              }
+
+              if (sql.includes("UPDATE processing_jobs") && sql.includes("SET status = 'succeeded'")) {
+                return d1Result(options.markSucceededChanges);
+              }
+
+              if (sql.includes("UPDATE processing_jobs") && sql.includes("SET status = 'failed'")) {
+                return d1Result(options.markFailedChanges ?? 1);
+              }
+
+              if (sql.includes("UPDATE uploads") && sql.includes("SET processing_status = ?")) {
+                state.sourceStatus = values[0] as SourceProcessingStatus;
+                return d1Result(1);
+              }
+
+              if (sql.includes("INSERT INTO transcripts")) {
+                state.transcripts.push({ text_r2_key: values[7] as string, segments_r2_key: values[8] as string });
+                return d1Result(1);
+              }
+
+              if (sql.includes("INSERT INTO processing_jobs")) {
+                state.jobs.push({ id: values[0] as string, status: "queued", error_message: null });
+                return d1Result(1);
+              }
+
+              throw new Error(`Unexpected run SQL: ${sql}`);
+            },
+          };
+        },
+      };
+    },
+  } as unknown as Db;
+
+  return { db, state };
+}
+
+function createWorkerEnv(r2Overrides: Partial<R2Bucket> = {}): AppEnv {
+  const r2Objects = new Map<string, string>();
+  return {
+    DB: {} as D1Database,
+    R2: {
+      async put(key: string, value: string) {
+        r2Objects.set(key, value);
+        return {} as R2Object;
+      },
+      ...r2Overrides,
+    } as unknown as R2Bucket,
+    PROCESSING_QUEUE: { send: vi.fn() } as unknown as Queue,
+    APP_NAME: "CloudWisePod",
+    SESSION_COOKIE_NAME: "session",
+    SESSION_SECRET: "secret",
+    UPLOAD_MAX_BYTES: "1000",
+    UPLOAD_MAX_SECONDS: "1000",
+  };
+}
+
 describe("nextStatusForJob", () => {
   test("maps transcribe and analyze job states to source processing statuses", () => {
     expect(nextStatusForJob("transcribe", "running")).toBe("transcribing");
@@ -236,5 +367,44 @@ describe("processing job transitions", () => {
     const staleFailed = createJobTransitionDb("succeeded");
     await expect(markJobFailed(staleFailed.db, "job_1", "boom")).resolves.toBe(false);
     expect(staleFailed.job.status).toBe("succeeded");
+  });
+});
+
+
+describe("processing worker guarded source transitions", () => {
+  test("does not mark a source transcribed when the transcribe job success transition is stale", async () => {
+    const { db, state } = createWorkerTerminalDb({ markSucceededChanges: 0 });
+    const env = createWorkerEnv();
+
+    await handleProcessingQueueMessage(env, db, {
+      type: "processing.job",
+      jobType: "transcribe",
+      jobId: "job_1",
+      userId: "user_1",
+      sourceType: "upload",
+      sourceId: "upload_1",
+    });
+
+    expect(state.sourceStatus).toBe("transcribing");
+  });
+
+  test("does not mark a source failed when the job failure transition is stale", async () => {
+    const { db, state } = createWorkerTerminalDb({ markSucceededChanges: 0, markFailedChanges: 0 });
+    const env = createWorkerEnv({
+      async put() {
+        throw new Error("R2 unavailable");
+      },
+    });
+
+    await handleProcessingQueueMessage(env, db, {
+      type: "processing.job",
+      jobType: "transcribe",
+      jobId: "job_1",
+      userId: "user_1",
+      sourceType: "upload",
+      sourceId: "upload_1",
+    });
+
+    expect(state.sourceStatus).toBe("transcribing");
   });
 });

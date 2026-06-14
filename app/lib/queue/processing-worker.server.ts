@@ -136,8 +136,10 @@ async function runTranscribeJob(env: AppEnv, db: Db, message: ProcessingQueueMes
   };
   await env.PROCESSING_QUEUE.send(analyzeMessage);
 
-  await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "transcribed");
-  await markJobSucceeded(db, message.jobId, { provider: transcript.provider, model: transcript.model });
+  const succeeded = await markJobSucceeded(db, message.jobId, { provider: transcript.provider, model: transcript.model });
+  if (succeeded) {
+    await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "transcribed");
+  }
 }
 
 async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessage): Promise<void> {
@@ -184,8 +186,10 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
     markdownR2Key: markdownKey,
   });
 
-  await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "processed");
-  await markJobSucceeded(db, message.jobId, { provider: analysis.provider, model: analysis.model });
+  const succeeded = await markJobSucceeded(db, message.jobId, { provider: analysis.provider, model: analysis.model });
+  if (succeeded) {
+    await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "processed");
+  }
 }
 
 export async function handleProcessingQueueMessage(
@@ -209,8 +213,10 @@ export async function handleProcessingQueueMessage(
     await runAnalyzeJob(env, db, message);
   } catch (error) {
     const errorMessage = safeErrorMessage(error);
-    await markJobFailed(db, message.jobId, errorMessage);
-    await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "failed");
+    const failed = await markJobFailed(db, message.jobId, errorMessage);
+    if (failed) {
+      await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "failed");
+    }
   }
 }
 
