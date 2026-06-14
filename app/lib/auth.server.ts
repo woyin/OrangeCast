@@ -2,8 +2,6 @@ import { createCookieSessionStorage, redirect } from "@remix-run/cloudflare";
 import type { AppEnv } from "./env.server";
 
 const MIN_PASSWORD_LENGTH = 8;
-const DEV_SESSION_SECRET = "cloudwise-pod-development-session-secret";
-
 function bytesToHex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -41,7 +39,7 @@ export function sessionStorage(env: AppEnv) {
       httpOnly: true,
       path: "/",
       sameSite: "lax",
-      secrets: [env.SESSION_SECRET || DEV_SESSION_SECRET],
+      secrets: [env.SESSION_SECRET],
       secure: true,
     },
   });

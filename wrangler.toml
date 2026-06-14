@@ -17,6 +17,7 @@ queue = "cloudwise-pod-processing"
 
 # Queue consumers are configured in a separate Worker entrypoint later.
 
+# Set SESSION_SECRET with `wrangler secret put SESSION_SECRET`; do not store it in [vars].
 [vars]
 APP_NAME = "CloudWisePod"
 SESSION_COOKIE_NAME = "cloudwise_session"

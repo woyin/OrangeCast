@@ -4,7 +4,7 @@ export interface AppEnv {
   PROCESSING_QUEUE: Queue;
   APP_NAME: string;
   SESSION_COOKIE_NAME: string;
-  SESSION_SECRET?: string;
+  SESSION_SECRET: string;
   UPLOAD_MAX_BYTES: string;
   UPLOAD_MAX_SECONDS: string;
   OPENAI_API_KEY?: string;
@@ -20,6 +20,7 @@ export function requireEnv(context: { cloudflare?: { env: AppEnv } } | { env?: A
     !env?.PROCESSING_QUEUE ||
     !env.APP_NAME ||
     !env.SESSION_COOKIE_NAME ||
+    !env.SESSION_SECRET ||
     !env.UPLOAD_MAX_BYTES ||
     !env.UPLOAD_MAX_SECONDS
   ) {
