@@ -30,6 +30,7 @@ function isBlockedIpLiteral(hostname: string): boolean {
     ? lowerHostname.slice(1, -1)
     : lowerHostname;
   if (["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(normalized)) return true;
+  if (normalized.includes("::ffff:")) return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
 
