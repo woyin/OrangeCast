@@ -1,5 +1,5 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { Link, useLoaderData } from "@remix-run/react";
+import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
 import { requireUserId } from "../lib/auth.server";
 import { requireEnv } from "../lib/env.server";
 import type { SourceProcessingStatus, SourceType } from "../lib/queue/messages.server";
@@ -7,6 +7,8 @@ import type { KnowledgeCard, TranscriptSegment } from "../lib/providers/types.se
 import { getAnalysisForSource } from "../lib/repositories/analyses.server";
 import { getSourceEpisodeForUser, type EpisodeRecord } from "../lib/repositories/episodes.server";
 import { getTranscriptForSource } from "../lib/repositories/transcripts.server";
+import { createMockChatProvider } from "../lib/providers/mock.server";
+import { answerSourceQuestion } from "../lib/services/qa.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
 
 function parseSourceType(value: string | undefined): SourceType | null {
@@ -216,6 +218,65 @@ async function getOwnedSource(
 
   const upload = await getUploadForUser(db, userId, sourceId);
   return upload ? { type: "upload", record: upload } : null;
+}
+
+export async function action({ request, context, params }: ActionFunctionArgs) {
+  const env = requireEnv(context);
+  const userId = await requireUserId(request, env);
+  const sourceType = parseSourceType(params.sourceType);
+  const sourceId = params.sourceId;
+
+  if (!sourceType || !sourceId) {
+    throw new Response("Not found", { status: 404 });
+  }
+
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+  if (intent !== "ask") {
+    throw new Response("Unsupported action", { status: 400 });
+  }
+
+  const question = String(formData.get("question") ?? "").trim();
+  if (question.length === 0) {
+    return json({ intent: "ask" as const, question, answer: null, error: "Enter a question to ask this source." }, { status: 400 });
+  }
+
+  const source = await getOwnedSource(env.DB, userId, sourceType, sourceId);
+  if (!source) throw new Response("Not found", { status: 404 });
+
+  const [transcript, analysis] = await Promise.all([
+    getTranscriptForSource(env.DB, userId, sourceType, sourceId),
+    getAnalysisForSource(env.DB, userId, sourceType, sourceId),
+  ]);
+
+  const [transcriptText, transcriptSegments, analysisCard] = await Promise.all([
+    loadTextArtifactIfPresent(env.R2, transcript?.text_r2_key),
+    loadTranscriptSegmentsArtifactIfPresent(env.R2, transcript?.segments_r2_key),
+    loadKnowledgeCardArtifactIfPresent(env.R2, analysis?.content_json_r2_key),
+  ]);
+
+  if (!transcriptText || !transcriptSegments || !analysisCard) {
+    return json(
+      {
+        intent: "ask" as const,
+        question,
+        answer: null,
+        error: "This source needs transcript and analysis artifacts before Q&A is available.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const answer = await answerSourceQuestion({
+    provider: createMockChatProvider(),
+    question,
+    title: analysisCard.title ?? analysis?.title ?? sourceTitle(source),
+    transcriptText,
+    segments: transcriptSegments,
+    analysis: analysisCard,
+  });
+
+  return json({ intent: "ask" as const, question, answer, error: null });
 }
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
@@ -430,6 +491,53 @@ function TranscriptSegments({ segments }: { segments: TranscriptSegment[] | null
   );
 }
 
+function SourceQuestionAnswer() {
+  const data = useActionData<typeof action>();
+
+  return (
+    <section>
+      <h2>Ask this source</h2>
+      <Form method="post">
+        <input type="hidden" name="intent" value="ask" />
+        <label htmlFor="source-question">Question</label>
+        <textarea
+          id="source-question"
+          name="question"
+          defaultValue={data?.intent === "ask" ? data.question : ""}
+          rows={3}
+          required
+        />
+        <button type="submit">Ask</button>
+      </Form>
+
+      {data?.intent === "ask" && data.error ? (
+        <p role="alert">{data.error}</p>
+      ) : null}
+
+      {data?.intent === "ask" && data.answer ? (
+        <article>
+          <h3>Answer</h3>
+          <p>{data.answer.answer}</p>
+          <p>Answered by {data.answer.provider} ({data.answer.model})</p>
+          <h4>Citations</h4>
+          {data.answer.citations.length === 0 ? (
+            <p>No citations returned.</p>
+          ) : (
+            <ol>
+              {data.answer.citations.map((citation, index) => (
+                <li key={`${citation.startSeconds ?? "unknown"}-${index}-${citation.text}`}>
+                  <blockquote>{citation.text}</blockquote>
+                  <p>{citation.startSeconds === null ? "Timestamp unknown" : formatTime(citation.startSeconds)}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </article>
+      ) : null}
+    </section>
+  );
+}
+
 export default function SourceDetail() {
   const { source, statusMessage, transcript, analysis, analysisCard, transcriptSegments } = useLoaderData<typeof loader>();
   const status = sourceStatus(source);
@@ -481,6 +589,8 @@ export default function SourceDetail() {
           <p>No transcript metadata yet.</p>
         )}
       </section>
+
+      <SourceQuestionAnswer />
 
       <section>
         <h2>Analysis metadata</h2>
