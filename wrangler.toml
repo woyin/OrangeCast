@@ -15,10 +15,7 @@ bucket_name = "cloudwise-pod"
 binding = "PROCESSING_QUEUE"
 queue = "cloudwise-pod-processing"
 
-[[queues.consumers]]
-queue = "cloudwise-pod-processing"
-max_batch_size = 1
-max_batch_timeout = 30
+# Queue consumers are configured in a separate Worker entrypoint later.
 
 [vars]
 APP_NAME = "CloudWisePod"
