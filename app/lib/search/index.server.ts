@@ -52,8 +52,20 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
-function likePattern(query: string): string {
-  return `%${escapeLike(query.trim())}%`;
+function likePattern(term: string): string {
+  return `%${escapeLike(term)}%`;
+}
+
+const likeEscapeClause = "ESCAPE '\\'";
+
+function likeAnyClause(columns: string[], termCount: number): string {
+  return Array.from({ length: termCount }, () =>
+    columns.map((column) => `${column} LIKE ? ${likeEscapeClause}`).join(" OR "),
+  ).join(" OR ");
+}
+
+function likeAnyValues(patterns: string[], columnCount: number): string[] {
+  return patterns.flatMap((pattern) => Array.from({ length: columnCount }, () => pattern));
 }
 
 function detailHref(sourceType: SourceType, sourceId: string): string {
@@ -69,36 +81,40 @@ export function scoreSearchResult(query: string, fields: SearchFields): number {
 
 export async function searchUserContent(db: Db, userId: string, query: string): Promise<SearchResult[]> {
   const trimmedQuery = query.trim();
-  if (!trimmedQuery) return [];
+  const terms = normalizedTerms(trimmedQuery);
+  if (terms.length === 0) return [];
 
-  const pattern = likePattern(trimmedQuery);
+  const patterns = terms.map(likePattern);
+  const episodeTitleClause = likeAnyClause(["title"], patterns.length);
+  const uploadTitleClause = likeAnyClause(["original_filename"], patterns.length);
+  const analysisClause = likeAnyClause(["title", "summary"], patterns.length);
   const [episodesResult, uploadsResult, analysesResult] = await Promise.all([
     db
       .prepare(
         `SELECT id, title, description
          FROM episodes
-         WHERE user_id = ? AND title LIKE ? ESCAPE '\\'
+         WHERE user_id = ? AND (${episodeTitleClause})
          LIMIT 50`,
       )
-      .bind(userId, pattern)
+      .bind(userId, ...likeAnyValues(patterns, 1))
       .all<EpisodeSearchRow>(),
     db
       .prepare(
         `SELECT id, original_filename
          FROM uploads
-         WHERE user_id = ? AND original_filename LIKE ? ESCAPE '\\'
+         WHERE user_id = ? AND (${uploadTitleClause})
          LIMIT 50`,
       )
-      .bind(userId, pattern)
+      .bind(userId, ...likeAnyValues(patterns, 1))
       .all<UploadSearchRow>(),
     db
       .prepare(
         `SELECT id, source_type, source_id, title, summary
          FROM analyses
-         WHERE user_id = ? AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')
+         WHERE user_id = ? AND (${analysisClause})
          LIMIT 50`,
       )
-      .bind(userId, pattern, pattern)
+      .bind(userId, ...likeAnyValues(patterns, 2))
       .all<AnalysisSearchRow>(),
   ]);
 

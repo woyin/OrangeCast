@@ -93,6 +93,48 @@ function createSearchDb() {
   return { db, executed };
 }
 
+function createTermMatchingSearchDb() {
+  const candidate = {
+    id: "analysis_split_terms",
+    source_type: "upload",
+    source_id: "upload_split_terms",
+    title: "Cloud Cost Patterns",
+    summary: "Architecture review notes without the exact phrase.",
+  };
+
+  function matchesPattern(value: string, pattern: unknown): boolean {
+    if (typeof pattern !== "string") return false;
+    const term = pattern.replace(/^%/, "").replace(/%$/, "").replace(/\\([\\%_])/g, "$1").toLowerCase();
+    return value.toLowerCase().includes(term);
+  }
+
+  return {
+    prepare(sql: string) {
+      return {
+        bind(...values: unknown[]) {
+          return {
+            async all<T>() {
+              if (sql.includes("FROM episodes") || sql.includes("FROM uploads")) {
+                return { results: [] as T[] };
+              }
+
+              if (sql.includes("FROM analyses")) {
+                const patterns = values.slice(1);
+                const matchesAnyTerm = patterns.some(
+                  (pattern) => matchesPattern(candidate.title, pattern) || matchesPattern(candidate.summary, pattern),
+                );
+                return { results: matchesAnyTerm ? [candidate as T] : [] };
+              }
+
+              throw new Error(`Unexpected SQL: ${sql}`);
+            },
+          };
+        },
+      };
+    },
+  } as unknown as Db;
+}
+
 describe("searchUserContent", () => {
   test("searches only content owned by the requested user", async () => {
     const { db, executed } = createSearchDb();
@@ -102,6 +144,20 @@ describe("searchUserContent", () => {
     expect(results.map((result) => result.sourceId)).toEqual(["episode_1", "upload_1", "upload_1"]);
     expect(executed).toHaveLength(3);
     expect(executed.every((query) => query.values[0] === "user_1")).toBe(true);
+  });
+
+  test("finds candidates when multi-term queries match without the exact phrase", async () => {
+    const db = createTermMatchingSearchDb();
+
+    const results = await searchUserContent(db, "user_1", "cloud architecture");
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        sourceId: "upload_split_terms",
+        title: "Cloud Cost Patterns",
+        summary: "Architecture review notes without the exact phrase.",
+      }),
+    ]);
   });
 
   test("returns no results for blank queries", async () => {
