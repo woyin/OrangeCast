@@ -4,7 +4,7 @@ import { renderKnowledgeCardMarkdown } from "../export/markdown.server";
 import { createMockAnalysisProvider, createMockTranscriptionProvider } from "../providers/mock.server";
 import type { TranscriptSegment } from "../providers/types.server";
 import { getSourceEpisodeForUser, updateEpisodeStatus } from "../repositories/episodes.server";
-import { createJob, markJobFailed, markJobRunning, markJobSucceeded } from "../repositories/jobs.server";
+import { createJob, getJobById, markJobFailed, markJobRunning, markJobSucceeded } from "../repositories/jobs.server";
 import { getUploadForUser, updateUploadStatus } from "../repositories/uploads.server";
 import { upsertAnalysisMetadata } from "../repositories/analyses.server";
 import { getTranscriptForSource, upsertTranscriptMetadata } from "../repositories/transcripts.server";
@@ -32,6 +32,16 @@ export function isProcessingQueueMessage(value: unknown): value is ProcessingQue
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Processing failed";
   return message.slice(0, 500);
+}
+
+function jobMatchesMessage(job: Awaited<ReturnType<typeof getJobById>>, message: ProcessingQueueMessage): boolean {
+  return (
+    !!job &&
+    job.user_id === message.userId &&
+    job.source_type === message.sourceType &&
+    job.source_id === message.sourceId &&
+    job.job_type === message.jobType
+  );
 }
 
 async function updateSourceStatus(
@@ -159,22 +169,7 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
   const analysis = await provider.analyze({ title, transcript: transcriptText, segments });
   const jsonKey = analysisJsonKey(message.userId, message.sourceType, message.sourceId);
   const markdownKey = analysisMarkdownKey(message.userId, message.sourceType, message.sourceId);
-  const createdAt = new Date().toISOString();
-  const markdown = renderKnowledgeCardMarkdown(
-    analysis.card,
-    {
-      sourceTitle: title,
-      sourceType: message.sourceType,
-      sourceId: message.sourceId,
-      createdAt,
-    },
-    { includeTranscriptAppendix: false },
-  );
-
-  await putText(env, jsonKey, JSON.stringify(analysis.card, null, 2), "application/json; charset=utf-8");
-  await putText(env, markdownKey, markdown, "text/markdown; charset=utf-8");
-
-  await upsertAnalysisMetadata(db, {
+  const analysisMetadata = await upsertAnalysisMetadata(db, {
     userId: message.userId,
     sourceType: message.sourceType,
     sourceId: message.sourceId,
@@ -185,6 +180,19 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
     contentJsonR2Key: jsonKey,
     markdownR2Key: markdownKey,
   });
+  const markdown = renderKnowledgeCardMarkdown(
+    analysis.card,
+    {
+      sourceTitle: title,
+      sourceType: message.sourceType,
+      sourceId: message.sourceId,
+      createdAt: analysisMetadata.created_at,
+    },
+    { includeTranscriptAppendix: false },
+  );
+
+  await putText(env, jsonKey, JSON.stringify(analysis.card, null, 2), "application/json; charset=utf-8");
+  await putText(env, markdownKey, markdown, "text/markdown; charset=utf-8");
 
   const succeeded = await markJobSucceeded(db, message.jobId, { provider: analysis.provider, model: analysis.model });
   if (succeeded) {
@@ -203,6 +211,12 @@ export async function handleProcessingQueueMessage(
 
   const claimed = await markJobRunning(db, message.jobId);
   if (!claimed) return;
+
+  const job = await getJobById(db, message.jobId);
+  if (!jobMatchesMessage(job, message)) {
+    await markJobFailed(db, message.jobId, "Queue message does not match claimed job");
+    return;
+  }
 
   try {
     if (message.jobType === "transcribe") {

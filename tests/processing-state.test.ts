@@ -89,6 +89,7 @@ function createProcessingDb(initialStatus: SourceProcessingStatus) {
                 return { processing_status: state.sourceStatus } as T;
               }
 
+
               if (sql.includes("FROM processing_jobs")) {
                 return {
                   id: state.jobs.at(-1)?.id ?? "job_1",
@@ -155,11 +156,12 @@ function createProcessingDb(initialStatus: SourceProcessingStatus) {
 }
 
 
-function createWorkerTerminalDb(options: { markSucceededChanges: number; markFailedChanges?: number }) {
+function createWorkerTerminalDb(options: { markSucceededChanges: number; markFailedChanges?: number; jobSourceId?: string; jobType?: "transcribe" | "analyze"; analysisCreatedAt?: string }) {
   const state = {
     sourceStatus: "queued" as SourceProcessingStatus,
     jobs: [{ id: "job_1", status: "queued", error_message: null as string | null }],
     transcripts: [] as Array<{ text_r2_key: string; segments_r2_key: string }>,
+    r2Puts: [] as Array<{ key: string; value: string }>,
   };
 
   const db = {
@@ -183,8 +185,10 @@ function createWorkerTerminalDb(options: { markSucceededChanges: number; markFai
               }
 
               if (sql.includes("FROM transcripts")) {
-                const transcript = state.transcripts.at(-1);
-                if (!transcript) return null as T;
+                const transcript = state.transcripts.at(-1) ?? {
+                  text_r2_key: "users/user_1/transcripts/upload/upload_1/text.txt",
+                  segments_r2_key: "users/user_1/transcripts/upload/upload_1/segments.json",
+                };
                 return {
                   id: "trn_1",
                   user_id: "user_1",
@@ -200,14 +204,30 @@ function createWorkerTerminalDb(options: { markSucceededChanges: number; markFai
                 } as T;
               }
 
+              if (sql.includes("FROM analyses")) {
+                return {
+                  id: "ana_1",
+                  user_id: "user_1",
+                  source_type: "upload",
+                  source_id: "upload_1",
+                  provider: "mock",
+                  model: "mock-analyzer-v1",
+                  title: "Thinking.mp3",
+                  summary: "Mock analysis summary for Thinking.mp3.",
+                  content_json_r2_key: "users/user_1/analyses/upload/upload_1/content.json",
+                  markdown_r2_key: "users/user_1/analyses/upload/upload_1/note.md",
+                  created_at: options.analysisCreatedAt ?? "2026-06-14T00:00:00.000Z",
+                } as T;
+              }
+
               if (sql.includes("FROM processing_jobs")) {
                 const job = state.jobs.at(-1) ?? state.jobs[0];
                 return {
                   id: job?.id ?? "job_2",
                   user_id: "user_1",
                   source_type: "upload",
-                  source_id: "upload_1",
-                  job_type: "analyze",
+                  source_id: options.jobSourceId ?? "upload_1",
+                  job_type: options.jobType ?? "transcribe",
                   status: job?.status ?? "queued",
                   attempt_count: 0,
                   error_message: job?.error_message ?? null,
@@ -252,6 +272,10 @@ function createWorkerTerminalDb(options: { markSucceededChanges: number; markFai
                 return d1Result(1);
               }
 
+              if (sql.includes("INSERT INTO analyses")) {
+                return d1Result(1);
+              }
+
               throw new Error(`Unexpected run SQL: ${sql}`);
             },
           };
@@ -263,14 +287,19 @@ function createWorkerTerminalDb(options: { markSucceededChanges: number; markFai
   return { db, state };
 }
 
-function createWorkerEnv(r2Overrides: Partial<R2Bucket> = {}): AppEnv {
+function createWorkerEnv(r2Overrides: Partial<R2Bucket> = {}, puts: Array<{ key: string; value: string }> = []): AppEnv {
   const r2Objects = new Map<string, string>();
   return {
     DB: {} as D1Database,
     R2: {
       async put(key: string, value: string) {
         r2Objects.set(key, value);
+        puts.push({ key, value });
         return {} as R2Object;
+      },
+      async get(key: string) {
+        const value = r2Objects.get(key) ?? (key.endsWith("text.txt") ? "Transcript text" : JSON.stringify([{ startSeconds: 0, endSeconds: 10, text: "Transcript text" }]));
+        return { text: async () => value } as R2ObjectBody;
       },
       ...r2Overrides,
     } as unknown as R2Bucket,
@@ -406,5 +435,42 @@ describe("processing worker guarded source transitions", () => {
     });
 
     expect(state.sourceStatus).toBe("transcribing");
+  });
+
+  test("does not write artifacts or update a message source when queue body does not match claimed job", async () => {
+    const { db, state } = createWorkerTerminalDb({ markSucceededChanges: 1, jobSourceId: "upload_real" });
+    const puts: Array<{ key: string; value: string }> = [];
+    const env = createWorkerEnv({}, puts);
+
+    await handleProcessingQueueMessage(env, db, {
+      type: "processing.job",
+      jobType: "transcribe",
+      jobId: "job_1",
+      userId: "user_1",
+      sourceType: "upload",
+      sourceId: "upload_wrong",
+    });
+
+    expect(state.sourceStatus).toBe("queued");
+    expect(puts).toHaveLength(0);
+  });
+
+  test("renders analysis markdown with the D1 analysis metadata timestamp", async () => {
+    const createdAt = "2026-01-02T03:04:05.000Z";
+    const { db } = createWorkerTerminalDb({ markSucceededChanges: 1, jobType: "analyze", analysisCreatedAt: createdAt });
+    const puts: Array<{ key: string; value: string }> = [];
+    const env = createWorkerEnv({}, puts);
+
+    await handleProcessingQueueMessage(env, db, {
+      type: "processing.job",
+      jobType: "analyze",
+      jobId: "job_1",
+      userId: "user_1",
+      sourceType: "upload",
+      sourceId: "upload_1",
+    });
+
+    const markdownPut = puts.find((put) => put.key.endsWith("note.md"));
+    expect(markdownPut?.value).toContain(`created_at: "${createdAt}"`);
   });
 });

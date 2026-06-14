@@ -52,6 +52,13 @@ export async function createJob(
   return job;
 }
 
+export async function getJobById(db: Db, jobId: string): Promise<ProcessingJobRecord | null> {
+  return await db
+    .prepare(`SELECT ${jobColumns} FROM processing_jobs WHERE id = ? LIMIT 1`)
+    .bind(jobId)
+    .first<ProcessingJobRecord>();
+}
+
 export async function markJobRunning(db: Db, jobId: string): Promise<boolean> {
   const result = await db
     .prepare(
