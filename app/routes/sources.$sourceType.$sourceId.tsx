@@ -22,10 +22,19 @@ async function loadTextArtifactIfPresent(bucket: R2Bucket, key: string | null | 
   return await object.text();
 }
 
-async function loadJsonArtifactIfPresent<T>(bucket: R2Bucket, key: string | null | undefined): Promise<T | null> {
+async function loadKnowledgeCardArtifactIfPresent(bucket: R2Bucket, key: string | null | undefined): Promise<KnowledgeCard | null> {
   const text = await loadTextArtifactIfPresent(bucket, key);
   if (text === null) return null;
-  return JSON.parse(text) as T;
+  return safeParseKnowledgeCard(text);
+}
+
+async function loadTranscriptSegmentsArtifactIfPresent(
+  bucket: R2Bucket,
+  key: string | null | undefined,
+): Promise<TranscriptSegment[] | null> {
+  const text = await loadTextArtifactIfPresent(bucket, key);
+  if (text === null) return null;
+  return safeParseTranscriptSegments(text);
 }
 
 function getStatusMessage(status: string): string {
@@ -52,6 +61,116 @@ function getStatusMessage(status: string): string {
 type SourceRecord =
   | { type: "episode"; record: EpisodeRecord }
   | { type: "upload"; record: UploadRecord };
+
+function safeJsonParse(text: string): unknown | null {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function safeParseTranscriptSegments(text: string): TranscriptSegment[] | null {
+  const value = safeJsonParse(text);
+  if (!Array.isArray(value)) return null;
+
+  return value.flatMap((item): TranscriptSegment[] => {
+    if (!isRecord(item)) return [];
+    if (!finiteNumber(item.startSeconds) || !finiteNumber(item.endSeconds)) return [];
+    if (typeof item.text !== "string" || item.text.length === 0) return [];
+
+    return [
+      {
+        startSeconds: item.startSeconds,
+        endSeconds: item.endSeconds,
+        text: item.text,
+      },
+    ];
+  });
+}
+
+export function safeParseKnowledgeCard(text: string): KnowledgeCard | null {
+  const value = safeJsonParse(text);
+  if (!isRecord(value)) return null;
+  if (typeof value.title !== "string" || typeof value.summary !== "string") return null;
+
+  const chapters = Array.isArray(value.chapters)
+    ? value.chapters.flatMap((chapter): KnowledgeCard["chapters"] => {
+        if (!isRecord(chapter)) return [];
+        if (typeof chapter.title !== "string" || typeof chapter.summary !== "string") return [];
+        if (!finiteNumber(chapter.startSeconds) || !finiteNumber(chapter.endSeconds)) return [];
+        return [
+          {
+            title: chapter.title,
+            startSeconds: chapter.startSeconds,
+            endSeconds: chapter.endSeconds,
+            summary: chapter.summary,
+          },
+        ];
+      })
+    : [];
+
+  const quotes = Array.isArray(value.quotes)
+    ? value.quotes.flatMap((quote): KnowledgeCard["quotes"] => {
+        if (!isRecord(quote)) return [];
+        if (typeof quote.text !== "string" || quote.text.length === 0) return [];
+        if (quote.startSeconds !== null && quote.startSeconds !== undefined && !finiteNumber(quote.startSeconds)) return [];
+        return [{ text: quote.text, startSeconds: finiteNumber(quote.startSeconds) ? quote.startSeconds : null }];
+      })
+    : [];
+
+  const entities = Array.isArray(value.entities)
+    ? value.entities.flatMap((entity): KnowledgeCard["entities"] => {
+        if (!isRecord(entity)) return [];
+        if (typeof entity.name !== "string" || typeof entity.type !== "string") return [];
+        return [{ name: entity.name, type: entity.type }];
+      })
+    : [];
+
+  const glossary = Array.isArray(value.glossary)
+    ? value.glossary.flatMap((entry): KnowledgeCard["glossary"] => {
+        if (!isRecord(entry)) return [];
+        if (typeof entry.term !== "string" || typeof entry.definition !== "string") return [];
+        return [{ term: entry.term, definition: entry.definition }];
+      })
+    : [];
+
+  return {
+    title: value.title,
+    summary: value.summary,
+    keyPoints: stringArray(value.keyPoints),
+    chapters,
+    quotes,
+    entities,
+    actionItems: stringArray(value.actionItems),
+    glossary,
+    suggestedQuestions: stringArray(value.suggestedQuestions),
+    tags: stringArray(value.tags),
+  };
+}
+
+export function getSafeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
 
 function sourceTitle(source: SourceRecord): string {
   return source.type === "episode" ? source.record.title : source.record.original_filename;
@@ -118,8 +237,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   ]);
 
   const [analysisCard, transcriptSegments] = await Promise.all([
-    loadJsonArtifactIfPresent<KnowledgeCard>(env.R2, analysis?.content_json_r2_key),
-    loadJsonArtifactIfPresent<TranscriptSegment[]>(env.R2, transcript?.segments_r2_key),
+    loadKnowledgeCardArtifactIfPresent(env.R2, analysis?.content_json_r2_key),
+    loadTranscriptSegmentsArtifactIfPresent(env.R2, transcript?.segments_r2_key),
   ]);
 
   return json({
@@ -152,6 +271,7 @@ function ListSection({ title, items }: { title: string; items: string[] }) {
 function SourceInfo({ source }: { source: SourceRecord }) {
   if (source.type === "episode") {
     const publishedAt = formatDate(source.record.published_at);
+    const audioUrl = getSafeHttpUrl(source.record.audio_url);
     return (
       <dl>
         <div>
@@ -175,7 +295,7 @@ function SourceInfo({ source }: { source: SourceRecord }) {
         <div>
           <dt>Audio</dt>
           <dd>
-            <a href={source.record.audio_url}>Episode audio</a>
+            {audioUrl ? <a href={audioUrl}>Episode audio</a> : "Audio link unavailable"}
           </dd>
         </div>
       </dl>
