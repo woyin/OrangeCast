@@ -9,6 +9,10 @@ function canProcess(status: string): boolean {
   return status === "unprocessed" || status === "failed";
 }
 
+function uploadSourceHref(uploadId: string): string {
+  return `/sources/upload/${encodeURIComponent(uploadId)}`;
+}
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = requireEnv(context);
   const userId = await requireUserId(request, env);
@@ -65,8 +69,10 @@ export default function UploadsIndex() {
             const processable = canProcess(upload.processing_status);
             return (
               <li key={upload.id}>
-                <strong>{upload.original_filename}</strong> · {formatSize(upload.size_bytes)} ·{" "}
-                {formatDuration(upload.duration_seconds)} · {upload.processing_status}
+                <strong>
+                  <Link to={uploadSourceHref(upload.id)}>{upload.original_filename}</Link>
+                </strong>{" "}
+                · {formatSize(upload.size_bytes)} · {formatDuration(upload.duration_seconds)} · {upload.processing_status}
                 <Form method="post">
                   <input type="hidden" name="intent" value="process" />
                   <input type="hidden" name="sourceType" value="upload" />

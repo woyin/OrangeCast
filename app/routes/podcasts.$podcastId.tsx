@@ -10,6 +10,10 @@ function canProcess(status: string): boolean {
   return status === "unprocessed" || status === "failed";
 }
 
+function episodeSourceHref(episodeId: string): string {
+  return `/sources/episode/${encodeURIComponent(episodeId)}`;
+}
+
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const env = requireEnv(context);
   const userId = await requireUserId(request, env);
@@ -75,7 +79,9 @@ export default function PodcastDetail() {
             const processable = canProcess(episode.processing_status);
             return (
               <li key={episode.id}>
-                <h3>{episode.title}</h3>
+                <h3>
+                  <Link to={episodeSourceHref(episode.id)}>{episode.title}</Link>
+                </h3>
                 {episode.published_at ? (
                   <p>{new Date(episode.published_at).toLocaleDateString()}</p>
                 ) : null}
