@@ -4,7 +4,10 @@ import { requireUserId } from "../lib/auth.server";
 import { newId } from "../lib/db.server";
 import { requireEnv } from "../lib/env.server";
 import { createUpload } from "../lib/repositories/uploads.server";
-import { validateUploadMetadata } from "../lib/services/upload-validation.server";
+import {
+  validateUploadFileSignature,
+  validateUploadMetadata,
+} from "../lib/services/upload-validation.server";
 
 function sanitizeFilename(filename: string): string {
   const safe = filename
@@ -58,23 +61,44 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ error: validation.message }, { status: 400 });
   }
 
+  const headerBytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const signatureValidation = validateUploadFileSignature(file.name || "audio", headerBytes);
+  if (!signatureValidation.ok) {
+    return json({ error: signatureValidation.message }, { status: 400 });
+  }
+
   const uploadId = newId("upl");
   const safeFilename = sanitizeFilename(file.name || "audio");
   const r2ObjectKey = `users/${userId}/uploads/${uploadId}/${safeFilename}`;
+  let r2PutSucceeded = false;
 
-  await env.R2.put(r2ObjectKey, await file.arrayBuffer(), {
-    httpMetadata: { contentType: file.type },
-  });
+  try {
+    await env.R2.put(r2ObjectKey, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+    });
+    r2PutSucceeded = true;
 
-  await createUpload(env.DB, {
-    id: uploadId,
-    userId,
-    originalFilename: file.name || safeFilename,
-    contentType: file.type,
-    sizeBytes: file.size,
-    durationSeconds,
-    r2ObjectKey,
-  });
+    await createUpload(env.DB, {
+      id: uploadId,
+      userId,
+      originalFilename: file.name || safeFilename,
+      contentType: file.type,
+      sizeBytes: file.size,
+      durationSeconds,
+      r2ObjectKey,
+    });
+  } catch (error) {
+    if (r2PutSucceeded) {
+      try {
+        await env.R2.delete(r2ObjectKey);
+      } catch (deleteError) {
+        console.error("Failed to delete orphaned upload from R2", deleteError);
+      }
+    }
+
+    console.error("Failed to store upload", error);
+    return json({ error: "Upload could not be saved. Please try again." }, { status: 500 });
+  }
 
   return redirect("/uploads");
 }
