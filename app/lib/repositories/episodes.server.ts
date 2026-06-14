@@ -23,6 +23,18 @@ export async function upsertEpisodesForPodcast(
   podcastId: string,
   episodes: ParsedEpisode[],
 ): Promise<void> {
+  const podcast = await db
+    .prepare(
+      `SELECT id
+       FROM podcasts
+       WHERE id = ? AND user_id = ?
+       LIMIT 1`,
+    )
+    .bind(podcastId, userId)
+    .first<{ id: string }>();
+
+  if (!podcast) throw new Error("Podcast not found");
+
   const now = nowIso();
 
   for (const episode of episodes) {

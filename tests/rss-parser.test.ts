@@ -31,4 +31,36 @@ describe("parsePodcastRss", () => {
       publishedAt: "2024-01-01T12:00:00.000Z",
     });
   });
+
+  it("does not use item title as the podcast title", () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <guid>episode-1</guid>
+      <title>Episode One</title>
+      <enclosure url="https://example.com/a.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>`;
+
+    expect(() => parsePodcastRss(rss)).toThrow("RSS feed is missing a podcast title");
+  });
+
+  it("does not use item link as the podcast site URL", () => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Podcast</title>
+    <item>
+      <guid>episode-1</guid>
+      <title>Episode One</title>
+      <link>https://example.com/episodes/1</link>
+      <enclosure url="https://example.com/a.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>`;
+
+    expect(parsePodcastRss(rss).siteUrl).toBeNull();
+  });
 });

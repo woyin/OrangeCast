@@ -65,6 +65,10 @@ function channelBlock(xml: string): string {
   return channel;
 }
 
+function withoutItemBlocks(channel: string): string {
+  return channel.replace(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi, "");
+}
+
 function parseDate(value: string | null): string | null {
   if (!value) return null;
   const time = Date.parse(value);
@@ -104,7 +108,8 @@ function episodeAudioUrl(item: string): string | null {
 
 export function parsePodcastRss(xml: string): ParsedPodcast {
   const channel = channelBlock(xml);
-  const title = textOf(channel, "title");
+  const channelMetadata = withoutItemBlocks(channel);
+  const title = textOf(channelMetadata, "title");
   if (!title) throw new Error("RSS feed is missing a podcast title");
 
   const episodes = blocksOf(channel, "item")
@@ -133,9 +138,9 @@ export function parsePodcastRss(xml: string): ParsedPodcast {
 
   return {
     title,
-    description: textOf(channel, "description"),
-    siteUrl: textOf(channel, "link"),
-    imageUrl: podcastImageUrl(channel),
+    description: textOf(channelMetadata, "description"),
+    siteUrl: textOf(channelMetadata, "link"),
+    imageUrl: podcastImageUrl(channelMetadata),
     episodes,
   };
 }
