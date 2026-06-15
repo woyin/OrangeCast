@@ -471,6 +471,6 @@ describe("processing worker guarded source transitions", () => {
     });
 
     const markdownPut = puts.find((put) => put.key.endsWith("note.md"));
-    expect(markdownPut?.value).toContain(`created_at: "${createdAt}"`);
+    expect(markdownPut?.value).toContain(`processed_at: "${createdAt}"`);
   });
 });

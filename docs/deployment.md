@@ -76,7 +76,7 @@ The Pages app uses the bindings in `wrangler.toml`: `DB`, `R2`, and `PROCESSING_
 
 ## Deploy the scheduled RSS refresh Worker
 
-The scheduled RSS refresh entrypoint is `app/worker.ts`. Cloudflare treats the checked-in `wrangler.toml` as the Pages project config because it contains `pages_build_output_dir`, so the scheduled Worker uses the separate Worker-only config `wrangler.rss-refresh.toml`. That config contains the shared bindings and cron trigger:
+The Worker entrypoint `app/worker.ts` handles both the scheduled RSS refresh cron and the processing queue consumer. Cloudflare treats the checked-in `wrangler.toml` as the Pages project config because it contains `pages_build_output_dir`, so the Worker uses the separate Worker-only config `wrangler.rss-refresh.toml`. That config contains the shared bindings, cron trigger, and the queue consumer:
 
 ```toml
 [triggers]
@@ -89,9 +89,13 @@ After copying the real D1 `database_id` into both Wrangler config files, deploy 
 npx wrangler deploy --config wrangler.rss-refresh.toml
 ```
 
+This Worker handles both:
+- **Cron**: RSS feed refresh every 30 minutes (discovers new episodes, no auto-processing).
+- **Queue consumer**: Processes transcribe/analyze jobs when users click "Process" on an episode or upload.
+
 ## Verify deployment
 
-Confirm the scheduled Worker can see bindings and starts without throwing:
+Confirm the Worker can see bindings and starts without throwing:
 
 ```bash
 npx wrangler tail cloudwise-pod-rss-refresh

@@ -9,6 +9,7 @@ import {
 } from "../lib/search/index.server";
 
 function sourceTypeLabel(sourceType: SearchResult["sourceType"]): string {
+  if (sourceType === "podcast") return "Podcast";
   return sourceType === "episode" ? "Episode" : "Upload";
 }
 

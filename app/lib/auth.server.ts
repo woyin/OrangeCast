@@ -32,6 +32,8 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return (await hashPassword(password)) === hash;
 }
 
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
 export function sessionStorage(env: AppEnv) {
   return createCookieSessionStorage({
     cookie: {
@@ -41,6 +43,7 @@ export function sessionStorage(env: AppEnv) {
       sameSite: "lax",
       secrets: [env.SESSION_SECRET],
       secure: true,
+      maxAge: SESSION_MAX_AGE_SECONDS,
     },
   });
 }

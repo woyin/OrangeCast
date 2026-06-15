@@ -4,6 +4,7 @@ import { renderKnowledgeCardMarkdown } from "../export/markdown.server";
 import { getProviders } from "../providers/index.server";
 import type { TranscriptionInput, TranscriptSegment } from "../providers/types.server";
 import { getSourceEpisodeForUser, updateEpisodeStatus } from "../repositories/episodes.server";
+import { getPodcastForUser } from "../repositories/podcasts.server";
 import { createJob, getJobById, markJobFailed, markJobRunning, markJobSucceeded } from "../repositories/jobs.server";
 import { getUploadForUser, updateUploadStatus } from "../repositories/uploads.server";
 import { upsertAnalysisMetadata } from "../repositories/analyses.server";
@@ -111,6 +112,41 @@ async function getSourceTitle(
   const upload = await getUploadForUser(db, userId, sourceId);
   if (!upload) throw new Error("Source upload not found");
   return upload.original_filename;
+}
+
+interface SourceExportMetadata {
+  sourceTitle: string;
+  podcastTitle: string | null;
+  publishedAt: string | null;
+  durationSeconds: number | null;
+}
+
+async function getSourceExportMetadata(
+  db: Db,
+  userId: string,
+  sourceType: SourceType,
+  sourceId: string,
+): Promise<SourceExportMetadata> {
+  if (sourceType === "episode") {
+    const episode = await getSourceEpisodeForUser(db, userId, sourceId);
+    if (!episode) throw new Error("Source episode not found");
+    const podcast = await getPodcastForUser(db, userId, episode.podcast_id);
+    return {
+      sourceTitle: episode.title,
+      podcastTitle: podcast?.title ?? null,
+      publishedAt: episode.published_at,
+      durationSeconds: episode.duration_seconds,
+    };
+  }
+
+  const upload = await getUploadForUser(db, userId, sourceId);
+  if (!upload) throw new Error("Source upload not found");
+  return {
+    sourceTitle: upload.original_filename,
+    podcastTitle: null,
+    publishedAt: null,
+    durationSeconds: upload.duration_seconds,
+  };
 }
 
 async function putText(env: AppEnv, key: string, value: string, contentType: string): Promise<void> {
@@ -241,12 +277,17 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
     contentJsonR2Key: jsonKey,
     markdownR2Key: markdownKey,
   });
+  const exportMetadata = await getSourceExportMetadata(db, message.userId, message.sourceType, message.sourceId);
   const markdown = renderKnowledgeCardMarkdown(
     analysis.card,
     {
-      sourceTitle: title,
+      sourceTitle: exportMetadata.sourceTitle,
       sourceType: message.sourceType,
       sourceId: message.sourceId,
+      podcastTitle: exportMetadata.podcastTitle,
+      publishedAt: exportMetadata.publishedAt,
+      processedAt: analysisMetadata.created_at,
+      durationSeconds: exportMetadata.durationSeconds,
       createdAt: analysisMetadata.created_at,
     },
     { includeTranscriptAppendix: false },
