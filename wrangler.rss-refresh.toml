@@ -1,0 +1,25 @@
+name = "cloudwise-pod-rss-refresh"
+main = "app/worker.ts"
+compatibility_date = "2026-06-14"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cloudwise_pod"
+database_id = "replace-with-cloudflare-d1-id"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "cloudwise-pod"
+
+[[queues.producers]]
+binding = "PROCESSING_QUEUE"
+queue = "cloudwise-pod-processing"
+
+[vars]
+APP_NAME = "CloudWisePod"
+SESSION_COOKIE_NAME = "cloudwise_session"
+UPLOAD_MAX_BYTES = "104857600"
+UPLOAD_MAX_SECONDS = "7200"
+
+[triggers]
+crons = ["*/30 * * * *"]

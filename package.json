@@ -1,0 +1,35 @@
+{
+  "name": "cloudwise-pod",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cf:dev": "wrangler pages dev ./build/client",
+    "db:migrate:local": "wrangler d1 execute cloudwise_pod --local --file=app/lib/schema.sql"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20260609.0",
+    "@remix-run/cloudflare": "2.17.5",
+    "@remix-run/react": "2.17.5",
+    "@remix-run/serve": "2.17.5",
+    "isbot": "^5.1.32",
+    "jszip": "^3.10.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@remix-run/dev": "2.17.5",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^3.114.17"
+  }
+}
