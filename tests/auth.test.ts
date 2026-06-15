@@ -37,7 +37,10 @@ describe("auth environment", () => {
 });
 
 describe("logout route", () => {
-  it("does not destroy the session from the loader", async () => {
-    expect(logoutLoader()).toBeNull();
+  it("redirects to dashboard without destroying the session from the loader", async () => {
+    const response = await logoutLoader();
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(302);
+    expect((response as Response).headers.get("Location")).toBe("/dashboard");
   });
 });

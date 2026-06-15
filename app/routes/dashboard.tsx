@@ -16,8 +16,15 @@ export default function Dashboard() {
     <main>
       <h1>CloudWisePod</h1>
       <p>Podcast knowledge cards on Cloudflare.</p>
-      <p>Logged in as {userId}.</p>
-      <p><Link to="/uploads">Uploads</Link></p>
+      <nav>
+        <ul>
+          <li><Link to="/podcasts">Podcasts</Link></li>
+          <li><Link to="/uploads">Uploads</Link></li>
+          <li><Link to="/search">Search</Link></li>
+          <li><Link to="/exports">Exports</Link></li>
+          <li><Link to="/logout">Log out</Link></li>
+        </ul>
+      </nav>
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { redirect, type ActionFunctionArgs } from "@remix-run/cloudflare";
+import { redirect, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { Form } from "@remix-run/react";
 import { sessionStorage } from "../lib/auth.server";
 import { requireEnv } from "../lib/env.server";
@@ -14,7 +14,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export function loader() {
-  return null;
+  return redirect("/dashboard");
 }
 
 export default function Logout() {

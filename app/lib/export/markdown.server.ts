@@ -5,6 +5,10 @@ export interface KnowledgeCardMarkdownMetadata {
   sourceTitle: string;
   sourceType: SourceType;
   sourceId: string;
+  podcastTitle: string | null;
+  publishedAt: string | null;
+  processedAt: string;
+  durationSeconds: number | null;
   createdAt: string;
 }
 
@@ -51,13 +55,21 @@ export function renderKnowledgeCardMarkdown(
 ): string {
   const tags = Array.from(new Set(card.tags.map((tag) => tag.trim()).filter(Boolean)));
   const entities = Array.from(new Set(card.entities.map((entity) => entity.name.trim()).filter(Boolean)));
+  const durationLabel =
+    metadata.durationSeconds != null
+      ? `${Math.round(metadata.durationSeconds / 60)} min`
+      : null;
+
   const lines: string[] = [
     "---",
     `title: ${yamlString(card.title)}`,
     `source_title: ${yamlString(metadata.sourceTitle)}`,
     `source_type: ${yamlString(metadata.sourceType)}`,
     `source_id: ${yamlString(metadata.sourceId)}`,
-    `created_at: ${yamlString(metadata.createdAt)}`,
+    `podcast: ${yamlString(metadata.podcastTitle ?? "")}`,
+    `published_at: ${yamlString(metadata.publishedAt ?? "")}`,
+    `processed_at: ${yamlString(metadata.processedAt)}`,
+    ...(durationLabel ? [`duration: ${yamlString(durationLabel)}`] : []),
     `tags:${yamlList(tags)}`,
     `entities:${yamlList(entities)}`,
     "---",
@@ -83,7 +95,7 @@ export function renderKnowledgeCardMarkdown(
 
   if (card.quotes.length > 0) {
     lines.push("## Quotes", "");
-    for (const quote of card.quotes) lines.push(`- “${quote.text}”${formatTimestamp(quote.startSeconds)}`);
+    for (const quote of card.quotes) lines.push(`- "${quote.text}"${formatTimestamp(quote.startSeconds)}`);
     lines.push("");
   }
 

@@ -15,6 +15,11 @@ bucket_name = "cloudwise-pod"
 binding = "PROCESSING_QUEUE"
 queue = "cloudwise-pod-processing"
 
+[[queues.consumers]]
+queue = "cloudwise-pod-processing"
+max_batch_size = 1
+max_batch_timeout = 30
+
 [vars]
 APP_NAME = "CloudWisePod"
 SESSION_COOKIE_NAME = "cloudwise_session"

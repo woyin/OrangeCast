@@ -8,12 +8,18 @@ export interface SearchFields {
 
 export interface SearchResult {
   id: string;
-  sourceType: SourceType;
+  sourceType: SourceType | "podcast";
   sourceId: string;
   title: string;
   summary: string | null;
   detailHref: string;
   score: number;
+}
+
+interface PodcastSearchRow {
+  id: string;
+  title: string;
+  description: string | null;
 }
 
 interface EpisodeSearchRow {
@@ -85,40 +91,71 @@ export async function searchUserContent(db: Db, userId: string, query: string): 
   if (terms.length === 0) return [];
 
   const patterns = terms.map(likePattern);
-  const episodeTitleClause = likeAnyClause(["title"], patterns.length);
-  const uploadTitleClause = likeAnyClause(["original_filename"], patterns.length);
+  const podcastClause = likeAnyClause(["title"], patterns.length);
+  const episodeClause = likeAnyClause(["title"], patterns.length);
+  const uploadClause = likeAnyClause(["original_filename"], patterns.length);
   const analysisClause = likeAnyClause(["title", "summary"], patterns.length);
-  const [episodesResult, uploadsResult, analysesResult] = await Promise.all([
-    db
-      .prepare(
-        `SELECT id, title, description
-         FROM episodes
-         WHERE user_id = ? AND (${episodeTitleClause})
-         LIMIT 50`,
-      )
-      .bind(userId, ...likeAnyValues(patterns, 1))
-      .all<EpisodeSearchRow>(),
-    db
-      .prepare(
-        `SELECT id, original_filename
-         FROM uploads
-         WHERE user_id = ? AND (${uploadTitleClause})
-         LIMIT 50`,
-      )
-      .bind(userId, ...likeAnyValues(patterns, 1))
-      .all<UploadSearchRow>(),
-    db
-      .prepare(
-        `SELECT id, source_type, source_id, title, summary
-         FROM analyses
-         WHERE user_id = ? AND (${analysisClause})
-         LIMIT 50`,
-      )
-      .bind(userId, ...likeAnyValues(patterns, 2))
-      .all<AnalysisSearchRow>(),
+
+  const podcastQuery = db
+    .prepare(
+      `SELECT id, title, description
+       FROM podcasts
+       WHERE user_id = ? AND (${podcastClause})
+       LIMIT 50`,
+    )
+    .bind(userId, ...likeAnyValues(patterns, 1))
+    .all<PodcastSearchRow>();
+
+  const episodeQuery = db
+    .prepare(
+      `SELECT id, title, description
+       FROM episodes
+       WHERE user_id = ? AND (${episodeClause})
+       LIMIT 50`,
+    )
+    .bind(userId, ...likeAnyValues(patterns, 1))
+    .all<EpisodeSearchRow>();
+
+  const uploadQuery = db
+    .prepare(
+      `SELECT id, original_filename
+       FROM uploads
+       WHERE user_id = ? AND (${uploadClause})
+       LIMIT 50`,
+    )
+    .bind(userId, ...likeAnyValues(patterns, 1))
+    .all<UploadSearchRow>();
+
+  const analysisQuery = db
+    .prepare(
+      `SELECT id, source_type, source_id, title, summary
+       FROM analyses
+       WHERE user_id = ? AND (${analysisClause})
+       LIMIT 50`,
+    )
+    .bind(userId, ...likeAnyValues(patterns, 2))
+    .all<AnalysisSearchRow>();
+
+  const [podcastsResult, episodesResult, uploadsResult, analysesResult] = await Promise.all([
+    podcastQuery,
+    episodeQuery,
+    uploadQuery,
+    analysisQuery,
   ]);
 
   const results: SearchResult[] = [
+    ...((podcastsResult.results ?? []).map((podcast) => {
+      const score = scoreSearchResult(trimmedQuery, { title: podcast.title, summary: podcast.description });
+      return {
+        id: `podcast:${podcast.id}`,
+        sourceType: "podcast" as const,
+        sourceId: podcast.id,
+        title: podcast.title,
+        summary: podcast.description,
+        detailHref: `/podcasts/${encodeURIComponent(podcast.id)}`,
+        score,
+      };
+    })),
     ...((episodesResult.results ?? []).map((episode) => {
       const score = scoreSearchResult(trimmedQuery, { title: episode.title, summary: episode.description });
       return {

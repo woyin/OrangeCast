@@ -39,6 +39,20 @@ function createSearchDb() {
           executed.push({ sql, values });
           return {
             async all<T>() {
+              if (sql.includes("FROM podcasts")) {
+                return {
+                  results: values[0] === "user_1"
+                    ? [
+                        {
+                          id: "podcast_1",
+                          title: "Cloud Podcast",
+                          description: "A podcast about cloud.",
+                        },
+                      ]
+                    : [],
+                } as { results: T[] };
+              }
+
               if (sql.includes("FROM episodes")) {
                 return {
                   results: values[0] === "user_1"
@@ -114,7 +128,7 @@ function createTermMatchingSearchDb() {
         bind(...values: unknown[]) {
           return {
             async all<T>() {
-              if (sql.includes("FROM episodes") || sql.includes("FROM uploads")) {
+              if (sql.includes("FROM podcasts") || sql.includes("FROM episodes") || sql.includes("FROM uploads")) {
                 return { results: [] as T[] };
               }
 
@@ -141,8 +155,8 @@ describe("searchUserContent", () => {
 
     const results = await searchUserContent(db, "user_1", "cloud");
 
-    expect(results.map((result) => result.sourceId)).toEqual(["episode_1", "upload_1", "upload_1"]);
-    expect(executed).toHaveLength(3);
+    expect(results.map((result) => result.sourceId)).toEqual(["podcast_1", "episode_1", "upload_1", "upload_1"]);
+    expect(executed).toHaveLength(4);
     expect(executed.every((query) => query.values[0] === "user_1")).toBe(true);
   });
 

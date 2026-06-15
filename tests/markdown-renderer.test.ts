@@ -23,6 +23,10 @@ describe("renderKnowledgeCardMarkdown", () => {
         sourceTitle: "Better Thinking",
         sourceType: "episode",
         sourceId: "episode_1",
+        podcastTitle: "Test Podcast",
+        publishedAt: "2026-06-10T00:00:00.000Z",
+        processedAt: "2026-06-14T00:00:00.000Z",
+        durationSeconds: 3600,
         createdAt: "2026-06-14T00:00:00.000Z",
       },
       { includeTranscriptAppendix: false },
@@ -34,6 +38,10 @@ describe("renderKnowledgeCardMarkdown", () => {
     expect(markdown).toContain("[[Naval]]");
     expect(markdown).toContain("## Summary");
     expect(markdown).toContain("## Key Points");
+    expect(markdown).toContain('podcast: "Test Podcast"');
+    expect(markdown).toContain('published_at: "2026-06-10T00:00:00.000Z"');
+    expect(markdown).toContain('processed_at: "2026-06-14T00:00:00.000Z"');
+    expect(markdown).toContain('duration: "60 min"');
     expect(markdown).not.toContain("## Transcript");
   });
 });

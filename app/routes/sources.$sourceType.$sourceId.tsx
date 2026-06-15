@@ -12,6 +12,7 @@ import { answerSourceQuestion } from "../lib/services/qa.server";
 import { renderKnowledgeCardMarkdown } from "../lib/export/markdown.server";
 import { safeDownloadFilename } from "../lib/export/zip.server";
 import { getUploadForUser, type UploadRecord } from "../lib/repositories/uploads.server";
+import { getPodcastForUser } from "../lib/repositories/podcasts.server";
 import { createUsageRecord } from "../lib/repositories/usage-records.server";
 
 export const MAX_QUESTION_LENGTH = 1000;
@@ -307,12 +308,19 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     if (!analysisCard) throw new Response("Analysis artifact is not available", { status: 404 });
 
     const transcriptText = await loadTextArtifactIfPresent(env.R2, transcript?.text_r2_key);
+    const podcast = source.type === "episode"
+      ? await getPodcastForUser(env.DB, userId, source.record.podcast_id)
+      : null;
     const markdown = renderKnowledgeCardMarkdown(
       analysisCard,
       {
         sourceTitle: sourceTitle(source),
         sourceType,
         sourceId,
+        podcastTitle: source.type === "episode" ? (podcast?.title ?? null) : null,
+        publishedAt: source.type === "episode" ? source.record.published_at : null,
+        processedAt: analysis.created_at,
+        durationSeconds: source.record.duration_seconds,
         createdAt: analysis.created_at,
       },
       { includeTranscriptAppendix: true, transcriptText: transcriptText ?? undefined },
