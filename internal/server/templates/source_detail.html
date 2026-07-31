@@ -1,5 +1,30 @@
 {{define "title"}}{{.Title}} · CloudWisePod{{end}}
 {{define "content"}}
+{{if eq .Status "failed"}}
+<div class="status-bar failed">
+  <strong>处理失败</strong>
+  {{if .LastError}}<p class="error-detail">{{.LastError}}</p>{{end}}
+  <form method="post" action="/api/process" class="inline">
+    <input type="hidden" name="source_type" value="{{.SourceType}}">
+    <input type="hidden" name="source_id" value="{{.SourceID}}">
+    <button class="btn" type="submit">重试处理</button>
+  </form>
+</div>
+{{else if eq .Status "transcribing"}}
+<div class="status-bar processing"><span class="spinner"></span>正在转录音频…</div>
+{{else if eq .Status "analyzing"}}
+<div class="status-bar processing"><span class="spinner"></span>正在生成知识卡片…</div>
+{{else if eq .Status "unprocessed"}}
+<div class="status-bar pending">
+  尚未处理。
+  <form method="post" action="/api/process" class="inline">
+    <input type="hidden" name="source_type" value="{{.SourceType}}">
+    <input type="hidden" name="source_id" value="{{.SourceID}}">
+    <button class="btn" type="submit">开始处理</button>
+  </form>
+</div>
+{{end}}
+
 <div class="source-head">
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>

@@ -146,16 +146,17 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 // 降码率后体积砍半，音质对语音转录足够。返回转码后文件路径。
 func (w *Worker) fetchAudio(ctx context.Context, job *models.ProcessingJob) (string, error) {
 	var rawPath string
-	var err error
+	var isTemp bool // episode 下载的临时文件需清理；upload 的持久化原文件必须保留（播放端点与重试依赖它）
 	if job.SourceType == models.SourceEpisode {
 		ep, gerr := w.store.GetEpisodeByID(ctx, job.SourceID)
 		if gerr != nil {
 			return "", gerr
 		}
-		rawPath, err = w.downloadAudio(ctx, ep.AudioURL)
-		if err != nil {
-			return "", fmt.Errorf("下载音频: %w", err)
+		rawPath, gerr = w.downloadAudio(ctx, ep.AudioURL)
+		if gerr != nil {
+			return "", fmt.Errorf("下载音频: %w", gerr)
 		}
+		isTemp = true
 	} else {
 		// upload：从持久化的上传文件读取
 		rawPath = w.uploadPath(job.SourceID)
@@ -163,7 +164,9 @@ func (w *Worker) fetchAudio(ctx context.Context, job *models.ProcessingJob) (str
 			return "", fmt.Errorf("上传音频文件不存在: %w", serr)
 		}
 	}
-	defer os.Remove(rawPath)
+	if isTemp {
+		defer os.Remove(rawPath) // 仅清理 episode 下载的临时文件
+	}
 
 	// 转码为 64kbps 单声道 mp3
 	transcoded, err := os.CreateTemp(w.tempDir, "cwp-tc-*.mp3")

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,3 +199,20 @@ func TestRegister_WeakPasswordRejected(t *testing.T) {
 
 // 确保 auth 包的 lint 不报未使用
 var _ = auth.RequireAuth
+
+func TestSourceDetailRender_FailedStatus(t *testing.T) {
+	tmpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal("NewTemplates:", err)
+	}
+	var buf bytes.Buffer
+	err = tmpl.Render(&buf, "source_detail.html", map[string]any{
+		"Title": "T", "Status": "failed", "SourceType": "upload", "SourceID": "x",
+	})
+	if err != nil {
+		t.Fatal("Render:", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("status-bar")) {
+		t.Errorf("failed 状态应渲染 status-bar，输出: %q", buf.String()[:min(200, buf.Len())])
+	}
+}

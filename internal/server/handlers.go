@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -232,8 +233,11 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	t, _ := srv.store.GetTranscript(r.Context(), userID, sourceType, sourceID)
 	a, _ := srv.store.GetAnalysis(r.Context(), userID, sourceType, sourceID)
 
+	// 取 source 处理状态与最近一次失败原因（供前端展示进度/错误/重试）
+	status, lastError := srv.sourceStatusAndError(r.Context(), userID, sourceType, sourceID)
+
 	var segments []provider.Segment
-	title := "处理中…"
+	title := titleForStatus(status)
 	summary := ""
 	var card map[string]any
 	if t != nil {
@@ -246,11 +250,15 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{
-		"Title":    title,
-		"Summary":  summary,
-		"AudioURL": audioURL,
-		"Segments": segments,
-		"Card":     card,
+		"Title":        title,
+		"Summary":      summary,
+		"AudioURL":     audioURL,
+		"Segments":     segments,
+		"Card":         card,
+		"Status":       string(status),
+		"LastError":    lastError,
+		"SourceType":   string(sourceType),
+		"SourceID":     sourceID,
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }
@@ -347,6 +355,50 @@ func (srv *Server) handleAudio(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(srv.cfg.TempDir, "uploads", uploadID)
 	w.Header().Set("Content-Type", up.ContentType)
 	http.ServeFile(w, r, path)
+}
+
+// sourceStatusAndError 返回 source 的处理状态与最近一次失败原因。
+func (srv *Server) sourceStatusAndError(ctx context.Context, userID string, sourceType models.SourceType, sourceID string) (models.EpisodeProcessingStatus, string) {
+	var status models.EpisodeProcessingStatus
+	if sourceType == models.SourceEpisode {
+		ep, err := srv.store.GetEpisodeByID(ctx, sourceID)
+		if err != nil {
+			return models.StatusUnprocessed, ""
+		}
+		status = ep.ProcessingStatus
+	} else {
+		up, err := srv.store.GetUploadByID(ctx, sourceID)
+		if err != nil {
+			return models.StatusUnprocessed, ""
+		}
+		status = up.ProcessingStatus
+	}
+	// 失败时取最近一次失败 job 的错误
+	var lastError string
+	if status == models.StatusFailedEp {
+		row := srv.store.DB.QueryRowContext(ctx,
+			`SELECT COALESCE(last_error,'') FROM processing_jobs
+			 WHERE user_id=? AND source_type=? AND source_id=? AND status='failed'
+			 ORDER BY updated_at DESC LIMIT 1`,
+			userID, string(sourceType), sourceID)
+		_ = row.Scan(&lastError)
+	}
+	return status, lastError
+}
+
+// titleForStatus 处理中/失败时的占位标题。
+func titleForStatus(status models.EpisodeProcessingStatus) string {
+	switch status {
+	case models.StatusFailedEp:
+		return "处理失败"
+	case models.StatusProcessed:
+		return ""
+	default:
+		if status == models.StatusUnprocessed {
+			return "尚未处理"
+		}
+		return "处理中…"
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
