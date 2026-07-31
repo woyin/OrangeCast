@@ -104,15 +104,33 @@ func TestTokenize_StopWordsFiltered(t *testing.T) {
 	}
 }
 
-func TestTokenize_CJK(t *testing.T) {
-	toks := tokenize("挪威的经济")
-	// 中文字符应各自成 token，且"的"是停用词被过滤
-	for _, tk := range toks {
-		if tk == "的" {
-			t.Error("中文停用词'的'应被过滤")
+func TestTokenize_CJK_Bigrams(t *testing.T) {
+	toks := tokenize("主权财富基金")
+	joined := strings.Join(toks, ",")
+	// bigram 应出现：主权、权财、财富、富基、基金
+	for _, bg := range []string{"主权", "财富", "基金"} {
+		if !strings.Contains(joined, bg) {
+			t.Errorf("中文 bigram %q 应出现在 token 中，实际 %s", bg, joined)
 		}
 	}
-	if len(toks) < 2 {
-		t.Errorf("中文分词应有多个 token，实际 %v", toks)
+	// "的"等停用词应被过滤（单字层）
+	if strings.Contains(joined, "的") {
+		t.Error("中文停用词'的'应被过滤")
+	}
+}
+
+func TestRetrieve_MultiCharChineseTerm(t *testing.T) {
+	// 验证 bigram 让多字中文查询命中更精准（回归"主权财富基金"检索问题）
+	chunks := []Chunk{
+		{Text: "节目的开头介绍和欢迎语，无实质内容", Start: 0, End: 10},
+		{Text: "挪威的主权财富基金规模达到两万亿美元", Start: 10, End: 20},
+		{Text: "日本三文鱼的营销故事", Start: 20, End: 30},
+	}
+	got := Retrieve(chunks, "主权财富基金有多少", 1)
+	if len(got) != 1 {
+		t.Fatalf("应返回 top1，实际 %d", len(got))
+	}
+	if !strings.Contains(got[0].Text, "主权财富基金") {
+		t.Errorf("bigram 应让含'主权财富基金'的 chunk 排第一，实际命中 %q", got[0].Text)
 	}
 }

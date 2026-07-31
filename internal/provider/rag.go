@@ -54,37 +54,55 @@ var stopWords = map[string]bool{
 }
 
 // tokenize 把问题切成关键词（小写、去标点、去停用词）。
-// 中文按字符、英文按单词混合处理——简单按非字母数字分隔，中文每字作为一个 token。
+// 英文按单词；中文连续段生成 bigram（"主权""财富"）+ 单字——
+// bigram 让多字词（主权财富基金）命中更精准，单字保留作为兜底召回。
 func tokenize(s string) []string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	var tokens []string
-	var current strings.Builder
-	flush := func() {
-		if current.Len() > 0 {
-			w := current.String()
-			if !stopWords[w] && len(w) > 1 { // 单字符英文 token 跳过（中文单字保留）
-				tokens = append(tokens, w)
-			} else if len(w) == 1 && isCJK(rune(w[0])) {
+	var latin strings.Builder
+	var cjkRun []rune
+
+	flushLatin := func() {
+		if latin.Len() > 0 {
+			w := latin.String()
+			if !stopWords[w] && len(w) > 1 {
 				tokens = append(tokens, w)
 			}
-			current.Reset()
+			latin.Reset()
 		}
 	}
+	flushCJK := func() {
+		// bigram：相邻两字组合，捕捉"主权""财富"等多字词语义
+		for i := 0; i+1 < len(cjkRun); i++ {
+			bg := string(cjkRun[i : i+2])
+			if !stopWords[bg] {
+				tokens = append(tokens, bg)
+			}
+		}
+		// 单字兜底（过滤停用词如"的""了"）
+		for _, r := range cjkRun {
+			ch := string(r)
+			if !stopWords[ch] {
+				tokens = append(tokens, ch)
+			}
+		}
+		cjkRun = cjkRun[:0]
+	}
+
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			// CJK 字符各自成 token
-			if isCJK(r) {
-				flush()
-				current.WriteRune(r)
-				flush()
-			} else {
-				current.WriteRune(r)
-			}
+		if isCJK(r) {
+			flushLatin()
+			cjkRun = append(cjkRun, r)
+		} else if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			flushCJK()
+			latin.WriteRune(r)
 		} else {
-			flush()
+			flushLatin()
+			flushCJK()
 		}
 	}
-	flush()
+	flushLatin()
+	flushCJK()
 	return tokens
 }
 
