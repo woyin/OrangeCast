@@ -1,0 +1,16 @@
+{{define "title"}}搜索 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>全库搜索</h1>
+<form method="get" action="/search" class="search-form">
+  <input type="text" name="q" value="{{.Query}}" placeholder="搜索转录与分析内容…" required>
+  <button type="submit">搜索</button>
+</form>
+{{range .Hits}}
+<div class="search-hit">
+  <a href="/sources/{{.SourceType}}/{{.SourceID}}"><h3>{{.Title}}</h3></a>
+  <p class="snippet">{{.Snippet}}</p>
+</div>
+{{else}}
+{{if .Query}}<p class="empty">无匹配结果。</p>{{end}}
+{{end}}
+{{end}}

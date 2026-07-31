@@ -1,0 +1,9 @@
+{{define "title"}}添加播客 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>添加播客</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/podcasts/new">
+  <label>RSS Feed URL<input type="url" name="feed_url" placeholder="https://example.com/feed.xml" required></label>
+  <button type="submit">订阅</button>
+</form>
+{{end}}

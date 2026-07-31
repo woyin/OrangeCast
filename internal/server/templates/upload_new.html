@@ -1,0 +1,9 @@
+{{define "title"}}上传音频 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>上传音频</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/uploads/new" enctype="multipart/form-data">
+  <label>音频文件（mp3/m4a/wav）<input type="file" name="audio" accept="audio/*" required></label>
+  <button type="submit">上传并处理</button>
+</form>
+{{end}}

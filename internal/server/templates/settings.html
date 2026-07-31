@@ -1,0 +1,15 @@
+{{define "title"}}设置 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>设置</h1>
+<form method="post" action="/settings">
+  <label>当前 Provider
+    <select name="active_provider">
+      <option value="groq" {{if eq .ActiveProvider "groq"}}selected{{end}}>Groq（免费主力）</option>
+      <option value="openai" {{if eq .ActiveProvider "openai"}}selected{{end}}>OpenAI（兜底）</option>
+    </select>
+  </label>
+  <p class="hint">切换后立即对新任务生效（运行时实时切换）。</p>
+  <button type="submit">保存</button>
+</form>
+{{if .Saved}}<p class="success">已保存。</p>{{end}}
+{{end}}

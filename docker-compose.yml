@@ -1,0 +1,25 @@
+services:
+  cloudwisepod:
+    build: .
+    container_name: cloudwisepod
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # 必填：会话密钥（生成：openssl rand -hex 32）
+      SESSION_SECRET: ${SESSION_SECRET}
+      # 必填：Groq API key（主力 provider）
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      # 可选：OpenAI 兜底（不填则无法切换到 openai provider）
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PORT: "8080"
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+    volumes:
+      # SQLite 数据库持久化
+      - cwp-data:/app/data
+      # 上传音频临时文件（删除 source 时配套清理）
+      - cwp-tmp:/app/tmp
+
+volumes:
+  cwp-data:
+  cwp-tmp:

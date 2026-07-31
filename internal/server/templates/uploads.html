@@ -1,0 +1,20 @@
+{{define "title"}}上传 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>音频上传</h1><a href="/uploads/new" class="btn">上传音频</a></div>
+{{range .Uploads}}
+<div class="list-item episode-row">
+  <div class="ep-info">
+    <h3>{{.OriginalFilename}}</h3>
+    <p class="meta">{{.ContentType}} · 状态：{{.ProcessingStatus}}</p>
+  </div>
+  <div class="ep-actions">
+    {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/upload/{{.ID}}" class="btn">查看</a>{{end}}
+    {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
+    <form method="post" action="/api/process"><input type="hidden" name="source_type" value="upload"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<p class="empty">还没有上传音频。</p>
+{{end}}
+{{end}}

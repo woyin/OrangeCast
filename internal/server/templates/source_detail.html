@@ -1,0 +1,81 @@
+{{define "title"}}{{.Title}} · CloudWisePod{{end}}
+{{define "content"}}
+<div class="source-head">
+  <h1>{{.Title}}</h1>
+  <p class="summary">{{.Summary}}</p>
+</div>
+
+{{if .AudioURL}}
+<!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
+<div class="player-bar">
+  <audio id="audio-player" src="{{.AudioURL}}" preload="metadata"></audio>
+  <div class="player-controls">
+    <button id="play-btn" type="button">▶</button>
+    <span id="current-time" class="time">0:00</span>
+    <input id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
+    <span id="duration" class="time">0:00</span>
+  </div>
+</div>
+{{end}}
+
+<div class="source-grid">
+  <!-- 左：转录稿（B 层联动：点句跳转 + 播放高亮当前句） -->
+  <section class="transcript-panel">
+    <h2>转录稿</h2>
+    <div id="transcript" class="transcript">
+    {{range $i, $seg := .Segments}}
+      <span class="seg" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span>
+    {{else}}
+    <p class="empty">暂无转录稿，请先点击「处理」。</p>
+    {{end}}
+    </div>
+  </section>
+
+  <!-- 右：知识卡片（C 层联动：章节/金句双向跳转） -->
+  <aside class="card-panel">
+    {{with .Card}}
+    <section>
+      <h2>章节</h2>
+      <ul class="chapter-list">
+      {{range .chapters}}
+        <li class="chapter" data-start="{{.startTime}}" data-end="{{.endTime}}">
+          <a href="#" onclick="return false;"><span class="ts">{{formatTime .startTime}}</span> {{.title}}</a>
+          <p class="gist">{{.gist}}</p>
+        </li>
+      {{end}}
+      </ul>
+    </section>
+    <section>
+      <h2>关键要点</h2>
+      <ul class="keypoints">
+      {{range .keyPoints}}
+        <li><strong>{{.content}}</strong><p>{{.description}}</p></li>
+      {{end}}
+      </ul>
+    </section>
+    <section>
+      <h2>金句</h2>
+      <ul class="quotes">
+      {{range .quotes}}
+        <li class="quote" data-start="{{.startTime}}" data-end="{{.endTime}}">"{{.text}}"<span class="ts">{{formatTime .startTime}}</span></li>
+      {{end}}
+      </ul>
+    </section>
+    <section>
+      <h2>标签</h2>
+      <div class="tags">{{range .tags}}<span class="tag">{{.}}</span>{{end}}</div>
+    </section>
+    {{end}}
+
+    <!-- Q&A（第 6b 题：当前为直接问答，非向量 RAG） -->
+    <section>
+      <h2>提问</h2>
+      <form id="qa-form">
+        <input type="text" name="question" placeholder="对这期内容提问…" required>
+        <button type="submit">问</button>
+      </form>
+      <div id="qa-answer"></div>
+    </section>
+  </aside>
+</div>
+{{end}}

@@ -1,0 +1,25 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{block "title" .}}CloudWisePod{{end}}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<nav class="navbar">
+  <a href="/dashboard" class="brand">CloudWisePod</a>
+  <div class="nav-links">
+    <a href="/podcasts">播客</a>
+    <a href="/uploads">上传</a>
+    <a href="/search">搜索</a>
+    <a href="/settings">设置</a>
+    <a href="/logout">登出</a>
+  </div>
+</nav>
+<main class="container">
+{{block "content" .}}{{end}}
+</main>
+<script src="/static/player.js"></script>
+</body>
+</html>{{end}}

@@ -1,0 +1,21 @@
+{{define "title"}}{{.Podcast.Title}} · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>{{.Podcast.Title}}</h1></div>
+<p>{{.Podcast.Description}}</p>
+{{range .Episodes}}
+<div class="list-item episode-row">
+  <div class="ep-info">
+    <h3>{{.Title}}</h3>
+    <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：{{.ProcessingStatus}}</p>
+  </div>
+  <div class="ep-actions">
+    {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/episode/{{.ID}}" class="btn">查看</a>{{end}}
+    {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
+    <form method="post" action="/api/process"><input type="hidden" name="source_type" value="episode"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<p class="empty">暂无单集。</p>
+{{end}}
+{{end}}

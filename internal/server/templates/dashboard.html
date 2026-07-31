@@ -1,0 +1,11 @@
+{{define "title"}}仪表盘 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>仪表盘</h1>
+<p>欢迎，{{.Email}}。</p>
+<div class="cards">
+  <a class="card" href="/podcasts"><h3>播客订阅</h3><p>管理与处理订阅的播客</p></a>
+  <a class="card" href="/uploads"><h3>音频上传</h3><p>上传本地音频进行转录分析</p></a>
+  <a class="card" href="/search"><h3>全库搜索</h3><p>检索所有转录与分析内容</p></a>
+  <a class="card" href="/settings"><h3>设置</h3><p>切换 AI provider 与模型</p></a>
+</div>
+{{end}}

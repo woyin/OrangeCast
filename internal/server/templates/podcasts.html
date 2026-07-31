@@ -1,0 +1,14 @@
+{{define "title"}}播客 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>播客订阅</h1><a href="/podcasts/new" class="btn">添加播客</a></div>
+{{range .Podcasts}}
+<div class="list-item">
+  <a href="/podcasts/{{.ID}}">
+    {{if .ImageURL}}<img src="{{.ImageURL}}" alt="" class="thumb">{{end}}
+    <div><h3>{{.Title}}</h3><p>{{.Description}}</p></div>
+  </a>
+</div>
+{{else}}
+<p class="empty">还没有订阅播客。<a href="/podcasts/new">添加第一个</a></p>
+{{end}}
+{{end}}
