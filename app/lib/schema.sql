@@ -138,3 +138,12 @@ CREATE INDEX IF NOT EXISTS idx_uploads_user_status ON uploads(user_id, processin
 CREATE INDEX IF NOT EXISTS idx_jobs_user_status ON processing_jobs(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_transcripts_source ON transcripts(user_id, source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_analyses_source ON analyses(user_id, source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS settings (
+  user_id TEXT PRIMARY KEY,
+  transcription_model TEXT,
+  analysis_model TEXT,
+  chat_model TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

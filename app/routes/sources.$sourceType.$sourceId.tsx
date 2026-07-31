@@ -1,3 +1,4 @@
+import { getUserSettings } from "../lib/settings.server";
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { Form, Link, useActionData, useLoaderData } from "@remix-run/react";
 import { requireUserId } from "../lib/auth.server";
@@ -376,8 +377,9 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     );
   }
 
+  const userSettings = await getUserSettings(env.DB, userId);
   const answer = await answerSourceQuestion({
-    provider: getProviders(env).chat,
+    provider: getProviders(env, { transcriptionModel: userSettings.transcription_model, analysisModel: userSettings.analysis_model, chatModel: userSettings.chat_model }).chat,
     question,
     title: analysisCard.title ?? analysis?.title ?? sourceTitle(source),
     transcriptText,

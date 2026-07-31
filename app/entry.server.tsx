@@ -3,7 +3,7 @@ import {
   type EntryContext,
 } from "@remix-run/cloudflare";
 import { RemixServer } from "@remix-run/react";
-import { renderToReadableStream } from "react-dom/server";
+import { renderToReadableStream } from "react-dom/server.browser";
 import { isbot } from "isbot";
 
 export default async function handleRequest(

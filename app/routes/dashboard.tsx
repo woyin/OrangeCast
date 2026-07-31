@@ -22,6 +22,7 @@ export default function Dashboard() {
           <li><Link to="/uploads">Uploads</Link></li>
           <li><Link to="/search">Search</Link></li>
           <li><Link to="/exports">Exports</Link></li>
+          <li><Link to="/settings">⚙️ Settings</Link></li>
           <li><Link to="/logout">Log out</Link></li>
         </ul>
       </nav>

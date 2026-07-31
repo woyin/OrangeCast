@@ -10,12 +10,60 @@ import type {
 } from "./types.server";
 import type { AppEnv } from "../env.server";
 
+// ── Defaults (used when the corresponding env var is not set) ──────────
+const DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
+const DEFAULT_ANALYSIS_MODEL = "gpt-4.1-mini";
+const DEFAULT_CHAT_MODEL = "gpt-4.1-mini";
+
 const provider = "openai";
-const transcriptionModel = "gpt-4o-mini-transcribe";
-const analysisModel = "gpt-4.1-mini";
-const chatModel = "gpt-4.1-mini";
 const responsesEndpoint = "https://api.openai.com/v1/responses";
 const transcriptionsEndpoint = "https://api.openai.com/v1/audio/transcriptions";
+
+/**
+ * Resolve the three model names, respecting this priority chain:
+ *
+ * 1. Per-user D1 settings (if provided via `overrides`)
+ * 2. Environment variable (`wrangler.toml [vars]` or `wrangler secret`)
+ * 3. Hardcoded defaults above
+ */
+function resolveModels(env: AppEnv, overrides?: {
+  transcriptionModel?: string | null;
+  analysisModel?: string | null;
+  chatModel?: string | null;
+}) {
+  return {
+    transcriptionModel:
+      overrides?.transcriptionModel?.trim() ||
+      env.OPENAI_TRANSCRIPTION_MODEL?.trim() ||
+      DEFAULT_TRANSCRIPTION_MODEL,
+    analysisModel:
+      overrides?.analysisModel?.trim() ||
+      env.OPENAI_ANALYSIS_MODEL?.trim() ||
+      DEFAULT_ANALYSIS_MODEL,
+    chatModel:
+      overrides?.chatModel?.trim() ||
+      env.OPENAI_CHAT_MODEL?.trim() ||
+      DEFAULT_CHAT_MODEL,
+  };
+}
+
+/**
+ * Factory: create all three OpenAI providers with per-user model overrides.
+ *
+ * Call this from queue handlers or HTTP routes where you have the userId.
+ */
+export function createOpenAIProviders(env: AppEnv, overrides?: {
+  transcriptionModel?: string | null;
+  analysisModel?: string | null;
+  chatModel?: string | null;
+}) {
+  const models = resolveModels(env, overrides);
+  return {
+    transcription: new OpenAITranscriptionProvider(env, models.transcriptionModel),
+    analysis: new OpenAIAnalysisProvider(env, models.analysisModel),
+    chat: new OpenAIChatProvider(env, models.chatModel),
+  };
+}
 
 const knowledgeCardSchema = z
   .object({
@@ -175,9 +223,14 @@ function jsonSchemaForKnowledgeCard() {
 
 export class OpenAITranscriptionProvider implements TranscriptionProvider {
   private readonly apiKey: string;
+  private readonly transcriptionModel: string;
 
-  constructor(env: AppEnv) {
+  constructor(env: AppEnv, transcriptionModel?: string) {
     this.apiKey = requireOpenAIKey(env);
+    this.transcriptionModel =
+      transcriptionModel?.trim() ||
+      env.OPENAI_TRANSCRIPTION_MODEL?.trim() ||
+      DEFAULT_TRANSCRIPTION_MODEL;
   }
 
   async transcribe(input: TranscriptionInput): Promise<TranscriptionResult> {
@@ -190,7 +243,7 @@ export class OpenAITranscriptionProvider implements TranscriptionProvider {
     }
 
     const form = new FormData();
-    form.set("model", transcriptionModel);
+    form.set("model", this.transcriptionModel);
     form.set("file", audioBlob, input.fileName ?? `${input.sourceTitle || "audio"}.mp3`);
     form.set("response_format", "verbose_json");
 
@@ -222,16 +275,21 @@ export class OpenAITranscriptionProvider implements TranscriptionProvider {
       language: typeof json.language === "string" ? json.language : null,
       durationSeconds: typeof json.duration === "number" ? json.duration : null,
       provider,
-      model: transcriptionModel,
+      model: this.transcriptionModel,
     };
   }
 }
 
 export class OpenAIAnalysisProvider implements AnalysisProvider {
   private readonly apiKey: string;
+  private readonly analysisModel: string;
 
-  constructor(env: AppEnv) {
+  constructor(env: AppEnv, analysisModel?: string) {
     this.apiKey = requireOpenAIKey(env);
+    this.analysisModel =
+      analysisModel?.trim() ||
+      env.OPENAI_ANALYSIS_MODEL?.trim() ||
+      DEFAULT_ANALYSIS_MODEL;
   }
 
   async analyze(input: Parameters<AnalysisProvider["analyze"]>[0]): Promise<AnalysisResult> {
@@ -242,7 +300,7 @@ export class OpenAIAnalysisProvider implements AnalysisProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: analysisModel,
+        model: this.analysisModel,
         input: [
           {
             role: "system",
@@ -265,15 +323,20 @@ export class OpenAIAnalysisProvider implements AnalysisProvider {
     });
     const json = await assertOk(response);
     const text = extractResponseText(json);
-    return { card: parseKnowledgeCard(text), provider, model: analysisModel };
+    return { card: parseKnowledgeCard(text), provider, model: this.analysisModel };
   }
 }
 
 export class OpenAIChatProvider implements ChatProvider {
   private readonly apiKey: string;
+  private readonly chatModel: string;
 
-  constructor(env: AppEnv) {
+  constructor(env: AppEnv, chatModel?: string) {
     this.apiKey = requireOpenAIKey(env);
+    this.chatModel =
+      chatModel?.trim() ||
+      env.OPENAI_CHAT_MODEL?.trim() ||
+      DEFAULT_CHAT_MODEL;
   }
 
   async answer(input: Parameters<ChatProvider["answer"]>[0]): Promise<Awaited<ReturnType<ChatProvider["answer"]>>> {
@@ -284,7 +347,7 @@ export class OpenAIChatProvider implements ChatProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: chatModel,
+        model: this.chatModel,
         input: [
           {
             role: "system",
@@ -333,6 +396,6 @@ export class OpenAIChatProvider implements ChatProvider {
       .strict()
       .parse(JSON.parse(extractResponseText(json)));
 
-    return { ...parsed, provider, model: chatModel };
+    return { ...parsed, provider, model: this.chatModel };
   }
 }

@@ -234,6 +234,10 @@ function qaActionEnv(overrides: Partial<AppEnv> = {}) {
                   created_at: "2026-06-14T00:00:00.000Z",
                 } as T;
               }
+              if (sql.includes("FROM settings")) {
+                return null as T;
+              }
+
               throw new Error(`Unexpected first SQL: ${sql}`);
             },
             async run() {

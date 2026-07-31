@@ -1,3 +1,4 @@
+import { getUserSettings } from "../settings.server";
 import type { Db } from "../db.server";
 import type { AppEnv } from "../env.server";
 import { renderKnowledgeCardMarkdown } from "../export/markdown.server";
@@ -197,7 +198,8 @@ async function runTranscribeJob(env: AppEnv, db: Db, message: ProcessingQueueMes
   await updateSourceStatus(db, message.userId, message.sourceType, message.sourceId, "transcribing");
 
   const source = await getSourceForTranscription(env, db, message.userId, message.sourceType, message.sourceId);
-  const provider = getProviders(env).transcription;
+  const userSettings = await getUserSettings(db, message.userId);
+  const provider = getProviders(env, { transcriptionModel: userSettings.transcription_model, analysisModel: userSettings.analysis_model, chatModel: userSettings.chat_model }).transcription;
   const transcript = await provider.transcribe(source.transcriptionInput);
 
   const textKey = transcriptTextKey(message.userId, message.sourceType, message.sourceId);
@@ -262,7 +264,8 @@ async function runAnalyzeJob(env: AppEnv, db: Db, message: ProcessingQueueMessag
   ]);
   const segments = JSON.parse(segmentsJson) as TranscriptSegment[];
 
-  const provider = getProviders(env).analysis;
+  const userSettings = await getUserSettings(db, message.userId);
+  const provider = getProviders(env, { transcriptionModel: userSettings.transcription_model, analysisModel: userSettings.analysis_model, chatModel: userSettings.chat_model }).analysis;
   const analysis = await provider.analyze({ title, transcript: transcriptText, segments });
   const jsonKey = analysisJsonKey(message.userId, message.sourceType, message.sourceId);
   const markdownKey = analysisMarkdownKey(message.userId, message.sourceType, message.sourceId);
