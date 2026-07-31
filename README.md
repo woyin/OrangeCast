@@ -39,6 +39,23 @@ go run ./cmd/cloudwisepod
 
 ### Docker 部署（VPS 推荐）
 
+已发布的多架构镜像（`linux/amd64`、`linux/arm64`）可从公开 GHCR 匿名拉取：
+
+```bash
+docker pull ghcr.io/woyin/orangecast:latest
+docker run -d --name orangecast --restart unless-stopped \
+  -p 8080:8080 \
+  -e SESSION_SECRET="$(openssl rand -hex 32)" \
+  -e GROQ_API_KEY="你的 Groq API Key" \
+  -v orangecast-data:/app/data \
+  -v orangecast-tmp:/app/tmp \
+  ghcr.io/woyin/orangecast:latest
+```
+
+访问 `http://localhost:8080/register` 注册首个用户。发布版本 `v0.1.0` 对应镜像标签 `0.1.0`、`0.1` 和 `latest`；后续版本也遵循相同规则。
+
+如需从源码构建并用 Compose 部署：
+
 ```bash
 # .env 中填好 SESSION_SECRET 和 GROQ_API_KEY
 docker compose up -d
