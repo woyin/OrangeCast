@@ -19,3 +19,17 @@ data/
 .agents/
 .claude/
 skills-lock.json
+
+# Go 标准模板（来自远端初始提交）
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+go.work
+go.work.sum
