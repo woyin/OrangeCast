@@ -1,20 +1,27 @@
 # CloudWisePod
 
-自用版 Podwise 复刻：把播客音频变成结构化、可检索、带引用的知识库。RSS 订阅 → Groq 转录 → AI 知识卡片 → 播放器时间戳联动 + Q&A 带引用。
+单 Owner、自托管的播客证据库：把主动选择的音频转化为可检索、可回听、带真实引用的证据，再通过 Markdown 沉淀到个人知识库。
 
-部署在 VPS（Go 单二进制 + Docker），AI 主力用 Groq（零成本），OpenAI 作可切换兜底。
+项目以 Go 单二进制或容器部署在 VPS。Groq 是默认零成本 Provider；目标产品只允许对单次任务显式授权付费 Provider。
 
-## 功能
+> **当前状态：** Roadmap Phase 0–7 已完成：单 Owner 认领、EvidenceAudio、可恢复任务队列、不可变版本与真实 Citation、分段搜索、Markdown 下载、备份/恢复、公网安全基线。实施记录见 [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md)，接手说明见 [`docs/handoff.md`](docs/handoff.md)。
 
-- **RSS 订阅**：订阅播客 feed，30 分钟 cron 自动拉取新单集（含 SSRF 防护）
-- **音频上传**：手动上传 mp3/m4a/wav
-- **AI 转录**：Groq `whisper-large-v3`，带逐句时间戳
-- **知识卡片**：Groq `llama-3.3-70b` 生成标题、摘要、章节（带时间戳）、要点、金句、标签
-- **播放器联动**：内嵌播放器 + 转录稿/章节/金句三层时间戳联动（点句跳转、播放高亮、双向跳转）
-- **Q&A 带引用**：RAG 检索相关片段回答，附可点击的时间戳引用（点击跳转播放）
-- **全库搜索**：SQLite FTS5 全文检索（覆盖转录与分析）
-- **Markdown 导出**：Obsidian frontmatter 格式
-- **运行时切换 provider**：后台一键 Groq ↔ OpenAI，对新任务即时生效
+## 已实现（Roadmap Phase 0–7）
+
+- **单 Owner 认领**：实例首次认领唯一 Owner，之后注册永久关闭（ADR-0003）
+- **RSS 订阅**：30 分钟 cron 拉取新单集；RSS 与音频下载共用 SSRF 防护客户端（逐跳重定向校验 + 私网拦截）
+- **音频上传**：mp3/m4a/wav；每个 Source 持久保存标准化 EvidenceAudio（SHA256 校验，ADR-0005）
+- **AI 转录**：Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳
+- **知识卡片**：不可变 ArtifactVersion（ADR-0011）；摘要/要点/章节/金句全部携带真实 Citation；金句逐字校验（ADR-0008）
+- **可恢复任务**：SQLite 驱动 worker，租约 + 心跳，进程重启后自动恢复（ADR-0006）
+- **播放器联动**：转录稿/章节/金句三层时间戳联动；`?t=` / `#seg-` 深链跳转
+- **单期 Q&A**：只使用模型实际引用的 Segment；无可靠引用明确拒答（Phase 7）
+- **全库搜索**：分段级 FTS5，命中返回实际 Segment 与时间范围
+- **Markdown 下载**：确定性 Obsidian Markdown（frontmatter + Citation 链接），单 Source 一键下载
+- **备份/恢复**：`cloudwisepod backup|restore` 一致性备份包（manifest + SHA256，不含密钥），可在全新实例恢复
+- **公网安全**：CSRF、登录限流、可信代理 + `PUBLIC_URL` Secure Cookie、Purge 两阶段可恢复删除
+
+详细验收标准见 [`docs/product-goal.md`](docs/product-goal.md#下一版本黄金旅程)，生产部署见 [`docs/production-deployment.md`](docs/production-deployment.md)。
 
 ## 快速开始
 
@@ -34,8 +41,10 @@ cp .env.example .env
 set -a; source .env; set +a
 go run ./cmd/cloudwisepod
 
-# 3. 访问 http://localhost:8080/register 注册首个用户
+# 3. 访问 http://localhost:8080/register 认领唯一 Owner
 ```
+
+认领后注册永久关闭。公网部署配置见 [`docs/production-deployment.md`](docs/production-deployment.md)。
 
 ### Docker 部署（VPS 推荐）
 
@@ -47,12 +56,12 @@ docker run -d --name orangecast --restart unless-stopped \
   -p 8080:8080 \
   -e SESSION_SECRET="$(openssl rand -hex 32)" \
   -e GROQ_API_KEY="你的 Groq API Key" \
+  -e PUBLIC_URL="https://cwp.example.com" \
   -v orangecast-data:/app/data \
-  -v orangecast-tmp:/app/tmp \
   ghcr.io/woyin/orangecast:latest
 ```
 
-访问 `http://localhost:8080/register` 注册首个用户。发布版本 `v0.1.0` 对应镜像标签 `0.1.0`、`0.1` 和 `latest`；后续版本也遵循相同规则。
+访问 `http://localhost:8080/register` 认领实例。`/app/data` 单一持久卷承载数据库、EvidenceAudio、临时文件与备份（ADR-0010）。
 
 如需从源码构建并用 Compose 部署：
 
@@ -61,7 +70,7 @@ docker run -d --name orangecast --restart unless-stopped \
 docker compose up -d
 ```
 
-容器已含 ffmpeg。SQLite 数据库与上传音频通过 volume 持久化（`cwp-data`、`cwp-tmp`）。
+容器已含 ffmpeg。SQLite、EvidenceAudio 与临时文件通过单一 volume（`cwp-data` → `/app/data`）持久化。
 
 ## 配置（环境变量）
 
@@ -69,11 +78,11 @@ docker compose up -d
 |---|---|---|---|
 | `SESSION_SECRET` | ✅ | 会话密钥，`openssl rand -hex 32` | — |
 | `GROQ_API_KEY` | ✅ | Groq API key（主力 provider） | — |
-| `OPENAI_API_KEY` | 否 | OpenAI key（兜底，留空则无法切换到 openai） | — |
+| `OPENAI_API_KEY` | 否 | OpenAI key；仅按单次任务显式授权使用（ADR-0009） | — |
 | `PORT` | 否 | 监听端口 | 8080 |
-| `DB_PATH` | 否 | SQLite 路径 | ./data/cloudwisepod.db |
-| `TEMP_DIR` | 否 | 音频临时落盘目录 | 系统 temp |
-| `BASE_URL` | 否 | 站点根 URL | http://localhost:8080 |
+| `DATA_DIR` | 否 | 统一数据目录（DB/evidence/tmp/backups） | ./data |
+| `PUBLIC_URL` | 否 | 公网 URL；决定 Secure Cookie 与 Markdown 链接 | http://localhost:8080 |
+| `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 
 ## Groq 真实约束
 
@@ -100,7 +109,7 @@ docs/adr/            架构决策记录
 CONTEXT.md           领域词汇表
 ```
 
-领域概念与决策见 `CONTEXT.md` 和 `docs/adr/`。
+领域概念与决策见 [`CONTEXT.md`](CONTEXT.md) 和 [`docs/adr/`](docs/adr/)。当前 Go 架构与目标架构之间的差距见 [`docs/handoff.md`](docs/handoff.md)。
 
 ## 测试
 
@@ -108,8 +117,17 @@ CONTEXT.md           领域词汇表
 go test ./...
 ```
 
-51 个单元测试，覆盖：级联删除、状态机幂等、argon2id、JSON 容错解析、RAG 分词检索、SSRF 防护、HTTP 路由集成。
+测试覆盖：迁移（v0.1 fixture 升级、失败回滚重试）、一致性备份/恢复 E2E、Owner 认领与 CSRF/限流、EvidenceAudio 持久化与幂等、worker 崩溃恢复与防重复领取、Citation/金句逐字校验、EvalSet 自动校验、Markdown golden 测试、分段搜索、Q&A 拒答。
 
-## 与 Podwise 的差异
+## 备份与恢复
 
-砍掉了多语言翻译、Notion/Readwise 集成、思维导图、CLI/MCP（自用非必需）。核心体验（订阅 → 转录 → 知识卡片 → 联动听 → Q&A 引用）完整复刻。
+```bash
+./cloudwisepod backup /backup/cwp-2026-08-01.tar.gz
+DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz
+```
+
+备份包含一致性数据库快照 + EvidenceAudio + manifest（DB/证据 SHA256），不含 API key 或 Session secret。
+
+## 产品定位
+
+CloudWisePod 借鉴 Podwise 的播客处理体验，但不再以“完整复刻”为目标。它聚焦单 Owner 的可信证据链和个人知识沉淀，明确不建设多用户、SaaS、跨 Source RAG、语义搜索、Obsidian 插件或双向同步。

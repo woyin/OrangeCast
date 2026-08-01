@@ -1,5 +1,7 @@
 # CloudWisePod MVP Implementation Plan
 
+> **历史文档，不再执行。** 本文对应已废弃的 Cloudflare/TypeScript 实现。不要继续勾选或执行其中任务；现行路线见 [`../../implementation-roadmap.md`](../../implementation-roadmap.md)，接手说明见 [`../../handoff.md`](../../handoff.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first usable CloudWisePod MVP: authenticated multi-user Cloudflare app for RSS podcasts and controlled audio uploads, manual AI processing, transcript/analysis storage, single-episode Q&A, search, and Obsidian-friendly Markdown/zip export.

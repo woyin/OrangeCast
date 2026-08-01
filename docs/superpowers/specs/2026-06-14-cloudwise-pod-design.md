@@ -1,5 +1,7 @@
 # CloudWisePod 第一版产品设计
 
+> **历史文档，不再执行。** 本文描述已废弃的 Cloudflare/TypeScript 多用户方案，仅用于追溯。现行目标见 [`../../product-goal.md`](../../product-goal.md)，实施路线见 [`../../implementation-roadmap.md`](../../implementation-roadmap.md)。
+
 日期：2026-06-14
 
 ## 1. 背景与目标

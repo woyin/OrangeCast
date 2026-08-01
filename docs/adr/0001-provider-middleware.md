@@ -1,7 +1,7 @@
 # ADR-0001：Provider 中间层与 Groq 主力选型
 
 日期：2026-07-31
-状态：已采纳
+状态：已被 [ADR-0009](0009-explicit-per-attempt-paid-provider.md) 取代
 
 ## 背景
 CloudWisePod 部署在 VPS（Go 单二进制），目标是零 AI 成本复刻 Podwise。需要选择 AI 供应商并设计可切换的抽象层。

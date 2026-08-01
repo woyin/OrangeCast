@@ -1,0 +1,9 @@
+# Caddy 反向代理示例（公网 HTTPS，ADR-0013）
+# CloudWisePod 不管理证书；TLS 由 Caddy 终止。
+# 部署在同一宿主网络时，应用只需信任 Caddy 的转发头。
+
+cwp.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		# Caddy 自动设置 X-Forwarded-For / X-Forwarded-Proto
+	}
+}

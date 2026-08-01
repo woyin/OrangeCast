@@ -1,5 +1,7 @@
 # CloudWisePod deployment
 
+> **历史文档，不再用于部署。** 本文描述已废弃的 Cloudflare/TypeScript 架构。当前版本通过 Go 单二进制或 Docker 部署，见 [`../README.md`](../README.md)；目标部署边界见 [`product-goal.md`](product-goal.md)。
+
 CloudWisePod deploys as two Cloudflare Workers:
 
 1. **Pages app** (`wrangler.toml`): Serves the Remix web application. Uses `functions/[[path]].ts` as the Pages Function adapter. Bindings: `DB`, `R2`, `PROCESSING_QUEUE` (producer).
