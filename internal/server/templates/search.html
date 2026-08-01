@@ -7,8 +7,14 @@
 </form>
 {{range .Hits}}
 <div class="search-hit">
+  {{if .SegmentID}}
+  <a href="/sources/{{.SourceType}}/{{.SourceID}}?t={{.Start}}#seg-{{.SegmentID}}"><h3>{{.Title}}</h3></a>
+  <p class="snippet">{{.Snippet}}</p>
+  <p class="meta">命中转录段 · {{formatTime .Start}} – {{formatTime .End}}</p>
+  {{else}}
   <a href="/sources/{{.SourceType}}/{{.SourceID}}"><h3>{{.Title}}</h3></a>
   <p class="snippet">{{.Snippet}}</p>
+  {{end}}
 </div>
 {{else}}
 {{if .Query}}<p class="empty">无匹配结果。</p>{{end}}

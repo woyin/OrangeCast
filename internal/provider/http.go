@@ -19,10 +19,10 @@ import (
 
 // 默认重试策略（第 7 题最小实现：指数退避，最多 3 次）。
 const (
-	maxRetries        = 3
-	baseBackoff       = 2 * time.Second
-	maxBackoff        = 16 * time.Second
-	requestTimeout    = 5 * time.Minute // 转录/分析可能较慢
+	maxRetries     = 3
+	baseBackoff    = 2 * time.Second
+	maxBackoff     = 16 * time.Second
+	requestTimeout = 5 * time.Minute // 转录/分析可能较慢
 )
 
 // httpClient 共享 HTTP 客户端。

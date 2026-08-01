@@ -8,18 +8,19 @@ services:
     environment:
       # 必填：会话密钥（生成：openssl rand -hex 32）
       SESSION_SECRET: ${SESSION_SECRET}
-      # 必填：Groq API key（主力 provider）
+      # 必填：Groq API key（默认零成本 provider）
       GROQ_API_KEY: ${GROQ_API_KEY}
-      # 可选：OpenAI 兜底（不填则无法切换到 openai provider）
+      # 可选：OpenAI key（仅按单次任务显式授权时使用，ADR-0009）
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # 公网 URL（反向代理场景必须设置，用于 Secure Cookie 与 Markdown 链接）
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      # 受信任反向代理（如 Caddy 在宿主网络：172.17.0.1/32；按实际调整）
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       PORT: "8080"
-      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      DATA_DIR: /app/data
     volumes:
-      # SQLite 数据库持久化
+      # 单一持久卷：数据库 + EvidenceAudio + 临时文件 + 备份（ADR-0010）
       - cwp-data:/app/data
-      # 上传音频临时文件（删除 source 时配套清理）
-      - cwp-tmp:/app/tmp
 
 volumes:
   cwp-data:
-  cwp-tmp:

@@ -21,6 +21,23 @@
     return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
   }
 
+  // 深链跳转（Roadmap Phase 5）：?t=秒 或 #seg-XXXX 命中后跳转播放
+  (function deepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const t = parseFloat(params.get('t'));
+    if (isFinite(t) && t >= 0 && t <= (audio.duration || Infinity)) {
+      audio.currentTime = t;
+      audio.play();
+      return;
+    }
+    const hash = window.location.hash;
+    if (hash.startsWith('#seg-')) {
+      const want = hash.slice(1);
+      const el = segs.find(sg => sg.dataset.id === want);
+      if (el) jumpTo(el);
+    }
+  })();
+
   // 播放/暂停
   if (playBtn) {
     playBtn.addEventListener('click', () => {

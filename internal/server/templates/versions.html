@@ -1,0 +1,45 @@
+{{define "title"}}版本历史 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>版本历史</h1><a href="/sources/{{.SourceType}}/{{.SourceID}}" class="btn">返回详情</a></div>
+<p class="meta">{{.Title}}</p>
+
+<h2>转录版本</h2>
+{{range .Transcripts}}
+<div class="list-item">
+  <div>
+    <h3>v{{.Version}} <span class="tag">{{if eq .Version $.CurrentTranscript}}当前{{end}}</span></h3>
+    <p class="meta">{{.Provider}} / {{.Model}} · prompt v{{.PromptVersion}} · {{.CreatedAt}}</p>
+  </div>
+  {{if ne .Version $.CurrentTranscript}}
+  <form method="post" action="/sources/{{$.SourceType}}/{{$.SourceID}}/versions/revert">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="kind" value="transcript">
+    <input type="hidden" name="version" value="{{.Version}}">
+    <button class="btn" type="submit">回退到此版本</button>
+  </form>
+  {{end}}
+</div>
+{{else}}
+<p class="empty">暂无转录版本。</p>
+{{end}}
+
+<h2>知识卡片版本</h2>
+{{range .Cards}}
+<div class="list-item">
+  <div>
+    <h3>v{{.Version}} <span class="tag">{{if eq .Version $.CurrentCard}}当前{{end}}</span></h3>
+    <p class="meta">{{.Provider}} / {{.Model}} · prompt v{{.PromptVersion}} · {{.CreatedAt}}</p>
+  </div>
+  {{if ne .Version $.CurrentCard}}
+  <form method="post" action="/sources/{{$.SourceType}}/{{$.SourceID}}/versions/revert">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="kind" value="knowledge_card">
+    <input type="hidden" name="version" value="{{.Version}}">
+    <button class="btn" type="submit">回退到此版本</button>
+  </form>
+  {{end}}
+</div>
+{{else}}
+<p class="empty">暂无知识卡片版本。</p>
+{{end}}
+{{end}}

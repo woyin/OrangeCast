@@ -78,22 +78,29 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 		return nil, fmt.Errorf("解析 openai 转录响应: %w", err)
 	}
 	res := &TranscriptResult{Language: raw.Language, Text: raw.Text}
-	for _, s := range raw.Segments {
-		res.Segments = append(res.Segments, Segment{Start: s.Start, End: s.End, Text: s.Text})
+	for i, s := range raw.Segments {
+		res.Segments = append(res.Segments, Segment{
+			ID:    fmt.Sprintf("seg-%04d", i+1),
+			Start: s.Start, End: s.End, Text: s.Text,
+		})
 	}
 	return res, nil
 }
 
 // Analyze 走 /responses + json_schema strict（OpenAI 保证结构化输出）。
-func (o *OpenAIProvider) Analyze(transcript string) (*KnowledgeCard, error) {
+func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
 	payload := map[string]any{
-		"model": openaiAnalysisModel,
+		"model":        openaiAnalysisModel,
 		"instructions": analysisSystemPrompt,
-		"input":        "请基于以下播客转录稿生成结构化知识卡片：\n\n" + transcript,
+		"input":        "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String(),
 		"text": map[string]any{
 			"format": map[string]any{
-				"type": "json_schema",
-				"name": "knowledge_card",
+				"type":   "json_schema",
+				"name":   "knowledge_card",
 				"strict": true,
 				"schema": knowledgeCardSchema,
 			},
@@ -135,13 +142,13 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 	}
 	input := fmt.Sprintf("基于以下播客片段回答，输出 JSON {\"answer\":\"\",\"cited\":[编号]}。\n\n%s\n问题：%s", ctxSB.String(), question)
 	payload := map[string]any{
-		"model":       openaiAnalysisModel,
+		"model":        openaiAnalysisModel,
 		"instructions": "你是播客内容助手。通过 cited 标注引用的片段编号。",
-		"input":       input,
+		"input":        input,
 		"text": map[string]any{
 			"format": map[string]any{
-				"type": "json_schema",
-				"name": "qa_result",
+				"type":   "json_schema",
+				"name":   "qa_result",
 				"strict": true,
 				"schema": map[string]any{
 					"type": "object",

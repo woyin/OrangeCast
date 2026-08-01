@@ -6,20 +6,30 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/breestealth/wisepod/internal/models"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/google/uuid"
 )
 
 var ErrNotFound = errors.New("not found")
 
-// CreateUser 创建用户。email 会被调用方规范化。
-func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (*models.User, error) {
+// ErrOwnerExists 表示实例已被认领，不能再创建第二个 Owner（ADR-0003）。
+var ErrOwnerExists = errors.New("实例已被认领")
+
+// ClaimOwner 首次认领唯一 Owner：仅当 users 表为空时插入，返回新 Owner。
+// 认领是原子的（INSERT ... SELECT ... WHERE NOT EXISTS），并发下不会产生第二个 Owner。
+func (s *Store) ClaimOwner(ctx context.Context, email, passwordHash string) (*models.User, error) {
 	id := uuid.NewString()
-	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)`,
+	res, err := s.DB.ExecContext(ctx,
+		`INSERT INTO users (id, email, password_hash)
+		 SELECT ?, ?, ?
+		 WHERE NOT EXISTS (SELECT 1 FROM users)`,
 		id, email, passwordHash)
 	if err != nil {
-		return nil, fmt.Errorf("创建用户: %w", err)
+		return nil, fmt.Errorf("认领 Owner: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, ErrOwnerExists
 	}
 	return s.GetUserByEmail(ctx, email)
 }
@@ -93,16 +103,15 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 	return err
 }
 
-// GetOrCreateSettings 获取用户设置，不存在则创建默认。
-func (s *Store) GetOrCreateSettings(ctx context.Context, userID string) (*models.Settings, error) {
-	st := &models.Settings{UserID: userID, ActiveProvider: "groq"}
+// GetSettings 读取实例级单例设置；不存在则创建默认单行（id=1）。
+func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
+	st := &models.Settings{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT active_provider, transcription_model, analysis_model, qa_model
-		 FROM settings WHERE user_id = ?`, userID).
-		Scan(&st.ActiveProvider, &st.TranscriptionModel, &st.AnalysisModel, &st.QAModel)
+		`SELECT transcription_model, analysis_model, qa_model FROM settings WHERE id = 1`).
+		Scan(&st.TranscriptionModel, &st.AnalysisModel, &st.QAModel)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = s.DB.ExecContext(ctx,
-			`INSERT INTO settings (user_id, active_provider) VALUES (?, 'groq')`, userID)
+			`INSERT INTO settings (id) VALUES (1)`)
 		if err != nil {
 			return nil, fmt.Errorf("创建默认设置: %w", err)
 		}
@@ -114,11 +123,16 @@ func (s *Store) GetOrCreateSettings(ctx context.Context, userID string) (*models
 	return st, nil
 }
 
-// UpdateActiveProvider 运行时实时切换 provider（worker 取任务时读取此值）。
-func (s *Store) UpdateActiveProvider(ctx context.Context, userID, provider string) error {
+// UpdateSettings 更新实例级模型偏好。
+func (s *Store) UpdateSettings(ctx context.Context, transcriptionModel, analysisModel, qaModel *string) error {
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO settings (user_id, active_provider) VALUES (?, ?)
-		 ON CONFLICT(user_id) DO UPDATE SET active_provider = excluded.active_provider, updated_at = datetime('now')`,
-		userID, provider)
+		`INSERT INTO settings (id, transcription_model, analysis_model, qa_model)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   transcription_model = excluded.transcription_model,
+		   analysis_model = excluded.analysis_model,
+		   qa_model = excluded.qa_model,
+		   updated_at = datetime('now')`,
+		transcriptionModel, analysisModel, qaModel)
 	return err
 }

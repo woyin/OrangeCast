@@ -6,34 +6,46 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
-	"github.com/breestealth/wisepod/internal/auth"
-	"github.com/breestealth/wisepod/internal/models"
-	"github.com/breestealth/wisepod/internal/provider"
-	"github.com/breestealth/wisepod/internal/rss"
-	"github.com/breestealth/wisepod/internal/store"
+	"github.com/woyin/orangecast/internal/auth"
+	"github.com/woyin/orangecast/internal/markdown"
+	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/rss"
+	"github.com/woyin/orangecast/internal/store"
 )
 
-// ---- 认证 ----
+// ---- 认证与 Owner 认领 ----
 
+// handleRegister 首次认领唯一 Owner（ADR-0003）。
+// GET：实例未认领时显示认领表单；已认领时重定向到 /login。
+// POST：仅当 users 为空时创建 Owner，其余情况拒绝。
 func (srv *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		srv.tmpl.Render(w, "register.html", map[string]any{})
+		claimed, err := srv.isClaimed(r.Context())
+		if err != nil {
+			http.Error(w, "内部错误", http.StatusInternalServerError)
+			return
+		}
+		if claimed {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		srv.tmpl.Render(w, "register.html", map[string]any{"CSRF": auth.CSRFValue(r)})
 		return
 	}
+	// POST：认领
 	email := auth.NormalizeEmail(r.FormValue("email"))
 	pw := r.FormValue("password")
 	if err := auth.ValidateEmail(email); err != nil {
-		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "邮箱格式无效"})
+		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "邮箱格式无效", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	if err := auth.ValidatePassword(pw); err != nil {
-		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "密码至少 8 位"})
-		return
-	}
-	if err := auth.EnsureUnusedEmail(r.Context(), srv.store, email); err != nil {
-		srv.tmpl.Render(w, "register.html", map[string]any{"Error": err.Error()})
+		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "密码至少 8 位", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	hash, err := auth.HashPassword(pw)
@@ -41,36 +53,54 @@ func (srv *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "内部错误", http.StatusInternalServerError)
 		return
 	}
-	u, err := srv.store.CreateUser(r.Context(), email, hash)
+	u, err := srv.store.ClaimOwner(r.Context(), email, hash)
 	if err != nil {
-		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "注册失败"})
+		if err == store.ErrOwnerExists {
+			srv.tmpl.Render(w, "register.html", map[string]any{"Error": "实例已被认领", "CSRF": auth.CSRFValue(r)})
+			return
+		}
+		srv.tmpl.Render(w, "register.html", map[string]any{"Error": "认领失败", "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	if err := auth.SetSessionCookie(w, r, srv.store, u.ID); err != nil {
+	if err := auth.SetSessionCookie(w, r, srv.store, u.ID, srv.cfg.PublicSchemeIsHTTPS()); err != nil {
 		http.Error(w, "内部错误", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
+// isClaimed 判断实例是否已被认领（users 表非空）。
+func (srv *Server) isClaimed(ctx context.Context) (bool, error) {
+	n, err := store.CountUsers(ctx, srv.store.DB)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 func (srv *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		srv.tmpl.Render(w, "login.html", map[string]any{})
+		srv.tmpl.Render(w, "login.html", map[string]any{"CSRF": auth.CSRFValue(r)})
+		return
+	}
+	// 登录限流（ADR-0013）：按客户端 IP 固定窗口
+	if !srv.loginLimiter.Allow(auth.ClientIP(r, srv.cfg.TrustedProxies)) {
+		http.Error(w, "尝试过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
 	}
 	email := auth.NormalizeEmail(r.FormValue("email"))
 	pw := r.FormValue("password")
 	u, err := srv.store.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误"})
+		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	ok, err := auth.VerifyPassword(pw, u.PasswordHash)
 	if err != nil || !ok {
-		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误"})
+		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误", "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	if err := auth.SetSessionCookie(w, r, srv.store, u.ID); err != nil {
+	if err := auth.SetSessionCookie(w, r, srv.store, u.ID, srv.cfg.PublicSchemeIsHTTPS()); err != nil {
 		http.Error(w, "内部错误", http.StatusInternalServerError)
 		return
 	}
@@ -93,8 +123,7 @@ func (srv *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 // ---- Podcasts ----
 
 func (srv *Server) handlePodcasts(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
-	ps, err := srv.store.ListPodcasts(r.Context(), userID)
+	ps, err := srv.store.ListPodcasts(r.Context())
 	if err != nil {
 		http.Error(w, "加载失败", http.StatusInternalServerError)
 		return
@@ -104,22 +133,21 @@ func (srv *Server) handlePodcasts(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handlePodcastNew(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		srv.tmpl.Render(w, "podcast_new.html", map[string]any{})
+		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"CSRF": auth.CSRFValue(r)})
 		return
 	}
 	feedURL := strings.TrimSpace(r.FormValue("feed_url"))
 	podcast, eps, err := rss.FetchFeed(feedURL)
 	if err != nil {
-		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"Error": "抓取/解析 feed 失败: " + err.Error()})
+		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"Error": "抓取/解析 feed 失败: " + err.Error(), "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	userID, _ := auth.UserIDFromContext(r.Context())
-	p, err := srv.store.CreatePodcast(r.Context(), userID, feedURL, podcast.Title, podcast.Description, podcast.ImageURL)
+	p, err := srv.store.CreatePodcast(r.Context(), feedURL, podcast.Title, podcast.Description, podcast.ImageURL)
 	if err != nil {
-		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"Error": "订阅失败（可能已订阅）"})
+		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"Error": "订阅失败（可能已订阅）", "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	if _, err := srv.store.MergeEpisodes(r.Context(), p.ID, userID, eps); err != nil {
+	if _, err := srv.store.MergeEpisodes(r.Context(), p.ID, eps); err != nil {
 		http.Error(w, "保存单集失败", http.StatusInternalServerError)
 		return
 	}
@@ -134,58 +162,51 @@ func (srv *Server) handlePodcastDetail(w http.ResponseWriter, r *http.Request) {
 		srv.handlePodcastNew(w, r)
 		return
 	}
-	userID, _ := auth.UserIDFromContext(r.Context())
 	p, err := srv.store.GetPodcastByID(r.Context(), path)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	if p.UserID != userID {
-		http.NotFound(w, r)
-		return
-	}
 	eps, _ := srv.store.ListEpisodes(r.Context(), path)
-	srv.tmpl.Render(w, "podcast_detail.html", map[string]any{"Podcast": p, "Episodes": eps})
+	srv.tmpl.Render(w, "podcast_detail.html", map[string]any{"Podcast": p, "Episodes": eps, "CSRF": auth.CSRFValue(r)})
 }
 
 // ---- Uploads ----
 
 func (srv *Server) handleUploads(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
-	us, _ := srv.store.ListUploads(r.Context(), userID)
+	us, _ := srv.store.ListUploads(r.Context())
 	srv.tmpl.Render(w, "uploads.html", map[string]any{"Uploads": us})
 }
 
 func (srv *Server) handleUploadNew(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"CSRF": auth.CSRFValue(r)})
 		return
 	}
 	// 限制大小 200MB
 	r.Body = http.MaxBytesReader(w, r.Body, 200<<20)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "上传失败: " + err.Error()})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "上传失败: " + err.Error(), "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	file, header, err := r.FormFile("audio")
 	if err != nil {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "请选择音频文件"})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "请选择音频文件", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	defer file.Close()
 	if !isAllowedAudio(header.Filename, header.Header.Get("Content-Type")) {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "仅支持 mp3/m4a/wav"})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "仅支持 mp3/m4a/wav", "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	userID, _ := auth.UserIDFromContext(r.Context())
-	up, err := srv.store.CreateUpload(r.Context(), userID, header.Filename, header.Header.Get("Content-Type"), header.Size)
+	up, err := srv.store.CreateUpload(r.Context(), header.Filename, header.Header.Get("Content-Type"), header.Size)
 	if err != nil {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "保存失败"})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "保存失败", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	// 音频持久化到临时目录（worker 从这里读，处理后保留以便重试）
 	if err := saveUploadFile(srv.cfg.TempDir, up.ID, file); err != nil {
-		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "存储音频失败"})
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"Error": "存储音频失败", "CSRF": auth.CSRFValue(r)})
 		return
 	}
 	http.Redirect(w, r, "/sources/upload/"+up.ID, http.StatusSeeOther)
@@ -208,57 +229,72 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if len(parts) >= 3 && parts[2] == "download" {
+		srv.handleDownloadMarkdown(w, r)
+		return
+	}
+	if len(parts) >= 4 && parts[2] == "versions" && parts[3] == "revert" {
+		srv.handleRevertVersion(w, r)
+		return
+	}
+	if len(parts) >= 3 && parts[2] == "versions" {
+		srv.handleVersions(w, r)
+		return
+	}
 	sourceType := models.SourceType(parts[0])
 	sourceID := parts[1]
-	userID, _ := auth.UserIDFromContext(r.Context())
-
-	audioURL := ""
-	if sourceType == models.SourceEpisode {
-		ep, err := srv.store.GetEpisodeByID(r.Context(), sourceID)
-		if err != nil || ep.UserID != userID {
-			http.NotFound(w, r)
-			return
-		}
-		audioURL = ep.AudioURL
-	} else {
-		up, err := srv.store.GetUploadByID(r.Context(), sourceID)
-		if err != nil || up.UserID != userID {
-			http.NotFound(w, r)
-			return
-		}
-		// upload 音频通过内部端点提供
-		audioURL = "/api/audio/" + sourceID
-	}
-
-	t, _ := srv.store.GetTranscript(r.Context(), userID, sourceType, sourceID)
-	a, _ := srv.store.GetAnalysis(r.Context(), userID, sourceType, sourceID)
 
 	// 取 source 处理状态与最近一次失败原因（供前端展示进度/错误/重试）
-	status, lastError := srv.sourceStatusAndError(r.Context(), userID, sourceType, sourceID)
+	status, lastError := srv.sourceStatusAndError(r.Context(), sourceType, sourceID)
 
+	// 播放只依赖 EvidenceAudio（ADR-0005）：存在则用内部端点；
+	// 尚未处理的 episode 用外链预览，upload 用原始落盘文件（处理后由证据替代）。
+	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
+	if _, err := srv.store.GetEvidenceAudio(r.Context(), sourceType, sourceID); err != nil {
+		if sourceType == models.SourceEpisode {
+			if ep, err := srv.store.GetEpisodeByID(r.Context(), sourceID); err == nil {
+				audioURL = ep.AudioURL
+			} else {
+				http.NotFound(w, r)
+				return
+			}
+		} else if _, err := srv.store.GetUploadByID(r.Context(), sourceID); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	}
+
+	// 当前 Transcript / KnowledgeCard 版本（ADR-0011）
 	var segments []provider.Segment
 	title := titleForStatus(status)
 	summary := ""
 	var card map[string]any
-	if t != nil {
-		segments = parseSegments(t.SegmentsJSON)
+	if t, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript); err == nil {
+		var tp provider.TranscriptPayload
+		if json.Unmarshal([]byte(t.Payload), &tp) == nil {
+			segments = tp.Segments
+		}
 	}
-	if a != nil {
-		title = a.Title
-		summary = a.Summary
-		card = parseCard(a.ContentJSON)
+	if c, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
+		var cardData provider.KnowledgeCard
+		if json.Unmarshal([]byte(c.Payload), &cardData) == nil {
+			title = cardData.Title
+			summary = cardData.Summary.Text
+			card = cardView(cardData, segments)
+		}
 	}
 
 	data := map[string]any{
-		"Title":        title,
-		"Summary":      summary,
-		"AudioURL":     audioURL,
-		"Segments":     segments,
-		"Card":         card,
-		"Status":       string(status),
-		"LastError":    lastError,
-		"SourceType":   string(sourceType),
-		"SourceID":     sourceID,
+		"Title":      title,
+		"Summary":    summary,
+		"AudioURL":   audioURL,
+		"Segments":   segments,
+		"Card":       card,
+		"Status":     string(status),
+		"LastError":  lastError,
+		"SourceType": string(sourceType),
+		"SourceID":   sourceID,
+		"CSRF":       auth.CSRFValue(r),
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }
@@ -266,11 +302,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 // ---- 搜索 ----
 
 func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	var hits []store.SearchHit
 	if q != "" {
-		hits, _ = srv.store.SearchSource(r.Context(), userID, q)
+		hits, _ = srv.store.SearchSource(r.Context(), q)
 	}
 	srv.tmpl.Render(w, "search.html", map[string]any{"Query": q, "Hits": hits})
 }
@@ -278,19 +313,45 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // ---- 设置 ----
 
 func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
 	if r.Method == http.MethodPost {
-		provider := r.FormValue("active_provider")
-		if provider == "groq" || provider == "openai" {
-			_ = srv.store.UpdateActiveProvider(r.Context(), userID, provider)
+		// 实例级模型偏好（ADR-0009：无全局 provider 切换；Groq 固定为默认零成本 Provider）
+		tm := r.FormValue("transcription_model")
+		am := r.FormValue("analysis_model")
+		qm := r.FormValue("qa_model")
+		var tp, ap, qp *string
+		if tm != "" {
+			tp = &tm
 		}
+		if am != "" {
+			ap = &am
+		}
+		if qm != "" {
+			qp = &qm
+		}
+		_ = srv.store.UpdateSettings(r.Context(), tp, ap, qp)
 		http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 		return
 	}
-	st, _ := srv.store.GetOrCreateSettings(r.Context(), userID)
+	st, _ := srv.store.GetSettings(r.Context())
+	transcriptionModel := ""
+	analysisModel := ""
+	qaModel := ""
+	if st.TranscriptionModel != nil {
+		transcriptionModel = *st.TranscriptionModel
+	}
+	if st.AnalysisModel != nil {
+		analysisModel = *st.AnalysisModel
+	}
+	if st.QAModel != nil {
+		qaModel = *st.QAModel
+	}
 	srv.tmpl.Render(w, "settings.html", map[string]any{
-		"ActiveProvider": st.ActiveProvider,
-		"Saved":          r.URL.Query().Get("saved") == "1",	})
+		"TranscriptionModel": transcriptionModel,
+		"AnalysisModel":      analysisModel,
+		"QAModel":            qaModel,
+		"Saved":              r.URL.Query().Get("saved") == "1",
+		"CSRF":               auth.CSRFValue(r),
+	})
 }
 
 // ---- API ----
@@ -300,17 +361,14 @@ func (srv *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	userID, _ := auth.UserIDFromContext(r.Context())
 	sourceType := models.SourceType(r.FormValue("source_type"))
 	sourceID := r.FormValue("source_id")
-	job, err := srv.store.EnqueueJob(r.Context(), userID, sourceType, sourceID, models.JobTranscribe)
+	job, err := srv.store.EnqueueJob(r.Context(), sourceType, sourceID, models.JobTranscribe)
 	if err != nil {
 		http.Error(w, "入队失败", http.StatusInternalServerError)
 		return
 	}
-	if job != nil {
-		srv.worker.Process(job)
-	}
+	_ = job // SQLite 驱动 worker 循环会领取并处理（ADR-0006）
 	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
 }
 
@@ -319,46 +377,237 @@ func (srv *Server) handleQA(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	userID, _ := auth.UserIDFromContext(r.Context())
 	sourceType := models.SourceType(r.FormValue("source_type"))
 	sourceID := r.FormValue("source_id")
 	question := r.FormValue("question")
 
-	t, err := srv.store.GetTranscript(r.Context(), userID, sourceType, sourceID)
+	av, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "无转录稿"})
 		return
 	}
-	st, _ := srv.store.GetOrCreateSettings(r.Context(), userID)
-	bundle, err := srv.selector.Bundle(st.ActiveProvider)
+	var tp provider.TranscriptPayload
+	if err := json.Unmarshal([]byte(av.Payload), &tp); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
+		return
+	}
+	// ADR-0009：默认 Groq（零成本）；付费 Provider 仅按单次任务显式授权
+	bundle, err := srv.selector.Bundle("groq")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	res, err := bundle.QA.Answer(question, parseSegments(t.SegmentsJSON))
+	res, err := bundle.QA.Answer(question, tp.Segments)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "回答失败"})
+		return
+	}
+	// 证据契约（ADR-0008 / Phase 7）：只有模型实际引用的 Segment 才能成为 Citation。
+	// 无可靠引用时明确拒答，绝不附加"被检索到"的片段伪装成依据。
+	if len(res.Sources) == 0 || strings.TrimSpace(res.Answer) == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error":   "证据不足，无法可靠回答：模型没有引用任何可核验片段。请换一种问法或查看转录稿。",
+			"answer":  "",
+			"sources": []provider.Source{},
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
-// handleAudio 提供 upload 音频文件（episode 直接用外链 audio_url，无需此端点）。
+// handleAudio 提供 Source 音频：优先 EvidenceAudio（ADR-0005）；
+// upload 在证据生成前回退到原始落盘文件（仅该实例内可访问）。
 func (srv *Server) handleAudio(w http.ResponseWriter, r *http.Request) {
-	userID, _ := auth.UserIDFromContext(r.Context())
-	uploadID := strings.TrimPrefix(r.URL.Path, "/api/audio/")
-	up, err := srv.store.GetUploadByID(r.Context(), uploadID)
-	if err != nil || up.UserID != userID {
+	// /api/audio/{sourceType}/{sourceID}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/audio/"), "/")
+	if len(parts) < 2 {
 		http.NotFound(w, r)
 		return
 	}
-	path := filepath.Join(srv.cfg.TempDir, "uploads", uploadID)
-	w.Header().Set("Content-Type", up.ContentType)
-	http.ServeFile(w, r, path)
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+
+	// 优先证据音频
+	if ev, err := srv.store.GetEvidenceAudio(r.Context(), sourceType, sourceID); err == nil {
+		path := filepath.Join(srv.cfg.EvidenceDir, ev.RelPath)
+		if _, serr := os.Stat(path); serr == nil {
+			http.ServeFile(w, r, path)
+			return
+		}
+	}
+	// upload 回退：原始落盘文件（处理前预览）
+	if sourceType == models.SourceUpload {
+		if _, err := srv.store.GetUploadByID(r.Context(), sourceID); err == nil {
+			path := filepath.Join(srv.cfg.TempDir, "uploads", sourceID)
+			http.ServeFile(w, r, path)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// handleVersions 查看一个 Source 的不可变版本历史（ADR-0011）。
+func (srv *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
+	if len(parts) < 3 {
+		http.NotFound(w, r)
+		return
+	}
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+
+	title := sourceID
+	if sourceType == models.SourceEpisode {
+		if ep, err := srv.store.GetEpisodeByID(r.Context(), sourceID); err == nil {
+			title = ep.Title
+		} else {
+			http.NotFound(w, r)
+			return
+		}
+	} else {
+		if up, err := srv.store.GetUploadByID(r.Context(), sourceID); err == nil {
+			title = up.OriginalFilename
+		} else {
+			http.NotFound(w, r)
+			return
+		}
+	}
+
+	transcripts, _ := srv.store.ListArtifactVersions(r.Context(), sourceType, sourceID, store.KindTranscript)
+	cards, _ := srv.store.ListArtifactVersions(r.Context(), sourceType, sourceID, store.KindKnowledgeCard)
+	currentT, _ := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
+	currentC, _ := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard)
+
+	curT, curC := 0, 0
+	if currentT != nil {
+		curT = currentT.Version
+	}
+	if currentC != nil {
+		curC = currentC.Version
+	}
+	srv.tmpl.Render(w, "versions.html", map[string]any{
+		"SourceType": string(sourceType), "SourceID": sourceID, "Title": title,
+		"Transcripts": transcripts, "Cards": cards,
+		"CurrentTranscript": curT, "CurrentCard": curC,
+		"CSRF": auth.CSRFValue(r),
+	})
+}
+
+// handleRevertVersion 把 Source 当前版本指针回退到指定版本（ADR-0011 "可恢复"）。
+func (srv *Server) handleRevertVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
+	if len(parts) < 4 {
+		http.NotFound(w, r)
+		return
+	}
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+	kindStr := r.FormValue("kind")
+	version, err := strconv.Atoi(r.FormValue("version"))
+	if err != nil {
+		http.Error(w, "版本号无效", http.StatusBadRequest)
+		return
+	}
+	kind := store.ArtifactKind(kindStr)
+	if kind != store.KindTranscript && kind != store.KindKnowledgeCard {
+		http.Error(w, "kind 无效", http.StatusBadRequest)
+		return
+	}
+	if err := srv.store.SetCurrentVersion(r.Context(), sourceType, sourceID, kind, version); err != nil {
+		http.Error(w, "回退失败：版本不存在", http.StatusNotFound)
+		return
+	}
+	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID+"/versions", http.StatusSeeOther)
+}
+
+// handleDownloadMarkdown 下载单 Source 的 KnowledgeNote Markdown（Roadmap Phase 5）。
+// 确定性渲染：frontmatter + 摘要/要点/章节/金句（全部带 Citation 链接）+ 标签。
+func (srv *Server) handleDownloadMarkdown(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
+	if len(parts) < 3 || parts[2] != "download" {
+		http.NotFound(w, r)
+		return
+	}
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+
+	card, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard)
+	if err != nil {
+		http.Error(w, "尚无知识卡片", http.StatusNotFound)
+		return
+	}
+	tr, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
+	if err != nil {
+		http.Error(w, "尚无转录稿", http.StatusNotFound)
+		return
+	}
+	var cardData provider.KnowledgeCard
+	if err := json.Unmarshal([]byte(card.Payload), &cardData); err != nil {
+		http.Error(w, "卡片数据损坏", http.StatusInternalServerError)
+		return
+	}
+	var tp provider.TranscriptPayload
+	if err := json.Unmarshal([]byte(tr.Payload), &tp); err != nil {
+		http.Error(w, "转录数据损坏", http.StatusInternalServerError)
+		return
+	}
+	title := cardData.Title
+	md, err := markdown.Render(markdown.Input{
+		Card: &cardData, Segments: tp.Segments,
+		SourceType: string(sourceType), SourceID: sourceID,
+		Title: title, BaseURL: srv.cfg.PublicURL,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		http.Error(w, "渲染失败", http.StatusInternalServerError)
+		return
+	}
+	filename := sanitizeFilename(title) + ".md"
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	_, _ = w.Write([]byte(md))
+}
+
+// sanitizeFilename 清理文件名中的不安全字符。
+func sanitizeFilename(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.', r == ' ', r >= 0x4E00 && r <= 0x9FFF:
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "cloudwisepod-note"
+	}
+	return out
+}
+
+// handlePurge 显式 Purge（ADR-0012）：完整、不可逆地删除 Source 及其全部证据与处理历史。
+func (srv *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sourceType := models.SourceType(r.FormValue("source_type"))
+	sourceID := r.FormValue("source_id")
+	if err := srv.worker.PurgeSource(r.Context(), sourceType, sourceID); err != nil {
+		http.Error(w, "Purge 失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/uploads", http.StatusSeeOther)
 }
 
 // sourceStatusAndError 返回 source 的处理状态与最近一次失败原因。
-func (srv *Server) sourceStatusAndError(ctx context.Context, userID string, sourceType models.SourceType, sourceID string) (models.EpisodeProcessingStatus, string) {
+func (srv *Server) sourceStatusAndError(ctx context.Context, sourceType models.SourceType, sourceID string) (models.EpisodeProcessingStatus, string) {
 	var status models.EpisodeProcessingStatus
 	if sourceType == models.SourceEpisode {
 		ep, err := srv.store.GetEpisodeByID(ctx, sourceID)
@@ -378,9 +627,9 @@ func (srv *Server) sourceStatusAndError(ctx context.Context, userID string, sour
 	if status == models.StatusFailedEp {
 		row := srv.store.DB.QueryRowContext(ctx,
 			`SELECT COALESCE(last_error,'') FROM processing_jobs
-			 WHERE user_id=? AND source_type=? AND source_id=? AND status='failed'
+			 WHERE source_type=? AND source_id=? AND status='failed'
 			 ORDER BY updated_at DESC LIMIT 1`,
-			userID, string(sourceType), sourceID)
+			string(sourceType), sourceID)
 		_ = row.Scan(&lastError)
 	}
 	return status, lastError
@@ -401,34 +650,83 @@ func titleForStatus(status models.EpisodeProcessingStatus) string {
 	}
 }
 
+// qaResultToResponse 依据证据契约决定 Q&A 响应（Phase 7）。
+// 无可靠引用或空答案 → 422 明确拒答；否则 200 返回答案 + 引用。
+func qaResultToResponse(res *provider.QAResult) (int, map[string]any) {
+	if !provider.HasReliableSources(res) {
+		return http.StatusUnprocessableEntity, map[string]any{
+			"error":   "证据不足，无法可靠回答：模型没有引用任何可核验片段。请换一种问法或查看转录稿。",
+			"answer":  "",
+			"sources": []provider.Source{},
+		}
+	}
+	return http.StatusOK, map[string]any{
+		"answer":  res.Answer,
+		"sources": res.Sources,
+	}
+}
+
+// cardView 把验证过的 KnowledgeCard 转换成模板友好结构（时间范围由程序从 Citation 解析）。
+func cardView(c provider.KnowledgeCard, segments []provider.Segment) map[string]any {
+	chapterView := make([]map[string]any, 0, len(c.Chapters))
+	for _, ch := range c.Chapters {
+		start, end, ok := citationSpan(ch.Citations, segments)
+		if !ok {
+			continue
+		}
+		chapterView = append(chapterView, map[string]any{
+			"title": ch.Title, "gist": ch.Gist, "startTime": start, "endTime": end,
+		})
+	}
+	quoteView := make([]map[string]any, 0, len(c.Quotes))
+	for _, q := range c.Quotes {
+		start, end, ok := citationSpan(q.Citations, segments)
+		if !ok {
+			continue
+		}
+		quoteView = append(quoteView, map[string]any{"text": q.Text, "startTime": start, "endTime": end})
+	}
+	keyPointView := make([]map[string]any, 0, len(c.KeyPoints))
+	for _, kp := range c.KeyPoints {
+		keyPointView = append(keyPointView, map[string]any{"content": kp.Content, "description": kp.Description})
+	}
+	return map[string]any{
+		"title":     c.Title,
+		"summary":   c.Summary.Text,
+		"chapters":  chapterView,
+		"keyPoints": keyPointView,
+		"quotes":    quoteView,
+		"tags":      c.Tags,
+	}
+}
+
+// citationSpan 取 citations 的最小时间范围（程序解析，ADR-0008）。
+func citationSpan(citations []string, segments []provider.Segment) (float64, float64, bool) {
+	if len(citations) == 0 {
+		return 0, 0, false
+	}
+	var start, end float64
+	first := true
+	for _, c := range citations {
+		s, e, ok := provider.ResolveCitationRange(c, segments)
+		if !ok {
+			continue
+		}
+		if first || s < start {
+			start = s
+		}
+		if first || e > end {
+			end = e
+		}
+		first = false
+	}
+	return start, end, !first
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
-}
-
-// parseSegments 解析 segments_json（[{start,end,text}]）为播放器联动所需结构。
-func parseSegments(raw string) []provider.Segment {
-	if raw == "" {
-		return nil
-	}
-	var segs []provider.Segment
-	if err := json.Unmarshal([]byte(raw), &segs); err != nil {
-		return nil
-	}
-	return segs
-}
-
-// parseCard 解析 KnowledgeCard JSON 为模板可用的 map。
-func parseCard(raw string) map[string]any {
-	if raw == "" {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return nil
-	}
-	return m
 }
 
 // saveUploadFile 将上传的音频保存到临时目录，供 worker 后续读取。

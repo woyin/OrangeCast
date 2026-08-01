@@ -11,7 +11,7 @@
   <div class="ep-actions">
     {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/episode/{{.ID}}" class="btn">查看</a>{{end}}
     {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-    <form method="post" action="/api/process"><input type="hidden" name="source_type" value="episode"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
+    <form method="post" action="/api/process"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="episode"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
     {{end}}
   </div>
 </div>

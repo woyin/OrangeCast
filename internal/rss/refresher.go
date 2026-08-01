@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/breestealth/wisepod/internal/models"
-	"github.com/breestealth/wisepod/internal/store"
+	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 	"github.com/robfig/cron/v3"
 )
 
@@ -50,7 +50,7 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 	if err != nil {
 		return err
 	}
-	if _, err := r.store.MergeEpisodes(ctx, p.ID, p.UserID, eps); err != nil {
+	if _, err := r.store.MergeEpisodes(ctx, p.ID, eps); err != nil {
 		return err
 	}
 	return r.store.UpdatePodcastFetched(ctx, p.ID)

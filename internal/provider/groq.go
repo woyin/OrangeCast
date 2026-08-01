@@ -34,9 +34,9 @@ func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	data, code, err := uploadFileAsMultipart(
 		context.Background(), groqBaseURL+"/audio/transcriptions", g.apiKey, "file", filePath,
 		map[string]string{
-			"model":                         groqTranscribeModel,
-			"response_format":               "verbose_json",
-			"timestamp_granularities[]":     "segment",
+			"model":                     groqTranscribeModel,
+			"response_format":           "verbose_json",
+			"timestamp_granularities[]": "segment",
 		},
 	)
 	if err != nil {
@@ -58,8 +58,12 @@ func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 		return nil, fmt.Errorf("解析 groq 转录响应: %w", err)
 	}
 	res := &TranscriptResult{Language: raw.Language, Text: strings.TrimSpace(raw.Text)}
-	for _, s := range raw.Segments {
-		res.Segments = append(res.Segments, Segment{Start: s.Start, End: s.End, Text: strings.TrimSpace(s.Text)})
+	for i, s := range raw.Segments {
+		// 稳定 Segment ID（ADR-0008）：程序分配，模型只引用 ID，不估算时间戳。
+		res.Segments = append(res.Segments, Segment{
+			ID:    fmt.Sprintf("seg-%04d", i+1),
+			Start: s.Start, End: s.End, Text: strings.TrimSpace(s.Text),
+		})
 	}
 	return res, nil
 }
@@ -107,11 +111,16 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 	return resp.Choices[0].Message.Content, code, nil
 }
 
-// Analyze 生成 KnowledgeCard。用 json_object（无 schema 强制）+ prompt 约束 + 容错解析兜底。
-func (g *GroqProvider) Analyze(transcript string) (*KnowledgeCard, error) {
+// Analyze 生成 KnowledgeCard（Evidence-first）。用 json_object + prompt 约束 + 容错解析，
+// 再由调用方（CitationValidator）强校验：Citation 必须引用真实 Segment.ID，金句必须逐字匹配。
+func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
 	content, _, err := g.chatComplete([]map[string]string{
 		{"role": "system", "content": analysisSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
-		{"role": "user", "content": "请基于以下播客转录稿生成结构化知识卡片：\n\n" + transcript},
+		{"role": "user", "content": "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String()},
 	}, "object")
 	if err != nil {
 		return nil, err
@@ -155,25 +164,8 @@ func (g *GroqProvider) Answer(question string, segments []Segment) (*QAResult, e
 		// 解析失败时退化为直接展示原文，不阻塞回答
 		return &QAResult{Answer: content}, nil
 	}
-	// 把 cited 索引映射回带时间戳的 Source
-	result := &QAResult{Answer: resp.Answer}
-	seen := map[int]bool{}
-	for _, idx := range resp.Cited {
-		if idx >= 0 && idx < len(chunks) && !seen[idx] {
-			seen[idx] = true
-			result.Sources = append(result.Sources, Source{
-				Content: chunks[idx].Text,
-				Start:   chunks[idx].Start,
-				End:     chunks[idx].End,
-			})
-		}
-	}
-	// 兜底：若 LLM 未给 cited 但有答案，引用首个片段
-	if len(result.Sources) == 0 {
-		result.Sources = append(result.Sources, Source{
-			Content: chunks[0].Text, Start: chunks[0].Start, End: chunks[0].End,
-		})
-	}
+	// 只保留模型实际引用的片段（Phase 7：无引用不附加兜底）
+	result := &QAResult{Answer: resp.Answer, Sources: MapCitedToSources(chunks, resp.Cited)}
 	return result, nil
 }
 

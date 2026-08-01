@@ -4,28 +4,30 @@ import (
 	"context"
 	"testing"
 
-	"github.com/breestealth/wisepod/internal/models"
+	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 func TestDeleteSourceAndDependents_CascadesAll(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	u := seedUser(t, s, "a@b.com")
+	seedUser(t, s, "a@b.com")
 
-	p, _ := s.CreatePodcast(ctx, u.ID, "https://feed.xml", "Pod", "", "")
+	p, _ := s.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
 	eps := []models.Episode{{GUID: "g1", Title: "ep1", AudioURL: "https://a.mp3"}}
-	s.MergeEpisodes(ctx, p.ID, u.ID, eps)
+	s.MergeEpisodes(ctx, p.ID, eps)
 	ep, _ := s.ListEpisodes(ctx, p.ID)
 	sourceID := ep[0].ID
 
-	// 写入关联数据
-	s.UpsertTranscript(ctx, u.ID, models.SourceEpisode, sourceID, "en", "hello", "[{\"start\":0}]")
-	s.UpsertAnalysis(ctx, u.ID, models.SourceEpisode, sourceID, "title", "summary", "{}")
-	s.EnqueueJob(ctx, u.ID, models.SourceEpisode, sourceID, models.JobTranscribe)
-	s.IndexSearch(ctx, u.ID, models.SourceEpisode, sourceID, "title", "hello")
+	// 写入关联数据（现行模型：artifact_versions + evidence + search）
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript, "groq", "m", "1", job.ID, `{"text":"hello"}`)
+	s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindKnowledgeCard, "groq", "m", "1", job.ID, `{"title":"t"}`)
+	s.UpsertEvidenceAudio(ctx, models.SourceEpisode, sourceID, "episode_x.mp3", "mp3", 10, "abc")
+	s.IndexSearch(ctx, models.SourceEpisode, sourceID, "title", "summary", []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello"}})
 
-	// 删除 source
-	if err := s.DeleteSourceAndDependents(ctx, u.ID, models.SourceEpisode, sourceID); err != nil {
+	// 删除 source（两阶段 purge 的 DB 部分）
+	if err := s.DeleteSourceAndDependents(ctx, models.SourceEpisode, sourceID); err != nil {
 		t.Fatalf("级联删除失败: %v", err)
 	}
 
@@ -33,13 +35,17 @@ func TestDeleteSourceAndDependents_CascadesAll(t *testing.T) {
 	if _, err := s.GetEpisodeByID(ctx, sourceID); err != ErrNotFound {
 		t.Error("episode 应被删除")
 	}
-	// transcript 应删（孤儿数据清理，第1题）
-	if _, err := s.GetTranscript(ctx, u.ID, models.SourceEpisode, sourceID); err != ErrNotFound {
-		t.Error("transcript 应被级联删除")
+	// artifact_versions 应删
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM artifact_versions WHERE source_id=?`, sourceID).Scan(&n); err != nil {
+		t.Fatal(err)
 	}
-	// analysis 应删
-	if _, err := s.GetAnalysis(ctx, u.ID, models.SourceEpisode, sourceID); err != ErrNotFound {
-		t.Error("analysis 应被级联删除")
+	if n != 0 {
+		t.Errorf("artifact_versions 应被级联删除，剩余 %d", n)
+	}
+	// evidence_audio 应删
+	if _, err := s.GetEvidenceAudio(ctx, models.SourceEpisode, sourceID); err != ErrNotFound {
+		t.Error("evidence_audio 应被级联删除")
 	}
 	// processing_jobs 应删
 	jobs, _ := s.DB.Query("SELECT 1 FROM processing_jobs WHERE source_id=?", sourceID)
@@ -47,21 +53,18 @@ func TestDeleteSourceAndDependents_CascadesAll(t *testing.T) {
 		jobs.Close()
 		t.Error("processing_jobs 应被级联删除")
 	}
+	// search_index 应删
+	hits, _ := s.SearchSource(ctx, "hello")
+	if len(hits) != 0 {
+		t.Error("search_index 应被级联删除")
+	}
 }
 
-func TestDeleteSource_WrongUser_NoEffect(t *testing.T) {
+func TestDeleteSource_Nonexistent_NoError(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	u1 := seedUser(t, s, "a@b.com")
-	u2 := seedUser(t, s, "c@d.com")
-
-	p, _ := s.CreatePodcast(ctx, u1.ID, "https://f.xml", "P", "", "")
-	s.MergeEpisodes(ctx, p.ID, u1.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}})
-	ep, _ := s.ListEpisodes(ctx, p.ID)
-
-	// u2 试图删 u1 的 source（带 user_id 校验，应无效）
-	s.DeleteSourceAndDependents(ctx, u2.ID, models.SourceEpisode, ep[0].ID)
-	if _, err := s.GetEpisodeByID(ctx, ep[0].ID); err != nil {
-		t.Error("其他用户不应能删除，episode 应仍存在")
+	seedUser(t, s, "a@b.com")
+	if err := s.DeleteSourceAndDependents(ctx, models.SourceEpisode, "missing"); err != nil {
+		t.Errorf("删除不存在的 source 不应报错: %v", err)
 	}
 }

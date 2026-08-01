@@ -5,6 +5,7 @@
   <strong>处理失败</strong>
   {{if .LastError}}<p class="error-detail">{{.LastError}}</p>{{end}}
   <form method="post" action="/api/process" class="inline">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_type" value="{{.SourceType}}">
     <input type="hidden" name="source_id" value="{{.SourceID}}">
     <button class="btn" type="submit">重试处理</button>
@@ -18,6 +19,7 @@
 <div class="status-bar pending">
   尚未处理。
   <form method="post" action="/api/process" class="inline">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_type" value="{{.SourceType}}">
     <input type="hidden" name="source_id" value="{{.SourceID}}">
     <button class="btn" type="submit">开始处理</button>
@@ -28,6 +30,10 @@
 <div class="source-head">
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>
+  {{if eq .Status "processed"}}
+  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download">下载 Markdown</a>
+  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/versions">版本历史</a>
+  {{end}}
 </div>
 
 {{if .AudioURL}}
@@ -49,7 +55,7 @@
     <h2>转录稿</h2>
     <div id="transcript" class="transcript">
     {{range $i, $seg := .Segments}}
-      <span class="seg" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span>
+      <span class="seg" data-id="{{$seg.ID}}" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span>
     {{else}}
     <p class="empty">暂无转录稿，请先点击「处理」。</p>
     {{end}}
@@ -96,6 +102,7 @@
     <section>
       <h2>提问</h2>
       <form id="qa-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
         <input type="text" name="question" placeholder="对这期内容提问…" required>
         <button type="submit">问</button>
       </form>

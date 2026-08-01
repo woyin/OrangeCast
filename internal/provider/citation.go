@@ -1,0 +1,150 @@
+package provider
+
+import (
+	"fmt"
+	"strings"
+)
+
+// TranscriptPayload 转录版本的持久化载荷（存入 artifact_versions.payload）。
+type TranscriptPayload struct {
+	Language string    `json:"language"`
+	Text     string    `json:"text"`
+	Segments []Segment `json:"segments"`
+}
+
+// ErrNoValidCitations 表示卡片内容无法满足证据契约（ADR-0008）：
+// 核心项缺失或全部 Citation 无效，必须拒绝保存并重试，不能降级为无证据内容。
+type ErrNoValidCitations struct{ Detail string }
+
+func (e *ErrNoValidCitations) Error() string {
+	return fmt.Sprintf("证据校验失败：%s", e.Detail)
+}
+
+// segmentIndex 建立 Segment.ID → Segment 的查找表。
+func segmentIndex(segments []Segment) map[string]Segment {
+	m := make(map[string]Segment, len(segments))
+	for _, s := range segments {
+		m[s.ID] = s
+	}
+	return m
+}
+
+// validCitations 返回 citations 中确实存在的 Segment ID（去重保序）。
+func validCitations(citations []string, segs map[string]Segment) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, c := range citations {
+		c = strings.TrimSpace(c)
+		if _, ok := segs[c]; ok && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// normalize 规范化空白用于逐字校验（去掉首尾空白，压缩连续空白）。
+func normalize(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+// quoteVerbatim 金句逐字校验：规范化后的金句必须是规范化后片段文本的子串。
+func quoteVerbatim(quote string, citations []string, segs map[string]Segment) bool {
+	q := normalize(quote)
+	if q == "" {
+		return false
+	}
+	for _, c := range citations {
+		seg, ok := segs[c]
+		if !ok {
+			continue
+		}
+		if strings.Contains(normalize(seg.Text), q) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateCard 校验并清洗 KnowledgeCard（ADR-0008 / Roadmap Phase 4）。
+//
+// 规则：
+//   - 每条 Citation 必须是 segments 中真实存在的 Segment.ID（时间范围由程序解析）。
+//   - 金句 text 必须逐字（规范化空白后）来自被引用片段；校验失败的金句被省略。
+//   - summary/keyPoints/chapters 只保留带有效 Citation 的项；全部无效时报错（拒绝保存）。
+//   - title/summary 缺失或全部内容无效时报错，调用方应重试。
+//
+// 返回清洗后的卡片；错误时返回 ErrNoValidCitations。
+func ValidateCard(card *KnowledgeCard, segments []Segment) (*KnowledgeCard, error) {
+	if card == nil {
+		return nil, &ErrNoValidCitations{Detail: "卡片为空"}
+	}
+	segs := segmentIndex(segments)
+	cleaned := &KnowledgeCard{
+		Title:              strings.TrimSpace(card.Title),
+		Tags:               card.Tags,
+		SuggestedQuestions: card.SuggestedQuestions,
+	}
+
+	// Summary：必须至少有一条有效 Citation
+	summaryCites := validCitations(card.Summary.Citations, segs)
+	if strings.TrimSpace(card.Summary.Text) == "" || len(summaryCites) == 0 {
+		return nil, &ErrNoValidCitations{Detail: "summary 必须包含有效 Citation"}
+	}
+	cleaned.Summary = CitedText{Text: strings.TrimSpace(card.Summary.Text), Citations: summaryCites}
+
+	// KeyPoints：只保留带有效 Citation 的项
+	for _, kp := range card.KeyPoints {
+		cites := validCitations(kp.Citations, segs)
+		if strings.TrimSpace(kp.Content) == "" || len(cites) == 0 {
+			continue
+		}
+		cleaned.KeyPoints = append(cleaned.KeyPoints, KeyPoint{
+			Content: strings.TrimSpace(kp.Content), Description: strings.TrimSpace(kp.Description), Citations: cites,
+		})
+	}
+	if len(cleaned.KeyPoints) == 0 {
+		return nil, &ErrNoValidCitations{Detail: "keyPoints 全部缺少有效 Citation"}
+	}
+
+	// Chapters：只保留带有效 Citation 的项
+	for _, ch := range card.Chapters {
+		cites := validCitations(ch.Citations, segs)
+		if strings.TrimSpace(ch.Title) == "" || len(cites) == 0 {
+			continue
+		}
+		cleaned.Chapters = append(cleaned.Chapters, Chapter{
+			Title: strings.TrimSpace(ch.Title), Gist: strings.TrimSpace(ch.Gist), Citations: cites,
+		})
+	}
+	if len(cleaned.Chapters) == 0 {
+		return nil, &ErrNoValidCitations{Detail: "chapters 全部缺少有效 Citation"}
+	}
+
+	// Quotes：金句逐字校验，失败的省略
+	for _, q := range card.Quotes {
+		cites := validCitations(q.Citations, segs)
+		if strings.TrimSpace(q.Text) == "" || len(cites) == 0 {
+			continue
+		}
+		if !quoteVerbatim(q.Text, cites, segs) {
+			continue // 非逐字：省略该项，不降级为无证据内容
+		}
+		cleaned.Quotes = append(cleaned.Quotes, Quote{Text: strings.TrimSpace(q.Text), Citations: cites})
+	}
+
+	if cleaned.Title == "" {
+		return nil, &ErrNoValidCitations{Detail: "title 为空"}
+	}
+	return cleaned, nil
+}
+
+// ResolveCitationRange 把一条 Citation 解析为时间范围（程序计算，ADR-0008）。
+func ResolveCitationRange(citation string, segments []Segment) (start, end float64, ok bool) {
+	for _, s := range segments {
+		if s.ID == citation {
+			return s.Start, s.End, true
+		}
+	}
+	return 0, 0, false
+}

@@ -4,7 +4,9 @@ import (
 	"fmt"
 )
 
-// Selector 运行时实时选择 provider bundle（第 9 题：处理时读 active_provider，非入队写死）。
+// Selector 按 Provider 名称构造 provider bundle。
+// ADR-0009：不再存在全局 active_provider 切换；Groq 是默认零成本 Provider，
+// 付费 Provider 仅在对单次 ProcessingJob 尝试显式授权时经此处构造（授权随任务记录）。
 type Selector struct {
 	groqAPIKey   string
 	openaiAPIKey string
@@ -14,8 +16,7 @@ func NewSelector(groqAPIKey, openaiAPIKey string) *Selector {
 	return &Selector{groqAPIKey: groqAPIKey, openaiAPIKey: openaiAPIKey}
 }
 
-// Bundle 根据 activeProvider 返回对应的全套 provider 实现。
-// groq 为主力，openai 为兜底。
+// Bundle 按 provider 名返回对应的全套实现。
 func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 	switch activeProvider {
 	case "openai":

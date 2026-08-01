@@ -11,9 +11,9 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata ffmpeg
 COPY --from=builder /out/cloudwisepod /app/cloudwisepod
 WORKDIR /app
-# 数据目录：SQLite 库 + 上传音频临时文件
-VOLUME ["/app/data", "/app/tmp"]
-ENV DB_PATH=/app/data/cloudwisepod.db
-ENV TEMP_DIR=/app/tmp
+# 单一持久数据目录（ADR-0010）：SQLite + evidence + tmp + backups 全在 /app/data
+VOLUME ["/app/data"]
+ENV DATA_DIR=/app/data
+ENV PORT=8080
 EXPOSE 8080
 ENTRYPOINT ["/app/cloudwisepod"]

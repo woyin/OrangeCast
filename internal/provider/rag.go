@@ -6,11 +6,13 @@ import (
 	"unicode"
 )
 
-// Chunk 是 transcript 的一个片段聚合，保留时间戳范围，作为 RAG 检索单元与引用来源。
+// Chunk 是 transcript 的一个片段聚合，保留时间戳范围与首个 Segment ID，
+// 作为 RAG 检索单元与引用来源。
 type Chunk struct {
-	Text  string
-	Start float64
-	End   float64
+	Text      string
+	Start     float64
+	End       float64
+	SegmentID string
 }
 
 // BuildChunks 将逐句 segments 按 perChunk 句聚合成 chunk。
@@ -35,9 +37,10 @@ func BuildChunks(segments []Segment, perChunk int) []Chunk {
 			sb.WriteString(" ")
 		}
 		chunks = append(chunks, Chunk{
-			Text:  strings.TrimSpace(sb.String()),
-			Start: group[0].Start,
-			End:   group[len(group)-1].End,
+			Text:      strings.TrimSpace(sb.String()),
+			Start:     group[0].Start,
+			End:       group[len(group)-1].End,
+			SegmentID: group[0].ID,
 		})
 	}
 	return chunks
@@ -122,8 +125,8 @@ func Retrieve(chunks []Chunk, question string, topK int) []Chunk {
 	}
 	terms := tokenize(question)
 	type scored struct {
-		idx    int
-		score  int
+		idx   int
+		score int
 	}
 	scoredList := make([]scored, len(chunks))
 	for i, c := range chunks {

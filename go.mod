@@ -1,4 +1,4 @@
-module github.com/breestealth/wisepod
+module github.com/woyin/orangecast
 
 go 1.25.0
 

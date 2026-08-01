@@ -1,75 +1,83 @@
 package provider
 
-// Segment 转录时间戳段，供播放器联动（第 5 题全三层联动所需）。
+// Segment 转录时间戳段，带稳定标识（ADR-0008）。
+// Citation 必须引用 Segment.ID，时间范围由程序从 Segment 解析，不能由 AI 估算。
 type Segment struct {
+	ID    string  `json:"id"`
 	Start float64 `json:"start"` // 秒
 	End   float64 `json:"end"`
 	Text  string  `json:"text"`
 }
 
-// TranscriptResult 转录输出：纯文本 + 分段。
+// TranscriptResult 转录输出：纯文本 + 分段（调用方负责分配稳定 Segment.ID）。
 type TranscriptResult struct {
 	Language string    `json:"language"`
 	Text     string    `json:"text"`
 	Segments []Segment `json:"segments"`
 }
 
-// KnowledgeCard AI 分析的结构化产物（对标 Podwise 的 summary/takeaways/outline/...）。
-// LLM 必须按此 schema 输出；Groq 路径走容错解析 + struct 校验（第 10 题决定）。
-type KnowledgeCard struct {
-	Title             string         `json:"title"`
-	Summary           string         `json:"summary"`
-	KeyPoints         []KeyPoint     `json:"keyPoints"`
-	Chapters          []Chapter      `json:"chapters"`
-	Quotes            []Quote        `json:"quotes"`
-	Tags              []string       `json:"tags"`
-	SuggestedQuestions []string      `json:"suggestedQuestions"`
+// CitedText 带 Citation 的文本（摘要等）。
+type CitedText struct {
+	Text      string   `json:"text"`
+	Citations []string `json:"citations"` // Segment ID 列表
 }
 
+// KeyPoint 带 Citation 的要点。
 type KeyPoint struct {
-	Content     string `json:"content"`
-	Description string `json:"description"`
+	Content     string   `json:"content"`
+	Description string   `json:"description"`
+	Citations   []string `json:"citations"`
 }
 
-// Chapter 章节大纲，带时间戳——播放器 C 层联动（点章节跳转）所需。
+// Chapter 带 Citation 的章节。时间范围由程序从被引用 Segment 解析。
 type Chapter struct {
-	Title     string  `json:"title"`
-	StartTime float64 `json:"startTime"`
-	EndTime   float64 `json:"endTime"`
-	Gist      string  `json:"gist"`
+	Title     string   `json:"title"`
+	Gist      string   `json:"gist"`
+	Citations []string `json:"citations"`
 }
 
-// Quote 金句，带时间戳——播放器 C 层联动所需。
+// Quote 带 Citation 的金句。金句文本必须逐字来自被引用 Segment（程序校验）。
 type Quote struct {
-	Text      string  `json:"text"`
-	StartTime float64 `json:"startTime"`
-	EndTime   float64 `json:"endTime"`
+	Text      string   `json:"text"`
+	Citations []string `json:"citations"`
 }
 
-// QAResult 问答输出。Podwise 的 RAG 带引用；当前实现返回答案 + 相关片段引用。
+// KnowledgeCard AI 分析的结构化产物（Evidence-first，ADR-0008）。
+// 所有内容项都携带 Citation；无 Citation 的项在保存前被校验/省略/拒绝。
+type KnowledgeCard struct {
+	Title              string     `json:"title"`
+	Summary            CitedText  `json:"summary"`
+	KeyPoints          []KeyPoint `json:"keyPoints"`
+	Chapters           []Chapter  `json:"chapters"`
+	Quotes             []Quote    `json:"quotes"`
+	Tags               []string   `json:"tags"`
+	SuggestedQuestions []string   `json:"suggestedQuestions"`
+}
+
+// QAResult 问答输出。引用来自实际检索到的 Segment（Phase 7 收紧：无可靠 Citation 时拒答）。
 type QAResult struct {
-	Answer     string   `json:"answer"`
-	Sources    []Source `json:"sources"`
+	Answer  string   `json:"answer"`
+	Sources []Source `json:"sources"`
 }
 
 // Source 引用来源（转录片段 + 时间戳）。
 type Source struct {
-	Content string  `json:"content"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
+	SegmentID string  `json:"segmentId,omitempty"`
+	Content   string  `json:"content"`
+	Start     float64 `json:"start"`
+	End       float64 `json:"end"`
 }
 
 // TranscriptionProvider 音频转录接口。
 type TranscriptionProvider interface {
-	// Transcribe 从本地音频文件路径转录。音频已临时落盘，由调用方负责清理。
 	Transcribe(filePath string) (*TranscriptResult, error)
-	// Name 返回 provider 标识（groq / openai），用于 usage 记录。
 	Name() string
 }
 
 // AnalysisProvider 内容分析接口，生成 KnowledgeCard。
+// segments 提供稳定 Segment.ID，模型必须用 ID 表达 Citation（不能自行估算时间戳）。
 type AnalysisProvider interface {
-	Analyze(transcript string) (*KnowledgeCard, error)
+	Analyze(transcript string, segments []Segment) (*KnowledgeCard, error)
 	Name() string
 }
 
