@@ -16,14 +16,14 @@
 ### 2. Whisper 单次上传文件 ~25MB 上限 → 需转码
 **现象**：转录 35MB mp3 报 `HTTP 413 Request Entity Too Large`。
 **根因**：完整播客单集（30+ 分钟 / 128kbps）常 30-50MB，超 Groq Whisper 单次上传限制。
-**应对**：worker 下载后用 ffmpeg 转码为 64kbps / 16kHz / 单声道，体积砍半，音质对语音转录足够（Whisper 内部本就用 16kHz）。Dockerfile 加 ffmpeg 依赖。
+**应对**：worker 下载后用 ffmpeg 转码为 16kHz / 单声道，并按时长自适应选择码率，以 22MiB 预算为 multipart 开销留出余量（详见 ADR-0014）。Dockerfile 加 ffmpeg 依赖。
 
 ### 3. json_schema 仅 gpt-oss 支持 + gpt-oss TPM 仅 8K → 用 json_object
 **现象**：
 - `llama-3.3-70b` 用 `response_format=json_schema` 报 HTTP 400（不支持）。
 - 换 `gpt-oss-120b`（支持 strict）后，整集 transcript 单次请求 8375 token 撞 8K TPM 限（结构性失败，重试无解）。
 **应对**：
-- 分析改用 `llama-3.3-70b-versatile` + `response_format=json_object`（所有模型支持，TPM 12K 宽裕），靠 prompt 约束字段 + `parseJSONLoose` 容错解析兜底。
+- 分析使用 `llama-3.3-70b-versatile` + `response_format=json_object`，但将 Transcript 按完整 Segment 拆为保守窗口；每个窗口独立生成带 Citation 的卡片，再由程序确定性合并。窗口间以 30 秒节流，确保免费层 TPM 预算不会因连续调用而累积触顶；避免截断或跨窗口伪造依据。
 - Q&A 用 RAG chunk 检索，只喂 top-5 chunk，单次请求 token 远低于 TPM 上限。
 
 ### 4. parseJSONLoose 必须忽略未知字段

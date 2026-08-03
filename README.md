@@ -88,7 +88,7 @@ docker compose up -d
 
 实测踩到的坑（详见 `docs/adr/0002-groq-real-constraints.md`）：
 
-1. **音频文件 ≤ 25MB**：完整播客单集（30+ 分钟）常超限。worker 下载后用 ffmpeg 转码为 64kbps/16kHz/单声道再上传。
+1. **音频文件 ≤ 25MB**：完整播客单集常超限。worker 下载后用 ffmpeg 转码为 16kHz/单声道，并按时长自适应降低码率，使上传保持在 22MiB 预算内；极长音频会明确要求后续分段转录。
 2. **`json_schema` 仅 gpt-oss 支持，且 TPM 仅 8K**：分析用 `llama-3.3-70b` + `json_object`（所有模型支持，TPM 12K），靠 prompt + 容错解析兜底。
 3. **Q&A 用 RAG 分块**：只把 top-5 相关片段喂 LLM，避免整集 transcript 撞 TPM。
 

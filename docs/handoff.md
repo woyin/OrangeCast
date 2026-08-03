@@ -120,9 +120,10 @@ Roadmap Phase 0–7 已全部完成并验证。接手新工作前：
 
 ### 下一步候选（发布前）
 
-- 用真实 Groq key 跑通约 60 分钟真实 Episode 的黄金旅程（处理中重启、跨实例恢复）。
 - 填写 `docs/evalset.md` 的人工有用性评分。
 - 公网 VPS 部署演练：Caddy/Nginx 反代 + `PUBLIC_URL`/`TRUSTED_PROXIES` 配置核对。
+
+> 已于 2026-08-02 以真实 Groq 完成 Talk Python To Me #556（1:04:55）的黄金旅程：处理中关闭/重启自动恢复、EvidenceAudio/Transcript/KnowledgeCard、分段搜索、Markdown 下载及全新目录恢复播放均已验证。
 
 ### 未来功能改动
 
