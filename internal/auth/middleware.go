@@ -21,6 +21,7 @@ const sessionTTL = 30 * 24 * time.Hour
 type ctxKey string
 
 const userCtxKey ctxKey = "user_id"
+const csrfCtxKey ctxKey = "csrf_token"
 
 // RequireAuth 中间件：校验 session cookie，将 userID 注入 context。
 // 未登录重定向到 /login（浏览器请求）或返回 401（API 请求）。
@@ -107,6 +108,9 @@ func CSRFProtect(next http.Handler) http.Handler {
 			}
 			http.SetCookie(w, c)
 		}
+		// 新 Cookie 在本次请求中尚不可从 r.Cookie 读回；把 token 注入
+		// context，确保首次打开表单时渲染出的隐藏字段与 Set-Cookie 一致。
+		r = r.WithContext(context.WithValue(r.Context(), csrfCtxKey, c.Value))
 
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -129,6 +133,9 @@ func CSRFProtect(next http.Handler) http.Handler {
 
 // CSRFValue 返回当前请求的 CSRF token（用于渲染进表单）。
 func CSRFValue(r *http.Request) string {
+	if value, ok := r.Context().Value(csrfCtxKey).(string); ok && value != "" {
+		return value
+	}
 	if c, err := r.Cookie(csrfCookieName); err == nil {
 		return c.Value
 	}

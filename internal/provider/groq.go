@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -14,12 +15,17 @@ const (
 	// 它不支持 json_schema strict，但支持 json_object（保证合法 JSON），
 	// 配合 prompt 约束字段 + parseJSONLoose 容错解析兜底（第 10 题设计）。
 	groqAnalysisModel = "llama-3.3-70b-versatile"
+	// 留出 prompt、JSON 输出和中文 token 密度的余量，避免触及 Groq 12K TPM。
+	analysisWindowCharBudget  = 12000
+	analysisWindowMinInterval = 30 * time.Second
 )
 
 // GroqProvider Groq 全套实现（方案 B 主力）。
 // 转录走 /audio/transcriptions（multipart file），分析/QA 走 /chat/completions。
 type GroqProvider struct {
-	apiKey string
+	apiKey         string
+	chatCompleteFn func(messages []map[string]string, jsonMode string) (string, int, error)
+	sleepFn        func(time.Duration)
 }
 
 func NewGroqProvider(apiKey string) *GroqProvider {
@@ -111,14 +117,49 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 	return resp.Choices[0].Message.Content, code, nil
 }
 
+func (g *GroqProvider) complete(messages []map[string]string, jsonMode string) (string, int, error) {
+	if g.chatCompleteFn != nil {
+		return g.chatCompleteFn(messages, jsonMode)
+	}
+	return g.chatComplete(messages, jsonMode)
+}
+
 // Analyze 生成 KnowledgeCard（Evidence-first）。用 json_object + prompt 约束 + 容错解析，
 // 再由调用方（CitationValidator）强校验：Citation 必须引用真实 Segment.ID，金句必须逐字匹配。
 func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+	_ = transcript // Segment 才是可引用的最小证据单位。
+	windows := splitAnalysisWindows(segments, analysisWindowCharBudget)
+	if len(windows) == 0 {
+		return nil, fmt.Errorf("无法分析空转录稿")
+	}
+	cards := make([]*KnowledgeCard, 0, len(windows))
+	for i, window := range windows {
+		if i > 0 {
+			g.waitBetweenAnalysisWindows()
+		}
+		card, err := g.analyzeWindow(window)
+		if err != nil {
+			return nil, err
+		}
+		cards = append(cards, card)
+	}
+	return mergeKnowledgeCards(cards), nil
+}
+
+func (g *GroqProvider) waitBetweenAnalysisWindows() {
+	if g.sleepFn != nil {
+		g.sleepFn(analysisWindowMinInterval)
+		return
+	}
+	time.Sleep(analysisWindowMinInterval)
+}
+
+func (g *GroqProvider) analyzeWindow(segments []Segment) (*KnowledgeCard, error) {
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
-	content, _, err := g.chatComplete([]map[string]string{
+	content, _, err := g.complete([]map[string]string{
 		{"role": "system", "content": analysisSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
 		{"role": "user", "content": "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String()},
 	}, "object")
@@ -130,6 +171,76 @@ func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*Knowledg
 		return nil, fmt.Errorf("解析 KnowledgeCard 失败（原始输出: %s）: %w", truncate(content, 200), err)
 	}
 	return card, nil
+}
+
+// splitAnalysisWindows 保持 Segment 完整，避免 Citation 横跨被截断的文本。
+func splitAnalysisWindows(segments []Segment, charBudget int) [][]Segment {
+	if charBudget <= 0 {
+		return nil
+	}
+	var windows [][]Segment
+	var current []Segment
+	used := 0
+	for _, seg := range segments {
+		cost := len(seg.ID) + len(seg.Text) + 4
+		if len(current) > 0 && used+cost > charBudget {
+			windows = append(windows, current)
+			current, used = nil, 0
+		}
+		current = append(current, seg)
+		used += cost
+	}
+	if len(current) > 0 {
+		windows = append(windows, current)
+	}
+	return windows
+}
+
+// mergeKnowledgeCards 只做确定性拼接；内容与 Citation 均来自已分析的窗口。
+func mergeKnowledgeCards(cards []*KnowledgeCard) *KnowledgeCard {
+	merged := &KnowledgeCard{}
+	var summaries []string
+	var citations []string
+	seenTags := map[string]bool{}
+	for _, card := range cards {
+		if card == nil {
+			continue
+		}
+		if merged.Title == "" && strings.TrimSpace(card.Title) != "" {
+			merged.Title = card.Title
+		}
+		if strings.TrimSpace(card.Summary.Text) != "" {
+			summaries = append(summaries, card.Summary.Text)
+			citations = appendUnique(citations, card.Summary.Citations...)
+		}
+		merged.KeyPoints = append(merged.KeyPoints, card.KeyPoints...)
+		merged.Chapters = append(merged.Chapters, card.Chapters...)
+		merged.Quotes = append(merged.Quotes, card.Quotes...)
+		merged.SuggestedQuestions = append(merged.SuggestedQuestions, card.SuggestedQuestions...)
+		for _, tag := range card.Tags {
+			tag = strings.TrimSpace(tag)
+			if tag != "" && !seenTags[tag] {
+				seenTags[tag] = true
+				merged.Tags = append(merged.Tags, tag)
+			}
+		}
+	}
+	merged.Summary = CitedText{Text: strings.Join(summaries, "\n\n"), Citations: citations}
+	return merged
+}
+
+func appendUnique(values []string, additions ...string) []string {
+	seen := make(map[string]bool, len(values)+len(additions))
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, value := range additions {
+		if value != "" && !seen[value] {
+			seen[value] = true
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 // Answer 单期问答（RAG：检索相关片段 → 喂 LLM → 返回答案 + 引用时间戳）。
@@ -148,7 +259,7 @@ func (g *GroqProvider) Answer(question string, segments []Segment) (*QAResult, e
 	prompt := fmt.Sprintf("基于以下播客片段回答问题。只输出 JSON：{\"answer\":\"回答\",\"cited\":[引用的片段编号数组]}。若片段无相关信息，answer 说明并 cited 为空。\n\n%s\n问题：%s",
 		ctxSB.String(), question)
 
-	content, _, err := g.chatComplete([]map[string]string{
+	content, _, err := g.complete([]map[string]string{
 		{"role": "system", "content": "你是播客内容助手。基于给定的带编号片段回答，必须通过 cited 标注引用了哪些片段编号。"},
 		{"role": "user", "content": prompt},
 	}, "object")

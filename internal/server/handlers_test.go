@@ -114,6 +114,36 @@ func TestAuth_ClaimThenAccessDashboard(t *testing.T) {
 	}
 }
 
+func TestRegister_FirstVisitRendersUsableCSRFToken(t *testing.T) {
+	srv := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/register", nil)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	var csrf string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatal("首次 GET /register 未设置 CSRF cookie")
+	}
+	if !strings.Contains(rec.Body.String(), `name="_csrf" value="`+csrf+`"`) {
+		t.Fatal("首次 GET /register 必须渲染与 CSRF cookie 相同的 token")
+	}
+
+	post := httptest.NewRequest(http.MethodPost, "/register",
+		strings.NewReader("_csrf="+csrf+"&email=first@example.com&password=password123"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	postRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(postRec, post)
+	if postRec.Code != http.StatusSeeOther {
+		t.Errorf("首次认领无需刷新应成功并重定向，实际 %d", postRec.Code)
+	}
+}
+
 func TestRegister_SecondClaimRejected(t *testing.T) {
 	srv := newTestServer(t)
 	claimOwnerAndLogin(t, srv, "a@example.com", "password123")

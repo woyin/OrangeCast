@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestParseJSONLoose_PlainJSON(t *testing.T) {
 	raw := `{"title":"T","summary":{"text":"S","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[],"suggestedQuestions":[]}`
@@ -57,5 +61,50 @@ func TestParseJSONLoose_RejectsMalformed(t *testing.T) {
 	var c KnowledgeCard
 	if err := parseJSONLoose(raw, &c); err == nil {
 		t.Error("非 JSON 应解析失败")
+	}
+}
+
+func TestGroqAnalyze_SplitsWindowsAndMergesCitations(t *testing.T) {
+	segments := []Segment{
+		{ID: "seg-0001", Text: strings.Repeat("a", 13000)},
+		{ID: "seg-0002", Text: strings.Repeat("b", 13000)},
+	}
+	calls := 0
+	g := NewGroqProvider("test")
+	waits := 0
+	g.sleepFn = func(time.Duration) { waits++ }
+	g.chatCompleteFn = func(_ []map[string]string, _ string) (string, int, error) {
+		calls++
+		if calls == 1 {
+			return `{"title":"First","summary":{"text":"summary one","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":["python"],"suggestedQuestions":[]}`, 200, nil
+		}
+		return `{"title":"Second","summary":{"text":"summary two","citations":["seg-0002"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":["python","ai"],"suggestedQuestions":[]}`, 200, nil
+	}
+	card, err := g.Analyze("ignored", segments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 analysis windows, got %d", calls)
+	}
+	if waits != 1 {
+		t.Fatalf("analysis windows should be rate paced, got %d waits", waits)
+	}
+	if card.Title != "First" || card.Summary.Text != "summary one\n\nsummary two" {
+		t.Errorf("merged card mismatch: %+v", card)
+	}
+	if len(card.Summary.Citations) != 2 || card.Summary.Citations[0] != "seg-0001" || card.Summary.Citations[1] != "seg-0002" {
+		t.Errorf("summary citations must preserve both windows: %+v", card.Summary.Citations)
+	}
+	if len(card.Tags) != 2 || card.Tags[0] != "python" || card.Tags[1] != "ai" {
+		t.Errorf("tags should be stable and deduplicated: %+v", card.Tags)
+	}
+}
+
+func TestSplitAnalysisWindows_DoesNotSplitSegment(t *testing.T) {
+	segments := []Segment{{ID: "a", Text: "12345"}, {ID: "b", Text: "67890"}}
+	windows := splitAnalysisWindows(segments, 10)
+	if len(windows) != 2 || len(windows[0]) != 1 || windows[0][0].ID != "a" || windows[1][0].ID != "b" {
+		t.Fatalf("segments must remain whole across windows: %+v", windows)
 	}
 }

@@ -69,6 +69,53 @@ func TestStartup_RecoversStuckRunningJob(t *testing.T) {
 	}
 }
 
+func TestProcessClaimed_ShutdownLeavesJobForStartupRecovery(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	job, err := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimNextJob(ctx, leaseDuration)
+	if err != nil || claimed == nil {
+		t.Fatalf("领取任务: %v %v", claimed, err)
+	}
+
+	// 模拟应用关闭：处理被 context cancellation 打断，而不是业务失败。
+	injectFakeProviders(t, w, context.Canceled, nil)
+	shutdownCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := w.processClaimed(shutdownCtx, claimed); err != nil {
+		t.Fatalf("正常关闭不应把中断作为 worker 错误返回: %v", err)
+	}
+
+	got, err := s.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.StatusRunning {
+		t.Fatalf("关闭中断后 job 应保留 running 供重启恢复，实际 %s", got.Status)
+	}
+	if got.AttemptCount != 0 {
+		t.Fatalf("关闭中断不应计为失败尝试，实际 %d", got.AttemptCount)
+	}
+	if err := s.ResetRunningOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.StatusQueued {
+		t.Errorf("重启恢复后 job 应 queued，实际 %s", got.Status)
+	}
+}
+
 func TestClaimNextJob_OnlyOneWorkerWins(t *testing.T) {
 	s, w := newTestWorker(t)
 	ctx := context.Background()
@@ -139,7 +186,7 @@ func TestEvidenceAudio_TranscodeAndIdempotentReuse(t *testing.T) {
 
 	// 构造一个最小的真实音频输入（ffmpeg 生成 0.2s 静音）作为 upload 原始文件
 	raw := filepath.Join(w.tempDir, "input.wav")
-	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2", raw)
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2", "-f", "wav", raw)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg 无法生成测试音频: %v %s", err, out)
 	}
@@ -182,6 +229,87 @@ func TestEvidenceAudio_TranscodeAndIdempotentReuse(t *testing.T) {
 	ev2, _ := s.GetEvidenceAudio(ctx, models.SourceUpload, sourceID)
 	if ev2.SHA256 != ev.SHA256 {
 		t.Error("重复 ensureEvidence 不应改变证据哈希")
+	}
+}
+
+func TestEvidenceAudio_OversizeExistingFileIsNotReused(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg 不可用")
+	}
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "input.mp3", "audio/mpeg", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(w.evidenceDir, 0o755)
+	path := filepath.Join(w.evidenceDir, "upload_"+up.ID+".mp3")
+	if err := os.WriteFile(path, []byte("old evidence"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, maxTranscriptionUploadBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := fileSHA256(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertEvidenceAudio(ctx, models.SourceUpload, up.ID, filepath.Base(path), "mp3", maxTranscriptionUploadBytes+1, sha); err != nil {
+		t.Fatal(err)
+	}
+
+	// 提供一个真实且很短的原始输入。若 oversize 文件被错误复用，结果仍会大于预算。
+	rawDir := filepath.Join(w.tempDir, "uploads")
+	if err := os.MkdirAll(rawDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := filepath.Join(rawDir, up.ID)
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2", "-f", "wav", raw)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("生成原始音频: %v %s", err, out)
+	}
+	if _, err := w.ensureEvidence(ctx, &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() > maxTranscriptionUploadBytes {
+		t.Fatal("超预算的旧 EvidenceAudio 应重新转码")
+	}
+}
+
+func TestEvidenceBitrateKbps_StaysWithinGroqUploadBudget(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration float64
+		want     int
+	}{
+		{name: "one hour preserves 48kbps speech quality", duration: 60 * 60, want: 48},
+		{name: "65 minute episode avoids 413", duration: 64*60 + 55, want: 40},
+		{name: "104 minute episode adapts further", duration: 104 * 60, want: 24},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := evidenceBitrateKbps(tt.duration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("evidenceBitrateKbps(%.0f)=%d, want %d", tt.duration, got, tt.want)
+			}
+			predictedBytes := int64(float64(got*1000) * tt.duration / 8)
+			if predictedBytes > maxTranscriptionUploadBytes {
+				t.Errorf("预估 %d bytes 超过上传预算 %d", predictedBytes, maxTranscriptionUploadBytes)
+			}
+		})
+	}
+}
+
+func TestEvidenceBitrateKbps_RejectsAudioNeedingSegmentation(t *testing.T) {
+	if _, err := evidenceBitrateKbps(float64(maxTranscriptionUploadBytes*8) / float64(minEvidenceBitrateKbps*1000) * 1.01); err == nil {
+		t.Fatal("16kbps 仍超上传预算的超长音频应要求分段转录")
 	}
 }
 

@@ -90,7 +90,9 @@ func NewClient(maxRedirects int, maxBodyBytes int64, timeout time.Duration) *htt
 	c := &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
+			// via 是已跟随的请求链；len(via) > maxRedirects 才拒绝，
+			// 允许恰好 maxRedirects 次跟随（修复 off-by-one：Podtrac 等需要 3 跳）。
+			if len(via) > maxRedirects {
 				return ErrTooManyRedirects
 			}
 			return ValidateURL(req.URL.String())

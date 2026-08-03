@@ -6,13 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +30,10 @@ const (
 	heartbeatEvery = 20 * time.Second
 	pollInterval   = 3 * time.Second
 	maxAudioSize   = 500 << 20 // 单集音频最大下载量（500MB）
+	// Groq 的 25MB 上限包含 multipart 开销；EvidenceAudio 留出余量，避免边界 413。
+	maxTranscriptionUploadBytes int64 = 22 << 20
+	minEvidenceBitrateKbps            = 16
+	maxEvidenceBitrateKbps            = 64
 )
 
 // Worker 处理转录与分析任务。
@@ -44,7 +51,7 @@ type Worker struct {
 }
 
 func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir string) *Worker {
-	client := safehttp.NewClient(3, maxAudioSize, 15*time.Minute)
+	client := safehttp.NewClient(5, maxAudioSize, 15*time.Minute)
 	w := &Worker{
 		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir,
 		client: client, poll: pollInterval,
@@ -101,6 +108,13 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 	go w.heartbeatLoop(hbCtx, job.ID)
 
 	if err := w.processJob(hbCtx, job); err != nil {
+		// 应用正常关闭会取消 worker context。此时保留 running 状态，
+		// 让下一次启动的 ResetRunningOnStartup 将任务重新入队；不能把
+		// 可恢复的中断伪装成业务失败。
+		if errors.Is(err, context.Canceled) || errors.Is(hbCtx.Err(), context.Canceled) {
+			log.Printf("任务 %s 因正常关闭中断，等待下次启动恢复", job.ID)
+			return nil
+		}
 		log.Printf("任务 %s 处理失败: %v", job.ID, err)
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
 		w.markSourceFailed(ctx, job)
@@ -232,7 +246,7 @@ func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) 
 	// 已存在且哈希一致 → 直接复用（避免重复转码/下载，且保证幂等）
 	if ev, err := w.store.GetEvidenceAudio(ctx, job.SourceType, job.SourceID); err == nil && ev.Status == "ready" {
 		if fi, serr := os.Stat(path); serr == nil && fi.Size() > 0 {
-			if h, herr := fileSHA256(path); herr == nil && h == ev.SHA256 {
+			if h, herr := fileSHA256(path); herr == nil && h == ev.SHA256 && fi.Size() <= maxTranscriptionUploadBytes {
 				return path, nil
 			}
 		}
@@ -245,9 +259,18 @@ func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) 
 	}
 	defer cleanup()
 
-	// 转码到证据路径（原子写：临时文件 + rename，崩溃不留下半成品证据）
+	// 转码到证据路径（原子写：临时文件 + rename，崩溃不留下半成品证据）。
+	// 为满足 Groq 单文件上传上限，码率按时长自适应，而非固定 64kbps。
 	tmpPath := path + ".part"
-	if err := transcodeAudio(rawPath, tmpPath); err != nil {
+	duration, err := audioDuration(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("读取音频时长: %w", err)
+	}
+	bitrate, err := evidenceBitrateKbps(duration)
+	if err != nil {
+		return "", err
+	}
+	if err := transcodeAudio(rawPath, tmpPath, bitrate); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("音频转码失败: %w", err)
 	}
@@ -331,12 +354,41 @@ func (w *Worker) downloadAudio(ctx context.Context, audioURL string) (string, er
 	return tmpFile.Name(), nil
 }
 
-// transcodeAudio 用 ffmpeg 转码为 64kbps 单声道 mp3。
-func transcodeAudio(in, out string) error {
+// evidenceBitrateKbps 按时长选择可让转录请求（含 multipart 开销）保持在 25MB
+// Groq 上限以内的最高标准 MP3 码率。长到 16kbps 仍无法容纳时，需要后续分段策略。
+func evidenceBitrateKbps(durationSeconds float64) (int, error) {
+	if durationSeconds <= 0 {
+		return 0, fmt.Errorf("音频时长无效: %.3f", durationSeconds)
+	}
+	maxKbps := int(math.Floor(float64(maxTranscriptionUploadBytes*8) / durationSeconds / 1000))
+	for _, bitrate := range []int{maxEvidenceBitrateKbps, 56, 48, 40, 32, 24, minEvidenceBitrateKbps} {
+		if bitrate <= maxKbps {
+			return bitrate, nil
+		}
+	}
+	return 0, fmt.Errorf("音频时长 %.0f 秒即使以 %dkbps 转码仍超过 Groq 单文件上传上限；需要分段转录", durationSeconds, minEvidenceBitrateKbps)
+}
+
+// audioDuration 用 ffprobe 读取原始输入时长，以便选择 EvidenceAudio 的码率。
+func audioDuration(path string) (float64, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil {
+		return 0, err
+	}
+	return duration, nil
+}
+
+// transcodeAudio 用给定码率转码为 16kHz 单声道 MP3。
+func transcodeAudio(in, out string, bitrateKbps int) error {
 	cmd := exec.Command("ffmpeg", "-y", "-i", in,
 		"-ac", "1",
 		"-ar", "16000",
-		"-b:a", "64k",
+		"-b:a", fmt.Sprintf("%dk", bitrateKbps),
 		"-f", "mp3",
 		out,
 	)
