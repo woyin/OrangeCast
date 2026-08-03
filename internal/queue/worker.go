@@ -51,7 +51,7 @@ type Worker struct {
 }
 
 func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir string) *Worker {
-	client := safehttp.NewClient(5, maxAudioSize, 15*time.Minute)
+	client := safehttp.NewClient(10, maxAudioSize, 15*time.Minute)
 	w := &Worker{
 		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir,
 		client: client, poll: pollInterval,

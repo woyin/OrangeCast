@@ -14,7 +14,7 @@ const maxFeedSize = 16 << 20 // 16MB
 
 // feedClient 共享安全 HTTP 客户端（SSRF 防护 + 重定向限制 + 超时），
 // 与 Episode 音频下载复用同一客户端（ADR-0013）。
-var feedClient = safehttp.NewClient(5, maxFeedSize, 30*time.Second)
+var feedClient = safehttp.NewClient(10, maxFeedSize, 30*time.Second)
 
 // FetchFeed 抓取并解析 RSS feed。含 SSRF 防护 + 大小限制。
 // 返回解析后的 podcast 元信息与 episode 列表（episode 的音频 URL 也校验过 http(s)）。
