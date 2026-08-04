@@ -14,43 +14,34 @@
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
 <input type="hidden" name="source_type" value="episode">
 <input type="hidden" name="podcast_id" value="{{.Podcast.ID}}">
-<table class="episode-table">
-  <thead>
-    <tr>
-      <th><input type="checkbox" id="select-all" title="全选/反选"></th>
-      <th>单集</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
+
 {{range .Episodes}}
-  <tr class="episode-row">
-    <td>
-      {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-      <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check">
-      {{end}}
-    </td>
-    <td class="ep-info">
-      <h3>{{.Title}}</h3>
-      <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：{{.ProcessingStatus}}</p>
-    </td>
-    <td class="ep-actions">
-      {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/episode/{{.ID}}" class="btn">查看</a>{{end}}
-      {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-      <form method="post" action="/api/process" class="inline"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="episode">
-<input type="hidden" name="podcast_id" value="{{.Podcast.ID}}"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
-      {{end}}
-    </td>
-  </tr>
+<div class="list-item episode-row">
+  {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
+  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px">
+  {{end}}
+  <div class="ep-info" style="flex:1">
+    <h3>{{.Title}}</h3>
+    <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：{{.ProcessingStatus}}</p>
+  </div>
+  <div class="ep-actions">
+    {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/episode/{{.ID}}" class="btn">查看</a>{{end}}
+    {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
+    <form method="post" action="/api/process" class="inline"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="episode"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
+    {{end}}
+  </div>
+</div>
 {{else}}
-</tbody>
-</table>
 <p class="empty">暂无单集。</p>
 {{end}}
-{{if .Episodes}}
-</tbody>
-</table>
-<button type="submit" class="btn" id="batch-submit" disabled>批量处理选中</button>
+
+{{$hasSelectable := false}}
+{{range .Episodes}}{{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}{{$hasSelectable = true}}{{end}}{{end}}
+{{if $hasSelectable}}
+<div style="margin-top:12px">
+  <label><input type="checkbox" id="select-all"> 全选</label>
+  <button type="submit" class="btn" id="batch-submit" disabled style="margin-left:12px">批量处理选中</button>
+</div>
 {{end}}
 </form>
 
@@ -60,15 +51,13 @@
   const checks = document.querySelectorAll('.batch-check');
   const submit = document.getElementById('batch-submit');
   if (!selectAll || !submit) return;
-
   selectAll.addEventListener('change', function() {
     checks.forEach(c => c.checked = selectAll.checked);
     updateSubmit();
   });
   checks.forEach(c => c.addEventListener('change', updateSubmit));
   function updateSubmit() {
-    const any = Array.from(checks).some(c => c.checked);
-    submit.disabled = !any;
+    submit.disabled = !Array.from(checks).some(c => c.checked);
   }
 })();
 </script>
