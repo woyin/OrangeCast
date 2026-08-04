@@ -408,3 +408,96 @@ func TestVersionsPage_RendersAndRevert(t *testing.T) {
 		t.Errorf("回退后卡片当前版本应为 2，实际 %d", cur.Version)
 	}
 }
+
+func TestProcessBatch_EnqueuesMultipleAndRedirects(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "batch@example.com", "password123")
+	ctx := context.Background()
+
+	// 造 3 集（2 个 unprocessed + 1 个 processed）
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{
+		{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"},
+		{GUID: "g2", Title: "Ep2", AudioURL: "https://b.mp3"},
+		{GUID: "g3", Title: "Ep3", AudioURL: "https://c.mp3"},
+	})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 把第 3 集标记为 processed（不应出现在可选中）
+	srv.store.UpdateEpisodeStatus(ctx, eps[2].ID, models.StatusProcessed)
+
+	// 构造 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/podcasts/"+p.ID, nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	// 批量入队 2 集
+	body := "_csrf=" + csrf + "&source_type=episode&podcast_id=" + p.ID +
+		"&source_id=" + eps[0].ID + "&source_id=" + eps[1].ID
+	req := httptest.NewRequest(http.MethodPost, "/api/process-batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("应重定向，实际 %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "enqueued=2") || !strings.Contains(loc, "skipped=0") {
+		t.Errorf("重定向 URL 应含 enqueued=2&skipped=0，实际 %s", loc)
+	}
+
+	// 验证 2 个 job 入队
+	jobs, _ := srv.store.ListQueuedOrRunning(ctx)
+	if len(jobs) != 2 {
+		t.Errorf("应入队 2 个 job，实际 %d", len(jobs))
+	}
+}
+
+func TestProcessBatch_SkipsAlreadyQueued(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "batch2@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{
+		{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"},
+	})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 先入队一次
+	srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+
+	// CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/podcasts/"+p.ID, nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	// 再次批量入队同一集 → 应 skipped=1
+	body := "_csrf=" + csrf + "&source_type=episode&podcast_id=" + p.ID + "&source_id=" + eps[0].ID
+	req := httptest.NewRequest(http.MethodPost, "/api/process-batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "enqueued=0") || !strings.Contains(loc, "skipped=1") {
+		t.Errorf("应 enqueued=0&skipped=1（已 queued），实际 %s", loc)
+	}
+}

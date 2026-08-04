@@ -72,6 +72,7 @@ func (srv *Server) Router() http.Handler {
 	protected.HandleFunc("/settings", srv.handleSettings)
 	protected.HandleFunc("/api/qa", srv.handleQA)
 	protected.HandleFunc("/api/process", srv.handleProcess)
+	protected.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	protected.HandleFunc("/api/audio/", srv.handleAudio)
 	mux.Handle("/", authMw(auth.CSRFProtect(protected)))
 	return mux

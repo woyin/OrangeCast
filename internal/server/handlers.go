@@ -169,7 +169,16 @@ func (srv *Server) handlePodcastDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	eps, _ := srv.store.ListEpisodes(r.Context(), path)
-	srv.tmpl.Render(w, "podcast_detail.html", map[string]any{"Podcast": p, "Episodes": eps, "CSRF": auth.CSRFValue(r)})
+	batchEnqueued := r.URL.Query().Get("enqueued")
+	batchSkipped := r.URL.Query().Get("skipped")
+	batchDone := ""
+	if batchEnqueued != "" || batchSkipped != "" {
+		batchDone = "1"
+	}
+	srv.tmpl.Render(w, "podcast_detail.html", map[string]any{
+		"Podcast": p, "Episodes": eps, "CSRF": auth.CSRFValue(r),
+		"BatchDone": batchDone, "BatchEnqueued": batchEnqueued, "BatchSkipped": batchSkipped,
+	})
 }
 
 // ---- Uploads ----
@@ -522,6 +531,38 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"Saved":              r.URL.Query().Get("saved") == "1",
 		"CSRF":               auth.CSRFValue(r),
 	})
+}
+
+// handleProcessBatch 批量入队（便利入口，不持久化批次）。
+// 部分成功：能入的入，状态不对的跳过；返回 enqueued/skipped 计数。
+func (srv *Server) handleProcessBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "表单解析失败", http.StatusBadRequest)
+		return
+	}
+	sourceType := models.SourceType(r.FormValue("source_type"))
+	sourceIDs := r.Form["source_id"]
+	podcastID := r.FormValue("podcast_id")
+
+	enqueued := 0
+	skipped := 0
+	for _, sid := range sourceIDs {
+		job, err := srv.store.EnqueueJob(r.Context(), sourceType, sid, models.JobTranscribe)
+		if err != nil {
+			skipped++
+			continue
+		}
+		if job != nil {
+			enqueued++
+		} else {
+			skipped++
+		}
+	}
+	http.Redirect(w, r, fmt.Sprintf("/podcasts/%s?enqueued=%d&skipped=%d", podcastID, enqueued, skipped), http.StatusSeeOther)
 }
 
 // ---- API ----
