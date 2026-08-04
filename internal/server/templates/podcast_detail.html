@@ -23,18 +23,18 @@
 </div>
 
 {{range .Episodes}}
-<div class="list-item episode-row">
+<div class="list-item episode-row" id="row-{{.ID}}">
   {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
   <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px;flex-shrink:0">
   {{end}}
   <div class="ep-info" style="flex:1">
     <h3>{{.Title}}</h3>
-    <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：{{.ProcessingStatus}}</p>
+    <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：<span class="status-text" data-source-id="{{.ID}}" data-status="{{.ProcessingStatus}}">{{.ProcessingStatus}}</span></p>
   </div>
-  <div class="ep-actions">
+  <div class="ep-actions" data-source-id="{{.ID}}">
     {{if eq (printf "%s" .ProcessingStatus) "processed"}}<a href="/sources/episode/{{.ID}}" class="btn">查看</a>{{end}}
     {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-    <form method="post" action="/api/process" class="inline"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="episode"><input type="hidden" name="source_id" value="{{.ID}}"><button class="btn" type="submit">处理</button></form>
+    <button class="btn process-one" data-source-type="episode" data-source-id="{{.ID}}" data-csrf="{{$.CSRF}}" type="button">处理</button>
     {{end}}
   </div>
 </div>
@@ -54,6 +54,44 @@
 
 <script>
 (function() {
+  // ---- 单集"处理"：AJAX，不刷新页面 ----
+  document.querySelectorAll('.process-one').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      const sid = btn.dataset.sourceId;
+      const stype = btn.dataset.sourceType;
+      const csrf = btn.dataset.csrf;
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      fd.append('source_type', stype);
+      fd.append('source_id', sid);
+      btn.disabled = true;
+      btn.textContent = '入队中…';
+      try {
+        // handleProcess 返回 redirect，fetch 默认跟随；入队成功后 redirect 到详情页——
+        // 但我们不想要跳转，所以用 redirect:'manual' 然后只看是否 ok
+        const resp = await fetch('/api/process', { method: 'POST', body: fd, redirect: 'manual' });
+        if (resp.status === 0 || resp.status === 303) {
+          // 入队成功（303 redirect 被拦截）：更新行 UI
+          btn.textContent = '✓ 已入队';
+          btn.classList.add('btn-secondary');
+          const statusEl = document.querySelector('.status-text[data-source-id="' + sid + '"]');
+          if (statusEl) statusEl.textContent = 'queued（等待处理）';
+          const checkbox = document.querySelector('.batch-check[value="' + sid + '"]');
+          if (checkbox) { checkbox.remove(); }
+        } else {
+          btn.textContent = '处理';
+          btn.disabled = false;
+          alert('入队失败');
+        }
+      } catch(e) {
+        btn.textContent = '处理';
+        btn.disabled = false;
+        alert('请求失败');
+      }
+    });
+  });
+
+  // ---- 批量工具栏 ----
   const checks = document.querySelectorAll('.batch-check');
   const toolbar = document.getElementById('batch-toolbar');
   const countEl = document.getElementById('batch-count');
