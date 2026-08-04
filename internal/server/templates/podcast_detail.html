@@ -15,10 +15,17 @@
 <input type="hidden" name="source_type" value="episode">
 <input type="hidden" name="podcast_id" value="{{.Podcast.ID}}">
 
+<div class="batch-toolbar" id="batch-toolbar" style="display:none">
+  <span id="batch-count">已选 0 集</span>
+  <button type="submit" class="btn" id="batch-submit">批量处理选中</button>
+  <button type="button" class="btn btn-secondary" id="select-all-btn">全选当前页</button>
+  <button type="button" class="btn btn-secondary" id="clear-all-btn">取消选择</button>
+</div>
+
 {{range .Episodes}}
 <div class="list-item episode-row">
   {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px">
+  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px;flex-shrink:0">
   {{end}}
   <div class="ep-info" style="flex:1">
     <h3>{{.Title}}</h3>
@@ -35,30 +42,47 @@
 <p class="empty">暂无单集。</p>
 {{end}}
 
-{{$hasSelectable := false}}
-{{range .Episodes}}{{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}{{$hasSelectable = true}}{{end}}{{end}}
-{{if $hasSelectable}}
-<div style="margin-top:12px">
-  <label><input type="checkbox" id="select-all"> 全选</label>
-  <button type="submit" class="btn" id="batch-submit" disabled style="margin-left:12px">批量处理选中</button>
+</form>
+
+{{if .TotalPages}}
+<div class="pagination">
+  {{if gt .Page 1}}<a href="/podcasts/{{.Podcast.ID}}?page={{.PrevPage}}" class="btn btn-secondary">‹ 上一页</a>{{end}}
+  <span class="page-info">第 {{.Page}} / {{.TotalPages}} 页（共 {{.Total}} 集）</span>
+  {{if lt .Page .TotalPages}}<a href="/podcasts/{{.Podcast.ID}}?page={{.NextPage}}" class="btn btn-secondary">下一页 ›</a>{{end}}
 </div>
 {{end}}
-</form>
 
 <script>
 (function() {
-  const selectAll = document.getElementById('select-all');
   const checks = document.querySelectorAll('.batch-check');
+  const toolbar = document.getElementById('batch-toolbar');
+  const countEl = document.getElementById('batch-count');
+  const selectAllBtn = document.getElementById('select-all-btn');
+  const clearAllBtn = document.getElementById('clear-all-btn');
   const submit = document.getElementById('batch-submit');
-  if (!selectAll || !submit) return;
-  selectAll.addEventListener('change', function() {
-    checks.forEach(c => c.checked = selectAll.checked);
-    updateSubmit();
-  });
-  checks.forEach(c => c.addEventListener('change', updateSubmit));
-  function updateSubmit() {
-    submit.disabled = !Array.from(checks).some(c => c.checked);
+  if (checks.length === 0) return;
+
+  function update() {
+    const n = Array.from(checks).filter(c => c.checked).length;
+    if (n > 0) {
+      toolbar.style.display = 'flex';
+      countEl.textContent = '已选 ' + n + ' 集';
+      submit.disabled = false;
+    } else {
+      toolbar.style.display = 'none';
+      submit.disabled = true;
+    }
   }
+  checks.forEach(c => c.addEventListener('change', update));
+  selectAllBtn.addEventListener('click', function() {
+    checks.forEach(c => c.checked = true);
+    update();
+  });
+  clearAllBtn.addEventListener('click', function() {
+    checks.forEach(c => c.checked = false);
+    update();
+  });
+  update();
 })();
 </script>
 {{end}}

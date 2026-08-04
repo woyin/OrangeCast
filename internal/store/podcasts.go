@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/woyin/orangecast/internal/models"
 	"github.com/google/uuid"
+	"github.com/woyin/orangecast/internal/models"
 )
 
 // CreatePodcast 创建播客订阅。feed_url 全局唯一（单 Owner 实例，ADR-0007）。
@@ -198,4 +198,38 @@ func (s *Store) ListUploads(ctx context.Context) ([]*models.Upload, error) {
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// ListEpisodesPaginated 分页查询单集（page 从 1 开始，每页 perPage 条）。
+// 返回当前页数据与总数。
+func (s *Store) ListEpisodesPaginated(ctx context.Context, podcastID string, page, perPage int) ([]*models.Episode, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
+	var total int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM episodes WHERE podcast_id = ?`, podcastID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * perPage
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, podcast_id, guid, title, COALESCE(description,''), audio_url, duration_seconds, published_at, processing_status, created_at
+		 FROM episodes WHERE podcast_id = ? ORDER BY published_at IS NULL, published_at DESC LIMIT ? OFFSET ?`,
+		podcastID, perPage, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*models.Episode
+	for rows.Next() {
+		e := &models.Episode{}
+		if err := rows.Scan(&e.ID, &e.PodcastID, &e.GUID, &e.Title, &e.Description, &e.AudioURL, &e.DurationSeconds, &e.PublishedAt, &e.ProcessingStatus, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	return out, total, rows.Err()
 }
