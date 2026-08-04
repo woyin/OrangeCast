@@ -10,6 +10,13 @@
 </div>
 {{end}}
 
+{{if .TotalPages}}
+<div class="pagination">
+  {{if gt .Page 1}}<a href="/podcasts/{{.Podcast.ID}}?page={{.PrevPage}}" class="btn btn-secondary">‹ 上一页</a>{{end}}
+  <span class="page-info">第 {{.Page}} / {{.TotalPages}} 页（共 {{.Total}} 集）</span>
+  {{if lt .Page .TotalPages}}<a href="/podcasts/{{.Podcast.ID}}?page={{.NextPage}}" class="btn btn-secondary">下一页 ›</a>{{end}}
+</div>
+{{end}}
 <form id="batch-form" method="post" action="/api/process-batch">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
 <input type="hidden" name="source_type" value="episode">
