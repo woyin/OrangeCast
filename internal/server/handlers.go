@@ -349,9 +349,23 @@ func (srv *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
 			Stage: fmt.Sprintf("排队第 %d 位", i+1),
 		})
 	}
+	// 最近完成的 5 个任务
+	recentJobs, _ := srv.store.ListRecentCompleted(r.Context(), 5)
+	type recentView struct {
+		Job   *models.ProcessingJob
+		Title string
+	}
+	recentViews := make([]recentView, 0, len(recentJobs))
+	for _, j := range recentJobs {
+		recentViews = append(recentViews, recentView{
+			Job:   j,
+			Title: srv.store.SourceTitle(r.Context(), j.SourceType, j.SourceID),
+		})
+	}
 	srv.tmpl.Render(w, "progress.html", map[string]any{
 		"Active": activeView,
 		"Queued": queuedViews,
+		"Recent": recentViews,
 	})
 }
 
@@ -410,9 +424,33 @@ func (srv *Server) handleProgressAPI(w http.ResponseWriter, r *http.Request) {
 			Stage:      fmt.Sprintf("排队第 %d 位", i+1),
 		})
 	}
+	// 最近完成的任务
+	recentJobs, _ := srv.store.ListRecentCompleted(r.Context(), 5)
+	type recentJSON struct {
+		JobID      string `json:"job_id"`
+		SourceType string `json:"source_type"`
+		SourceID   string `json:"source_id"`
+		Title      string `json:"title"`
+		JobType    string `json:"job_type"`
+		Status     string `json:"status"`
+		UpdatedAt  string `json:"updated_at"`
+	}
+	recent := make([]recentJSON, 0, len(recentJobs))
+	for _, j := range recentJobs {
+		recent = append(recent, recentJSON{
+			JobID:      j.ID,
+			SourceType: string(j.SourceType),
+			SourceID:   j.SourceID,
+			Title:      srv.store.SourceTitle(r.Context(), j.SourceType, j.SourceID),
+			JobType:    string(j.JobType),
+			Status:     string(j.Status),
+			UpdatedAt:  j.UpdatedAt,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"active": active,
 		"queued": queued,
+		"recent": recent,
 	})
 }
 

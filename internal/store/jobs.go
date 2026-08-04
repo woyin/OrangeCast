@@ -334,3 +334,26 @@ func (s *Store) SourceStatus(ctx context.Context, sourceType models.SourceType, 
 	}
 	return models.StatusUnprocessed
 }
+
+// ListRecentCompleted 返回最近完成的 N 个任务（供进度页展示历史）。
+func (s *Store) ListRecentCompleted(ctx context.Context, limit int) ([]*models.ProcessingJob, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at
+		 FROM processing_jobs WHERE status IN ('succeeded','failed') ORDER BY updated_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.ProcessingJob
+	for rows.Next() {
+		j := &models.ProcessingJob{}
+		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}

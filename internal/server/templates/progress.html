@@ -6,21 +6,24 @@
 {{with .Active}}
 <div class="status-bar processing">
   <span class="spinner"></span>
-  <strong>正在处理：</strong>{{.Title}}
-  <span class="meta">（{{.Stage}}）</span>
+  <div style="flex:1">
+    <strong>正在处理：</strong><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a>
+    <span class="meta">（{{.Stage}} · {{.Job.JobType}}）</span>
+  </div>
 </div>
 {{else}}
 <div class="status-bar pending">当前没有正在处理的任务。</div>
 {{end}}
 
+<div id="queued-section">
 {{if .Queued}}
 <h2>排队中（{{len .Queued}}）</h2>
 <div id="queued-list">
 {{range .Queued}}
 <div class="list-item">
-  <div class="ep-info">
-    <h3>{{.Title}}</h3>
-    <p class="meta">{{.Stage}}</p>
+  <div class="ep-info" style="flex:1">
+    <h3><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a></h3>
+    <p class="meta">{{.Stage}} · {{.Job.JobType}}</p>
   </div>
 </div>
 {{end}}
@@ -30,8 +33,23 @@
 {{end}}
 </div>
 
+{{if .Recent}}
+<h2 style="margin-top:1.5rem">最近完成</h2>
+<div id="recent-list">
+{{range .Recent}}
+<div class="list-item">
+  <div class="ep-info" style="flex:1">
+    <h3><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a></h3>
+    <p class="meta">{{if eq (printf "%s" .Job.Status) "succeeded"}}✅ 成功{{else}}❌ 失败{{end}} · {{.Job.JobType}} · {{.Job.UpdatedAt}}</p>
+  </div>
+</div>
+{{end}}
+</div>
+{{end}}
+
+</div>
+
 <script>
-// 5 秒轮询（ADR-0015）
 (function() {
   async function refresh() {
     try {
@@ -39,21 +57,30 @@
       const data = await resp.json();
       let html = '';
       if (data.active) {
-        html += '<div class="status-bar processing"><span class="spinner"></span> <strong>正在处理：</strong>' + data.active.title + ' <span class="meta">（' + data.active.stage + '）</span></div>';
+        const a = data.active;
+        html += '<div class="status-bar processing"><span class="spinner"></span><div style="flex:1"><strong>正在处理：</strong><a href="/sources/' + a.source_type + '/' + a.source_id + '">' + a.title + '</a> <span class="meta">（' + a.stage + ' · ' + a.job_type + '）</span></div></div>';
       } else {
         html += '<div class="status-bar pending">当前没有正在处理的任务。</div>';
       }
       if (data.queued && data.queued.length > 0) {
         html += '<h2>排队中（' + data.queued.length + '）</h2><div id="queued-list">';
         data.queued.forEach(function(j) {
-          html += '<div class="list-item"><div class="ep-info"><h3>' + j.title + '</h3><p class="meta">' + j.stage + '</p></div></div>';
+          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + j.stage + ' · ' + j.job_type + '</p></div></div>';
         });
         html += '</div>';
       } else {
         html += '<p class="empty">没有排队中的任务。</p>';
       }
+      if (data.recent && data.recent.length > 0) {
+        html += '<h2 style="margin-top:1.5rem">最近完成</h2><div id="recent-list">';
+        data.recent.forEach(function(j) {
+          const icon = j.status === 'succeeded' ? '✅' : '❌';
+          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + icon + (j.status === 'succeeded' ? ' 成功' : ' 失败') + ' · ' + j.job_type + ' · ' + j.updated_at + '</p></div></div>';
+        });
+        html += '</div>';
+      }
       document.getElementById('progress-content').innerHTML = html;
-    } catch(e) { /* 静默失败，下次重试 */ }
+    } catch(e) {}
   }
   setInterval(refresh, 5000);
 })();
