@@ -77,3 +77,11 @@ _避免使用：Model；模型是 Provider 内部的一项选择_
 **Purge（彻底删除）**：
 由 Owner 明确发起、不可撤销地移除一个 Source 及其全部证据和处理历史的动作。Purge 会使 PersonalKnowledgeBase 中指向该 Source 的 Citation 失效。
 _避免使用：Delete、Archive、Remove；它们没有表达完整且不可逆的删除边界_
+
+**Highlight（高光片段）**：
+AI 根据整集 Transcript 判断出的、按价值密度选出的连续音频区间。每个 Highlight 的 Citation 是一组 Segment 的并集（程序取 min(start)–max(end)），AI 只能选择 Segment ID，不能自行估算时间范围。它与按主题划分的 Chapter、逐字的 Quote、文字要点的 KeyPoint 是并列关系，粒度比 Chapter 粗（按价值而非主题）、比 Quote 广（区间而非单句）。
+_避免使用：MustHear、Spotlight、Takeaway、BestPart；它们要么语义模糊，要么与 KeyPoint 冲突_
+
+**Gist（要点说明）**：
+对一段音频区间（Highlight 或 Chapter）内容的简短文字说明，由 AI 重新组织语言生成，非逐字原文。Gist 自身不可逐字核验，其证据来自所属区间绑定的 Citation 指向的真实 Segment。
+_避免使用：Narration、Annotation、Summary；它们要么偏实现，要么与整集 Summary 冲突_
