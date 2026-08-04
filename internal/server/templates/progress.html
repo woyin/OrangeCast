@@ -1,0 +1,61 @@
+{{define "title"}}处理进度 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>处理进度</h1>
+
+<div id="progress-content">
+{{with .Active}}
+<div class="status-bar processing">
+  <span class="spinner"></span>
+  <strong>正在处理：</strong>{{.Title}}
+  <span class="meta">（{{.Stage}}）</span>
+</div>
+{{else}}
+<div class="status-bar pending">当前没有正在处理的任务。</div>
+{{end}}
+
+{{if .Queued}}
+<h2>排队中（{{len .Queued}}）</h2>
+<div id="queued-list">
+{{range .Queued}}
+<div class="list-item">
+  <div class="ep-info">
+    <h3>{{.Title}}</h3>
+    <p class="meta">{{.Stage}}</p>
+  </div>
+</div>
+{{end}}
+</div>
+{{else}}
+<p class="empty" id="queued-empty">没有排队中的任务。</p>
+{{end}}
+</div>
+
+<script>
+// 5 秒轮询（ADR-0015）
+(function() {
+  async function refresh() {
+    try {
+      const resp = await fetch('/api/progress');
+      const data = await resp.json();
+      let html = '';
+      if (data.active) {
+        html += '<div class="status-bar processing"><span class="spinner"></span> <strong>正在处理：</strong>' + data.active.title + ' <span class="meta">（' + data.active.stage + '）</span></div>';
+      } else {
+        html += '<div class="status-bar pending">当前没有正在处理的任务。</div>';
+      }
+      if (data.queued && data.queued.length > 0) {
+        html += '<h2>排队中（' + data.queued.length + '）</h2><div id="queued-list">';
+        data.queued.forEach(function(j) {
+          html += '<div class="list-item"><div class="ep-info"><h3>' + j.title + '</h3><p class="meta">' + j.stage + '</p></div></div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<p class="empty">没有排队中的任务。</p>';
+      }
+      document.getElementById('progress-content').innerHTML = html;
+    } catch(e) { /* 静默失败，下次重试 */ }
+  }
+  setInterval(refresh, 5000);
+})();
+</script>
+{{end}}

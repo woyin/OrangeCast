@@ -234,8 +234,36 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	_ = w.store.IndexSearch(ctx, job.SourceType, job.SourceID, validated.Title, validated.Summary.Text, payload.Segments)
 
 	_ = w.store.RecordUsage(ctx, "analysis", bundle.Analysis.Name(), "", 0, 0, 0)
+
+	// 自动生成 Highlight（ADR-0016：接在分析之后，独立 AI 任务）
+	if err := w.doHighlight(ctx, job, bundle, payload.Segments); err != nil {
+		log.Printf("任务 %s 高光生成失败（不阻塞主流程）: %v", job.ID, err)
+	}
 	return nil
 }
+
+// doHighlight 生成高光片段并存为独立 ArtifactVersion（ADR-0016）。
+// 失败不阻塞主流程（KnowledgeCard 已成功）；Highlight 是可选增强。
+func (w *Worker) doHighlight(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, segments []provider.Segment) error {
+	raw, err := bundle.Highlight.GenerateHighlights(segments)
+	if err != nil {
+		return fmt.Errorf("生成高光: %w", err)
+	}
+	validated, err := provider.ValidateHighlightSet(raw, segments)
+	if err != nil {
+		return fmt.Errorf("高光校验: %w", err)
+	}
+	contentJSON, _ := json.Marshal(validated)
+	version, err := w.store.CreateArtifactVersion(ctx, job.SourceType, job.SourceID,
+		store.KindHighlight, bundle.Highlight.Name(), "llama-3.3-70b-versatile", "1", job.ID, string(contentJSON))
+	if err != nil {
+		return fmt.Errorf("创建高光版本: %w", err)
+	}
+	return w.store.SetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindHighlight, version)
+}
+
+// HighlightName 返回高光 Provider 名（供 worker 记录）。
+func (w *Worker) HighlightName() string { return "groq" }
 
 // ensureEvidence 确保 Source 的标准化 EvidenceAudio 已持久化并校验，返回文件路径。
 // 幂等：evidence_audio 已记录且文件存在（按 sha256 校验）时直接复用。

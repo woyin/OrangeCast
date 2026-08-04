@@ -466,6 +466,16 @@ func (f *fakeAnalyzer) Analyze(transcript string, segments []provider.Segment) (
 }
 func (f *fakeAnalyzer) Name() string { return "fake" }
 
+type fakeHighlight struct{ err error }
+
+func (f *fakeHighlight) GenerateHighlights(segments []provider.Segment) (*provider.HighlightSet, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &provider.HighlightSet{}, nil
+}
+func (f *fakeHighlight) Name() string { return "fake" }
+
 type fakeQA struct{}
 
 func (f *fakeQA) Answer(question string, segments []provider.Segment) (*provider.QAResult, error) {
@@ -480,6 +490,7 @@ func injectFakeProviders(t *testing.T, w *Worker, tc, an error) {
 			Transcription: &fakeTranscriber{err: tc},
 			Analysis:      &fakeAnalyzer{err: an},
 			QA:            &fakeQA{},
+			Highlight:     &fakeHighlight{},
 		}, nil
 	}
 }

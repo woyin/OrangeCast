@@ -203,3 +203,66 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 	}
 	return result, nil
 }
+
+// GenerateHighlights 生成高光片段（ADR-0016）。
+func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, error) {
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("无 Segment 可供生成高光")
+	}
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	payload := map[string]any{
+		"model":        openaiAnalysisModel,
+		"instructions": highlightSystemPrompt,
+		"input":        "请基于以下全部带编号片段的播客转录稿，选出最值得听的高光区间：\n\n" + sb.String(),
+		"text": map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "highlight_set",
+				"strict": true,
+				"schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"highlights": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"gist":      map[string]any{"type": "string"},
+									"citations": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								},
+								"required": []string{"gist", "citations"},
+							},
+						},
+					},
+					"required": []string{"highlights"},
+				},
+			},
+		},
+	}
+	buf, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiBaseURL+"/responses", bytes.NewReader(buf))
+	req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai 高光请求: %w", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("openai 高光失败 HTTP %d: %s", resp.StatusCode, string(data))
+	}
+	var r struct {
+		OutputText string `json:"output_text"`
+	}
+	_ = json.Unmarshal(data, &r)
+	hs := &HighlightSet{}
+	if err := parseJSONLoose(r.OutputText, hs); err != nil {
+		return nil, fmt.Errorf("解析 openai 高光: %w", err)
+	}
+	return hs, nil
+}

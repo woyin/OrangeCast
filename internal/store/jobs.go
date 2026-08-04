@@ -274,3 +274,63 @@ func (s *Store) ListQueuedOrRunning(ctx context.Context) ([]*models.ProcessingJo
 	}
 	return out, rows.Err()
 }
+
+// ProcessingProgress 描述全局处理进度（ADR-0015）。
+type ProcessingProgress struct {
+	Active *models.ProcessingJob   // 正在处理的任务（0 或 1 个，单 worker）
+	Queued []*models.ProcessingJob // 排队中的任务
+}
+
+// GetProcessingProgress 返回当前处理进度。
+func (s *Store) GetProcessingProgress(ctx context.Context) (*ProcessingProgress, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at, COALESCE(current_step,'')
+		 FROM processing_jobs WHERE status IN ('running','queued') ORDER BY
+		   CASE WHEN status='running' THEN 0 ELSE 1 END, created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	p := &ProcessingProgress{}
+	for rows.Next() {
+		j := &models.ProcessingJob{}
+		var step string
+		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt, &step); err != nil {
+			return nil, err
+		}
+		if j.Status == models.StatusRunning && p.Active == nil {
+			p.Active = j
+		} else {
+			p.Queued = append(p.Queued, j)
+		}
+	}
+	return p, rows.Err()
+}
+
+// SourceTitle 返回 Source 的标题（用于进度展示）。
+func (s *Store) SourceTitle(ctx context.Context, sourceType models.SourceType, sourceID string) string {
+	if sourceType == models.SourceEpisode {
+		if ep, err := s.GetEpisodeByID(ctx, sourceID); err == nil {
+			return ep.Title
+		}
+	} else {
+		if up, err := s.GetUploadByID(ctx, sourceID); err == nil {
+			return up.OriginalFilename
+		}
+	}
+	return sourceID[:8] + "…"
+}
+
+// SourceStatus 返回 Source 的处理状态。
+func (s *Store) SourceStatus(ctx context.Context, sourceType models.SourceType, sourceID string) models.EpisodeProcessingStatus {
+	if sourceType == models.SourceEpisode {
+		if ep, err := s.GetEpisodeByID(ctx, sourceID); err == nil {
+			return ep.ProcessingStatus
+		}
+	} else {
+		if up, err := s.GetUploadByID(ctx, sourceID); err == nil {
+			return up.ProcessingStatus
+		}
+	}
+	return models.StatusUnprocessed
+}

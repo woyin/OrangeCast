@@ -1,0 +1,60 @@
+{{define "title"}}AI DJ · {{.Title}} · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>AI DJ：{{.Title}}</h1><a href="/sources/{{.SourceType}}/{{.SourceID}}" class="btn">返回详情</a></div>
+
+<audio id="dj-player" src="{{.AudioURL}}" preload="metadata"></audio>
+
+<p class="hint">AI 选取的本集高光片段。依次播放每段原音，配合文字解说。</p>
+
+<div id="playlist">
+{{range $i, $h := .Highlights}}
+<div class="dj-item" data-start="{{$h.Start}}" data-end="{{$h.End}}">
+  <div class="dj-gist">
+    <strong>高光 {{$i}}</strong>（{{formatTime $h.Start}} – {{formatTime $h.End}}）
+    <p>{{$h.Gist}}</p>
+  </div>
+  <button class="btn dj-play" data-start="{{$h.Start}}" data-end="{{$h.End}}" type="button">▶ 播放这段</button>
+</div>
+{{else}}
+<p class="empty">无高光片段。</p>
+{{end}}
+</div>
+
+{{if .KeyPoints}}
+<div class="dj-takeaways">
+  <h2>Take Aways</h2>
+  <ul class="keypoints">
+  {{range .KeyPoints}}
+    <li><strong>{{.Content}}</strong>{{if .Description}}<p>{{.Description}}</p>{{end}}</li>
+  {{end}}
+  </ul>
+</div>
+{{end}}
+
+<script>
+(function() {
+  const audio = document.getElementById('dj-player');
+  let endTimer = null;
+
+  function playSegment(start, end) {
+    if (endTimer) clearTimeout(endTimer);
+    audio.currentTime = start;
+    audio.play();
+    const duration = (end - start) * 1000 + 500; // 多放 0.5s 缓冲
+    endTimer = setTimeout(function() { audio.pause(); }, duration);
+  }
+
+  document.querySelectorAll('.dj-play').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const start = parseFloat(btn.dataset.start);
+      const end = parseFloat(btn.dataset.end);
+      playSegment(start, end);
+    });
+  });
+
+  audio.addEventListener('pause', function() {
+    if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+  });
+})();
+</script>
+{{end}}

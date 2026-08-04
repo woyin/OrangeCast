@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -233,6 +234,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		srv.handleDownloadMarkdown(w, r)
 		return
 	}
+	if len(parts) >= 3 && parts[2] == "dj" {
+		srv.handleDJ(w, r)
+		return
+	}
 	if len(parts) >= 4 && parts[2] == "versions" && parts[3] == "revert" {
 		srv.handleRevertVersion(w, r)
 		return
@@ -297,6 +302,171 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		"CSRF":       auth.CSRFValue(r),
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
+}
+
+// ---- 进度（ADR-0015）----
+
+func (srv *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	progress, _ := srv.store.GetProcessingProgress(r.Context())
+	// 给每个 job 补上 Source 标题
+	type jobView struct {
+		Job   *models.ProcessingJob
+		Title string
+		Stage string // 友好阶段名
+	}
+	var activeView *jobView
+	if progress.Active != nil {
+		activeView = &jobView{
+			Job:   progress.Active,
+			Title: srv.store.SourceTitle(r.Context(), progress.Active.SourceType, progress.Active.SourceID),
+			Stage: stageLabel(string(srv.store.SourceStatus(r.Context(), progress.Active.SourceType, progress.Active.SourceID))),
+		}
+	}
+	queuedViews := make([]jobView, 0, len(progress.Queued))
+	for i, j := range progress.Queued {
+		queuedViews = append(queuedViews, jobView{
+			Job:   j,
+			Title: srv.store.SourceTitle(r.Context(), j.SourceType, j.SourceID),
+			Stage: fmt.Sprintf("排队第 %d 位", i+1),
+		})
+	}
+	srv.tmpl.Render(w, "progress.html", map[string]any{
+		"Active": activeView,
+		"Queued": queuedViews,
+	})
+}
+
+// stageLabel 把 Source 处理状态转成友好文字。
+func stageLabel(status string) string {
+	switch status {
+	case "transcribing":
+		return "正在转录音频"
+	case "analyzing":
+		return "正在生成知识卡片"
+	case "queued":
+		return "等待处理"
+	case "processed":
+		return "处理完成"
+	case "failed":
+		return "处理失败"
+	default:
+		return "等待处理"
+	}
+}
+
+// handleProgressAPI 返回 JSON（供前端 5s 轮询）。
+func (srv *Server) handleProgressAPI(w http.ResponseWriter, r *http.Request) {
+	progress, err := srv.store.GetProcessingProgress(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	type jobJSON struct {
+		JobID      string `json:"job_id"`
+		SourceType string `json:"source_type"`
+		SourceID   string `json:"source_id"`
+		Title      string `json:"title"`
+		JobType    string `json:"job_type"`
+		Stage      string `json:"stage"`
+	}
+	var active *jobJSON
+	if progress.Active != nil {
+		active = &jobJSON{
+			JobID:      progress.Active.ID,
+			SourceType: string(progress.Active.SourceType),
+			SourceID:   progress.Active.SourceID,
+			Title:      srv.store.SourceTitle(r.Context(), progress.Active.SourceType, progress.Active.SourceID),
+			JobType:    string(progress.Active.JobType),
+			Stage:      stageLabel(string(srv.store.SourceStatus(r.Context(), progress.Active.SourceType, progress.Active.SourceID))),
+		}
+	}
+	queued := make([]jobJSON, 0, len(progress.Queued))
+	for i, j := range progress.Queued {
+		queued = append(queued, jobJSON{
+			JobID:      j.ID,
+			SourceType: string(j.SourceType),
+			SourceID:   j.SourceID,
+			Title:      srv.store.SourceTitle(r.Context(), j.SourceType, j.SourceID),
+			JobType:    string(j.JobType),
+			Stage:      fmt.Sprintf("排队第 %d 位", i+1),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active": active,
+		"queued": queued,
+	})
+}
+
+// ---- AI DJ 模式（ADR-0016）----
+
+// handleDJ 渲染 DJ 播放清单页面。
+func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
+	if len(parts) < 3 || parts[2] != "dj" {
+		http.NotFound(w, r)
+		return
+	}
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+
+	// 读取当前 Highlight 版本
+	hv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindHighlight)
+	if err != nil {
+		http.Error(w, "尚无高光片段，请先完成处理", http.StatusNotFound)
+		return
+	}
+	var hs provider.HighlightSet
+	if err := json.Unmarshal([]byte(hv.Payload), &hs); err != nil {
+		http.Error(w, "高光数据损坏", http.StatusInternalServerError)
+		return
+	}
+
+	// 读取当前 Transcript（用于解析 Citation 时间范围）
+	tv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
+	if err != nil {
+		http.Error(w, "尚无转录稿", http.StatusNotFound)
+		return
+	}
+	var tp provider.TranscriptPayload
+	if err := json.Unmarshal([]byte(tv.Payload), &tp); err != nil {
+		http.Error(w, "转录数据损坏", http.StatusInternalServerError)
+		return
+	}
+
+	// 读取 KnowledgeCard（结尾 Take Aways = KeyPoints）
+	var card provider.KnowledgeCard
+	if cv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
+		json.Unmarshal([]byte(cv.Payload), &card)
+	}
+
+	// 构造播放清单：每个 Highlight 解析时间范围
+	type highlightView struct {
+		Gist      string
+		Start     float64
+		End       float64
+		Citations []string
+	}
+	var highlights []highlightView
+	for _, h := range hs.Highlights {
+		start, end, ok := citationSpan(h.Citations, tp.Segments)
+		if !ok {
+			continue
+		}
+		highlights = append(highlights, highlightView{
+			Gist: h.Gist, Start: start, End: end, Citations: h.Citations,
+		})
+	}
+
+	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
+	srv.tmpl.Render(w, "dj.html", map[string]any{
+		"SourceType": string(sourceType),
+		"SourceID":   sourceID,
+		"Title":      card.Title,
+		"Highlights": highlights,
+		"KeyPoints":  card.KeyPoints,
+		"AudioURL":   audioURL,
+		"CSRF":       auth.CSRFValue(r),
+	})
 }
 
 // ---- 搜索 ----

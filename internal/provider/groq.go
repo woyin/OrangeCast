@@ -286,3 +286,27 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
+
+// GenerateHighlights 生成高光片段（ADR-0016）。
+// 喂入全部 Segment（不分窗口，因为高光判断需要整集视野）。
+func (g *GroqProvider) GenerateHighlights(segments []Segment) (*HighlightSet, error) {
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("无 Segment 可供生成高光")
+	}
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	content, _, err := g.complete([]map[string]string{
+		{"role": "system", "content": highlightSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
+		{"role": "user", "content": "请基于以下全部带编号片段的播客转录稿，选出最值得听的高光区间：\n\n" + sb.String()},
+	}, "object")
+	if err != nil {
+		return nil, err
+	}
+	hs := &HighlightSet{}
+	if err := parseJSONLoose(content, hs); err != nil {
+		return nil, fmt.Errorf("解析高光片段失败（原始输出: %s）: %w", truncate(content, 200), err)
+	}
+	return hs, nil
+}

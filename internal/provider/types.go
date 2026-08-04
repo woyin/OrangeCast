@@ -92,4 +92,17 @@ type ProviderBundle struct {
 	Transcription TranscriptionProvider
 	Analysis      AnalysisProvider
 	QA            QAProvider
+	Highlight     HighlightProvider
+}
+
+// Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。
+// Citation 是一组 Segment ID 的集合，程序取 min(start)–max(end) 算时间范围。
+type Highlight struct {
+	Gist      string   `json:"gist"`      // AI 生成的"为什么这段值得听"说明（非逐字原文）
+	Citations []string `json:"citations"` // Segment ID 列表
+}
+
+// HighlightSet 一个 Source 的全部高光片段。
+type HighlightSet struct {
+	Highlights []Highlight `json:"highlights"`
 }

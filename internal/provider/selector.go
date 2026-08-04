@@ -24,13 +24,13 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 			return nil, fmt.Errorf("active_provider=openai 但 OPENAI_API_KEY 未配置")
 		}
 		oa := NewOpenAIProvider(sel.openaiAPIKey)
-		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa}, nil
+		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
 		}
 		g := NewGroqProvider(sel.groqAPIKey)
-		return &ProviderBundle{Transcription: g, Analysis: g, QA: g}, nil
+		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}
