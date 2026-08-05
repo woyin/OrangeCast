@@ -29,7 +29,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	if len(applied) != len(want) {
 		t.Fatalf("应应用 %v，实际 %v", want, applied)
 	}
@@ -40,7 +40,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	}
 	// schema_migrations 已登记到最新版本
 	v, _ := AppliedVersion(context.Background(), db)
-	if v != 9 {
+	if v != 10 {
 		t.Fatalf("AppliedVersion 应为 8，实际 %d", v)
 	}
 	// 关键表存在（含 schema_migrations）
@@ -93,8 +93,8 @@ func TestMigrate_V01FixtureUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
-	if len(applied) != 9 {
-		t.Fatalf("应应用 9 条迁移，实际 %d", len(applied))
+	if len(applied) != 10 {
+		t.Fatalf("应应用 10 条迁移，实际 %d", len(applied))
 	}
 	after := countAll(t, db)
 
@@ -136,7 +136,7 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	}
 
 	// 注入一条必然失败的迁移：引用不存在的表 + 故意语法错（version=4，位于全部真实迁移之后）。
-	bad := migration{version: 11, name: "0007_broken", up: "CREATE TABLE boom (id INTEGER); SELECT no_such_column FROM no_such_table;"}
+	bad := migration{version: 12, name: "0007_broken", up: "CREATE TABLE boom (id INTEGER); SELECT no_such_column FROM no_such_table;"}
 	if err := applyOne(context.Background(), db, bad); err == nil {
 		t.Fatal("期望失败迁移报错，实际成功")
 	}
@@ -150,8 +150,8 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 9 {
-		t.Errorf("失败迁移不应登记版本；应保持 10，实际 %d", v)
+	if v != 10 {
+		t.Errorf("失败迁移不应登记版本；应保持 11，实际 %d", v)
 	}
 
 	// 可安全重试：再次正常 Migrate 应保持 version=8 且不报错（无新迁移）。

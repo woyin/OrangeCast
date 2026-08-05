@@ -19,6 +19,7 @@ import (
 // 注意：OpenAI 的 /responses 与 Groq 的 /chat/completions 契约不对称（第 10 题），此处独立实现。
 type OpenAIProvider struct {
 	apiKey        string
+	baseURL       string // 空则用默认
 	analysisModel string // 空则用默认
 }
 
@@ -36,7 +37,7 @@ func (o *OpenAIProvider) Name() string { return "openai" }
 
 // WithModel 返回使用指定分析模型的新实例。
 func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
-	return &OpenAIProvider{apiKey: o.apiKey, analysisModel: model}
+	return &OpenAIProvider{apiKey: o.apiKey, baseURL: o.baseURL, analysisModel: model}
 }
 
 func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) {
@@ -58,7 +59,11 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 	}
 	w.Close()
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiBaseURL+"/audio/transcriptions", body)
+	bURL := o.baseURL
+	if bURL == "" {
+		bURL = openaiBaseURL
+	}
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/audio/transcriptions", body)
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -95,12 +100,20 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 
 // Analyze 走 /responses + json_schema strict（OpenAI 保证结构化输出）。
 func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+	bURL := o.baseURL
+	if bURL == "" {
+		bURL = openaiBaseURL
+	}
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
+	aModel := o.analysisModel
+	if aModel == "" {
+		aModel = openaiAnalysisModel
+	}
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        aModel,
 		"instructions": analysisSystemPrompt,
 		"input":        "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String(),
 		"text": map[string]any{
@@ -113,7 +126,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 		},
 	}
 	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiBaseURL+"/responses", bytes.NewReader(buf))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -138,6 +151,11 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 }
 
 func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult, error) {
+	bURL := o.baseURL
+	if bURL == "" {
+		bURL = openaiBaseURL
+	}
+	_ = bURL
 	chunks := Retrieve(BuildChunks(segments, 8), question, 5)
 	if len(chunks) == 0 {
 		return &QAResult{Answer: "暂无转录稿可用于回答。"}, nil
@@ -168,7 +186,7 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 		},
 	}
 	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiBaseURL+"/responses", bytes.NewReader(buf))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -212,6 +230,11 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 
 // GenerateHighlights 生成高光片段（ADR-0016）。
 func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, error) {
+	bURL := o.baseURL
+	if bURL == "" {
+		bURL = openaiBaseURL
+	}
+	_ = bURL
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("无 Segment 可供生成高光")
 	}

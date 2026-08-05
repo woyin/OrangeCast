@@ -24,6 +24,7 @@ const (
 // 转录走 /audio/transcriptions（multipart file），分析/QA 走 /chat/completions。
 type GroqProvider struct {
 	apiKey         string
+	baseURL        string // 空则用默认 groqBaseURL
 	model          string // 空则用默认 groqAnalysisModel
 	chatCompleteFn func(messages []map[string]string, jsonMode string) (string, int, error)
 	sleepFn        func(time.Duration)
@@ -37,7 +38,7 @@ func (g *GroqProvider) Name() string { return "groq" }
 
 // WithModel 返回使用指定分析模型的新实例（转录模型不变）。
 func (g *GroqProvider) WithModel(model string) *GroqProvider {
-	return &GroqProvider{apiKey: g.apiKey, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
+	return &GroqProvider{apiKey: g.apiKey, baseURL: g.baseURL, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
 }
 
 // Transcribe 转录：Groq 要求上传文件本体（不支持服务端 fetch URL）。

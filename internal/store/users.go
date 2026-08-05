@@ -108,10 +108,12 @@ func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
 	st := &models.Settings{}
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT transcription_model, analysis_model, highlight_model, qa_model,
-		        transcription_provider, analysis_provider, highlight_provider, qa_provider
+		        transcription_provider, analysis_provider, highlight_provider, qa_provider,
+		        groq_api_key, groq_base_url, openai_api_key, openai_base_url
 		 FROM settings WHERE id = 1`).
 		Scan(&st.TranscriptionModel, &st.AnalysisModel, &st.HighlightModel, &st.QAModel,
-			&st.TranscriptionProvider, &st.AnalysisProvider, &st.HighlightProvider, &st.QAProvider)
+			&st.TranscriptionProvider, &st.AnalysisProvider, &st.HighlightProvider, &st.QAProvider,
+			&st.GroqAPIKey, &st.GroqBaseURL, &st.OpenAIAPIKey, &st.OpenAIBaseURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = s.DB.ExecContext(ctx,
 			`INSERT INTO settings (id) VALUES (1)`)
@@ -143,6 +145,7 @@ func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 		   qa_provider = excluded.qa_provider,
 		   updated_at = datetime('now')`,
 		st.TranscriptionModel, st.AnalysisModel, st.HighlightModel, st.QAModel,
-		st.TranscriptionProvider, st.AnalysisProvider, st.HighlightProvider, st.QAProvider)
+		st.TranscriptionProvider, st.AnalysisProvider, st.HighlightProvider, st.QAProvider,
+		st.GroqAPIKey, st.GroqBaseURL, st.OpenAIAPIKey, st.OpenAIBaseURL)
 	return err
 }

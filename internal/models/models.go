@@ -166,4 +166,8 @@ type Settings struct {
 	AnalysisProvider      *string
 	HighlightProvider     *string
 	QAProvider            *string
+	GroqAPIKey            *string
+	GroqBaseURL           *string
+	OpenAIAPIKey          *string
+	OpenAIBaseURL         *string
 }

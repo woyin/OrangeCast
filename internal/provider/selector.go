@@ -5,15 +5,36 @@ import (
 )
 
 // Selector 按 Provider 名称构造 provider bundle。
-// ADR-0009：不再存在全局 active_provider 切换；Groq 是默认零成本 Provider，
-// 付费 Provider 仅在对单次 ProcessingJob 尝试显式授权时经此处构造（授权随任务记录）。
+// key 和 baseURL 可在运行时从 SQLite settings 覆盖（ADR-0009 扩展）。
 type Selector struct {
-	groqAPIKey   string
-	openaiAPIKey string
+	groqAPIKey    string
+	groqBaseURL   string
+	openaiAPIKey  string
+	openaiBaseURL string
 }
 
 func NewSelector(groqAPIKey, openaiAPIKey string) *Selector {
 	return &Selector{groqAPIKey: groqAPIKey, openaiAPIKey: openaiAPIKey}
+}
+
+// HasGroq 返回 Groq key 是否就绪。
+func (sel *Selector) HasGroq() bool   { return sel.groqAPIKey != "" }
+func (sel *Selector) HasOpenAI() bool { return sel.openaiAPIKey != "" }
+
+// ApplySettings 用 SQLite settings 覆盖默认 key/URL（启动时 + 保存时调）。
+func (sel *Selector) ApplySettings(groqKey, groqURL, openaiKey, openaiURL string) {
+	if groqKey != "" {
+		sel.groqAPIKey = groqKey
+	}
+	if groqURL != "" {
+		sel.groqBaseURL = groqURL
+	}
+	if openaiKey != "" {
+		sel.openaiAPIKey = openaiKey
+	}
+	if openaiURL != "" {
+		sel.openaiBaseURL = openaiURL
+	}
 }
 
 // Bundle 按 provider 名返回对应的全套实现。
@@ -24,21 +45,23 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 			return nil, fmt.Errorf("active_provider=openai 但 OPENAI_API_KEY 未配置")
 		}
 		oa := NewOpenAIProvider(sel.openaiAPIKey)
+		if sel.openaiBaseURL != "" {
+			oa.baseURL = sel.openaiBaseURL
+		}
 		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
 		}
 		g := NewGroqProvider(sel.groqAPIKey)
+		if sel.groqBaseURL != "" {
+			g.baseURL = sel.groqBaseURL
+		}
 		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}
 }
-
-// 默认导出便捷函数，供测试或启动期检查 key 是否就绪。
-func (sel *Selector) HasGroq() bool   { return sel.groqAPIKey != "" }
-func (sel *Selector) HasOpenAI() bool { return sel.openaiAPIKey != "" }
 
 // TaskConfig 每个任务的 Provider + Model 配置（来自 settings）。
 type TaskConfig struct {
@@ -53,7 +76,6 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 		return nil, err
 	}
 	if tc.Model != "" {
-		// 用指定模型覆盖（不修改原 bundle）
 		switch tc.Provider {
 		case "groq":
 			if g, ok := bundle.Analysis.(*GroqProvider); ok {

@@ -60,6 +60,23 @@ func runServe() {
 
 	// provider 选择器 + worker + cron 刷新器
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
+	// 从 SQLite settings 覆盖 key/URL（可页面配置，ADR-0009 扩展）
+	if st, err := s.GetSettings(context.Background()); err == nil {
+		gKey, gURL, oKey, oURL := "", "", "", ""
+		if st.GroqAPIKey != nil {
+			gKey = *st.GroqAPIKey
+		}
+		if st.GroqBaseURL != nil {
+			gURL = *st.GroqBaseURL
+		}
+		if st.OpenAIAPIKey != nil {
+			oKey = *st.OpenAIAPIKey
+		}
+		if st.OpenAIBaseURL != nil {
+			oURL = *st.OpenAIBaseURL
+		}
+		selector.ApplySettings(gKey, gURL, oKey, oURL)
+	}
 	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir)
 	refresher := rss.NewRefresher(s)
 	refresher.Start()

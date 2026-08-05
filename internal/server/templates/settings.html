@@ -1,14 +1,37 @@
 {{define "title"}}设置 · CloudWisePod{{end}}
 {{define "content"}}
 <h1>设置</h1>
-<p class="hint">为每个任务选择 Provider 和 Model。Groq 是默认零成本；OpenAI 需配置 API key 且产生费用（ADR-0009）。</p>
-{{if not .HasOpenAI}}
-<p class="hint" style="color:#dc2626">⚠️ 未配置 OPENAI_API_KEY，选择 OpenAI 的任务会失败。</p>
-{{end}}
 
+<h2>Provider 配置</h2>
+<p class="hint">API key 和 base URL 存储在本地 SQLite。留空则使用 .env 环境变量的值。</p>
 <form method="post" action="/settings">
   <input type="hidden" name="_csrf" value="{{.CSRF}}">
-  <table style="width:100%;border-collapse:collapse">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:0.5rem">Provider</th>
+        <th style="text-align:left;padding:0.5rem">API Key</th>
+        <th style="text-align:left;padding:0.5rem">Base URL</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem;font-weight:bold">Groq</td>
+        <td style="padding:0.5rem"><input type="password" name="groq_api_key" value="{{.GroqAPIKey}}" placeholder="gsk_..." style="width:100%"></td>
+        <td style="padding:0.5rem"><input type="text" name="groq_base_url" value="{{.GroqBaseURL}}" placeholder="https://api.groq.com/openai/v1" style="width:100%"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem;font-weight:bold">OpenAI</td>
+        <td style="padding:0.5rem"><input type="password" name="openai_api_key" value="{{.OpenAIAPIKey}}" placeholder="sk-..." style="width:100%"></td>
+        <td style="padding:0.5rem"><input type="text" name="openai_base_url" value="{{.OpenAIBaseURL}}" placeholder="https://api.openai.com/v1" style="width:100%"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>任务模型配置</h2>
+  <p class="hint">为每个任务选择 Provider 和 Model。Groq 是默认零成本；OpenAI 产生费用。</p>
+  {{if not .HasOpenAI}}<p class="hint" style="color:#dc2626">⚠️ 未配置 OpenAI API key，选择 OpenAI 的任务会失败。</p>{{end}}
+  <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
     <thead>
       <tr style="border-bottom:1px solid var(--border)">
         <th style="text-align:left;padding:0.5rem">任务</th>
@@ -19,47 +42,27 @@
     <tbody>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">转录</td>
-        <td style="padding:0.5rem">
-          <select name="transcription_provider">
-            <option value="groq" {{if eq .TranscriptionProvider "groq"}}selected{{end}}>Groq</option>
-            <option value="openai" {{if eq .TranscriptionProvider "openai"}}selected{{end}}>OpenAI</option>
-          </select>
-        </td>
+        <td style="padding:0.5rem"><select name="transcription_provider"><option value="groq" {{if eq .TranscriptionProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .TranscriptionProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
         <td style="padding:0.5rem"><input type="text" name="transcription_model" value="{{.TranscriptionModel}}" placeholder="whisper-large-v3"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">分析（知识卡片）</td>
-        <td style="padding:0.5rem">
-          <select name="analysis_provider">
-            <option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option>
-            <option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option>
-          </select>
-        </td>
-        <td style="padding:0.5rem"><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="llama-3.3-70b-versatile / gpt-4o-mini"></td>
+        <td style="padding:0.5rem"><select name="analysis_provider"><option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="llama-3.3-70b-versatile"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">高光（AI DJ）</td>
-        <td style="padding:0.5rem">
-          <select name="highlight_provider">
-            <option value="groq" {{if eq .HighlightProvider "groq"}}selected{{end}}>Groq</option>
-            <option value="openai" {{if eq .HighlightProvider "openai"}}selected{{end}}>OpenAI</option>
-          </select>
-        </td>
+        <td style="padding:0.5rem"><select name="highlight_provider"><option value="groq" {{if eq .HighlightProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .HighlightProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
         <td style="padding:0.5rem"><input type="text" name="highlight_model" value="{{.HighlightModel}}" placeholder="同分析模型"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">问答（Q&A）</td>
-        <td style="padding:0.5rem">
-          <select name="qa_provider">
-            <option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option>
-            <option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option>
-          </select>
-        </td>
+        <td style="padding:0.5rem"><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
         <td style="padding:0.5rem"><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="llama-3.3-70b-versatile"></td>
       </tr>
     </tbody>
   </table>
-  <button type="submit" style="margin-top:1rem">保存</button>
+  <button type="submit">保存</button>
 </form>
-{{if .Saved}}<p class="success">已保存。新设置对后续处理的任务立即生效。</p>{{end}}
+{{if .Saved}}<p class="success">已保存。新设置对后续任务立即生效。</p>{{end}}
 {{end}}
