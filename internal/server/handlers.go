@@ -1082,9 +1082,9 @@ func (srv *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGraphAPI 返回图谱 JSON。
+// handleGraphAPI 返回 KeyPoint 粒度图谱 JSON。
 func (srv *Server) handleGraphAPI(w http.ResponseWriter, r *http.Request) {
-	gd, err := srv.store.GetTagGraph(r.Context())
+	gd, err := srv.store.GetKpGraph(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return

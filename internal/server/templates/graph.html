@@ -1,9 +1,14 @@
 {{define "title"}}知识图谱 · CloudWisePod{{end}}
 {{define "content"}}
 <h1>知识图谱</h1>
-<p class="hint">每个节点是一集已处理的 Episode，共享 Tag 越多的 Episode 靠得越近。点击节点查看详情。</p>
+<p class="hint">每个节点是一个关键要点。<strong>实线</strong>=同一集合（Owner 组织）；<strong>虚线</strong>=文本相似度建议（可考虑归入同一集合）。点击节点跳转出处。</p>
 
-<svg id="graph-svg" style="width:100%;height:70vh;border:1px solid var(--border);border-radius:8px;background:#fff"></svg>
+<div id="legend" style="margin-bottom:0.5rem;display:flex;gap:1rem;font-size:0.85rem;color:var(--muted)">
+  <span><span style="display:inline-block;width:16px;height:2px;background:#4f46e5;vertical-align:middle"></span> 同一集合</span>
+  <span><span style="display:inline-block;width:16px;height:2px;background:#999;border-top:1px dashed #999;vertical-align:middle"></span> 相似度建议</span>
+</div>
+
+<svg id="graph-svg" style="width:100%;height:72vh;border:1px solid var(--border);border-radius:8px;background:#fff"></svg>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
@@ -16,9 +21,14 @@
     if (!data.nodes || data.nodes.length === 0) {
       svg.append('text').attr('x', width/2).attr('y', height/2)
         .attr('text-anchor', 'middle').attr('fill', '#999')
-        .text('暂无已处理的 Episode。处理播客后会自动生成图谱。');
+        .text('暂无关键要点。处理播客后自动生成。');
       return;
     }
+
+    // Collection 颜色映射
+    const colColors = {};
+    const palette = d3.schemeCategory10;
+    (data.collections || []).forEach((c, i) => { colColors[c.ID] = palette[i % 10]; });
 
     const nodes = data.nodes.map(d => ({...d}));
     const links = (data.links || []).map(d => ({...d}));
@@ -30,53 +40,49 @@
     nodes.forEach(n => { n.degree = linkCount[n.id] || 0; });
 
     const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.id).distance(d => 120 - d.tags.length * 15).strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-400))
+      .force('link', d3.forceLink(links).id(d => d.id)
+        .distance(l => l.type === 'collection' ? 60 : 150)
+        .strength(l => l.type === 'collection' ? 0.8 : 0.1))
+      .force('charge', d3.forceManyBody().strength(-300))
       .force('center', d3.forceCenter(width/2, height/2))
-      .force('collision', d3.forceCollide().radius(d => 25 + d.degree * 3));
+      .force('collision', d3.forceCollide().radius(d => 20 + d.degree * 2));
 
-    const link = svg.append('g').selectAll('line')
-      .data(links).enter().append('line')
-      .attr('stroke', '#999').attr('stroke-opacity', 0.4)
-      .attr('stroke-width', d => Math.min(d.tags.length, 3));
+    // 边
+    const linkG = svg.append('g').selectAll('line').data(links).enter().append('line')
+      .attr('stroke', d => d.type === 'collection' ? '#4f46e5' : '#999')
+      .attr('stroke-opacity', d => d.type === 'collection' ? 0.5 : 0.25)
+      .attr('stroke-width', d => d.type === 'collection' ? 2 : 1)
+      .attr('stroke-dasharray', d => d.type === 'similar' ? '4,4' : null);
 
-    const node = svg.append('g').selectAll('g')
-      .data(nodes).enter().append('g')
+    // 节点
+    const nodeG = svg.append('g').selectAll('g').data(nodes).enter().append('g')
       .style('cursor', 'pointer')
-      .call(d3.drag()
-        .on('start', dragStart)
-        .on('drag', dragging)
-        .on('end', dragEnd));
+      .call(d3.drag().on('start', ds).on('drag', dd).on('end', de));
 
-    node.append('circle')
-      .attr('r', d => 12 + d.degree * 2)
-      .attr('fill', d => d3.schemeCategory10[d.degree % 10] || '#4f46e5')
-      .attr('stroke', '#fff').attr('stroke-width', 2);
+    nodeG.append('circle')
+      .attr('r', d => 8 + d.degree * 1.5)
+      .attr('fill', d => d.collection ? (colColors[d.collection] || '#4f46e5') : '#cbd5e1')
+      .attr('stroke', '#fff').attr('stroke-width', 1.5);
 
-    node.append('text')
-      .text(d => d.title.length > 15 ? d.title.slice(0,14)+'…' : d.title)
-      .attr('x', 0).attr('y', d => 20 + d.degree * 2)
-      .attr('text-anchor', 'middle').attr('font-size', '11px').attr('fill', '#333');
+    nodeG.append('text')
+      .text(d => d.content.length > 20 ? d.content.slice(0,19)+'…' : d.content)
+      .attr('x', 0).attr('y', d => 16 + d.degree * 1.5)
+      .attr('text-anchor', 'middle').attr('font-size', '10px').attr('fill', '#333');
 
-    node.append('title').text(d => d.title + '（连接 ' + d.degree + ' 集）');
+    nodeG.append('title').text(d => d.content + '\n出处：' + d.source_title + '（' + fmtT(d.time_start) + '）');
 
-    node.on('click', (e, d) => { window.location.href = '/sources/episode/' + d.id; });
+    nodeG.on('click', (e, d) => { window.location.href = '/sources/' + d.source_type + '/' + d.source_id + '?t=' + d.time_start; });
 
     simulation.on('tick', () => {
-      link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-          .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-      node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+      linkG.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+           .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      nodeG.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
     });
 
-    function dragStart(e, d) {
-      if (!e.active) simulation.alphaTarget(0.3).restart();
-      d.fx = d.x; d.fy = d.y;
-    }
-    function dragging(e, d) { d.fx = e.x; d.fy = e.y; }
-    function dragEnd(e, d) {
-      if (!e.active) simulation.alphaTarget(0);
-      d.fx = null; d.fy = null;
-    }
+    function ds(e, d) { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+    function dd(e, d) { d.fx = e.x; d.fy = e.y; }
+    function de(e, d) { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+    function fmtT(s) { const t=Math.floor(s),m=Math.floor(t/60),x=t%60; return m+':'+(x<10?'0':'')+x; }
   });
 })();
 </script>
