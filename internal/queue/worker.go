@@ -233,6 +233,17 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	// 更新分段级搜索索引（幂等：先删后插，Roadmap Phase 5）
 	_ = w.store.IndexSearch(ctx, job.SourceType, job.SourceID, validated.Title, validated.Summary.Text, payload.Segments)
 
+	// 刷新 KeyPoint 全局索引（ADR-0017）
+	sourceTitle := ""
+	if ep, err := w.store.GetEpisodeByID(ctx, job.SourceID); err == nil {
+		sourceTitle = ep.Title
+	} else if up, err := w.store.GetUploadByID(ctx, job.SourceID); err == nil {
+		sourceTitle = up.OriginalFilename
+	}
+	if err := w.store.IndexKeyPoints(ctx, job.SourceType, job.SourceID, sourceTitle, version, validated, payload.Segments); err != nil {
+		log.Printf("任务 %s KeyPoint 索引刷新失败（不阻塞）: %v", job.ID, err)
+	}
+
 	_ = w.store.RecordUsage(ctx, "analysis", bundle.Analysis.Name(), "", 0, 0, 0)
 
 	// 自动生成 Highlight（ADR-0016：接在分析之后，独立 AI 任务）
@@ -454,7 +465,12 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 		// 1) 删除文件（EvidenceAudio + upload 原始文件；不存在视为已删，幂等）
 		_ = os.Remove(filepath.Join(w.evidenceDir, fmt.Sprintf("%s_%s.mp3", p.SourceType, p.SourceID)))
 		_ = os.Remove(filepath.Join(w.tempDir, "uploads", p.SourceID))
-		// 2) 事务性删除 DB 行
+		// 2) 删除 KeyPoint 索引 + 标注/收藏/集合成员（ADR-0017）
+		_ = w.store.DeleteKeyPointsForSource(ctx, p.SourceType, p.SourceID)
+		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM annotations WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
+		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM pins WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
+		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM collection_items WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
+		// 3) 事务性删除 DB 行
 		if err := w.store.DeleteSourceRows(ctx, p.SourceType, p.SourceID); err != nil {
 			return fmt.Errorf("purge 删除 DB 行（%s/%s）: %w", p.SourceType, p.SourceID, err)
 		}

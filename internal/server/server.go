@@ -69,6 +69,12 @@ func (srv *Server) Router() http.Handler {
 	protected.HandleFunc("/uploads/new", srv.handleUploadNew)
 	protected.HandleFunc("/sources/", srv.handleSourceDetail) // /sources/{type}/{id}[/dj|/download|/versions]
 	protected.HandleFunc("/search", srv.handleSearch)
+	protected.HandleFunc("/keypoints", srv.handleKeyPoints)
+	protected.HandleFunc("/api/keypoints/search", srv.handleKeyPointsSearch)
+	protected.HandleFunc("/api/annotation", srv.handleAnnotation)
+	protected.HandleFunc("/api/pin", srv.handlePin)
+	protected.HandleFunc("/api/collection", srv.handleCollection)
+	protected.HandleFunc("/api/collection/item", srv.handleCollectionItem)
 	protected.HandleFunc("/settings", srv.handleSettings)
 	protected.HandleFunc("/api/qa", srv.handleQA)
 	protected.HandleFunc("/api/process", srv.handleProcess)

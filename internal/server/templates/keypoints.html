@@ -1,0 +1,179 @@
+{{define "title"}}关键要点 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>关键要点</h1>
+
+<div class="search-form" style="margin-bottom:1rem">
+  <input type="text" id="kp-search" placeholder="搜索关键要点…" style="flex:1">
+  <button type="button" class="btn" id="kp-search-btn">搜索</button>
+  <button type="button" class="btn btn-secondary" id="kp-search-clear" style="display:none">清除</button>
+</div>
+
+<div id="kp-results">
+{{range .KeyPoints}}
+<div class="list-item kp-row" data-kp-id="{{.ID}}">
+  <div class="ep-info" style="flex:1">
+    <h3>{{.Content}}</h3>
+    <p>{{.Description}}</p>
+    <p class="meta">
+      <a href="/sources/{{.SourceType}}/{{.SourceID}}?t={{.TimeStart}}">{{.SourceTitle}}</a>
+      · {{formatTime .TimeStart}} – {{formatTime .TimeEnd}}
+      · {{.CreatedAt}}
+    </p>
+  </div>
+  <div class="kp-actions" style="display:flex;gap:0.5rem;flex-shrink:0">
+    <button class="btn btn-secondary kp-annotate" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">标注</button>
+    <button class="btn btn-secondary kp-pin" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">收藏</button>
+    <button class="btn btn-secondary kp-collect" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">加入集合</button>
+  </div>
+</div>
+{{else}}
+<p class="empty">暂无关键要点。处理播客后会自动生成。</p>
+{{end}}
+</div>
+
+{{if .TotalPages}}
+<div class="pagination">
+  {{if gt .Page 1}}<a href="/keypoints?page={{.PrevPage}}" class="btn btn-secondary">‹ 上一页</a>{{end}}
+  <span class="page-info">第 {{.Page}} / {{.TotalPages}} 页（共 {{.Total}} 条）</span>
+  {{if lt .Page .TotalPages}}<a href="/keypoints?page={{.NextPage}}" class="btn btn-secondary">下一页 ›</a>{{end}}
+</div>
+{{end}}
+
+<div id="kp-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:100;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:8px;padding:1.5rem;max-width:500px;width:90%">
+    <h3 id="kp-modal-title">标注</h3>
+    <textarea id="kp-modal-body" rows="4" style="width:100%;margin:0.5rem 0"></textarea>
+    <div id="kp-modal-collection-select" style="display:none;margin:0.5rem 0">
+      <select id="kp-modal-collection-id" style="width:100%"></select>
+    </div>
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary" id="kp-modal-cancel">取消</button>
+      <button class="btn" id="kp-modal-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const csrf = "{{.CSRF}}";
+  let modalAction = null;
+  let modalData = {};
+
+  const modal = document.getElementById('kp-modal');
+  const modalTitle = document.getElementById('kp-modal-title');
+  const modalBody = document.getElementById('kp-modal-body');
+  const modalSave = document.getElementById('kp-modal-save');
+  const modalCancel = document.getElementById('kp-modal-cancel');
+  const modalCollection = document.getElementById('kp-modal-collection-select');
+  const collectionSelect = document.getElementById('kp-modal-collection-id');
+
+  function openModal(action, data) {
+    modalAction = action;
+    modalData = data;
+    modalCollection.style.display = 'none';
+    if (action === 'annotate') {
+      modalTitle.textContent = '标注';
+      modalBody.style.display = '';
+      modalBody.value = '';
+      modalSave.textContent = '保存';
+    } else if (action === 'collect') {
+      modalTitle.textContent = '加入集合';
+      modalBody.style.display = 'none';
+      modalCollection.style.display = '';
+      modalSave.textContent = '加入';
+      // 加载集合列表
+      fetch('/api/collection').then(r => r.json()).then(d => {
+        collectionSelect.innerHTML = '<option value="">（选择集合）</option>';
+        (d.collections || []).forEach(c => {
+          collectionSelect.innerHTML += '<option value="' + c.ID + '">' + c.Title + ' (' + c.ItemCount + ')</option>';
+        });
+        collectionSelect.innerHTML += '<option value="__new">+ 新建集合…</option>';
+      });
+    }
+    modal.style.display = 'flex';
+  }
+
+  modalCancel.onclick = () => { modal.style.display = 'none'; };
+  modalSave.onclick = async () => {
+    if (modalAction === 'annotate') {
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      Object.keys(modalData).forEach(k => fd.append(k, modalData[k]));
+      fd.append('body', modalBody.value);
+      await fetch('/api/annotation', { method: 'POST', body: fd });
+    } else if (modalAction === 'collect') {
+      let colID = collectionSelect.value;
+      if (colID === '__new') {
+        const title = prompt('集合名称：');
+        if (!title) return;
+        const fd = new FormData();
+        fd.append('_csrf', csrf);
+        fd.append('title', title);
+        const resp = await fetch('/api/collection', { method: 'POST', body: fd });
+        const data = await resp.json();
+        colID = data.collection.ID;
+      }
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      fd.append('collection_id', colID);
+      Object.keys(modalData).forEach(k => fd.append(k, modalData[k]));
+      await fetch('/api/collection/item', { method: 'POST', body: fd });
+    }
+    modal.style.display = 'none';
+  };
+
+  document.querySelectorAll('.kp-annotate').forEach(btn => btn.addEventListener('click', () => {
+    openModal('annotate', extractData(btn));
+  }));
+  document.querySelectorAll('.kp-collect').forEach(btn => btn.addEventListener('click', () => {
+    openModal('collect', extractData(btn));
+  }));
+  document.querySelectorAll('.kp-pin').forEach(async btn => {
+    btn.addEventListener('click', async () => {
+      const d = extractData(btn);
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      Object.keys(d).forEach(k => fd.append(k, d[k]));
+      const resp = await fetch('/api/pin', { method: 'POST', body: fd });
+      const data = await resp.json();
+      btn.textContent = data.pinned ? '★ 已收藏' : '收藏';
+    });
+  });
+
+  function extractData(btn) {
+    return {
+      source_type: btn.dataset.sourceType,
+      source_id: btn.dataset.sourceId,
+      segment_ids: btn.dataset.segmentIds,
+      time_start: btn.dataset.start,
+      time_end: btn.dataset.end,
+      source_title: btn.dataset.title,
+    };
+  }
+
+  // 搜索
+  const searchInput = document.getElementById('kp-search');
+  const searchBtn = document.getElementById('kp-search-btn');
+  const searchClear = document.getElementById('kp-search-clear');
+  const resultsDiv = document.getElementById('kp-results');
+
+  searchBtn.addEventListener('click', doSearch);
+  searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  searchClear.addEventListener('click', () => { location.reload(); });
+
+  async function doSearch() {
+    const q = searchInput.value.trim();
+    if (!q) return;
+    const resp = await fetch('/api/keypoints/search?q=' + encodeURIComponent(q));
+    const data = await resp.json();
+    searchClear.style.display = '';
+    let html = '';
+    (data.results || []).forEach(kp => {
+      html += '<div class="list-item kp-row"><div class="ep-info" style="flex:1"><h3>' + kp.content + '</h3><p>' + kp.description + '</p><p class="meta"><a href="/sources/' + kp.source_type + '/' + kp.source_id + '?t=' + kp.time_start + '">' + kp.source_title + '</a> · ' + fmtTime(kp.time_start) + '–' + fmtTime(kp.time_end) + '</p></div></div>';
+    });
+    resultsDiv.innerHTML = html || '<p class="empty">无匹配结果。</p>';
+  }
+  function fmtTime(s) { const t=Math.floor(s),m=Math.floor(t/60),x=t%60; return m+':'+(x<10?'0':'')+x; }
+})();
+</script>
+{{end}}
