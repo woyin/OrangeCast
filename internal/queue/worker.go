@@ -56,9 +56,26 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir stri
 		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir,
 		client: client, poll: pollInterval,
 	}
-	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
-		// ADR-0009：Groq 是默认零成本 Provider；付费 Provider 按单次任务显式授权（Phase 4 落地）。
-		return w.selector.Bundle("groq")
+	w.bundleFor = func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
+		// 读 settings 选每任务的 Provider + Model（ADR-0009 扩展）
+		st, err := w.store.GetSettings(context.Background())
+		if err != nil {
+			return w.selector.Bundle("groq") // 降级默认
+		}
+		var tc provider.TaskConfig
+		switch job.JobType {
+		case models.JobTranscribe:
+			tc = provider.TaskConfig{Provider: ptrStr(st.TranscriptionProvider), Model: ptrStr(st.TranscriptionModel)}
+		case models.JobAnalyze:
+			// analyze job 包含分析+高光，用 analysis 配置
+			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
+		default:
+			tc = provider.TaskConfig{Provider: "groq"}
+		}
+		if tc.Provider == "" {
+			tc.Provider = "groq"
+		}
+		return w.selector.BundleForTask(tc)
 	}
 	return w
 }
@@ -510,4 +527,12 @@ func (w *Worker) setSourceStatus(ctx context.Context, job *models.ProcessingJob,
 
 func (w *Worker) markSourceFailed(ctx context.Context, job *models.ProcessingJob) {
 	w.setSourceStatus(ctx, job, models.StatusFailedEp)
+}
+
+// ptrStr 安全解引用 *string，nil 返回空串。
+func ptrStr(p *string) string {
+	if p != nil {
+		return *p
+	}
+	return ""
 }

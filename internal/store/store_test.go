@@ -147,11 +147,16 @@ func TestUpdateSettings(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	tm := "whisper-large-v3"
-	if err := s.UpdateSettings(ctx, &tm, nil, nil); err != nil {
+	tp := "groq"
+	st := &models.Settings{TranscriptionModel: &tm, TranscriptionProvider: &tp}
+	if err := s.UpdateSettings(ctx, st); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := s.GetSettings(ctx)
-	if st.TranscriptionModel == nil || *st.TranscriptionModel != tm {
-		t.Errorf("转录模型应为 %s，实际 %v", tm, st.TranscriptionModel)
+	got, _ := s.GetSettings(ctx)
+	if got.TranscriptionModel == nil || *got.TranscriptionModel != tm {
+		t.Errorf("转录模型应为 %s，实际 %v", tm, got.TranscriptionModel)
+	}
+	if got.TranscriptionProvider == nil || *got.TranscriptionProvider != tp {
+		t.Errorf("转录 Provider 应为 %s，实际 %v", tp, got.TranscriptionProvider)
 	}
 }

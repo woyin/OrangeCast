@@ -106,3 +106,9 @@ type Highlight struct {
 type HighlightSet struct {
 	Highlights []Highlight `json:"highlights"`
 }
+
+// ConfigurableProvider 可按外部配置指定模型名（ADR-0009 扩展：每任务配 Provider+Model）。
+type ConfigurableProvider interface {
+	// WithModel 返回一个使用指定模型名的新实例（不修改原实例）。
+	WithModel(model string) interface{}
+}

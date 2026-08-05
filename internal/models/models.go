@@ -158,7 +158,12 @@ type Purge struct {
 // Settings 实例级设置（单例，id=1）。ADR-0009 移除全局 active_provider：
 // Groq 是默认零成本 Provider；付费 Provider 仅按单次 ProcessingJob 尝试显式授权。
 type Settings struct {
-	TranscriptionModel *string
-	AnalysisModel      *string
-	QAModel            *string
+	TranscriptionModel    *string
+	AnalysisModel         *string
+	HighlightModel        *string
+	QAModel               *string
+	TranscriptionProvider *string
+	AnalysisProvider      *string
+	HighlightProvider     *string
+	QAProvider            *string
 }

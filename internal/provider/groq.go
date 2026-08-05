@@ -24,6 +24,7 @@ const (
 // 转录走 /audio/transcriptions（multipart file），分析/QA 走 /chat/completions。
 type GroqProvider struct {
 	apiKey         string
+	model          string // 空则用默认 groqAnalysisModel
 	chatCompleteFn func(messages []map[string]string, jsonMode string) (string, int, error)
 	sleepFn        func(time.Duration)
 }
@@ -33,6 +34,11 @@ func NewGroqProvider(apiKey string) *GroqProvider {
 }
 
 func (g *GroqProvider) Name() string { return "groq" }
+
+// WithModel 返回使用指定分析模型的新实例（转录模型不变）。
+func (g *GroqProvider) WithModel(model string) *GroqProvider {
+	return &GroqProvider{apiKey: g.apiKey, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
+}
 
 // Transcribe 转录：Groq 要求上传文件本体（不支持服务端 fetch URL）。
 // filePath 是已临时落盘的音频文件。
@@ -77,8 +83,12 @@ func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 // chatComplete 调用 /chat/completions，返回助手的 message content。
 // jsonMode: "schema" 用 json_schema strict（仅 gpt-oss 支持）；"object" 用 json_object（所有模型，不强制 schema）；"" 不约束。
 func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode string) (string, int, error) {
+	model := g.model
+	if model == "" {
+		model = groqAnalysisModel
+	}
 	payload := map[string]any{
-		"model":       groqAnalysisModel,
+		"model":       model,
 		"messages":    messages,
 		"temperature": 0.3,
 	}

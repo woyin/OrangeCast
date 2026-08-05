@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/woyin/orangecast/internal/models"
 	"github.com/google/uuid"
+	"github.com/woyin/orangecast/internal/models"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -107,8 +107,11 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
 	st := &models.Settings{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT transcription_model, analysis_model, qa_model FROM settings WHERE id = 1`).
-		Scan(&st.TranscriptionModel, &st.AnalysisModel, &st.QAModel)
+		`SELECT transcription_model, analysis_model, highlight_model, qa_model,
+		        transcription_provider, analysis_provider, highlight_provider, qa_provider
+		 FROM settings WHERE id = 1`).
+		Scan(&st.TranscriptionModel, &st.AnalysisModel, &st.HighlightModel, &st.QAModel,
+			&st.TranscriptionProvider, &st.AnalysisProvider, &st.HighlightProvider, &st.QAProvider)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = s.DB.ExecContext(ctx,
 			`INSERT INTO settings (id) VALUES (1)`)
@@ -123,16 +126,23 @@ func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
 	return st, nil
 }
 
-// UpdateSettings 更新实例级模型偏好。
-func (s *Store) UpdateSettings(ctx context.Context, transcriptionModel, analysisModel, qaModel *string) error {
+// UpdateSettings 更新实例级 Provider + Model 配置。
+func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO settings (id, transcription_model, analysis_model, qa_model)
-		 VALUES (1, ?, ?, ?)
+		`INSERT INTO settings (id, transcription_model, analysis_model, highlight_model, qa_model,
+		    transcription_provider, analysis_provider, highlight_provider, qa_provider)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   transcription_model = excluded.transcription_model,
 		   analysis_model = excluded.analysis_model,
+		   highlight_model = excluded.highlight_model,
 		   qa_model = excluded.qa_model,
+		   transcription_provider = excluded.transcription_provider,
+		   analysis_provider = excluded.analysis_provider,
+		   highlight_provider = excluded.highlight_provider,
+		   qa_provider = excluded.qa_provider,
 		   updated_at = datetime('now')`,
-		transcriptionModel, analysisModel, qaModel)
+		st.TranscriptionModel, st.AnalysisModel, st.HighlightModel, st.QAModel,
+		st.TranscriptionProvider, st.AnalysisProvider, st.HighlightProvider, st.QAProvider)
 	return err
 }

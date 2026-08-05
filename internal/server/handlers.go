@@ -541,43 +541,45 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		// 实例级模型偏好（ADR-0009：无全局 provider 切换；Groq 固定为默认零成本 Provider）
-		tm := r.FormValue("transcription_model")
-		am := r.FormValue("analysis_model")
-		qm := r.FormValue("qa_model")
-		var tp, ap, qp *string
-		if tm != "" {
-			tp = &tm
+		// 每个任务独立配置 Provider + Model（ADR-0009 扩展）
+		st := &models.Settings{}
+		strPtr := func(v string) *string {
+			if v != "" {
+				return &v
+			}
+			return nil
 		}
-		if am != "" {
-			ap = &am
-		}
-		if qm != "" {
-			qp = &qm
-		}
-		_ = srv.store.UpdateSettings(r.Context(), tp, ap, qp)
+		st.TranscriptionModel = strPtr(r.FormValue("transcription_model"))
+		st.AnalysisModel = strPtr(r.FormValue("analysis_model"))
+		st.HighlightModel = strPtr(r.FormValue("highlight_model"))
+		st.QAModel = strPtr(r.FormValue("qa_model"))
+		st.TranscriptionProvider = strPtr(r.FormValue("transcription_provider"))
+		st.AnalysisProvider = strPtr(r.FormValue("analysis_provider"))
+		st.HighlightProvider = strPtr(r.FormValue("highlight_provider"))
+		st.QAProvider = strPtr(r.FormValue("qa_provider"))
+		_ = srv.store.UpdateSettings(r.Context(), st)
 		http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 		return
 	}
 	st, _ := srv.store.GetSettings(r.Context())
-	transcriptionModel := ""
-	analysisModel := ""
-	qaModel := ""
-	if st.TranscriptionModel != nil {
-		transcriptionModel = *st.TranscriptionModel
-	}
-	if st.AnalysisModel != nil {
-		analysisModel = *st.AnalysisModel
-	}
-	if st.QAModel != nil {
-		qaModel = *st.QAModel
+	deref := func(p *string) string {
+		if p != nil {
+			return *p
+		}
+		return ""
 	}
 	srv.tmpl.Render(w, "settings.html", map[string]any{
-		"TranscriptionModel": transcriptionModel,
-		"AnalysisModel":      analysisModel,
-		"QAModel":            qaModel,
-		"Saved":              r.URL.Query().Get("saved") == "1",
-		"CSRF":               auth.CSRFValue(r),
+		"TranscriptionModel":    deref(st.TranscriptionModel),
+		"AnalysisModel":         deref(st.AnalysisModel),
+		"HighlightModel":        deref(st.HighlightModel),
+		"QAModel":               deref(st.QAModel),
+		"TranscriptionProvider": deref(st.TranscriptionProvider),
+		"AnalysisProvider":      deref(st.AnalysisProvider),
+		"HighlightProvider":     deref(st.HighlightProvider),
+		"QAProvider":            deref(st.QAProvider),
+		"HasOpenAI":             srv.selector.HasOpenAI(),
+		"Saved":                 r.URL.Query().Get("saved") == "1",
+		"CSRF":                  auth.CSRFValue(r),
 	})
 }
 
@@ -650,8 +652,17 @@ func (srv *Server) handleQA(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
 		return
 	}
-	// ADR-0009：默认 Groq（零成本）；付费 Provider 仅按单次任务显式授权
-	bundle, err := srv.selector.Bundle("groq")
+	// 读 settings 选 Q&A Provider + Model
+	st, _ := srv.store.GetSettings(r.Context())
+	qaProvider := "groq"
+	if st.QAProvider != nil && *st.QAProvider != "" {
+		qaProvider = *st.QAProvider
+	}
+	qaModel := ""
+	if st.QAModel != nil {
+		qaModel = *st.QAModel
+	}
+	bundle, err := srv.selector.BundleForTask(provider.TaskConfig{Provider: qaProvider, Model: qaModel})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return

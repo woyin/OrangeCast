@@ -39,3 +39,37 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 // 默认导出便捷函数，供测试或启动期检查 key 是否就绪。
 func (sel *Selector) HasGroq() bool   { return sel.groqAPIKey != "" }
 func (sel *Selector) HasOpenAI() bool { return sel.openaiAPIKey != "" }
+
+// TaskConfig 每个任务的 Provider + Model 配置（来自 settings）。
+type TaskConfig struct {
+	Provider string
+	Model    string // 空则用该 provider 的默认模型
+}
+
+// BundleForTask 按 TaskConfig 返回配置好的 bundle（模型名注入）。
+func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
+	bundle, err := sel.Bundle(tc.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if tc.Model != "" {
+		// 用指定模型覆盖（不修改原 bundle）
+		switch tc.Provider {
+		case "groq":
+			if g, ok := bundle.Analysis.(*GroqProvider); ok {
+				custom := g.WithModel(tc.Model)
+				bundle.Analysis = custom
+				bundle.Highlight = custom
+				bundle.QA = custom
+			}
+		case "openai":
+			if o, ok := bundle.Analysis.(*OpenAIProvider); ok {
+				custom := o.WithModel(tc.Model)
+				bundle.Analysis = custom
+				bundle.Highlight = custom
+				bundle.QA = custom
+			}
+		}
+	}
+	return bundle, nil
+}

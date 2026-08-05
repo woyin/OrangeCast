@@ -18,7 +18,8 @@ import (
 // 转录走 /audio/transcriptions（gpt-4o-mini-transcribe），分析/QA 走 /responses（json_schema strict）。
 // 注意：OpenAI 的 /responses 与 Groq 的 /chat/completions 契约不对称（第 10 题），此处独立实现。
 type OpenAIProvider struct {
-	apiKey string
+	apiKey        string
+	analysisModel string // 空则用默认
 }
 
 const (
@@ -32,6 +33,11 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 }
 
 func (o *OpenAIProvider) Name() string { return "openai" }
+
+// WithModel 返回使用指定分析模型的新实例。
+func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
+	return &OpenAIProvider{apiKey: o.apiKey, analysisModel: model}
+}
 
 func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	f, err := os.Open(filePath)
