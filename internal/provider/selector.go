@@ -1,3 +1,6 @@
+// Selector 按 Provider 名称构造 provider bundle（ADR-0009）。
+// key 和 baseURL 可在运行时从 SQLite settings 覆盖，支持兼容 API（DeepSeek/Together/Ollama）。
+// BundleForTask 按任务级 TaskConfig 返回注入模型名的 bundle。
 package provider
 
 import (

@@ -271,6 +271,9 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 }
 
 // doHighlight 生成高光片段并存为独立 ArtifactVersion（ADR-0016）。
+// 流程：调 HighlightProvider.GenerateHighlights → ValidateHighlightSet 校验
+// （Citation 必须引用真实 Segment）→ CreateArtifactVersion（kind=highlight）
+// → SetCurrentVersion 指向新版本。
 // 失败不阻塞主流程（KnowledgeCard 已成功）；Highlight 是可选增强。
 func (w *Worker) doHighlight(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, segments []provider.Segment) error {
 	raw, err := bundle.Highlight.GenerateHighlights(segments)

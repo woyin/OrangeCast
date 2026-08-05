@@ -1,3 +1,7 @@
+// Package server 实现 CloudWisePod 的 HTTP 层：路由、handler、模板渲染与 REST API。
+// handler 按功能分区：认证、Podcast/Episode 管理、Upload、Source 详情、
+// 搜索/进度/AI DJ/版本历史/Markdown 下载、批量入队、KeyPoint 全局视图、
+// Owner 标注（Annotation/Pin/Collection）、知识图谱。
 package server
 
 import (

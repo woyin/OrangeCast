@@ -1,3 +1,5 @@
+// Highlight（高光片段）相关的类型定义、生成接口与校验逻辑（ADR-0016）。
+// Highlight 是 AI 按价值密度选出的连续音频区间，与 KnowledgeCard 并列但独立版本化。
 package provider
 
 import (

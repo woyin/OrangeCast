@@ -1,3 +1,7 @@
+// Annotation / Pin / Collection 数据访问层（ADR-0017）。
+// 锚定方式：所有三种实体锚定在 (source_type, source_id, segment_ids) 上——
+// 即"某 Source 的一组 Segment 引用"。不锚定 KeyPoint 文字（重新分析后 KeyPoint
+// 文字会变，但 Segment 在同一 Transcript 版本内稳定）。
 package store
 
 import (

@@ -1,0 +1,168 @@
+package store
+
+import (
+	"context"
+	"testing"
+
+	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
+)
+
+func TestIndexKeyPoints_Basic(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+
+	card := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{
+			{Content: "要点一", Description: "说明一", Citations: []string{"seg-0001", "seg-0002"}},
+			{Content: "要点二", Description: "说明二", Citations: []string{"seg-0003"}},
+		},
+		Chapters: []provider.Chapter{{Title: "CH", Gist: "G", Citations: []string{"seg-0001"}}},
+	}
+	segs := []provider.Segment{
+		{ID: "seg-0001", Start: 0, End: 5, Text: "第一段"},
+		{ID: "seg-0002", Start: 5, End: 10, Text: "第二段"},
+		{ID: "seg-0003", Start: 10, End: 15, Text: "第三段"},
+	}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	kps, total, err := s.ListKeyPoints(ctx, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 {
+		t.Errorf("应索引 2 个 KeyPoint，实际 %d", total)
+	}
+	if len(kps) != 2 {
+		t.Fatalf("应返回 2 行，实际 %d", len(kps))
+	}
+	// 第一个要点的时间范围应是 seg-0001+seg-0002 的 min-max = 0-10
+	if kps[0].TimeStart != 0 || kps[0].TimeEnd != 10 {
+		t.Errorf("第一个要点时间范围应为 0-10，实际 %.1f-%.1f", kps[0].TimeStart, kps[0].TimeEnd)
+	}
+}
+
+func TestIndexKeyPoints_ReindexReplaces(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+
+	card1 := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{
+			{Content: "旧要点", Citations: []string{"seg-0001"}},
+			{Content: "旧要点二", Citations: []string{"seg-0001"}},
+		},
+		Chapters: []provider.Chapter{{Title: "C", Gist: "G", Citations: []string{"seg-0001"}}},
+	}
+	s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card1, segs)
+
+	card2 := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{
+			{Content: "新要点", Citations: []string{"seg-0001"}},
+		},
+		Chapters: []provider.Chapter{{Title: "C", Gist: "G", Citations: []string{"seg-0001"}}},
+	}
+	s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 2, card2, segs)
+
+	_, total, _ := s.ListKeyPoints(ctx, 1, 10)
+	if total != 1 {
+		t.Errorf("重新索引后应只有 1 个 KeyPoint（先删后插），实际 %d", total)
+	}
+}
+
+func TestSearchKeyPoints(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "沟通"}}
+	card := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{
+			{Content: "communication skills", Citations: []string{"seg-0001"}},
+		},
+		Chapters: []provider.Chapter{{Title: "C", Gist: "G", Citations: []string{"seg-0001"}}},
+	}
+	s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs)
+
+	results, total, err := s.SearchKeyPoints(ctx, "communication", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Errorf("搜索应命中 1 个，实际 %d", total)
+	}
+	if len(results) != 1 || results[0].Content != "communication skills" {
+		t.Errorf("搜索结果不符: %+v", results)
+	}
+}
+
+func TestTokenizeKp(t *testing.T) {
+	tokens := tokenizeKp("沟通技巧很重要")
+	if len(tokens) == 0 {
+		t.Error("应产出 token")
+	}
+	// bigram 应包含 "沟通"
+	if _, ok := tokens["沟通"]; !ok {
+		t.Errorf("bigram 应包含'沟通'，实际 %v", tokens)
+	}
+}
+
+func TestJaccard(t *testing.T) {
+	a := map[string]int{"apple": 1, "banana": 1}
+	b := map[string]int{"apple": 1, "cherry": 1}
+	sim := jaccard(a, b)
+	// 交集=1 (apple), 并集=3 (apple, banana, cherry), 1/3 ≈ 0.333
+	if sim < 0.3 || sim > 0.4 {
+		t.Errorf("Jaccard 应约 0.33，实际 %.3f", sim)
+	}
+	// 完全相同
+	if jaccard(a, a) != 1.0 {
+		t.Error("完全相同的集合 Jaccard 应为 1.0")
+	}
+	// 完全不同
+	if jaccard(a, map[string]int{"zzz": 1}) != 0 {
+		t.Error("无交集 Jaccard 应为 0")
+	}
+}
+
+func TestSpanFromSegments(t *testing.T) {
+	segs := map[string]provider.Segment{
+		"s1": {ID: "s1", Start: 5, End: 10},
+		"s2": {ID: "s2", Start: 0, End: 3},
+		"s3": {ID: "s3", Start: 20, End: 25},
+	}
+	start, end := spanFromSegments([]string{"s1", "s2", "s3"}, segs)
+	if start != 0 || end != 25 {
+		t.Errorf("span 应为 0-25，实际 %.1f-%.1f", start, end)
+	}
+}
+
+func TestValidCitations(t *testing.T) {
+	segs := map[string]provider.Segment{
+		"s1": {ID: "s1"},
+		"s2": {ID: "s2"},
+	}
+	out := validCitations([]string{"s1", "missing", "s2", "s1"}, segs)
+	if len(out) != 2 || out[0] != "s1" || out[1] != "s2" {
+		t.Errorf("应去重+过滤后返回 [s1 s2]，实际 %v", out)
+	}
+}

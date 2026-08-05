@@ -2,52 +2,82 @@ package provider
 
 import "testing"
 
-func TestSelector_DefaultGroq(t *testing.T) {
+func TestSelector_Bundle_GroqDefault(t *testing.T) {
 	sel := NewSelector("groq-key", "openai-key")
-	b, err := sel.Bundle("")
+	bundle, err := sel.Bundle("groq")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.Transcription.Name() != "groq" {
-		t.Errorf("空 provider 应默认 groq，实际 %s", b.Transcription.Name())
+	if bundle.Transcription.Name() != "groq" {
+		t.Errorf("Groq bundle 应返回 groq provider，实际 %s", bundle.Transcription.Name())
 	}
 }
 
-func TestSelector_OpenAI(t *testing.T) {
-	sel := NewSelector("g", "o-key")
-	b, err := sel.Bundle("openai")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b.Analysis.Name() != "openai" {
-		t.Errorf("应返回 openai bundle，实际 %s", b.Analysis.Name())
+func TestSelector_Bundle_MissingGroqKey(t *testing.T) {
+	sel := NewSelector("", "")
+	_, err := sel.Bundle("groq")
+	if err == nil {
+		t.Error("缺少 Groq key 应报错")
 	}
 }
 
-func TestSelector_GroqMissingKey(t *testing.T) {
-	sel := NewSelector("", "o-key")
-	if _, err := sel.Bundle("groq"); err == nil {
-		t.Error("groq 缺 key 应报错（生产不静默回退）")
+func TestSelector_Bundle_MissingOpenAIKey(t *testing.T) {
+	sel := NewSelector("g", "")
+	_, err := sel.Bundle("openai")
+	if err == nil {
+		t.Error("缺少 OpenAI key 应报错")
 	}
 }
 
-func TestSelector_OpenAIMissingKey(t *testing.T) {
-	sel := NewSelector("g-key", "")
-	if _, err := sel.Bundle("openai"); err == nil {
-		t.Error("openai 缺 key 应报错")
-	}
-}
-
-func TestSelector_UnknownProvider(t *testing.T) {
+func TestSelector_Bundle_UnknownProvider(t *testing.T) {
 	sel := NewSelector("g", "o")
-	if _, err := sel.Bundle("claude"); err == nil {
+	_, err := sel.Bundle("claude")
+	if err == nil {
 		t.Error("未知 provider 应报错")
 	}
 }
 
-func TestHasKeys(t *testing.T) {
+func TestSelector_BundleForTask_ModelOverride(t *testing.T) {
+	sel := NewSelector("groq-key", "")
+	bundle, err := sel.BundleForTask(TaskConfig{Provider: "groq", Model: "custom-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := bundle.Analysis.(*GroqProvider)
+	if !ok {
+		t.Fatal("Analysis 应为 *GroqProvider")
+	}
+	if g.model != "custom-model" {
+		t.Errorf("model 应为 custom-model，实际 %s", g.model)
+	}
+}
+
+func TestSelector_ApplySettings(t *testing.T) {
+	sel := NewSelector("", "")
+	if sel.HasGroq() {
+		t.Error("初始应无 Groq key")
+	}
+	sel.ApplySettings("new-groq-key", "https://custom.groq.com/v1", "", "")
+	if !sel.HasGroq() {
+		t.Error("ApplySettings 后应有 Groq key")
+	}
+	bundle, err := sel.Bundle("groq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := bundle.Analysis.(*GroqProvider)
+	if g.baseURL != "https://custom.groq.com/v1" {
+		t.Errorf("baseURL 应被覆盖，实际 %s", g.baseURL)
+	}
+}
+
+func TestSelector_HasGroq_HasOpenAI(t *testing.T) {
 	sel := NewSelector("g", "")
 	if !sel.HasGroq() || sel.HasOpenAI() {
-		t.Error("HasGroq/HasOpenAI 判断错误")
+		t.Error("HasGroq/HasOpenAI 返回不正确")
+	}
+	sel2 := NewSelector("", "o")
+	if sel2.HasGroq() || !sel2.HasOpenAI() {
+		t.Error("HasGroq/HasOpenAI 返回不正确")
 	}
 }

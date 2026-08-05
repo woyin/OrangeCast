@@ -29,8 +29,10 @@ type KeyPointRow struct {
 	CreatedAt     string
 }
 
-// IndexKeyPoints 把一个 Source 当前卡片版本的 KeyPoints 拆解写入索引（先删后插，幂等）。
-// segments 用于解析 Citation 时间范围。
+// IndexKeyPoints 把一个 Source 当前卡片版本的 KeyPoints 拆解写入索引表（先删后插，幂等）。
+// 每个 KeyPoint 的 Citation（Segment ID 列表）被解析为聚合时间范围（min start – max end），
+// 存入 keypoint_index 表 + keypoint_search FTS5 表。用于 /keypoints 全局视图。
+// 真理来源是 artifact_versions.payload；本表是索引投影（ADR-0017）。
 func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -330,8 +332,11 @@ type KpGraphData struct {
 	Collections []*Collection `json:"collections"`
 }
 
-// GetKpGraph 返回 KeyPoint 粒度图谱。
-// 实线 = 同一 Collection（Owner 组织）；虚线 = 文本相似度建议（词重叠）。
+// GetKpGraph 返回 KeyPoint 粒度图谱（ADR-0017）。
+// 节点 = keypoint_index 中的每行 KeyPoint。
+// 实线边 = 同一 Collection 的 KeyPoint 两两连接（Owner 组织的跨 Source 主题集）。
+// 虚线边 = 文本相似度建议（Jaccard 词重叠 ≥0.3，跨 Episode，且不重复已有实线）。
+// 用于 /graph 页面的力导向可视化。
 func (s *Store) GetKpGraph(ctx context.Context) (*KpGraphData, error) {
 	// 1) 全部 KeyPoint
 	kps, _, err := s.ListKeyPoints(ctx, 1, 500) // 上限 500 条
