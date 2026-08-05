@@ -1074,6 +1074,24 @@ func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "total": total})
 }
 
+// ---- 知识图谱（Episode + Tag 共现可视化）----
+
+func (srv *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	srv.tmpl.Render(w, "graph.html", map[string]any{
+		"CSRF": auth.CSRFValue(r),
+	})
+}
+
+// handleGraphAPI 返回图谱 JSON。
+func (srv *Server) handleGraphAPI(w http.ResponseWriter, r *http.Request) {
+	gd, err := srv.store.GetTagGraph(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, gd)
+}
+
 func (srv *Server) handleAnnotation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)

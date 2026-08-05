@@ -199,3 +199,107 @@ func (s *Store) DeleteKeyPointsForSource(ctx context.Context, sourceType models.
 }
 
 var _ = errors.New
+
+// GraphNode 图谱节点（一个 Episode）。
+type GraphNode struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+// GraphLink 图谱边（两个 Episode 共享的 Tag）。
+type GraphLink struct {
+	Source string   `json:"source"`
+	Target string   `json:"target"`
+	Tags   []string `json:"tags"`
+}
+
+// GraphData 图谱完整数据。
+type GraphData struct {
+	Nodes []GraphNode `json:"nodes"`
+	Links []GraphLink `json:"links"`
+}
+
+// GetTagGraph 返回 Episode + Tag 共现图谱。
+// 节点 = processed 的 Episode；边 = 共享至少 1 个 Tag 的 Episode 对。
+func (s *Store) GetTagGraph(ctx context.Context) (*GraphData, error) {
+	// 1) 查询所有 processed Episode 的 Tag（从当前 knowledge_card 版本 payload）
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT e.id, e.title, av.payload
+		 FROM episodes e
+		 JOIN artifact_versions av ON av.source_type='episode' AND av.source_id=e.id
+		 WHERE av.kind='knowledge_card' AND av.version = e.current_card_version
+		 ORDER BY e.title`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type epTags struct {
+		id    string
+		title string
+		tags  []string
+	}
+	var eps []epTags
+	for rows.Next() {
+		var id, title, payload string
+		if err := rows.Scan(&id, &title, &payload); err != nil {
+			return nil, err
+		}
+		var card struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.Unmarshal([]byte(payload), &card); err != nil {
+			continue
+		}
+		eps = append(eps, epTags{id: id, title: title, tags: card.Tags})
+	}
+
+	// 2) 构造节点
+	gd := &GraphData{}
+	tagMap := map[string]map[string]bool{} // tag -> {episodeID: true}
+	for _, ep := range eps {
+		gd.Nodes = append(gd.Nodes, GraphNode{ID: ep.id, Title: ep.title, Status: "processed"})
+		for _, tag := range ep.tags {
+			if tagMap[tag] == nil {
+				tagMap[tag] = map[string]bool{}
+			}
+			tagMap[tag][ep.id] = true
+		}
+	}
+
+	// 3) 构造边：共享至少 1 个 Tag 的 Episode 对
+	pairTags := map[string]map[string]bool{} // "idA|idB" -> {tag: true}
+	for tag, eps := range tagMap {
+		ids := make([]string, 0, len(eps))
+		for id := range eps {
+			ids = append(ids, id)
+		}
+		for i := 0; i < len(ids); i++ {
+			for j := i + 1; j < len(ids); j++ {
+				a, b := ids[i], ids[j]
+				if a > b {
+					a, b = b, a
+				}
+				key := a + "|" + b
+				if pairTags[key] == nil {
+					pairTags[key] = map[string]bool{}
+				}
+				pairTags[key][tag] = true
+			}
+		}
+	}
+	for pair, tags := range pairTags {
+		parts := strings.SplitN(pair, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		tagList := make([]string, 0, len(tags))
+		for t := range tags {
+			tagList = append(tagList, t)
+		}
+		sort.Strings(tagList)
+		gd.Links = append(gd.Links, GraphLink{Source: parts[0], Target: parts[1], Tags: tagList})
+	}
+	return gd, nil
+}
