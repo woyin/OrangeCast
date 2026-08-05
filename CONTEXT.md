@@ -85,3 +85,15 @@ _避免使用：MustHear、Spotlight、Takeaway、BestPart；它们要么语义�
 **Gist（要点说明）**：
 对一段音频区间（Highlight 或 Chapter）内容的简短文字说明，由 AI 重新组织语言生成，非逐字原文。Gist 自身不可逐字核验，其证据来自所属区间绑定的 Citation 指向的真实 Segment。
 _避免使用：Narration、Annotation、Summary；它们要么偏实现，要么与整集 Summary 冲突_
+
+**Annotation（标注）**：
+Owner 在某个 Citation 上附加的个人文字注解。它不是 AI 生成的，不随重新分析消失；锚定在 Citation 指向的 Segment 上，保证证据不变则标注不丢。
+_避免使用：Note、Comment、Remark_
+
+**Pin（收藏）**：
+Owner 标记某个 Citation"值得记住"的轻量动作。Pin 是 CloudWisePod 内的标记，不等于 KnowledgeNote——后者是沉淀到 PersonalKnowledgeBase 的最终 Markdown。
+_避免使用：Bookmark、Favorite、Star_
+
+**Collection（集合）**：
+Owner 把跨 Source 的 Citation 按自定义主题组织成的组。它按主题组织而非按 Source，是 Owner 的个人组织层，不改变 EvidenceArchive 的结构。
+_避免使用：Playlist、Folder、Tag_
