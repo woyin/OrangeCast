@@ -31,7 +31,8 @@
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>
   {{if eq .Status "processed"}}
-  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download">下载 Markdown</a>
+  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download">下载 Markdown（仅证据）</a>
+  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download?with_generated=1" title="在证据之外，额外纳入 AI 复述讲解与学习对话（明确标注为非原文）">下载 Markdown（含 AI 讲解）</a>
   <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/versions">版本历史</a>
   <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/dj">AI DJ</a>
   {{end}}
@@ -56,13 +57,26 @@
     <h2>转录稿</h2>
     <div id="transcript" class="transcript">
     {{range $i, $seg := .Segments}}
-      <span class="seg" data-id="{{$seg.ID}}" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span>
+      <span class="seg" data-id="{{$seg.ID}}" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span><button class="seg-paraphrase-btn" title="用别的话重新讲解这段（AI 讲解·非原文）" data-seg-id="{{$seg.ID}}">重讲</button>
     {{else}}
     <p class="empty">暂无转录稿，请先点击「处理」。</p>
     {{end}}
     </div>
   </section>
 
+    <!-- Paraphrase 复述讲解（GeneratedDerivative，ADR-0018）：AI 用别的话重讲，挂 Reference，非原文 -->
+    <section id="paraphrase-panel" hidden>
+      <h2>复述讲解 <small style="color:var(--muted);font-weight:normal">AI 讲解·非原文</small></h2>
+      <form id="paraphrase-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="hidden" name="segment_ids" id="paraphrase-segment-ids">
+        <input type="text" name="question" placeholder="可选：说明哪里没懂（例：这段的概念能用什么类比？）">
+        <button type="submit">重新讲解</button>
+        <button type="button" id="paraphrase-close">取消</button>
+      </form>
+      <div id="paraphrase-output"></div>
+      <p class="hint" style="color:var(--muted);font-size:0.85rem">这是 AI 重新组织的讲解，参考自上方片段，但<strong>不是逐字原文</strong>，不可当作原话核验。</p>
+    </section>
   <!-- 右：知识卡片（C 层联动：章节/金句双向跳转） -->
   <aside class="card-panel">
     {{with .Card}}
@@ -99,15 +113,29 @@
     </section>
     {{end}}
 
-    <!-- Q&A（第 6b 题：当前为直接问答，非向量 RAG） -->
+    <!-- EvidenceQA（证据问答，ADR-0018）：CitedDerivative，必须引用原文、证据不足拒答 -->
     <section>
-      <h2>提问</h2>
-      <form id="qa-form">
+      <h2>证据问答 <small style="color:var(--muted);font-weight:normal">EvidenceQA · 查证原文</small></h2>
+      <form id="evidence-qa-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
-        <input type="text" name="question" placeholder="对这期内容提问…" required>
-        <button type="submit">问</button>
+        <input type="text" name="question" placeholder="问原文：有没有说…在哪里…" required>
+        <button type="submit">查证</button>
       </form>
-      <div id="qa-answer"></div>
+      <div id="evidence-qa-answer"></div>
+    </section>
+
+    <!-- StudyChat 学习对话（GeneratedDerivative，ADR-0018 R3）：AI 用别的话讲解，挂 Reference，非原文 -->
+    <section>
+      <h2>学习对话 <small style="color:var(--muted);font-weight:normal">StudyChat · AI 讲解·非原文</small></h2>
+      <p class="hint" style="color:var(--muted);font-size:0.85rem">围绕本期内容自由提问，AI 用别的话讲解。回答明确标注<strong>非逐字原文</strong>，仅供参考。超出本集范围或脱离原文时将拒答。</p>
+      <div id="study-chat-thread"></div>
+      <form id="study-chat-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <input type="hidden" name="session_id" id="study-chat-session-id">
+        <input type="text" name="question" placeholder="这段没懂…能不能举个例子？" required>
+        <button type="submit">讲解</button>
+      </form>
+      <div id="study-chat-feedback"></div>
     </section>
   </aside>
 </div>

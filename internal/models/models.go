@@ -171,3 +171,17 @@ type Settings struct {
 	OpenAIAPIKey          *string
 	OpenAIBaseURL         *string
 }
+
+// RelationKind 显式区分一个 Segment 关联是 Citation 还是 Reference（ADR-0018 R1）。
+//
+// Citation：可逐字核验的强关系（CitedDerivative）。
+// Reference：仅表示参考的弱关系（GeneratedDerivative），不声称忠实。
+// 二者语义不同且不可互换；宿主实体类别与 RelationKind 必须配对正确，写入层校验。
+type RelationKind string
+
+const (
+	// RelationCitation 可核验的强关系。
+	RelationCitation RelationKind = "citation"
+	// RelationReference 仅表示参考的弱关系，不声称忠实。
+	RelationReference RelationKind = "reference"
+)

@@ -31,3 +31,18 @@
 ```bash
 go test ./internal/evalset/...
 ```
+
+## ReferenceCheck EvalSet（ADR-0018 R3）
+
+StudyChat 的信任根是 ReferenceCheck（主题锚定校验器）。它的误杀（合法被判不相关）与漏放（非法被判相关）作为 EvalSet 同等公民接受自动评测，定义见 `internal/evalset/reference_check.go`，6 个场景（3 放行 + 3 挡住）：
+
+| ID | 期望 | 场景 |
+|---|---|---|
+| rc-pass-01 | 放行 | 类比例化：用买房例子说明参考片段中的通胀概念 |
+| rc-pass-02 | 放行 | 解释/重述：用别的话重新讲量化宽松定义 |
+| rc-pass-03 | 放行 | 结构重组：把线性步骤重组为闭环视角 |
+| rc-block-01 | 挡住 | 主题漂移：回答主体是预测与投资建议，仅顺带提原文 |
+| rc-block-02 | 挡住 | 脱离内容：评价主播，与参考片段无关 |
+| rc-block-03 | 挡住 | 措辞蹭原文：回答主题是蜂鸟，与通胀无概念联系 |
+
+自动评测入口：`evalset.CheckReferenceSamples(checker)`，返回不符项（空 = 全部正确）。校验器模型/prompt 变更时跑此集合；若虚挂率上升，第一道干预是切换校验模型或引入第二判据，而非调 prompt（ADR-0018 R3）。

@@ -148,3 +148,53 @@ func ResolveCitationRange(citation string, segments []Segment) (start, end float
 	}
 	return 0, 0, false
 }
+
+// ResolveReferenceRange 把一组 Reference（Segment ID 列表）解析为聚合时间范围
+// min(start)–max(end)（程序计算，ADR-0018 R1）。
+// 与 ResolveCitationRange 对偶：Reference 不声称逐字忠实，但时间范围仍由程序从 Segment 解析，
+// 保证所引用的时间点真实存在（AI 不得自行估算）。
+func ResolveReferenceRange(references []string, segments []Segment) (start, end float64) {
+	first := true
+	for _, ref := range references {
+		for _, s := range segments {
+			if s.ID == ref {
+				if first || s.Start < start {
+					start = s.Start
+				}
+				if first || s.End > end {
+					end = s.End
+				}
+				first = false
+				break
+			}
+		}
+	}
+	return start, end
+}
+
+// ResolveCitationSpan 把一组 Citation（Segment ID 列表）解析为聚合时间范围
+// min(start)–max(end)（程序计算，ADR-0008）。返回 (start, end, ok)；ok=false 表示无有效引用。
+//
+// 这是 Citation 多片段 span 的统一实现，供 HTTP 层与 Markdown 渲染共用，
+// 消除此前散落在 internal/server 与 internal/markdown 的重复实现。
+// 对偶的单片段解析见 ResolveCitationRange；Reference 的多片段解析见 ResolveReferenceRange。
+func ResolveCitationSpan(citations []string, segments []Segment) (start, end float64, ok bool) {
+	if len(citations) == 0 {
+		return 0, 0, false
+	}
+	first := true
+	for _, c := range citations {
+		s, e, singleOK := ResolveCitationRange(c, segments)
+		if !singleOK {
+			continue
+		}
+		if first || s < start {
+			start = s
+		}
+		if first || e > end {
+			end = e
+		}
+		first = false
+	}
+	return start, end, !first
+}

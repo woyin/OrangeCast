@@ -321,3 +321,142 @@ func (g *GroqProvider) GenerateHighlights(segments []Segment) (*HighlightSet, er
 	}
 	return hs, nil
 }
+
+// Paraphrase 生成复述讲解（GeneratedDerivative，ADR-0018）。
+// 输出是 AI 重新组织的讲解，非逐字原文；referenceSegmentIDs 由调用方传入的参考片段决定，
+// 模型不参与选择（时间点真实性的保证来自调用方）。
+func (g *GroqProvider) Paraphrase(question string, referenceSegments []Segment) (*ParaphraseResult, error) {
+	if len(referenceSegments) == 0 {
+		return nil, fmt.Errorf("复述讲解至少需要一个参考片段")
+	}
+	var sb strings.Builder
+	for _, seg := range referenceSegments {
+		sb.WriteString(fmt.Sprintf("[%s | %.0f-%.0fs] %s\n", seg.ID, seg.Start, seg.End, seg.Text))
+	}
+	refs := make([]string, 0, len(referenceSegments))
+	for _, seg := range referenceSegments {
+		refs = append(refs, seg.ID)
+	}
+	prompt := fmt.Sprintf("参考片段：\n%s\n\n用户的疑问：%s\n\n请基于参考片段重新讲解，帮用户理解。",
+		sb.String(), question)
+	content, _, err := g.complete([]map[string]string{
+		{"role": "system", "content": paraphraseSystemPrompt},
+		{"role": "user", "content": prompt},
+	}, "")
+	if err != nil {
+		return nil, err
+	}
+	return &ParaphraseResult{Text: strings.TrimSpace(content), ReferenceSegmentIDs: refs}, nil
+}
+
+// StudyChatAnswer 学习对话一轮（GeneratedDerivative，ADR-0018 R3）。
+// 模型自选参考 Segment 并生成讲解；硬约束一（无 Reference 不生成）由此函数的调用方依据返回结果执行。
+func (g *GroqProvider) StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error) {
+	if len(candidates) == 0 {
+		// 硬约束一：无候选 Segment 可关联 → 不生成，返回可见反馈。
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	// RAG 检索 top-N 候选片段作为可参考集（问题驱动）。
+	retrieved := Retrieve(BuildChunks(candidates, 8), question, 6)
+	if len(retrieved) == 0 {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	var ctxSB strings.Builder
+	for _, c := range retrieved {
+		ctxSB.WriteString(fmt.Sprintf("[%s | %.0f-%.0fs] %s\n", c.SegmentID, c.Start, c.End, c.Text))
+	}
+	// 构造历史消息（最多最近 6 轮）。
+	msgs := []map[string]string{
+		{"role": "system", "content": studyChatSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
+	}
+	start := 0
+	if len(history) > 6 {
+		start = len(history) - 6
+	}
+	for _, m := range history[start:] {
+		role := "user"
+		if m.Role == "assistant" {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]string{"role": role, "content": m.Content})
+	}
+	msgs = append(msgs, map[string]string{
+		"role": "user", "content": fmt.Sprintf("候选片段：\n%s\n用户问题：%s", ctxSB.String(), question),
+	})
+
+	content, _, err := g.complete(msgs, "object")
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Answer              string   `json:"answer"`
+		ReferenceSegmentIDs []string `json:"referenceSegmentIds"`
+	}
+	if err := parseJSONLoose(content, &resp); err != nil {
+		return nil, fmt.Errorf("解析 StudyChat 输出失败: %w", err)
+	}
+	// 硬约束一：模型未关联任何参考 Segment → 不生成，可见反馈。
+	if len(resp.ReferenceSegmentIDs) == 0 || strings.TrimSpace(resp.Answer) == "" {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	// 校验所选参考 Segment 真实存在于候选集（防模型编造 ID）。
+	validIDs := validReferenceIDs(resp.ReferenceSegmentIDs, retrieved)
+	if len(validIDs) == 0 {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	return &StudyChatResult{
+		Answer: &StudyChatMessage{
+			Role:                "assistant",
+			Content:             strings.TrimSpace(resp.Answer),
+			ReferenceSegmentIDs: validIDs,
+		},
+	}, nil
+}
+
+// CheckReference 主题锚定校验（ADR-0018 R3 硬约束二）。
+// 独立判定步骤：只判相关、不参与生成。与生成模型同实例但独立 prompt——
+// 成本约束下的妥协（默认零成本），标注为可替换点（虚挂率上升时切换校验模型）。
+func (g *GroqProvider) CheckReference(question, answer string, referenceSegments []Segment) (ReferenceCheckResult, error) {
+	if len(referenceSegments) == 0 {
+		return ReferenceCheckResult{Related: false, Reason: "无参考片段"}, nil
+	}
+	var sb strings.Builder
+	for _, seg := range referenceSegments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	prompt := fmt.Sprintf("用户问题：%s\n\nAI 回答：\n%s\n\n参考片段原文：\n%s", question, answer, sb.String())
+	content, _, err := g.complete([]map[string]string{
+		{"role": "system", "content": referenceCheckSystemPrompt + "\n\n必须只输出一个 JSON 对象。"},
+		{"role": "user", "content": prompt},
+	}, "object")
+	if err != nil {
+		return ReferenceCheckResult{}, err
+	}
+	var resp struct {
+		Related bool   `json:"related"`
+		Reason  string `json:"reason"`
+	}
+	if err := parseJSONLoose(content, &resp); err != nil {
+		// 解析失败时保守判为不相关（宁误杀不放行虚挂）。
+		return ReferenceCheckResult{Related: false, Reason: "校验解析失败，保守拒绝"}, nil
+	}
+	return ReferenceCheckResult{Related: resp.Related, Reason: resp.Reason}, nil
+}
+
+// validReferenceIDs 过滤模型选的参考 ID，只保留真实存在于检索结果中的。
+func validReferenceIDs(ids []string, retrieved []Chunk) []string {
+	exist := map[string]bool{}
+	for _, c := range retrieved {
+		exist[c.SegmentID] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if exist[id] && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}

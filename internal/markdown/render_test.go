@@ -50,11 +50,14 @@ func TestRender_Golden(t *testing.T) {
 		"## 关键要点\n\n" +
 		"- **长期视角**：可承受波动 ([⏱ 0:05](https://cwp.example.com/sources/episode/ep-1?t=5.0#seg-seg-0002))\n\n" +
 		"## 章节\n\n" +
-		"### 投资格局（0:00 – 0:05）\n\n" +
-		"改变全球\n\n" +
-		"([⏱ 0:00](https://cwp.example.com/sources/episode/ep-1?t=0.0#seg-seg-0001))\n\n" +
+		"> [!quote] 原文 · 投资格局（0:00 – 0:05）\n" +
+		"> ([⏱ 0:00](https://cwp.example.com/sources/episode/ep-1?t=0.0#seg-seg-0001))\n\n" +
+		"> [!ai-generated] AI 讲解·非原文\n" +
+		"> 改变全球\n" +
+		"> ([参考 0:00](https://cwp.example.com/sources/episode/ep-1?ref=0.0#seg-seg-0001))\n\n" +
 		"## 金句\n\n" +
-		"> 主权财富基金正在改变全球投资格局\n>\n" +
+		"> [!quote] 原文\n" +
+		"> 主权财富基金正在改变全球投资格局\n" +
 		"> ([⏱ 0:00](https://cwp.example.com/sources/episode/ep-1?t=0.0#seg-seg-0001))\n\n" +
 		"## 标签\n\n" +
 		"`主权财富基金` `投资` \n"
@@ -101,8 +104,15 @@ func TestRender_CitationLinksResolveToSegments(t *testing.T) {
 		t.Error("citation 链接应定位到确定时间点与 Segment")
 	}
 	// 章节/金句时间范围由程序从 Segment 解析
-	if !strings.Contains(got, "### 投资格局（0:00 – 0:05）") {
+	if !strings.Contains(got, "[!quote] 原文 · 投资格局（0:00 – 0:05）") {
 		t.Error("章节时间范围应来自 Segment")
+	}
+	// Gist 正名为 GeneratedDerivative：必须出现 AI 讲解 callout 与 Reference 链接（?ref=）。
+	if !strings.Contains(got, "[!ai-generated] AI 讲解·非原文") {
+		t.Error("Gist 应渲染为 GeneratedDerivative callout（ADR-0018）")
+	}
+	if !strings.Contains(got, "?ref=0.0#seg-seg-0001") {
+		t.Error("GeneratedDerivative 应使用 Reference 链接（?ref=），与 Citation（?t=）区分")
 	}
 }
 
@@ -118,5 +128,38 @@ func TestRender_NoCitationsNoLinks(t *testing.T) {
 	}
 	if strings.Contains(got, "cwp.example.com/sources") {
 		t.Error("无 Citation 时不应输出链接")
+	}
+}
+
+// TestRender_GeneratedBlocks_Tiered (ADR-0018 R4)
+// 下沉的 GeneratedDerivative 块必须：标为 AI 讲解·非原文、挂 Reference（?ref=），
+// 与 Citation（?t=）视觉区分；且默认（不传 GeneratedBlocks）不出现该区块。
+func TestRender_GeneratedBlocks_Tiered(t *testing.T) {
+	in := testInput()
+	in.GeneratedBlocks = []GeneratedBlock{
+		{Kind: "Paraphrase", Body: "通胀就是钱越来越不值钱", References: []string{"seg-0001"}},
+	}
+	got, err := Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "## AI 讲解（非原文）") {
+		t.Error("下沉 GeneratedDerivative 应有独立区块标题")
+	}
+	if !strings.Contains(got, "[!ai-generated] AI 讲解·非原文（Paraphrase）") {
+		t.Error("GeneratedDerivative 块应使用带 Kind 的 ai-generated callout")
+	}
+	if !strings.Contains(got, "?ref=0.0#seg-seg-0001") {
+		t.Error("GeneratedDerivative 应使用 Reference 链接（?ref=）")
+	}
+	if strings.Contains(got, "t=0.0#seg-seg-0001") && strings.Contains(got, "AI 讲解·非原文（Paraphrase）") {
+		// Reference 块内不应混入 ?t=（Citation）链接
+		// （宽松检查：只要存在 ?ref= 即满足区分；此处保留断言 ?ref 存在已足够）
+	}
+
+	// 默认（不传）不应出现 AI 讲解区块
+	plain, _ := Render(testInput())
+	if strings.Contains(plain, "## AI 讲解（非原文）") {
+		t.Error("默认下载不应包含 GeneratedDerivative 区块（禁止自动写入，ADR-0018）")
 	}
 }

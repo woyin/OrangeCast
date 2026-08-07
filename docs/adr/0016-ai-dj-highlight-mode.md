@@ -17,11 +17,12 @@ Highlight 的 Citation 是一组 Segment ID 的集合，**程序取 min(start)�
 ### 3. Highlight 结构
 ```
 Highlight {
-    Citations: []SegmentID   // 程序算时间范围
-    Gist: string             // AI 生成的"为什么这段值得听"的说明（非逐字原文）
+    Citations: []SegmentID   // 区间本身是 CitedDerivative，程序算时间范围
+    Gist: string             // GeneratedDerivative：AI 生成的"为什么这段值得听"的说明（非逐字原文）
+    References: []SegmentID  // Gist 的参考关系，程序算时间范围，AI 只能选 Segment ID
 }
 ```
-Gist 复用现有词汇（Chapter.Gist 同名同义），是 AI 重新组织的概括，非逐字原文，其证据来自 Citations。
+Gist 复用现有词汇（Chapter.Gist 同名同义），是 AI 重新组织的概括，非逐字原文。Gist 是 GeneratedDerivative，其与 Segment 的关联是 Reference（非 Citation），表示参考了这些片段但不声称逐字忠实。所属区间本身仍是 CitedDerivative。
 
 ### 4. DJ 播放序列
 DJ 模式是一个**编排好的播放清单页面**，不是生成的音频文件：
@@ -42,3 +43,9 @@ DJ 模式是一个**编排好的播放清单页面**，不是生成的音频文�
 - Highlight 作为独立产物，schema 复用现有 `artifact_versions` + Source 指针，无新表。
 - DJ 模式是只读编排层，不产生新音频，不增加 EvidenceAudio 负担。
 - 未来若 Owner 坚持要 TTS，必须新开 ADR 明确记录违背 EvidenceArchive 定位的后果。
+
+---
+
+## 修订记录
+
+- 2026-08-07：在信息分层升级（PrimarySource / Derivative / CitedDerivative / GeneratedDerivative / Reference）下正名 Gist 的关联类型。原文描述 Gist 的证据来自 Citations，但 Gist 一直是非逐字、重新组织语言的产物，与 Citation 的可核验语义冲突。本次修订将 Gist 明确为 GeneratedDerivative，关联类型改为 Reference；Highlight 区间本身的 Citation 不变。决策结论（Highlight 独立版本化、不做 TTS、Gist 非逐字）未变。

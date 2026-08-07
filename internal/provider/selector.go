@@ -51,7 +51,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.openaiBaseURL != "" {
 			oa.baseURL = sel.openaiBaseURL
 		}
-		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa}, nil
+		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
@@ -60,7 +60,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.groqBaseURL != "" {
 			g.baseURL = sel.groqBaseURL
 		}
-		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g}, nil
+		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}
@@ -86,6 +86,9 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Analysis = custom
 				bundle.Highlight = custom
 				bundle.QA = custom
+				bundle.Paraphrase = custom
+				bundle.StudyChat = custom
+				bundle.RefChecker = custom
 			}
 		case "openai":
 			if o, ok := bundle.Analysis.(*OpenAIProvider); ok {
@@ -93,6 +96,9 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Analysis = custom
 				bundle.Highlight = custom
 				bundle.QA = custom
+				bundle.Paraphrase = custom
+				bundle.StudyChat = custom
+				bundle.RefChecker = custom
 			}
 		}
 	}

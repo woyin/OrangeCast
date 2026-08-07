@@ -2,7 +2,7 @@
 
 > 单 Owner、自托管、默认零 AI 成本的播客证据库。
 
-把主动选择的播客音频转化为持久、可检索、可回听、所有衍生内容都有真实引用的证据，再通过 Markdown 沉淀到个人知识库。
+把主动选择的播客音频转化为持久、可检索、可回听的证据，再在严格分层的衍生内容之上提供学习辅助（带证衍生逐字可核验，生成衍生明确标注为 AI 生成），最终通过 Markdown 沉淀到个人知识库。
 
 ---
 
@@ -27,8 +27,10 @@
 
 - **分段级全文搜索**：FTS5 命中返回实际 Transcript Segment 与时间范围，直接跳转到 EvidenceAudio 对应位置
 - **播放器联动**：转录稿/章节/金句三层时间戳联动；`?t=` / `#seg-` 深链跳转
-- **单期 Q&A**：只使用模型实际引用的 Segment；无可靠引用明确拒答
-- **Markdown 下载**：确定性 Obsidian Markdown（frontmatter + Citation 链接），单 Source 一键下载
+- **证据问答（EvidenceQA）**：查证型，只使用模型实际引用的 Segment；无可靠引用明确拒答（CitedDerivative，挂 Citation）
+- **复述讲解（Paraphrase）**：在任意片段上触发"重讲"，AI 用别的话重新讲解（GeneratedDerivative，挂 Reference，标为非原文）；同锚点保留最近 3 次
+- **学习对话（StudyChat）**：围绕本期内容多轮自由提问；硬约束一"无 Reference 不生成"+ 硬约束二"ReferenceCheck 主题锚定校验"防止脱稿；按会话（StudySession）保存
+- **Markdown 下载**：确定性 Obsidian Markdown；证据块（CitedDerivative）带 Citation 链接（?t=），AI 讲解块（GeneratedDerivative）带 Reference 链接（?ref=），视觉区分；可一键下载"仅证据"或"含 AI 讲解"
 
 ### 可靠性与安全
 
@@ -178,7 +180,7 @@ go build ./cmd/cloudwisepod
 git diff --check
 ```
 
-106 个测试覆盖：迁移、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet、Markdown golden、分段搜索、Q&A 拒答、批量入队。
+测试覆盖：迁移、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet（含 ReferenceCheck 6 场景）、Markdown golden、分段搜索、EvidenceQA 拒答、StudyChat 硬约束、Paraphrase 最近 N 次淘汰、批量入队。
 
 ---
 

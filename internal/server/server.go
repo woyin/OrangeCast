@@ -78,7 +78,11 @@ func (srv *Server) Router() http.Handler {
 	protected.HandleFunc("/api/collection", srv.handleCollection)
 	protected.HandleFunc("/api/collection/item", srv.handleCollectionItem)
 	protected.HandleFunc("/settings", srv.handleSettings)
-	protected.HandleFunc("/api/qa", srv.handleQA)
+	protected.HandleFunc("/api/qa", srv.handleEvidenceQA)                       // 向后兼容别名
+	protected.HandleFunc("/api/evidence-qa", srv.handleEvidenceQA)              // 规范路径（ADR-0018）
+	protected.HandleFunc("/api/paraphrase", srv.handleParaphrase)               // Paraphrase（GeneratedDerivative，ADR-0018 R2）
+	protected.HandleFunc("/api/study-chat", srv.handleStudyChat)                // StudyChat（GeneratedDerivative，ADR-0018 R3）
+	protected.HandleFunc("/api/study-chat/history", srv.handleStudyChatHistory) // StudyChat 历史回看
 	protected.HandleFunc("/api/process", srv.handleProcess)
 	protected.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	protected.HandleFunc("/api/audio/", srv.handleAudio)

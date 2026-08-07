@@ -315,7 +315,7 @@ func TestLogin_RateLimited(t *testing.T) {
 
 func TestQAResponse_RefusesWithoutCitations(t *testing.T) {
 	// 模型有答案但未引用任何片段 → 拒答（Phase 7）
-	code, body := qaResultToResponse(&provider.QAResult{Answer: "好像是这样的", Sources: nil})
+	code, body := evidenceQAResultToResponse(&provider.QAResult{Answer: "好像是这样的", Sources: nil})
 	if code != http.StatusUnprocessableEntity {
 		t.Errorf("无引用应 422 拒答，实际 %d", code)
 	}
@@ -325,7 +325,7 @@ func TestQAResponse_RefusesWithoutCitations(t *testing.T) {
 }
 
 func TestQAResponse_RefusesEmptyAnswer(t *testing.T) {
-	code, body := qaResultToResponse(&provider.QAResult{Answer: "", Sources: []provider.Source{{SegmentID: "seg-0001"}}})
+	code, body := evidenceQAResultToResponse(&provider.QAResult{Answer: "", Sources: []provider.Source{{SegmentID: "seg-0001"}}})
 	if code != http.StatusUnprocessableEntity {
 		t.Errorf("空答案应拒答，实际 %d", code)
 	}
@@ -337,7 +337,7 @@ func TestQAResponse_AllowsCitedAnswer(t *testing.T) {
 		Answer:  "有效回答",
 		Sources: []provider.Source{{SegmentID: "seg-0001", Content: "原文", Start: 0, End: 1}},
 	}
-	code, body := qaResultToResponse(res)
+	code, body := evidenceQAResultToResponse(res)
 	if code != http.StatusOK {
 		t.Errorf("有答案且有引用应 200，实际 %d", code)
 	}

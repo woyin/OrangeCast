@@ -1,22 +1,15 @@
 package queue
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -31,9 +24,6 @@ const (
 	pollInterval   = 3 * time.Second
 	maxAudioSize   = 500 << 20 // 单集音频最大下载量（500MB）
 	// Groq 的 25MB 上限包含 multipart 开销；EvidenceAudio 留出余量，避免边界 413。
-	maxTranscriptionUploadBytes int64 = 22 << 20
-	minEvidenceBitrateKbps            = 16
-	maxEvidenceBitrateKbps            = 64
 )
 
 // Worker 处理转录与分析任务。
@@ -413,65 +403,6 @@ func (w *Worker) downloadAudio(ctx context.Context, audioURL string) (string, er
 	return tmpFile.Name(), nil
 }
 
-// evidenceBitrateKbps 按时长选择可让转录请求（含 multipart 开销）保持在 25MB
-// Groq 上限以内的最高标准 MP3 码率。长到 16kbps 仍无法容纳时，需要后续分段策略。
-func evidenceBitrateKbps(durationSeconds float64) (int, error) {
-	if durationSeconds <= 0 {
-		return 0, fmt.Errorf("音频时长无效: %.3f", durationSeconds)
-	}
-	maxKbps := int(math.Floor(float64(maxTranscriptionUploadBytes*8) / durationSeconds / 1000))
-	for _, bitrate := range []int{maxEvidenceBitrateKbps, 56, 48, 40, 32, 24, minEvidenceBitrateKbps} {
-		if bitrate <= maxKbps {
-			return bitrate, nil
-		}
-	}
-	return 0, fmt.Errorf("音频时长 %.0f 秒即使以 %dkbps 转码仍超过 Groq 单文件上传上限；需要分段转录", durationSeconds, minEvidenceBitrateKbps)
-}
-
-// audioDuration 用 ffprobe 读取原始输入时长，以便选择 EvidenceAudio 的码率。
-func audioDuration(path string) (float64, error) {
-	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-	duration, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	if err != nil {
-		return 0, err
-	}
-	return duration, nil
-}
-
-// transcodeAudio 用给定码率转码为 16kHz 单声道 MP3。
-func transcodeAudio(in, out string, bitrateKbps int) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", in,
-		"-ac", "1",
-		"-ar", "16000",
-		"-b:a", fmt.Sprintf("%dk", bitrateKbps),
-		"-f", "mp3",
-		out,
-	)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", stderr.String(), err)
-	}
-	return nil
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // ---- 可恢复 Purge（ADR-0012）----
 
 // ResumePurges 恢复所有 pending 的 purge：先删文件（幂等），再事务性删 DB 行。
@@ -490,6 +421,10 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM annotations WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
 		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM pins WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
 		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM collection_items WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
+		// ADR-0018：删除 GeneratedDerivative 产物（Paraphrase / StudySession），
+		// 使 PersonalKnowledgeBase 中指向该 Source 的 Citation 与 Reference 一并失效。
+		_ = w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID)
+		_ = w.store.DeleteStudySessionsForSource(ctx, p.SourceType, p.SourceID)
 		// 3) 事务性删除 DB 行
 		if err := w.store.DeleteSourceRows(ctx, p.SourceType, p.SourceID); err != nil {
 			return fmt.Errorf("purge 删除 DB 行（%s/%s）: %w", p.SourceType, p.SourceID, err)
@@ -508,16 +443,6 @@ func (w *Worker) PurgeSource(ctx context.Context, sourceType models.SourceType, 
 		return err
 	}
 	return w.ResumePurges(ctx)
-}
-
-func guessAudioExt(url string) string {
-	low := strings.ToLower(url)
-	for _, e := range []string{".mp3", ".m4a", ".wav", ".aac", ".ogg"} {
-		if strings.HasSuffix(low, e) {
-			return e
-		}
-	}
-	return ".mp3"
 }
 
 func (w *Worker) setSourceStatus(ctx context.Context, job *models.ProcessingJob, status models.EpisodeProcessingStatus) {

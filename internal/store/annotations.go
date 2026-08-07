@@ -17,24 +17,25 @@ import (
 // ---- Annotation ----
 
 type Annotation struct {
-	ID         string
-	SourceType models.SourceType
-	SourceID   string
-	SegmentIDs string
-	TimeStart  float64
-	TimeEnd    float64
-	Body       string
-	CreatedAt  string
-	UpdatedAt  string
+	ID           string
+	SourceType   models.SourceType
+	SourceID     string
+	SegmentIDs   string
+	RelationKind models.RelationKind
+	TimeStart    float64
+	TimeEnd      float64
+	Body         string
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 func (s *Store) UpsertAnnotation(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, body string) (*Annotation, error) {
 	id := uuid.NewString()
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO annotations (id, source_type, source_id, segment_ids, time_start, time_end, body)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(source_type, source_id, segment_ids) DO UPDATE SET body = excluded.body, updated_at = datetime('now')`,
-		id, string(sourceType), sourceID, segmentIDs, timeStart, timeEnd, body)
+		`INSERT INTO annotations (id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, body)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(source_type, source_id, segment_ids) DO UPDATE SET body = excluded.body, relation_kind = excluded.relation_kind, updated_at = datetime('now')`,
+		id, string(sourceType), sourceID, segmentIDs, string(models.RelationCitation), timeStart, timeEnd, body)
 	if err != nil {
 		return nil, fmt.Errorf("写入标注: %w", err)
 	}
@@ -44,10 +45,10 @@ func (s *Store) UpsertAnnotation(ctx context.Context, sourceType models.SourceTy
 func (s *Store) GetAnnotation(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string) (*Annotation, error) {
 	a := &Annotation{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, source_type, source_id, segment_ids, time_start, time_end, body, created_at, updated_at
+		`SELECT id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, body, created_at, updated_at
 		 FROM annotations WHERE source_type=? AND source_id=? AND segment_ids=?`,
 		string(sourceType), sourceID, segmentIDs).
-		Scan(&a.ID, &a.SourceType, &a.SourceID, &a.SegmentIDs, &a.TimeStart, &a.TimeEnd, &a.Body, &a.CreatedAt, &a.UpdatedAt)
+		Scan(&a.ID, &a.SourceType, &a.SourceID, &a.SegmentIDs, &a.RelationKind, &a.TimeStart, &a.TimeEnd, &a.Body, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -56,7 +57,7 @@ func (s *Store) GetAnnotation(ctx context.Context, sourceType models.SourceType,
 
 func (s *Store) ListAnnotations(ctx context.Context) ([]*Annotation, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, segment_ids, time_start, time_end, body, created_at, updated_at
+		`SELECT id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, body, created_at, updated_at
 		 FROM annotations ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -65,7 +66,7 @@ func (s *Store) ListAnnotations(ctx context.Context) ([]*Annotation, error) {
 	var out []*Annotation
 	for rows.Next() {
 		a := &Annotation{}
-		if err := rows.Scan(&a.ID, &a.SourceType, &a.SourceID, &a.SegmentIDs, &a.TimeStart, &a.TimeEnd, &a.Body, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.SourceType, &a.SourceID, &a.SegmentIDs, &a.RelationKind, &a.TimeStart, &a.TimeEnd, &a.Body, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -83,14 +84,15 @@ func (s *Store) DeleteAnnotation(ctx context.Context, sourceType models.SourceTy
 // ---- Pin ----
 
 type Pin struct {
-	SourceType  models.SourceType
-	SourceID    string
-	SegmentIDs  string
-	TimeStart   float64
-	TimeEnd     float64
-	SourceTitle string
-	Note        *string
-	CreatedAt   string
+	SourceType   models.SourceType
+	SourceID     string
+	SegmentIDs   string
+	RelationKind models.RelationKind
+	TimeStart    float64
+	TimeEnd      float64
+	SourceTitle  string
+	Note         *string
+	CreatedAt    string
 }
 
 func (s *Store) TogglePin(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, sourceTitle string) (bool, error) {
@@ -111,14 +113,14 @@ func (s *Store) TogglePin(ctx context.Context, sourceType models.SourceType, sou
 	}
 	// 未 pin → 添加
 	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO pins (source_type, source_id, segment_ids, time_start, time_end, source_title) VALUES (?, ?, ?, ?, ?, ?)`,
-		string(sourceType), sourceID, segmentIDs, timeStart, timeEnd, sourceTitle)
+		`INSERT INTO pins (source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		string(sourceType), sourceID, segmentIDs, string(models.RelationCitation), timeStart, timeEnd, sourceTitle)
 	return true, err
 }
 
 func (s *Store) ListPins(ctx context.Context) ([]*Pin, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT source_type, source_id, segment_ids, time_start, time_end, source_title, note, created_at
+		`SELECT source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note, created_at
 		 FROM pins ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -127,7 +129,7 @@ func (s *Store) ListPins(ctx context.Context) ([]*Pin, error) {
 	var out []*Pin
 	for rows.Next() {
 		p := &Pin{}
-		if err := rows.Scan(&p.SourceType, &p.SourceID, &p.SegmentIDs, &p.TimeStart, &p.TimeEnd, &p.SourceTitle, &p.Note, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.SourceType, &p.SourceID, &p.SegmentIDs, &p.RelationKind, &p.TimeStart, &p.TimeEnd, &p.SourceTitle, &p.Note, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -159,6 +161,7 @@ type CollectionItem struct {
 	SourceType   models.SourceType
 	SourceID     string
 	SegmentIDs   string
+	RelationKind models.RelationKind
 	TimeStart    float64
 	TimeEnd      float64
 	SourceTitle  string
@@ -210,9 +213,9 @@ func (s *Store) ListCollections(ctx context.Context) ([]*Collection, error) {
 
 func (s *Store) AddToCollection(ctx context.Context, collectionID string, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, sourceTitle, note string) error {
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO collection_items (collection_id, source_type, source_id, segment_ids, time_start, time_end, source_title, note)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		collectionID, string(sourceType), sourceID, segmentIDs, timeStart, timeEnd, sourceTitle, note)
+		`INSERT OR IGNORE INTO collection_items (collection_id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		collectionID, string(sourceType), sourceID, segmentIDs, string(models.RelationCitation), timeStart, timeEnd, sourceTitle, note)
 	if err != nil {
 		return err
 	}
@@ -222,7 +225,7 @@ func (s *Store) AddToCollection(ctx context.Context, collectionID string, source
 
 func (s *Store) ListCollectionItems(ctx context.Context, collectionID string) ([]*CollectionItem, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT collection_id, source_type, source_id, segment_ids, time_start, time_end, source_title, note, added_at
+		`SELECT collection_id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note, added_at
 		 FROM collection_items WHERE collection_id=? ORDER BY added_at DESC`, collectionID)
 	if err != nil {
 		return nil, err
@@ -231,7 +234,7 @@ func (s *Store) ListCollectionItems(ctx context.Context, collectionID string) ([
 	var out []*CollectionItem
 	for rows.Next() {
 		ci := &CollectionItem{}
-		if err := rows.Scan(&ci.CollectionID, &ci.SourceType, &ci.SourceID, &ci.SegmentIDs, &ci.TimeStart, &ci.TimeEnd, &ci.SourceTitle, &ci.Note, &ci.AddedAt); err != nil {
+		if err := rows.Scan(&ci.CollectionID, &ci.SourceType, &ci.SourceID, &ci.SegmentIDs, &ci.RelationKind, &ci.TimeStart, &ci.TimeEnd, &ci.SourceTitle, &ci.Note, &ci.AddedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, ci)

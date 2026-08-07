@@ -16,7 +16,7 @@ type ArtifactKind string
 const (
 	KindTranscript    ArtifactKind = "transcript"
 	KindKnowledgeCard ArtifactKind = "knowledge_card"
-	KindHighlight    ArtifactKind = "highlight"
+	KindHighlight     ArtifactKind = "highlight"
 )
 
 // CreateArtifactVersion 创建不可变产物版本并返回版本号。

@@ -1,11 +1,11 @@
 # CloudWisePod 产品目标
 
-状态：已确认  
-日期：2026-08-01
+状态：已确认（2026-08-07 信息分层升级，见 ADR-0018）  
+日期：2026-08-01 / 修订：2026-08-07
 
 ## 一句话目标
 
-CloudWisePod 是单 Owner、自托管、默认零 AI 成本的播客证据库：它将 Owner 主动选择的音频可靠地转化为持久、可检索、可回听且所有衍生内容都有真实引用的证据，并通过 Markdown 单向沉淀为个人知识库中的 KnowledgeNote。
+CloudWisePod 是单 Owner、自托管、默认零 AI 成本的播客学习平台：它将 Owner 主动选择的音频可靠地转化为持久、可检索、可回听的证据，并在严格分层的衍生内容之上提供学习辅助——带证衍生（CitedDerivative）逐字可核验，生成衍生（GeneratedDerivative）明确标注为 AI 生成、非原文；最终通过 Markdown 单向沉淀为个人知识库中的 KnowledgeNote。证据库定位不变，学习平台是叠加其上的能力层。
 
 ## 要解决的问题
 
@@ -35,7 +35,8 @@ KnowledgeNote → PersonalKnowledgeBase
 - CloudWisePod 是 EvidenceArchive；Obsidian 等外部系统是 PersonalKnowledgeBase。
 - KnowledgeNote 通过确定性 Markdown 单向沉淀；CloudWisePod 不编辑或同步外部笔记。
 - Groq 是默认零成本 Provider；付费 Provider 只允许 Owner 对单次任务显式授权。
-- 本地 SQLite FTS 搜索是核心能力；单 Source Q&A 是次要探索能力。
+- 本地 SQLite FTS 搜索是核心能力。
+- EvidenceQA（证据问答）是次要探索能力；StudyChat（学习对话）是本次升级新增的核心学习能力，二者在 UI 明确区分。
 - 默认按可能暴露在公网的 VPS 服务建立安全基线，HTTPS 由受信任反向代理终止。
 
 ## 质量与可靠性门槛
@@ -44,7 +45,7 @@ KnowledgeNote → PersonalKnowledgeBase
 - ProcessingJob 持久化，程序重启后自动恢复，产物写入保持幂等。
 - Transcript 与 KnowledgeCard 作为不可变 ArtifactVersion 保存，可比较和回退。
 - KnowledgeCard 的摘要、关键要点、章节和金句全部绑定真实 Segment；金句逐字可核验。
-- Q&A 无可靠 Citation 时明确拒答，不附加虚假依据。
+- EvidenceQA 无可靠 Citation 时明确拒答，不附加虚假依据；StudyChat 不拒答，但每轮必须挂 Reference 并通过独立相关性校验，无 Reference 不生成。
 - 模型、Prompt 或分块变更必须通过小型内容质量 EvalSet。
 - 所有持久数据位于统一 `DATA_DIR`，备份必须能在全新实例恢复。
 - Source 默认永久保留；只有 Owner 明确执行 Purge 才完整删除。
@@ -63,7 +64,7 @@ KnowledgeNote → PersonalKnowledgeBase
 7. 一键下载带 Citation 链接的 Obsidian Markdown。
 8. 生成备份包，并在另一全新实例成功恢复。
 
-整条旅程默认只使用 Groq，不产生付费调用；Q&A 不阻塞发布。
+整条旅程默认只使用 Groq，不产生付费调用；EvidenceQA 不阻塞发布。
 
 ## 明确不做
 
@@ -71,7 +72,7 @@ KnowledgeNote → PersonalKnowledgeBase
 - 完整复刻 Podwise。
 - 自动处理所有新 Episode。
 - Embedding、向量数据库、语义搜索或跨 Source RAG。
-- 将 Q&A 回答自动写入 KnowledgeNote。
+- 任何衍生内容自动写入 KnowledgeNote（含 EvidenceQA 回答与 StudyChat 回答）；StudyChat 精彩回答只允许 Owner 手动选择后下沉，并标为 GeneratedDerivative 块。
 - Obsidian 插件、直接写入 Vault、Git/WebDAV 双向同步。
 - 静默切换到付费 Provider。
 - 内置云备份、定时云同步或自行终止 TLS。

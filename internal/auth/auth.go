@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	ErrInvalidEmail    = errors.New("invalid email")
+	ErrInvalidEmail     = errors.New("invalid email")
 	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
 )
 

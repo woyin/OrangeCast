@@ -93,6 +93,9 @@ type ProviderBundle struct {
 	Analysis      AnalysisProvider
 	QA            QAProvider
 	Highlight     HighlightProvider
+	Paraphrase    ParaphraseProvider
+	StudyChat     StudyChatProvider
+	RefChecker    ReferenceChecker
 }
 
 // Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。
@@ -105,6 +108,58 @@ type Highlight struct {
 // HighlightSet 一个 Source 的全部高光片段。
 type HighlightSet struct {
 	Highlights []Highlight `json:"highlights"`
+}
+
+// ParaphraseResult 复述讲解输出（GeneratedDerivative，ADR-0018）。
+// Text 是 AI 重新组织的讲解（非逐字原文），允许类比/举例/拆解。
+// ReferenceSegmentIDs 是它所参考的 Segment ID（由调用方传入，AI 不可自行编造时间）。
+type ParaphraseResult struct {
+	Text                string   `json:"text"`
+	ReferenceSegmentIDs []string `json:"referenceSegmentIds"`
+}
+
+// ParaphraseProvider 复述讲解接口（GeneratedDerivative，ADR-0018 R2）。
+// 基于给定参考 Segment 重讲 Owner 未理解的部分；输出明确标注为 AI 生成、非原文。
+// 它不挂 Citation、不要求逐字忠实——与 EvidenceQA（CitedDerivative）形成对照。
+type ParaphraseProvider interface {
+	Paraphrase(question string, referenceSegments []Segment) (*ParaphraseResult, error)
+	Name() string
+}
+
+// StudyChatMessage 一轮学习对话的消息（GeneratedDerivative，ADR-0018）。
+type StudyChatMessage struct {
+	Role                string   `json:"role"` // user | assistant
+	Content             string   `json:"content"`
+	ReferenceSegmentIDs []string `json:"referenceSegmentIds,omitempty"` // assistant 回答所参考的 Segment（Reference，非 Citation）
+	Suppressed          bool     `json:"suppressed,omitempty"`          // 因 ReferenceCheck 失败被抑制时为 true（仅内部记录，不呈现）
+}
+
+// StudyChatResult 学习对话一轮的输出。
+type StudyChatResult struct {
+	Answer            *StudyChatMessage // 生成的回答；ScopeTethered 或 ReferenceCheck 失败时为 nil
+	ScopeFeedback     string            // 硬约束一失败（无法关联任何 Segment）的可见反馈；非空表示不生成
+	ReferenceRejected bool              // 硬约束二失败（ReferenceCheck 判定主题不锚定）的可见反馈
+}
+
+// StudyChatProvider 学习对话接口（GeneratedDerivative，ADR-0018 R3）。
+// 输入：Owner 问题 + 历史 + 当前 Source 可检索的 Segment；模型自选参考 Segment 并生成回答。
+// 调用方负责硬约束一（无 Reference 不生成）与硬约束二（ReferenceCheck）。
+type StudyChatProvider interface {
+	StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error)
+	Name() string
+}
+
+// ReferenceCheckResult 主题锚定校验结果（ADR-0018 R3 硬约束二）。
+type ReferenceCheckResult struct {
+	Related bool   // 回答主题是否扎根于 Reference 段所讨论内容
+	Reason  string // 可选说明
+}
+
+// ReferenceChecker 主题锚定校验器接口（独立步骤，不参与生成）。
+// 输入三元组（问题 + 回答 + Reference 段文本），只判相关、不判逐字忠实。
+type ReferenceChecker interface {
+	CheckReference(question, answer string, referenceSegments []Segment) (ReferenceCheckResult, error)
+	Name() string
 }
 
 // ConfigurableProvider 可按外部配置指定模型名（ADR-0009 扩展：每任务配 Provider+Model）。

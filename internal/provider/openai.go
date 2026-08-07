@@ -40,6 +40,31 @@ func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
 	return &OpenAIProvider{apiKey: o.apiKey, baseURL: o.baseURL, analysisModel: model}
 }
 
+// doResponses 发送一次 POST /responses，返回原始响应体。
+// 集中 6 处重复的 baseURL 解析、鉴权、超时与 HTTP 错误处理；调用方各自 Unmarshal/解析。
+// label 用于错误信息标注（哪个任务失败）。
+func (o *OpenAIProvider) doResponses(payload map[string]any, label string) ([]byte, error) {
+	bURL := o.baseURL
+	if bURL == "" {
+		bURL = openaiBaseURL
+	}
+	buf, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
+	req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai %s 请求: %w", label, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("openai %s 失败 HTTP %d: %s", label, resp.StatusCode, string(data))
+	}
+	return data, nil
+}
+
 func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -100,10 +125,6 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 
 // Analyze 走 /responses + json_schema strict（OpenAI 保证结构化输出）。
 func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
-	bURL := o.baseURL
-	if bURL == "" {
-		bURL = openaiBaseURL
-	}
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
@@ -125,19 +146,9 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 			},
 		},
 	}
-	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	data, err := o.doResponses(payload, "分析")
 	if err != nil {
-		return nil, fmt.Errorf("openai 分析请求: %w", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("openai 分析失败 HTTP %d: %s", resp.StatusCode, string(data))
+		return nil, err
 	}
 	var r struct {
 		OutputText string `json:"output_text"`
@@ -151,11 +162,6 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 }
 
 func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult, error) {
-	bURL := o.baseURL
-	if bURL == "" {
-		bURL = openaiBaseURL
-	}
-	_ = bURL
 	chunks := Retrieve(BuildChunks(segments, 8), question, 5)
 	if len(chunks) == 0 {
 		return &QAResult{Answer: "暂无转录稿可用于回答。"}, nil
@@ -185,19 +191,9 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 			},
 		},
 	}
-	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	data, err := o.doResponses(payload, "QA")
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("openai QA 失败 HTTP %d", resp.StatusCode)
 	}
 	var r struct {
 		OutputText string `json:"output_text"`
@@ -230,11 +226,6 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 
 // GenerateHighlights 生成高光片段（ADR-0016）。
 func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, error) {
-	bURL := o.baseURL
-	if bURL == "" {
-		bURL = openaiBaseURL
-	}
-	_ = bURL
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("无 Segment 可供生成高光")
 	}
@@ -271,19 +262,9 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 			},
 		},
 	}
-	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiBaseURL+"/responses", bytes.NewReader(buf))
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	data, err := o.doResponses(payload, "高光")
 	if err != nil {
-		return nil, fmt.Errorf("openai 高光请求: %w", err)
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("openai 高光失败 HTTP %d: %s", resp.StatusCode, string(data))
+		return nil, err
 	}
 	var r struct {
 		OutputText string `json:"output_text"`
@@ -294,4 +275,167 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 		return nil, fmt.Errorf("解析 openai 高光: %w", err)
 	}
 	return hs, nil
+}
+
+// Paraphrase 生成复述讲解（GeneratedDerivative，ADR-0018）。
+// 与 Groq.Paraphrase 对偶：输出纯文本讲解，非逐字原文；参考片段由调用方传入。
+func (o *OpenAIProvider) Paraphrase(question string, referenceSegments []Segment) (*ParaphraseResult, error) {
+	if len(referenceSegments) == 0 {
+		return nil, fmt.Errorf("复述讲解至少需要一个参考片段")
+	}
+	var sb strings.Builder
+	for _, seg := range referenceSegments {
+		sb.WriteString(fmt.Sprintf("[%s | %.0f-%.0fs] %s\n", seg.ID, seg.Start, seg.End, seg.Text))
+	}
+	refs := make([]string, 0, len(referenceSegments))
+	for _, seg := range referenceSegments {
+		refs = append(refs, seg.ID)
+	}
+	input := fmt.Sprintf("参考片段：\n%s\n\n用户的疑问：%s\n\n请基于参考片段重新讲解，帮用户理解。", sb.String(), question)
+	payload := map[string]any{
+		"model":        openaiAnalysisModel,
+		"instructions": paraphraseSystemPrompt,
+		"input":        input,
+	}
+	data, err := o.doResponses(payload, "复述讲解")
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		OutputText string `json:"output_text"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("解析 openai 复述讲解响应: %w", err)
+	}
+	return &ParaphraseResult{Text: strings.TrimSpace(r.OutputText), ReferenceSegmentIDs: refs}, nil
+}
+
+// StudyChatAnswer 学习对话一轮（GeneratedDerivative，ADR-0018 R3）。
+// OpenAI /responses 接口不接收完整 chat history，故把历史折叠进 input 文本。
+func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error) {
+	if len(candidates) == 0 {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	retrieved := Retrieve(BuildChunks(candidates, 8), question, 6)
+	if len(retrieved) == 0 {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	var ctxSB strings.Builder
+	for _, c := range retrieved {
+		ctxSB.WriteString(fmt.Sprintf("[%s | %.0f-%.0fs] %s\n", c.SegmentID, c.Start, c.End, c.Text))
+	}
+	var histSB strings.Builder
+	start := 0
+	if len(history) > 6 {
+		start = len(history) - 6
+	}
+	for _, m := range history[start:] {
+		role := "用户"
+		if m.Role == "assistant" {
+			role = "助手"
+		}
+		histSB.WriteString(fmt.Sprintf("%s：%s\n", role, m.Content))
+	}
+	input := fmt.Sprintf("候选片段：\n%s\n对话历史：\n%s当前用户问题：%s", ctxSB.String(), histSB.String(), question)
+	payload := map[string]any{
+		"model":        openaiAnalysisModel,
+		"instructions": studyChatSystemPrompt,
+		"input":        input,
+		"text": map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "studychat_result",
+				"strict": true,
+				"schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"answer":              map[string]any{"type": "string"},
+						"referenceSegmentIds": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					},
+					"required": []string{"answer", "referenceSegmentIds"},
+				},
+			},
+		},
+	}
+	data, err := o.doResponses(payload, "学习对话")
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		OutputText string `json:"output_text"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("解析 openai 学习对话响应: %w", err)
+	}
+	var parsed struct {
+		Answer              string   `json:"answer"`
+		ReferenceSegmentIDs []string `json:"referenceSegmentIds"`
+	}
+	if err := parseJSONLoose(r.OutputText, &parsed); err != nil {
+		return nil, fmt.Errorf("解析 StudyChat 输出失败: %w", err)
+	}
+	if len(parsed.ReferenceSegmentIDs) == 0 || strings.TrimSpace(parsed.Answer) == "" {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	validIDs := validReferenceIDs(parsed.ReferenceSegmentIDs, retrieved)
+	if len(validIDs) == 0 {
+		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
+	}
+	return &StudyChatResult{
+		Answer: &StudyChatMessage{
+			Role:                "assistant",
+			Content:             strings.TrimSpace(parsed.Answer),
+			ReferenceSegmentIDs: validIDs,
+		},
+	}, nil
+}
+
+// CheckReference 主题锚定校验（ADR-0018 R3 硬约束二）。
+func (o *OpenAIProvider) CheckReference(question, answer string, referenceSegments []Segment) (ReferenceCheckResult, error) {
+	if len(referenceSegments) == 0 {
+		return ReferenceCheckResult{Related: false, Reason: "无参考片段"}, nil
+	}
+	var sb strings.Builder
+	for _, seg := range referenceSegments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	input := fmt.Sprintf("用户问题：%s\n\nAI 回答：\n%s\n\n参考片段原文：\n%s", question, answer, sb.String())
+	payload := map[string]any{
+		"model":        openaiAnalysisModel,
+		"instructions": referenceCheckSystemPrompt,
+		"input":        input,
+		"text": map[string]any{
+			"format": map[string]any{
+				"type":   "json_schema",
+				"name":   "reference_check_result",
+				"strict": true,
+				"schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"related": map[string]any{"type": "boolean"},
+						"reason":  map[string]any{"type": "string"},
+					},
+					"required": []string{"related", "reason"},
+				},
+			},
+		},
+	}
+	data, err := o.doResponses(payload, "校验")
+	if err != nil {
+		return ReferenceCheckResult{}, err
+	}
+	var r struct {
+		OutputText string `json:"output_text"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return ReferenceCheckResult{Related: false, Reason: "校验解析失败，保守拒绝"}, nil
+	}
+	var parsed struct {
+		Related bool   `json:"related"`
+		Reason  string `json:"reason"`
+	}
+	if err := parseJSONLoose(r.OutputText, &parsed); err != nil {
+		return ReferenceCheckResult{Related: false, Reason: "校验解析失败，保守拒绝"}, nil
+	}
+	return ReferenceCheckResult{Related: parsed.Related, Reason: parsed.Reason}, nil
 }
