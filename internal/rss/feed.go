@@ -38,6 +38,12 @@ func FetchFeed(feedURL string) (*models.Podcast, []models.Episode, error) {
 		return nil, nil, fmt.Errorf("解析 feed: %w", err)
 	}
 
+	return parseFeed(feed, feedURL)
+}
+
+// parseFeed 把已解析的 gofeed.Feed 转换为领域模型（Podcast + Episodes）。
+// 与网络抓取解耦，便于纯单元测试。
+func parseFeed(feed *gofeed.Feed, feedURL string) (*models.Podcast, []models.Episode, error) {
 	podcast := &models.Podcast{
 		FeedURL:     feedURL,
 		Title:       feed.Title,

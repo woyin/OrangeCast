@@ -11,13 +11,14 @@ import (
 
 // Refresher 定时刷新所有播客 feed 的调度器。
 type Refresher struct {
-	cron  *cron.Cron
-	store *store.Store
+	cron      *cron.Cron
+	store     *store.Store
+	fetchFeed func(string) (*models.Podcast, []models.Episode, error) // 可注入（测试用），默认走 FetchFeed
 }
 
 // NewRefresher 创建刷新器，每 30 分钟跑一次。
 func NewRefresher(s *store.Store) *Refresher {
-	r := &Refresher{cron: cron.New(), store: s}
+	r := &Refresher{cron: cron.New(), store: s, fetchFeed: FetchFeed}
 	r.cron.AddFunc("*/30 * * * *", func() {
 		if err := r.RefreshAll(context.Background()); err != nil {
 			log.Printf("cron 刷新失败: %v", err)
@@ -46,7 +47,7 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 }
 
 func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
-	_, eps, err := FetchFeed(p.FeedURL)
+	_, eps, err := r.fetchFeed(p.FeedURL)
 	if err != nil {
 		return err
 	}
