@@ -485,6 +485,16 @@ func TestRevertVersion_ErrorPaths(t *testing.T) {
 	}
 }
 
+// TestVersions_Nonexistent404 验证版本页对不存在的 source 返回 404。
+func TestVersions_Nonexistent404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "ver404@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/nonexistent/versions")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("不存在的 source 版本页应 404，实际 %d", rec.Code)
+	}
+}
+
 func TestProcessBatch_EnqueuesMultipleAndRedirects(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "batch@example.com", "password123")
