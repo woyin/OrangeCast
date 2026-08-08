@@ -454,6 +454,37 @@ func TestVersionsPage_RendersAndRevert(t *testing.T) {
 	}
 }
 
+// TestRevertVersion_ErrorPaths 验证回退的非法输入路径：无效版本号、无效 kind、版本不存在。
+func TestRevertVersion_ErrorPaths(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "revert@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 无效版本号 → 400
+	rec := postForm(t, srv, cookie, "/sources/episode/"+sourceID+"/versions/revert", "kind=transcript&version=abc")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("无效版本号应 400，实际 %d", rec.Code)
+	}
+	// 无效 kind → 400
+	rec = postForm(t, srv, cookie, "/sources/episode/"+sourceID+"/versions/revert", "kind=bogus&version=1")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("无效 kind 应 400，实际 %d", rec.Code)
+	}
+	// 版本不存在 → 404
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	v, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID, `{"v":1}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, v)
+	rec = postForm(t, srv, cookie, "/sources/episode/"+sourceID+"/versions/revert", "kind=transcript&version=99")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("版本不存在应 404，实际 %d", rec.Code)
+	}
+}
+
 func TestProcessBatch_EnqueuesMultipleAndRedirects(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "batch@example.com", "password123")
