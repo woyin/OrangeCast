@@ -381,6 +381,44 @@ func TestProcessOne_NoJob_Noop(t *testing.T) {
 	}
 }
 
+// TestRun_ProcessesAndStopsOnCancel 验证 Run 主循环：处理一个任务后，context 取消时干净退出。
+func TestRun_ProcessesAndStopsOnCancel(t *testing.T) {
+	s, w := newTestWorker(t)
+	injectFakeProviders(t, w, nil, nil)
+	ctx := context.Background()
+	// upload 源 + 已就绪 EvidenceAudio（跳过转码）
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	if _, err := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe); err != nil {
+		t.Fatalf("入队: %v", err)
+	}
+
+	// 用可取消 context 启动 Run，缩短轮询间隔以加速测试
+	ctx, cancel := context.WithCancel(ctx)
+	w.poll = 10 * time.Millisecond
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	// 等待任务被处理（转录版本写入）
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := s.GetCurrentVersion(context.Background(), models.SourceUpload, up.ID, store.KindTranscript); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done // 干净退出
+
+	// 验证转录已写入
+	if _, err := s.GetCurrentVersion(context.Background(), models.SourceUpload, up.ID, store.KindTranscript); err != nil {
+		t.Fatalf("Run 应处理转录任务: %v", err)
+	}
+}
+
 func TestWorkerHeartbeat_ExtendsLease(t *testing.T) {
 	s, _ := newTestWorker(t)
 	ctx := context.Background()
