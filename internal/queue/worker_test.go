@@ -760,6 +760,21 @@ func TestFetchRawAudio_UploadMissing(t *testing.T) {
 	}
 }
 
+// TestFetchRawAudio_EpisodeInvalidURL 验证 episode 音频 URL 非法时报错（无网络）。
+func TestFetchRawAudio_EpisodeInvalidURL(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// episode 的 AudioURL 为非法协议（ftp://），ValidateURL 拒绝，无需网络
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "ftp://x.com/a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	job := &models.ProcessingJob{SourceType: models.SourceEpisode, SourceID: sourceID}
+	if _, _, err := w.fetchRawAudio(ctx, job); err == nil {
+		t.Fatal("非法音频 URL 应报错")
+	}
+}
+
 // TestNewWorker_DefaultBundleFor 验证默认 bundleFor 按 settings 选择 Provider/Model。
 func TestNewWorker_DefaultBundleFor(t *testing.T) {
 	s, w := newTestWorker(t)
