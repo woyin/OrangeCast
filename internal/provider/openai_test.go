@@ -141,6 +141,44 @@ func TestOpenAI_StudyChat_HistoryTruncation(t *testing.T) {
 	}
 }
 
+// TestOpenAI_StudyChat_NoCandidates 验证无候选片段时返回范围外反馈。
+func TestOpenAI_StudyChat_NoCandidates(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	res, err := o.StudyChatAnswer("通胀是啥", nil, nil)
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer != nil || res.ScopeFeedback == "" {
+		t.Errorf("应返回范围外反馈，实际 %+v", res)
+	}
+}
+
+// TestOpenAI_StudyChat_EmptyReferenceIDs 验证返回空参考片段时给出范围外反馈（不请求服务器）。
+func TestOpenAI_StudyChat_EmptyReferenceIDs(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"answer":"","referenceSegmentIds":[]}`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	res, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer != nil {
+		t.Errorf("空参考应返回范围外反馈，实际 %+v", res)
+	}
+}
+
+// TestOpenAI_CheckReference_NoSegments 验证无参考片段时判定不相关。
+func TestOpenAI_CheckReference_NoSegments(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	res, err := o.CheckReference("q", "a", nil)
+	if err != nil {
+		t.Fatalf("CheckReference: %v", err)
+	}
+	if res.Related {
+		t.Errorf("无参考片段应判定不相关，实际 %+v", res)
+	}
+}
+
 // TestOpenAI_CheckReference 验证 OpenAI 主题锚定校验。
 func TestOpenAI_CheckReference(t *testing.T) {
 	srv := newOpenAITestServer(t, `{"related":true,"reason":"主题扎根"}`)
