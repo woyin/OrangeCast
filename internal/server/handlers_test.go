@@ -601,3 +601,57 @@ func TestPodcastsList_Renders(t *testing.T) {
 		t.Errorf("页面应含播客标题，实际 %s", rec.Body.String())
 	}
 }
+
+// TestUploads_Renders 验证上传列表页在认证后正常渲染（含上传条目）。
+func TestUploads_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "uplist@example.com", "password123")
+	ctx := context.Background()
+
+	srv.store.CreateUpload(ctx, "音轨.mp3", "audio/mpeg", 1024)
+	req := httptest.NewRequest(http.MethodGet, "/uploads", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("上传列表应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "音轨.mp3") {
+		t.Errorf("页面应含上传文件名，实际 %s", rec.Body.String())
+	}
+}
+
+// TestUploadNew_GET_Renders 验证上传新文件页 GET 渲染表单。
+func TestUploadNew_GET_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "upnew@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/new", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("上传新文件页应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "audio") {
+		t.Errorf("页面应含文件上传控件，实际 %s", rec.Body.String())
+	}
+}
+
+// TestSettings_GET_Renders 验证设置页 GET 渲染（默认 Groq Provider）。
+func TestSettings_GET_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "settings@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("设置页应 200，实际 %d", rec.Code)
+	}
+	// 默认渲染应含 Provider 选择字段（groq）
+	if !strings.Contains(rec.Body.String(), "groq") {
+		t.Errorf("设置页应含默认 groq provider，实际 %s", rec.Body.String())
+	}
+}
