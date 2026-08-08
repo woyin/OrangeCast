@@ -847,6 +847,14 @@ func TestSetSourceStatus_Upload(t *testing.T) {
 	}
 }
 
+// TestHighlightName 验证 HighlightName 返回高光 Provider 名。
+func TestHighlightName(t *testing.T) {
+	_, w := newTestWorker(t)
+	if got := w.HighlightName(); got != "groq" {
+		t.Errorf("HighlightName() = %q want groq", got)
+	}
+}
+
 // TestHeartbeatLoop_StopsOnCancel 验证 heartbeatLoop 随 context 取消干净退出。
 func TestHeartbeatLoop_StopsOnCancel(t *testing.T) {
 	_, w := newTestWorker(t)
