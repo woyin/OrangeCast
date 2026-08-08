@@ -148,6 +148,32 @@ func TestRestore_RejectsTamperedBackup(t *testing.T) {
 	}
 }
 
+// TestCreate_MissingEvidenceDir 验证证据目录不存在时 Create 报错。
+func TestCreate_MissingEvidenceDir(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	ctx := context.Background()
+	// 指向不存在的证据目录 → filepath.Walk 报错
+	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
+	if _, err := Create(ctx, srcStore, filepath.Join(srcDir, "nonexistent-evidence"), backupFile); err == nil {
+		t.Fatal("证据目录不存在应报错")
+	}
+}
+
+// TestCreate_InvalidDestDir 验证目标目录不可创建时 Create 报错。
+func TestCreate_InvalidDestDir(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	ctx := context.Background()
+	// 目标父目录被文件占用 → MkdirAll 失败
+	blocker := filepath.Join(t.TempDir(), "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	badDest := filepath.Join(blocker, "sub", "b.tar.gz")
+	if _, err := Create(ctx, srcStore, filepath.Join(srcDir, "evidence"), badDest); err == nil {
+		t.Fatal("目标目录不可创建应报错")
+	}
+}
+
 // TestFileSHA256 验证文件哈希计算（确定性）。
 func TestFileSHA256(t *testing.T) {
 	dir := t.TempDir()
