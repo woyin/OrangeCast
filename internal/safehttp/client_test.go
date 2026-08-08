@@ -92,3 +92,16 @@ var errEOF = netClosed("EOF")
 type netClosed string
 
 func (e netClosed) Error() string { return string(e) }
+
+// TestSafeDialer_BlockedIP 验证 Dial 拒绝私网地址（SSRF 防护）。
+func TestSafeDialer_BlockedIP(t *testing.T) {
+	d := safeDialer{}
+	// 127.0.0.1 是私网，应被拦截
+	if _, err := d.Dial("tcp", "127.0.0.1:8080"); err != ErrBlockedAddress {
+		t.Errorf("私网地址应 ErrBlockedAddress，实际 %v", err)
+	}
+	// 非法地址 → 报错
+	if _, err := d.Dial("tcp", "not-an-addr"); err == nil {
+		t.Fatal("非法地址应报错")
+	}
+}
