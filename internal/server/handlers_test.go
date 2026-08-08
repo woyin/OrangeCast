@@ -1089,6 +1089,20 @@ func TestKeyPointsPage_Pagination(t *testing.T) {
 	}
 }
 
+// TestKeyPointsPage_ClosedDB500 验证数据库关闭后 KeyPoint 页返回 500。
+func TestKeyPointsPage_ClosedDB500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "kp500@example.com", "password123")
+	srv.store.Close()
+	req := httptest.NewRequest(http.MethodGet, "/keypoints", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("数据库关闭后 KeyPoint 页应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestGraphAPI 验证图谱 JSON 接口返回结构（nodes/links/collections）。
 func TestGraphAPI(t *testing.T) {
 	srv := newTestServer(t)
