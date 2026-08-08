@@ -147,3 +147,39 @@ func TestRestore_RejectsTamperedBackup(t *testing.T) {
 		t.Fatal("损坏备份包应拒绝")
 	}
 }
+
+// TestFileSHA256 验证文件哈希计算（确定性）。
+func TestFileSHA256(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.bin")
+	content := "hello backup"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fileSHA256(path)
+	if err != nil {
+		t.Fatalf("fileSHA256: %v", err)
+	}
+	// 首次与再次读取应一致
+	got2, _ := fileSHA256(path)
+	if got != got2 {
+		t.Errorf("哈希应确定: %s vs %s", got, got2)
+	}
+	if len(got) != 64 {
+		t.Errorf("sha256 hex 应为 64 字符，实际 %d", len(got))
+	}
+}
+
+// TestFileSHA256_NotFound 验证文件不存在时返回错误。
+func TestFileSHA256_NotFound(t *testing.T) {
+	if _, err := fileSHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
+		t.Fatal("文件不存在应报错")
+	}
+}
+
+// TestRestore_MissingFile 验证备份文件不存在时返回错误。
+func TestRestore_MissingFile(t *testing.T) {
+	if _, err := Restore(context.Background(), filepath.Join(t.TempDir(), "missing.tar.gz"), t.TempDir(), false); err == nil {
+		t.Fatal("备份文件不存在应报错")
+	}
+}
