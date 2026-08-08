@@ -915,3 +915,40 @@ func TestSearch_Renders(t *testing.T) {
 		t.Errorf("页面应含查询词 wealth，实际 %s", rec.Body.String())
 	}
 }
+
+// TestCollectionItem_AddAndRemove 验证 Collection 条目 API：action=add 加入、action=remove 移除。
+func TestCollectionItem_AddAndRemove(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "colitem@example.com", "password123")
+	ctx := context.Background()
+
+	col, _ := srv.store.CreateCollection(ctx, "专题", "desc")
+
+	// 加入条目
+	rec := postForm(t, srv, cookie, "/api/collection/item",
+		"collection_id="+col.ID+"&source_type=episode&source_id=ep-1&segment_ids=seg-0001&source_title=Ep&time_start=0&time_end=5")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("加入条目应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Errorf("加入应 ok=true，实际 %s", rec.Body.String())
+	}
+	items, _ := srv.store.ListCollectionItems(ctx, col.ID)
+	if len(items) != 1 {
+		t.Fatalf("应 1 个条目，实际 %d", len(items))
+	}
+
+	// 移除条目
+	rec = postForm(t, srv, cookie, "/api/collection/item",
+		"collection_id="+col.ID+"&source_type=episode&source_id=ep-1&segment_ids=seg-0001&action=remove")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("移除条目应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"action":"removed"`) {
+		t.Errorf("移除应 action=removed，实际 %s", rec.Body.String())
+	}
+	items, _ = srv.store.ListCollectionItems(ctx, col.ID)
+	if len(items) != 0 {
+		t.Errorf("移除后应 0 个条目，实际 %d", len(items))
+	}
+}
