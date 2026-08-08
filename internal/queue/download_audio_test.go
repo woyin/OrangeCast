@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,4 +57,53 @@ func TestGuessAudioExt(t *testing.T) {
 			t.Errorf("guessAudioExt(%q)=%q want %q", in, got, want)
 		}
 	}
+}
+
+// TestDownloadAudio_Success 验证 downloadAudio 从测试服务器下载内容。
+func TestDownloadAudio_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("fake-audio-bytes"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{}, dir)
+	path, err := w.downloadAudio(context.Background(), srv.URL+"/audio.mp3")
+	if err != nil {
+		t.Fatalf("downloadAudio: %v", err)
+	}
+	defer os.Remove(path)
+	data, _ := os.ReadFile(path)
+	if string(data) != "fake-audio-bytes" {
+		t.Errorf("下载内容不符: %q", data)
+	}
+}
+
+// TestDownloadAudio_HTTPError 验证非 200 响应报错。
+func TestDownloadAudio_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{}, dir)
+	if _, err := w.downloadAudio(context.Background(), srv.URL+"/audio.mp3"); err == nil {
+		t.Fatal("404 应报错")
+	}
+}
+
+// TestDownloadAudio_InvalidURL 验证非法 URL 报错。
+func TestDownloadAudio_InvalidURL(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{}, dir)
+	if _, err := w.downloadAudio(context.Background(), "ftp://x.com/a.mp3"); err == nil {
+		t.Fatal("非法 URL 应报错")
+	}
+}
+
+// NewWorkerWithClient 构造一个使用指定 HTTP client 的 worker（测试用）.
+func NewWorkerWithClient(client *http.Client, dir string) *Worker {
+	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
+	return &Worker{client: client, tempDir: filepath.Join(dir, "tmp")}
 }
