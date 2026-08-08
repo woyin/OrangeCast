@@ -846,3 +846,20 @@ func TestSetSourceStatus_Upload(t *testing.T) {
 		t.Errorf("upload 状态应 Transcribing，实际 %q", got.ProcessingStatus)
 	}
 }
+
+// TestHeartbeatLoop_StopsOnCancel 验证 heartbeatLoop 随 context 取消干净退出。
+func TestHeartbeatLoop_StopsOnCancel(t *testing.T) {
+	_, w := newTestWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.heartbeatLoop(ctx, "job-1")
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("heartbeatLoop 应在取消后退出")
+	}
+}
