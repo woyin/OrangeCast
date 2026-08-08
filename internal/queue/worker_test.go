@@ -680,3 +680,47 @@ var errFakeAnalyze = &fakeError{"analyze boom"}
 type fakeError struct{ msg string }
 
 func (e *fakeError) Error() string { return e.msg }
+
+// TestDoHighlight 验证 doHighlight 生成高光并写入 artifact 版本。
+func TestDoHighlight(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+
+	bundle := &provider.ProviderBundle{
+		Highlight: &fakeHighlightOK{},
+	}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}}
+	if err := w.doHighlight(ctx, job, bundle, segs); err != nil {
+		t.Fatalf("doHighlight: %v", err)
+	}
+	// 高光版本已写入
+	if _, err := s.GetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight); err != nil {
+		t.Fatalf("高光版本未写入: %v", err)
+	}
+}
+
+// TestDoHighlight_EmptySegmentsError 验证空 segments 时报错。
+func TestDoHighlight_EmptySegmentsError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	bundle := &provider.ProviderBundle{Highlight: &fakeHighlightOK{}}
+	if err := w.doHighlight(ctx, job, bundle, nil); err == nil {
+		t.Fatal("空 segments 应报错")
+	}
+}
+
+// fakeHighlightOK 返回有效高光集合。
+type fakeHighlightOK struct{}
+
+func (f *fakeHighlightOK) GenerateHighlights(segments []provider.Segment) (*provider.HighlightSet, error) {
+	return &provider.HighlightSet{
+		Highlights: []provider.Highlight{
+			{ID: "h1", Gist: "最值得听", Citations: []string{"seg-0001"}},
+		},
+	}, nil
+}
+func (f *fakeHighlightOK) Name() string { return "fake-highlight" }
