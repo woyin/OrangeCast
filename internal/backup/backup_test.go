@@ -289,6 +289,41 @@ func TestRestore_MissingEvidenceFile(t *testing.T) {
 	}
 }
 
+// TestRestore_EvidenceHashMismatch 验证证据文件内容与 manifest 哈希不符时恢复失败。
+func TestRestore_EvidenceHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 声明证据文件 ep-1.mp3 的哈希为错误值
+	m := Manifest{
+		Format: ManifestFormat, Version: ManifestVersion,
+		DBFile: dbFileName, DBSHA256: "deadbeef",
+		Evidence: []EvidenceEntry{{RelPath: "ep-1.mp3", SHA256: "wrong-hash", SizeBytes: 4}},
+	}
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	// 包内包含证据文件，但内容与 manifest 哈希不符
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Mode: 0o644, Size: int64(len("data"))}
+	tw.WriteHeader(eh)
+	tw.Write([]byte("data"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("证据哈希不匹配应导致恢复失败")
+	}
+}
+
 // TestFileSHA256 验证文件哈希计算（确定性）。
 func TestFileSHA256(t *testing.T) {
 	dir := t.TempDir()
