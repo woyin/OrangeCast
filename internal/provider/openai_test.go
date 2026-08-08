@@ -123,6 +123,24 @@ func TestOpenAI_StudyChatAnswer(t *testing.T) {
 	}
 }
 
+// TestOpenAI_StudyChat_HistoryTruncation 验证超过 6 轮的对话历史被折叠进输入。
+func TestOpenAI_StudyChat_HistoryTruncation(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"answer":"最近回答","referenceSegmentIds":["seg-0001"]}`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	history := make([]StudyChatMessage, 8)
+	for i := range history {
+		history[i] = StudyChatMessage{Role: "user", Content: "历史消息"}
+	}
+	res, err := o.StudyChatAnswer("解释通胀", history, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer == nil || res.Answer.Content != "最近回答" {
+		t.Errorf("应基于最近 6 轮历史生成回答，实际 %+v", res.Answer)
+	}
+}
+
 // TestOpenAI_CheckReference 验证 OpenAI 主题锚定校验。
 func TestOpenAI_CheckReference(t *testing.T) {
 	srv := newOpenAITestServer(t, `{"related":true,"reason":"主题扎根"}`)
