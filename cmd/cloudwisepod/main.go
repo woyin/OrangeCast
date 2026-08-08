@@ -22,21 +22,35 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "backup":
-			runBackup(os.Args[2:])
-			return
-		case "restore":
-			runRestore(os.Args[2:])
-			return
-		}
-		if os.Args[1] != "serve" {
-			fmt.Fprintf(os.Stderr, "未知命令 %q。可用命令：serve（默认）、backup <目标文件>、restore <备份包> [--force]\n", os.Args[1])
-			os.Exit(2)
-		}
+	cmd, rest := parseCommand(os.Args[1:])
+	switch cmd {
+	case "backup":
+		runBackup(rest)
+	case "restore":
+		runRestore(rest)
+	case "serve", "":
+		runServe()
+	default:
+		fmt.Fprintf(os.Stderr, "未知命令 %q。可用命令：serve（默认）、backup <目标文件>、restore <备份包> [--force]\n", cmd)
+		os.Exit(2)
 	}
-	runServe()
+}
+
+// parseCommand 解析 CLI 参数，返回命令与剩余参数。
+// 空参数（默认 runServe）或 "serve" 返回 ("serve"/"", rest)；backup/restore 返回对应命令。
+// 便于单元测试 CLI 分发逻辑。
+func parseCommand(args []string) (cmd string, rest []string) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	switch args[0] {
+	case "backup", "restore":
+		return args[0], args[1:]
+	case "serve":
+		return "serve", args[1:]
+	default:
+		return args[0], args[1:]
+	}
 }
 
 // runServe 启动 HTTP 服务（默认命令）。
