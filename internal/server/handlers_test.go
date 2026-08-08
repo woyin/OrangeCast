@@ -352,6 +352,31 @@ func TestSourceDetailRender_FailedStatus(t *testing.T) {
 	}
 }
 
+// TestRender_UnknownTemplate 验证渲染不存在的模板返回错误。
+func TestRender_UnknownTemplate(t *testing.T) {
+	tmpl, err := NewTemplates()
+	if err != nil {
+		t.Fatal("NewTemplates:", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Render(&buf, "nonexistent.html", nil); err == nil {
+		t.Fatal("渲染不存在的模板应报错")
+	}
+}
+
+// TestFormatSeconds 验证秒数格式化。
+func TestFormatSeconds(t *testing.T) {
+	if got := formatSeconds(0); got != "0:00" {
+		t.Errorf("formatSeconds(0)=%q want 0:00", got)
+	}
+	if got := formatSeconds(65); got != "1:05" {
+		t.Errorf("formatSeconds(65)=%q want 1:05", got)
+	}
+	if got := formatSeconds(3661); got != "1:01:01" {
+		t.Errorf("formatSeconds(3661)=%q want 1:01:01", got)
+	}
+}
+
 func TestLogin_RateLimited(t *testing.T) {
 	srv := newTestServer(t)
 	claimOwnerAndLogin(t, srv, "rl@example.com", "password123")
