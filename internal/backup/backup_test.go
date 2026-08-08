@@ -258,6 +258,37 @@ func TestRestore_DBHashMismatch(t *testing.T) {
 	}
 }
 
+// TestRestore_MissingEvidenceFile 验证 manifest 列出但包内缺失的证据文件导致恢复失败。
+func TestRestore_MissingEvidenceFile(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 声明一个证据文件，但包内不含它
+	m := Manifest{
+		Format: ManifestFormat, Version: ManifestVersion,
+		DBFile: dbFileName, DBSHA256: "deadbeef",
+		Evidence: []EvidenceEntry{{RelPath: "ep-1.mp3", SHA256: "abc", SizeBytes: 10}},
+	}
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("缺失证据文件应导致恢复失败")
+	}
+}
+
 // TestFileSHA256 验证文件哈希计算（确定性）。
 func TestFileSHA256(t *testing.T) {
 	dir := t.TempDir()
