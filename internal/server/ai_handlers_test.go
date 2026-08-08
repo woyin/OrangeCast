@@ -112,6 +112,49 @@ func TestParaphraseHandler_ReferenceNotFound(t *testing.T) {
 	}
 }
 
+// TestParaphraseHandler_ProviderError 验证 Paraphrase Provider 报错时返回 500。
+func TestParaphraseHandler_ProviderError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "pherr@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = fakeBundleFor(nil, &fakeParaphrase{err: errors.New("paraphrase down")}, nil, nil)
+	rec := postForm(t, srv, cookie, "/api/paraphrase",
+		"source_type=episode&source_id="+sourceID+"&segment_ids=[\"seg-0001\"]&question=解释一下")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("Paraphrase 报错应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "复述讲解失败") {
+		t.Errorf("应返回复述失败错误，实际 %s", rec.Body.String())
+	}
+}
+
+// TestParaphraseHandler_BundleForError 验证 bundleFor 失败时返回 500。
+func TestParaphraseHandler_BundleForError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "phbundle@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return nil, errors.New("bundle failed")
+	}
+	rec := postForm(t, srv, cookie, "/api/paraphrase",
+		"source_type=episode&source_id="+sourceID+"&segment_ids=[\"seg-0001\"]&question=解释一下")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("bundleFor 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestStudyChat_ScopeTethered (ADR-0018 R3 硬约束一)
 // 模型返回无 reference → handler 给出 out_of_scope 反馈，不生成。
 func TestStudyChat_ScopeTethered(t *testing.T) {
