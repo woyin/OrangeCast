@@ -220,6 +220,48 @@ func TestSourceDetail_NotFound(t *testing.T) {
 	}
 }
 
+// TestSourceDetail_RendersEpisode 验证 episode source 详情页渲染标题与音频。
+func TestSourceDetail_RendersEpisode(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sd@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "通胀专题", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 写入 transcript + 知识卡片
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	vt, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"通胀是物价上升"}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, vt)
+	cardPayload := `{"title":"通胀专题","summary":{"text":"概览","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`
+	vc, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID, cardPayload)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, vc)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("source 详情应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "通胀专题") {
+		t.Errorf("页面应含标题，实际 %s", rec.Body.String())
+	}
+}
+
+// TestSourceDetail_UploadAudio 验证 upload source 详情页渲染（无证据时不 404）。
+func TestSourceDetail_UploadAudio(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sdu@example.com", "password123")
+	ctx := context.Background()
+
+	up, _ := srv.store.CreateUpload(ctx, "音轨.wav", "audio/wav", 10)
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/upload/"+up.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload source 详情应 200，实际 %d", rec.Code)
+	}
+}
+
 func TestLogout_ClearsSession(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "lo@example.com", "password123")
