@@ -225,3 +225,23 @@ func TestParseSourcePath(t *testing.T) {
 		t.Error("非 /sources/ 前缀应解析失败")
 	}
 }
+
+// TestParseSegmentIDs 验证 segment_ids 解析：JSON 数组、分隔字符串、空串。
+func TestParseSegmentIDs(t *testing.T) {
+	// JSON 数组
+	if got := parseSegmentIDs(`["seg-0001","seg-0002"]`); len(got) != 2 || got[0] != "seg-0001" {
+		t.Errorf("JSON 数组解析错误: %v", got)
+	}
+	// 逗号分隔
+	if got := parseSegmentIDs("seg-1,seg-2,seg-3"); len(got) != 3 || got[2] != "seg-3" {
+		t.Errorf("逗号分隔解析错误: %v", got)
+	}
+	// 空格/换行分隔
+	if got := parseSegmentIDs("seg-1 seg-2\nseg-3"); len(got) != 3 {
+		t.Errorf("空白分隔解析错误: %v", got)
+	}
+	// 空串 → nil
+	if got := parseSegmentIDs("   "); got != nil {
+		t.Errorf("空串应返回 nil，实际 %v", got)
+	}
+}
