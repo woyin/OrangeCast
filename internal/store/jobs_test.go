@@ -242,3 +242,66 @@ func TestListRecentCompleted(t *testing.T) {
 		t.Errorf("最近完成应包含两个任务，实际 %+v", recent)
 	}
 }
+
+// TestRecordUsage 验证 AI 用量记录写入。
+func TestRecordUsage(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.RecordUsage(ctx, "transcribe", "groq", "whisper", 100, 200, 0.5); err != nil {
+		t.Fatalf("RecordUsage: %v", err)
+	}
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_records`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("应有 1 条用量记录，实际 %d", n)
+	}
+}
+
+// TestClaimHeartbeatReset 验证 worker 领取/心跳/启动恢复的完整租约生命周期。
+func TestClaimHeartbeatReset(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForJob(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+
+	// 领取 queued 任务
+	claimed, err := s.ClaimNextJob(ctx, "60 seconds")
+	if err != nil {
+		t.Fatalf("ClaimNextJob: %v", err)
+	}
+	if claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("应领取到 job，实际 %+v", claimed)
+	}
+	if claimed.Status != models.StatusRunning {
+		t.Errorf("领取后应 running，实际 %q", claimed.Status)
+	}
+
+	// 无更多任务 → nil
+	again, err := s.ClaimNextJob(ctx, "60 seconds")
+	if err != nil || again != nil {
+		t.Errorf("无任务应返回 nil，实际 %+v err=%v", again, err)
+	}
+
+	// ListQueuedOrRunning 应含该 running 任务
+	pending, _ := s.ListQueuedOrRunning(ctx)
+	if len(pending) != 1 || pending[0].ID != job.ID {
+		t.Errorf("ListQueuedOrRunning 应含 running 任务，实际 %+v", pending)
+	}
+
+	// 心跳续约
+	if err := s.HeartbeatJob(ctx, job.ID, "60 seconds"); err != nil {
+		t.Fatalf("HeartbeatJob: %v", err)
+	}
+
+	// 启动恢复：running → queued
+	if err := s.ResetRunningOnStartup(ctx); err != nil {
+		t.Fatalf("ResetRunningOnStartup: %v", err)
+	}
+	got, _ := s.GetJob(ctx, job.ID)
+	if got.Status != models.StatusQueued {
+		t.Errorf("启动恢复后应 queued，实际 %q", got.Status)
+	}
+}
