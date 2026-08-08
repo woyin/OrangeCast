@@ -645,6 +645,16 @@ func TestProcessBatch_SkipsAlreadyQueued(t *testing.T) {
 	}
 }
 
+// TestProcessBatch_NonPost405 验证非 POST 请求返回 405。
+func TestProcessBatch_NonPost405(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "batch405@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/process-batch")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("非 POST 应 405，实际 %d", rec.Code)
+	}
+}
+
 // TestPageParam 验证 pageParam 的解析：缺省/非法回退 1，合法保留。
 func TestPageParam(t *testing.T) {
 	cases := []struct {
