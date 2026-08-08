@@ -122,3 +122,25 @@ func TestDJ_NoHighlight_404(t *testing.T) {
 		t.Errorf("无高光应 404，实际 %d", rec.Code)
 	}
 }
+
+// TestDJ_TranscriptMissing_404 验证有高光但无转录稿时 DJ 页 404。
+func TestDJ_TranscriptMissing_404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djtr@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 只写高光版本，不写转录稿
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID,
+		`{"highlights":[{"id":"hl-a","gist":"g","citations":["seg-0001"]}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("无转录稿应 404，实际 %d", rec.Code)
+	}
+}
