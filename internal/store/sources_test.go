@@ -68,3 +68,12 @@ func TestDeleteSource_Nonexistent_NoError(t *testing.T) {
 		t.Errorf("删除不存在的 source 不应报错: %v", err)
 	}
 }
+
+// TestDeleteSource_UnknownType 验证未知 source_type 时报错。
+func TestDeleteSource_UnknownType(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.DeleteSourceRows(ctx, "bogus", "x"); err == nil {
+		t.Fatal("未知 source_type 应报错")
+	}
+}
