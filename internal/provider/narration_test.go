@@ -67,3 +67,35 @@ func TestKokoroProvider_Getters(t *testing.T) {
 		t.Errorf("DefaultVoice() = %q", k.DefaultVoice())
 	}
 }
+
+// TestKokoroProvider_RunCLI 验证 runCLI 调用外部二进制并成功生成文件。
+func TestKokoroProvider_RunCLI(t *testing.T) {
+	// 用 shell 脚本模拟 kokoro CLI：写入输出文件并成功退出。
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-kokoro.sh")
+	outPath := filepath.Join(dir, "out.wav")
+	// 脚本取最后一个参数（--output 的路径）创建输出文件
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch \"$6\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(filepath.Join(dir, "fake-kokoro.sh"), "af_heart", "model.bin")
+	if err := k.runCLI("text", "voice", outPath); err != nil {
+		t.Fatalf("runCLI: %v", err)
+	}
+	if _, err := os.Stat(outPath); err != nil {
+		t.Errorf("输出文件应被创建: %v", err)
+	}
+}
+
+// TestKokoroProvider_RunCLIError 验证二进制失败时返回错误。
+func TestKokoroProvider_RunCLIError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fail.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(script, "af_heart", "model.bin")
+	if err := k.runCLI("text", "voice", filepath.Join(dir, "x.wav")); err == nil {
+		t.Fatal("失败脚本应返回错误")
+	}
+}
