@@ -875,3 +875,43 @@ func TestCollection_CreateAndList(t *testing.T) {
 		t.Errorf("列表应含 Collection，实际 %s", rec2.Body.String())
 	}
 }
+
+// TestSettings_POST_SavesAndRedirects 验证设置保存 POST 更新 settings 并重定向。
+func TestSettings_POST_SavesAndRedirects(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "settingspost@example.com", "password123")
+	ctx := context.Background()
+
+	rec := postForm(t, srv, cookie, "/settings",
+		"transcription_model=whisper-large-v3&qa_provider=openai")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("设置保存应 303 重定向，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "saved=1") {
+		t.Errorf("重定向应含 saved=1，实际 %q", rec.Header().Get("Location"))
+	}
+	st, _ := srv.store.GetSettings(ctx)
+	if st.TranscriptionModel == nil || *st.TranscriptionModel != "whisper-large-v3" {
+		t.Errorf("转录模型应保存，实际 %v", st.TranscriptionModel)
+	}
+	if st.QAProvider == nil || *st.QAProvider != "openai" {
+		t.Errorf("QA Provider 应保存，实际 %v", st.QAProvider)
+	}
+}
+
+// TestSearch_Renders 验证搜索页渲染（含查询词）。
+func TestSearch_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "search@example.com", "password123")
+
+	req := httptest.NewRequest(http.MethodGet, "/search?q=wealth", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("搜索页应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "wealth") {
+		t.Errorf("页面应含查询词 wealth，实际 %s", rec.Body.String())
+	}
+}
