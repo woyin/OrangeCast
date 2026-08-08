@@ -1286,6 +1286,30 @@ func TestAudio_ServesEvidence(t *testing.T) {
 	}
 }
 
+// TestAudio_UploadFallback 验证 upload source 无证据时回退到原始落盘文件。
+func TestAudio_UploadFallback(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audioup@example.com", "password123")
+	ctx := context.Background()
+
+	up, _ := srv.store.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 原始落盘文件
+	rawDir := filepath.Join(srv.cfg.TempDir, "uploads")
+	os.MkdirAll(rawDir, 0o755)
+	os.WriteFile(filepath.Join(rawDir, up.ID), []byte("raw-audio"), 0o644)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/upload/"+up.ID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload 回退应 200，实际 %d", rec.Code)
+	}
+	if rec.Body.String() != "raw-audio" {
+		t.Errorf("应返回原始音频内容，实际 %q", rec.Body.String())
+	}
+}
+
 // TestPodcastNew_POST_Subscribes 验证订阅新播客 POST：抓取 feed、创建播客、合并单集并重定向。
 func TestPodcastNew_POST_Subscribes(t *testing.T) {
 	srv := newTestServer(t)
