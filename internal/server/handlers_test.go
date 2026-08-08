@@ -600,6 +600,22 @@ func TestVersions_Nonexistent404(t *testing.T) {
 	}
 }
 
+// TestVersions_UploadSource 验证 upload source 的版本页渲染（标题为文件名）。
+func TestVersions_UploadSource(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "verup@example.com", "password123")
+	ctx := context.Background()
+	up, _ := srv.store.CreateUpload(ctx, "音轨.wav", "audio/wav", 10)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/upload/"+up.ID+"/versions")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload 版本页应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "音轨.wav") {
+		t.Errorf("页面应含 upload 文件名标题，实际 %s", rec.Body.String())
+	}
+}
+
 func TestProcessBatch_EnqueuesMultipleAndRedirects(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "batch@example.com", "password123")
