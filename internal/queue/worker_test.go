@@ -759,3 +759,30 @@ func TestFetchRawAudio_UploadMissing(t *testing.T) {
 		t.Fatal("upload 文件不存在应报错")
 	}
 }
+
+// TestNewWorker_DefaultBundleFor 验证默认 bundleFor 按 settings 选择 Provider/Model。
+func TestNewWorker_DefaultBundleFor(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// 设置 Transcription Provider + Model
+	tp := "groq"
+	tm := "whisper-large-v3"
+	s.UpdateSettings(ctx, &models.Settings{TranscriptionProvider: &tp, TranscriptionModel: &tm})
+
+	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe})
+	if err != nil {
+		t.Fatalf("bundleFor: %v", err)
+	}
+	if bundle == nil || bundle.Transcription == nil {
+		t.Fatal("应返回带转录 provider 的 bundle")
+	}
+}
+
+// TestNewWorker_GroqMissingKeyFallback 验证 groq 无 key 时 bundleFor 返回错误。
+func TestNewWorker_GroqMissingKeyFallback(t *testing.T) {
+	_, w := newTestWorker(t)
+	w.selector = provider.NewSelector("", "") // 无 key
+	if _, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe}); err == nil {
+		t.Fatal("groq 无 key 应报错")
+	}
+}
