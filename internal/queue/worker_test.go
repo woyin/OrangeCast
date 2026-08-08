@@ -801,3 +801,15 @@ func TestNewWorker_GroqMissingKeyFallback(t *testing.T) {
 		t.Fatal("groq 无 key 应报错")
 	}
 }
+
+// TestProcessJob_UnknownType 验证未知 job_type 报错。
+func TestProcessJob_UnknownType(t *testing.T) {
+	_, w := newTestWorker(t)
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{}, nil
+	}
+	job := &models.ProcessingJob{JobType: "bogus"}
+	if err := w.processJob(context.Background(), job); err == nil {
+		t.Fatal("未知 job_type 应报错")
+	}
+}
