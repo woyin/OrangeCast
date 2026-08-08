@@ -997,6 +997,32 @@ func TestKeyPointsPage_Renders(t *testing.T) {
 	}
 }
 
+// TestKeyPointsPage_Pagination 验证带分页参数的 KeyPoint 页渲染（page 解析）。
+func TestKeyPointsPage_Pagination(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "kppage2@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	card := &provider.KnowledgeCard{
+		Title:     "T",
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{{Content: "sovereign wealth insight", Citations: []string{"seg-0001"}}},
+	}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	srv.store.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep1", 1, card, segs)
+
+	// 请求第 2 页（无数据也应为 200）
+	req := httptest.NewRequest(http.MethodGet, "/keypoints?page=2", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("分页 KeyPoint 页应 200，实际 %d", rec.Code)
+	}
+}
+
 // TestGraphAPI 验证图谱 JSON 接口返回结构（nodes/links/collections）。
 func TestGraphAPI(t *testing.T) {
 	srv := newTestServer(t)
