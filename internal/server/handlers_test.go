@@ -1277,6 +1277,38 @@ func TestUploadNew_POST_NoFile(t *testing.T) {
 	}
 }
 
+// TestUploadNew_POST_MalformedMultipart 验证 multipart 解析失败时渲染错误页。
+func TestUploadNew_POST_MalformedMultipart(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "upmal@example.com", "password123")
+
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads/new", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	// 发送非 multipart 的 POST → ParseMultipartForm 失败
+	body := strings.NewReader("_csrf=" + csrf + "&foo=bar")
+	req := httptest.NewRequest(http.MethodPost, "/uploads/new", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("multipart 解析失败应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "上传失败") {
+		t.Errorf("应显示上传失败错误，实际 %s", rec.Body.String())
+	}
+}
+
 // TestDownloadMarkdown 验证 KnowledgeNote Markdown 下载：
 // 有卡片+转录返回 200 与 frontmatter，无卡片返回 404。
 func TestDownloadMarkdown(t *testing.T) {
