@@ -32,6 +32,11 @@ func seedHighlightAndNarration(t *testing.T, srv *Server, sourceID string) (stri
 		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"a"},{"id":"seg-0002","start":5,"end":10,"text":"b"},{"id":"seg-0003","start":10,"end":15,"text":"c"}]}`)
 	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, tv)
 
+	// 知识卡片（DJ 页结尾 Take Aways = KeyPoints）
+	cv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID,
+		`{"title":"T","summary":{"text":"S","citations":["seg-0001"]},"keyPoints":[{"content":"要点","citations":["seg-0001"]}],"chapters":[],"quotes":[],"tags":[]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, cv)
+
 	// 一条 Narration（hl-a）
 	os.MkdirAll(srv.cfg.NarrationDir, 0o755)
 	rel := sourceID + "_hl-a_1.wav"
@@ -161,5 +166,58 @@ func TestDJ_TranscriptMissing_404(t *testing.T) {
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("无转录稿应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestDJ_BadPath_404 验证非 dj 后缀路径返回 404。
+func TestDJ_BadPath_404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djbad@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/x/other")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestDJ_CorruptHighlight_500 验证高光载荷损坏时 DJ 页返回 500。
+func TestDJ_CorruptHighlight_500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djch@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID, `{bad json`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("高光载荷损坏应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestDJ_CorruptTranscript_500 验证转录载荷损坏时 DJ 页返回 500。
+func TestDJ_CorruptTranscript_500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djct@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID,
+		`{"highlights":[{"id":"hl-a","gist":"g","citations":["seg-0001"]}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
+	tv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID, `{bad json`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, tv)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("转录载荷损坏应 500，实际 %d", rec.Code)
 	}
 }
