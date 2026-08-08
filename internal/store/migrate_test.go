@@ -263,3 +263,51 @@ func TestHasPendingDestructiveMigration(t *testing.T) {
 		t.Error("应用版本 <2 应判定 pending")
 	}
 }
+
+// TestCountUsers 验证 CountUsers：无 users 表返回 0，有表返回行数。
+func TestCountUsers(t *testing.T) {
+	ctx := context.Background()
+	// 无 users 表
+	raw := openRaw(t, filepath.Join(t.TempDir(), "c1.db"))
+	n, err := CountUsers(ctx, raw)
+	if err != nil {
+		t.Fatalf("CountUsers: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("无 users 表应返回 0，实际 %d", n)
+	}
+
+	// 有表但 0 行
+	s := newTestStore(t)
+	n, err = CountUsers(ctx, s.DB)
+	if err != nil {
+		t.Fatalf("CountUsers: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("空 users 表应返回 0，实际 %d", n)
+	}
+}
+
+// TestRequireSafeForSingleOwner 验证单 Owner 守卫：1 用户通过、多用户拒绝。
+func TestRequireSafeForSingleOwner(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	// 0 用户通过
+	if err := RequireSafeForSingleOwner(ctx, s.DB); err != nil {
+		t.Fatalf("0 用户应通过: %v", err)
+	}
+	// 1 用户通过
+	if _, err := s.ClaimOwner(ctx, "a@b.com", "$argon2id$fakehash"); err != nil {
+		t.Fatalf("ClaimOwner: %v", err)
+	}
+	if err := RequireSafeForSingleOwner(ctx, s.DB); err != nil {
+		t.Fatalf("1 用户应通过: %v", err)
+	}
+	// 多用户拒绝
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u2','b@c.com','x')`); err != nil {
+		t.Fatalf("插入第二个用户: %v", err)
+	}
+	if err := RequireSafeForSingleOwner(ctx, s.DB); err != ErrMultipleUsers {
+		t.Errorf("多用户应 ErrMultipleUsers，实际 %v", err)
+	}
+}
