@@ -95,3 +95,90 @@ func TestGroq_EmptyGenerateHighlights(t *testing.T) {
 		t.Error("空 segments 应报错")
 	}
 }
+
+// TestGroq_Answer 验证 Groq Answer：RAG 检索 + 引用映射。
+func TestGroq_Answer(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return `{"answer":"通胀是物价上升","cited":[0]}`, 200, nil
+	}
+	segs := []Segment{
+		{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价总水平持续上升"},
+		{ID: "seg-0002", Start: 5, End: 10, Text: "主权财富基金改变投资格局"},
+	}
+	res, err := g.Answer("通胀是什么", segs)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if res.Answer != "通胀是物价上升" {
+		t.Errorf("答案错误: %q", res.Answer)
+	}
+	if len(res.Sources) == 0 {
+		t.Error("应存在引用来源")
+	}
+}
+
+// TestGroq_AnswerNoChunks 验证无相关片段时返回占位回答。
+func TestGroq_AnswerNoChunks(t *testing.T) {
+	g := NewGroqProvider("key")
+	res, err := g.Answer("完全不相关的问题", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if res.Answer == "" {
+		t.Error("应返回占位回答")
+	}
+}
+
+// TestGroq_Paraphrase 验证 Paraphrase 返回重新讲解文本与参考片段 ID。
+func TestGroq_Paraphrase(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "通胀就是货币购买力下降，用买房举例…", 200, nil
+	}
+	res, err := g.Paraphrase("解释通胀", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err != nil {
+		t.Fatalf("Paraphrase: %v", err)
+	}
+	if res.Text == "" {
+		t.Error("应返回讲解文本")
+	}
+	if len(res.ReferenceSegmentIDs) != 1 || res.ReferenceSegmentIDs[0] != "seg-0001" {
+		t.Errorf("参考片段 ID 错误: %v", res.ReferenceSegmentIDs)
+	}
+}
+
+// TestGroq_ParaphraseNoRef 验证无参考片段报错。
+func TestGroq_ParaphraseNoRef(t *testing.T) {
+	g := NewGroqProvider("key")
+	if _, err := g.Paraphrase("q", nil); err == nil {
+		t.Error("无参考片段应报错")
+	}
+}
+
+// TestGroq_StudyChatAnswer 验证学习对话返回回答与参考片段。
+func TestGroq_StudyChatAnswer(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return `{"answer":"通胀就是货币购买力下降","referenceSegmentIds":["seg-0001"]}`, 200, nil
+	}
+	res, err := g.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer == nil || res.Answer.Content != "通胀就是货币购买力下降" {
+		t.Errorf("回答错误: %+v", res.Answer)
+	}
+}
+
+// TestGroq_StudyChatNoCandidates 验证无候选片段时返回 scope 反馈。
+func TestGroq_StudyChatNoCandidates(t *testing.T) {
+	g := NewGroqProvider("key")
+	res, err := g.StudyChatAnswer("q", nil, nil)
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.ScopeFeedback == "" {
+		t.Error("应返回 scope 反馈")
+	}
+}
