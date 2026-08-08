@@ -183,3 +183,39 @@ func TestListKeyPoints_PageNormalization(t *testing.T) {
 		t.Fatalf("page=-1/perPage=-5 应归一化不报错: %v", err)
 	}
 }
+
+// TestIndexKeyPoints_SkipsInvalid 验证无效 KeyPoint 被跳过：
+// 无有效 Citation 的删除、时间范围非法（end<=start）的跳过，仅索引有效项。
+func TestIndexKeyPoints_SkipsInvalid(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+
+	card := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{
+			{Content: "有效要点", Citations: []string{"seg-0001"}},   // 有效
+			{Content: "无效引用要点", Citations: []string{"seg-9999"}}, // 无有效引用 → 跳过
+			{Content: "非法时间要点", Citations: []string{"seg-0002"}}, // seg-0002 end<=start → 跳过
+		},
+		Chapters: []provider.Chapter{{Title: "C", Gist: "G", Citations: []string{"seg-0001"}}},
+	}
+	segs := []provider.Segment{
+		{ID: "seg-0001", Start: 0, End: 5, Text: "a"},
+		{ID: "seg-0002", Start: 10, End: 5, Text: "b"}, // end < start，非法时间范围
+	}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	kps, total, _ := s.ListKeyPoints(ctx, 1, 10)
+	if total != 1 || len(kps) != 1 {
+		t.Fatalf("应只索引 1 个有效 KeyPoint，实际 total=%d len=%d", total, len(kps))
+	}
+	if kps[0].Content != "有效要点" {
+		t.Errorf("应索引有效要点，实际 %q", kps[0].Content)
+	}
+}
