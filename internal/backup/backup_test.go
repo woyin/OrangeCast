@@ -359,3 +359,16 @@ func TestRestore_MissingFile(t *testing.T) {
 		t.Fatal("备份文件不存在应报错")
 	}
 }
+
+// TestRestore_InvalidGzip 验证非 gzip 备份包读取时报错。
+func TestRestore_InvalidGzip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "b.tar.gz")
+	// 写入非 gzip 内容
+	if err := os.WriteFile(path, []byte("not a gzip file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Restore(context.Background(), path, t.TempDir(), false); err == nil {
+		t.Fatal("非 gzip 备份包应报错")
+	}
+}
