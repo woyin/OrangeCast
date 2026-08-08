@@ -262,6 +262,42 @@ func TestStudyChat_LongQuestionTitleTruncated(t *testing.T) {
 	}
 }
 
+// TestStudyChat_ReuseSession 验证传入已存在 session_id 时复用会话并追加消息。
+func TestStudyChat_ReuseSession(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scsess@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	// 预建会话
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "既有会话")
+
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "回答", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=下一个问题")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	// 会话应复用（不新增），且消息追加
+	sessions, _ := srv.store.ListStudySessions(ctx, models.SourceEpisode, sourceID)
+	if len(sessions) != 1 || sessions[0].ID != sess.ID {
+		t.Fatalf("应复用既有会话，实际 %d 个", len(sessions))
+	}
+	msgs, _ := srv.store.ListStudyMessages(ctx, sess.ID, true)
+	if len(msgs) < 2 {
+		t.Errorf("应追加用户问题与回答，实际 %d 条消息", len(msgs))
+	}
+}
+
 // TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
 // 无引用拒答 422、有引用 200。
 func TestEvidenceQA_Handler(t *testing.T) {
