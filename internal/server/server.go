@@ -6,6 +6,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/config"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/queue"
 	"github.com/woyin/orangecast/internal/rss"
@@ -20,6 +21,7 @@ type Server struct {
 	refresher    *rss.Refresher
 	selector     *provider.Selector
 	bundleFor    func(provider.TaskConfig) (*provider.ProviderBundle, error) // 可注入（测试用），默认走 selector
+	fetchFeed    func(string) (*models.Podcast, []models.Episode, error)     // 可注入（测试用），默认走 rss.FetchFeed
 	tmpl         *Templates
 	loginLimiter *auth.RateLimiter
 }
@@ -36,6 +38,7 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return selector.BundleForTask(tc)
 	}
+	srv.fetchFeed = rss.FetchFeed
 	return srv, nil
 }
 

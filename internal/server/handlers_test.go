@@ -1088,3 +1088,56 @@ func TestAudio_ServesEvidence(t *testing.T) {
 		t.Fatalf("无音频应 404，实际 %d", rec.Code)
 	}
 }
+
+// TestPodcastNew_POST_Subscribes 验证订阅新播客 POST：抓取 feed、创建播客、合并单集并重定向。
+func TestPodcastNew_POST_Subscribes(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podnew@example.com", "password123")
+	ctx := context.Background()
+
+	// 注入 fake fetchFeed（隔离网络）
+	srv.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL, Title: "测试播客", Description: "desc"},
+			[]models.Episode{{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"}}, nil
+	}
+
+	rec := postForm(t, srv, cookie, "/podcasts/new", "feed_url=https://feed.example.com/pod.xml")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("订阅成功应 303 重定向，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "/podcasts/") {
+		t.Errorf("重定向应指向播客详情，实际 %q", loc)
+	}
+
+	// 验证播客与单集已创建
+	ps, _ := srv.store.ListPodcasts(ctx)
+	if len(ps) != 1 || ps[0].Title != "测试播客" {
+		t.Errorf("应创建 1 个播客，实际 %+v", ps)
+	}
+	eps, _ := srv.store.ListEpisodes(ctx, ps[0].ID)
+	if len(eps) != 1 || eps[0].Title != "Ep1" {
+		t.Errorf("应合并 1 集，实际 %+v", eps)
+	}
+}
+
+// TestPodcastNew_POST_FetchError 验证抓取失败时渲染错误页而非崩溃。
+func TestPodcastNew_POST_FetchError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podnewerr@example.com", "password123")
+
+	srv.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return nil, nil, errFetchFailed{}
+	}
+	rec := postForm(t, srv, cookie, "/podcasts/new", "feed_url=https://feed.example.com/nope.xml")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("抓取失败应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "抓取/解析 feed 失败") {
+		t.Errorf("应显示抓取错误，实际 %s", rec.Body.String())
+	}
+}
+
+type errFetchFailed struct{}
+
+func (errFetchFailed) Error() string { return "fetch failed" }

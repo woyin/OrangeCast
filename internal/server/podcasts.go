@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
-	"github.com/woyin/orangecast/internal/rss"
 )
 
 func (srv *Server) handlePodcasts(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +23,7 @@ func (srv *Server) handlePodcastNew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	feedURL := strings.TrimSpace(r.FormValue("feed_url"))
-	podcast, eps, err := rss.FetchFeed(feedURL)
+	podcast, eps, err := srv.fetchFeed(feedURL)
 	if err != nil {
 		srv.tmpl.Render(w, "podcast_new.html", map[string]any{"Error": "抓取/解析 feed 失败: " + err.Error(), "CSRF": auth.CSRFValue(r)})
 		return
