@@ -46,6 +46,50 @@ func TestStudySession_Lifecycle(t *testing.T) {
 	}
 }
 
+// TestStudySession_ClosedDBErrors 验证数据库关闭后各 StudySession 方法返回错误。
+func TestStudySession_ClosedDBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 先建会话与消息，再关闭 DB，触发各查询错误分支。
+	sess, err := s.CreateStudySession(ctx, models.SourceEpisode, "ep-1", "会话")
+	if err != nil {
+		t.Fatalf("创建会话: %v", err)
+	}
+	if _, err := s.AppendStudyMessage(ctx, sess.ID, "assistant", "回答", []string{"seg-0001"}, false); err != nil {
+		t.Fatalf("追加消息: %v", err)
+	}
+	s.Close()
+
+	// 创建（Exec 错误）
+	if _, err := s.CreateStudySession(ctx, models.SourceEpisode, "ep-2", "x"); err == nil {
+		t.Error("关闭后创建会话应报错")
+	}
+	// 读取
+	if _, err := s.GetStudySession(ctx, sess.ID); err == nil {
+		t.Error("关闭后读取会话应报错")
+	}
+	// 列表
+	if _, err := s.ListStudySessions(ctx, models.SourceEpisode, "ep-1"); err == nil {
+		t.Error("关闭后列会话应报错")
+	}
+	// 追加消息（user 分支）
+	if _, err := s.AppendStudyMessage(ctx, sess.ID, "user", "q", nil, false); err == nil {
+		t.Error("关闭后追加 user 消息应报错")
+	}
+	// 读取单条
+	if _, err := s.GetStudyMessage(ctx, "any-id"); err == nil {
+		t.Error("关闭后读取消息应报错")
+	}
+	// 列消息
+	if _, err := s.ListStudyMessages(ctx, sess.ID, false); err == nil {
+		t.Error("关闭后列消息应报错")
+	}
+	// 删除会话
+	if err := s.DeleteStudySession(ctx, sess.ID); err == nil {
+		t.Error("关闭后删除会话应报错")
+	}
+}
+
 // TestStudyMessages_AppendAndSuppress 验证消息追加、Reference 关联与抑制过滤。
 func TestStudyMessages_AppendAndSuppress(t *testing.T) {
 	s := newTestStore(t)
