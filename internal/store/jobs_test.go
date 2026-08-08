@@ -324,3 +324,13 @@ func TestIndexSearch_ClosedDBNerror(t *testing.T) {
 		t.Fatal("数据库关闭后 IndexSearch 应报错")
 	}
 }
+
+// TestGetJob_NotFound 验证查询不存在的 job 返回 ErrNotFound。
+func TestGetJob_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	if _, err := s.GetJob(ctx, "nonexistent"); err != ErrNotFound {
+		t.Errorf("不存在的 job 应 ErrNotFound，实际 %v", err)
+	}
+}
