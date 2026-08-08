@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -309,5 +310,37 @@ func TestRequireSafeForSingleOwner(t *testing.T) {
 	}
 	if err := RequireSafeForSingleOwner(ctx, s.DB); err != ErrMultipleUsers {
 		t.Errorf("多用户应 ErrMultipleUsers，实际 %v", err)
+	}
+}
+
+// TestPreMigrationSafety_CreatesBackup 验证待迁移且已有用户时生成一致性备份。
+func TestPreMigrationSafety_CreatesBackup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "src.db")
+	db := openRaw(t, dbPath)
+	// 迁移到最新后回退版本记录到 1（制造"待破坏性迁移"状态）
+	if _, err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM schema_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	// 造 1 个用户
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u1','a@b.com','x')`); err != nil {
+		t.Fatal(err)
+	}
+	// users 表需存在；若迁移后列兼容，直接插入即可
+
+	if err := preMigrationSafety(ctx, db, dbPath); err != nil {
+		t.Fatalf("preMigrationSafety: %v", err)
+	}
+	// 备份文件应已生成
+	bakPath := dbPath + ".pre-single-owner.bak"
+	if _, err := os.Stat(bakPath); err != nil {
+		t.Errorf("应生成备份文件 %s: %v", bakPath, err)
 	}
 }
