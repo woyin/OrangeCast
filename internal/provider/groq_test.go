@@ -182,3 +182,56 @@ func TestGroq_StudyChatNoCandidates(t *testing.T) {
 		t.Error("应返回 scope 反馈")
 	}
 }
+
+// TestGroq_ChatComplete 验证 chatComplete 实际 HTTP 路径（/chat/completions）。
+func TestGroq_ChatComplete(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("路径应为 /chat/completions，实际 %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"{\"answer\":\"通胀是物价上升\"}"}}]}`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	content, code, err := g.chatComplete([]map[string]string{{"role": "user", "content": "hi"}}, "object")
+	if err != nil {
+		t.Fatalf("chatComplete: %v", err)
+	}
+	if code != http.StatusOK {
+		t.Errorf("应 200，实际 %d", code)
+	}
+	if content == "" {
+		t.Error("应返回 message content")
+	}
+}
+
+// TestGroq_ChatCompleteHTTPError 验证非 200 返回错误（4xx 不触发重试）。
+func TestGroq_ChatCompleteHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	if _, code, err := g.chatComplete(nil, "object"); err == nil {
+		t.Fatalf("429 应报错，code=%d", code)
+	} else if code != http.StatusBadRequest {
+		t.Errorf("应返回 400，实际 %d", code)
+	}
+}
+
+// TestGroq_ChatCompleteEmptyChoices 验证空 choices 报错。
+func TestGroq_ChatCompleteEmptyChoices(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	if _, _, err := g.chatComplete(nil, ""); err == nil {
+		t.Fatal("空 choices 应报错")
+	}
+}
