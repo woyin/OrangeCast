@@ -74,6 +74,25 @@ func TestStudyChat_ValidAnswerPassesScopeTether(t *testing.T) {
 	}
 }
 
+// TestStudyChat_HistoryTruncation 验证超过 6 轮的对话历史被截断为最近 6 轮。
+func TestStudyChat_HistoryTruncation(t *testing.T) {
+	g := NewGroqProvider("test")
+	g.chatCompleteFn = fakeChatFn(`{"answer":"最近回答","referenceSegmentIds":["seg-0001"]}`)
+	candidates := []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	// 构造 8 轮历史（user/assistant 交替）
+	history := make([]StudyChatMessage, 8)
+	for i := range history {
+		history[i] = StudyChatMessage{Role: "user", Content: "历史消息"}
+	}
+	res, err := g.StudyChatAnswer("解释通胀", history, candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer == nil || res.Answer.Content != "最近回答" {
+		t.Errorf("应基于最近 6 轮历史生成回答，实际 %+v", res.Answer)
+	}
+}
+
 // TestReferenceCheck_RelatedJudgment (ADR-0018 R3 硬约束二)
 // 校验器返回 related=true/false 时结果正确传递。
 func TestReferenceCheck_RelatedJudgment(t *testing.T) {
