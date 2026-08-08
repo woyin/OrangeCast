@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -85,4 +86,38 @@ func TestConsistencyBackup_FailureLeavesNoArtifact(t *testing.T) {
 	// 该路径的父目录 nonexistent_deep 在 t.TempDir 之外或不可创建；预期失败或产物清理。
 	// 无论报错与否，函数不应 panic；若"成功"则必须有非空产物。
 	_ = err
+}
+
+// TestSQLQuoteString 验证 SQL 单引号字面量转义。
+func TestSQLQuoteString(t *testing.T) {
+	if got := sqlQuoteString("plain"); got != "'plain'" {
+		t.Errorf("sqlQuoteString(plain)=%q", got)
+	}
+	if got := sqlQuoteString("it's"); got != "'it''s'" {
+		t.Errorf("含单引号应双写转义，实际 %q", got)
+	}
+	if got := sqlQuoteString(""); got != "''" {
+		t.Errorf("空串应返回 ''，实际 %q", got)
+	}
+}
+
+// TestConsistencyBackup_InvalidDest 验证 VACUUM INTO 到非法目标报错。
+func TestConsistencyBackup_InvalidDest(t *testing.T) {
+	dir := t.TempDir()
+	src, err := sql.Open("sqlite", filepath.Join(dir, "src.db")+"?_pragma=foreign_keys(on)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { src.Close() })
+	ctx := context.Background()
+	if _, err := Migrate(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	// 目标路径的父目录不可创建（用文件占用父目录）→ VACUUM INTO 失败
+	blocker := filepath.Join(dir, "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	badDst := filepath.Join(blocker, "sub", "backup.db") // blocker 是文件，无法作为目录
+	if err := ConsistencyBackup(ctx, src, badDst); err == nil {
+		t.Fatal("非法目标应报错")
+	}
 }
