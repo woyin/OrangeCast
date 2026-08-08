@@ -19,16 +19,19 @@ type Refresher struct {
 // NewRefresher 创建刷新器，每 30 分钟跑一次。
 func NewRefresher(s *store.Store) *Refresher {
 	r := &Refresher{cron: cron.New(), store: s, fetchFeed: FetchFeed}
-	r.cron.AddFunc("*/30 * * * *", func() {
-		if err := r.RefreshAll(context.Background()); err != nil {
-			log.Printf("cron 刷新失败: %v", err)
-		}
-	})
+	r.cron.AddFunc("*/30 * * * *", r.runScheduled)
 	return r
 }
 
 func (r *Refresher) Start() { r.cron.Start() }
 func (r *Refresher) Stop()  { r.cron.Stop() }
+
+// runScheduled cron 定时调用的入口：刷新失败仅记录日志，不中断调度。
+func (r *Refresher) runScheduled() {
+	if err := r.RefreshAll(context.Background()); err != nil {
+		log.Printf("cron 刷新失败: %v", err)
+	}
+}
 
 // RefreshAll 按 last_fetched_at ASC 取一批（25 个）刷新。
 // 只插入新 episode，不自动触发 AI 处理（与原设计一致，手动处理）。

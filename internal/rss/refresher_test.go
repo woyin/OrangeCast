@@ -98,3 +98,22 @@ func TestRefresher_StartStop(t *testing.T) {
 	r.Stop()
 	r.Stop() // 重复停止应安全
 }
+
+// TestRefresher_RunScheduled 验证 cron 定时入口触发刷新并合并 episode。
+func TestRefresher_RunScheduled(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	p, _ := s.CreatePodcast(ctx, "https://feed.example.com/pod.xml", "测试播客", "desc", "")
+	r := NewRefresher(s)
+	r.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL}, []models.Episode{
+			{GUID: "ep-1", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"},
+		}, nil
+	}
+	// 直接调用 cron 入口（不等待 30 分钟调度）
+	r.runScheduled()
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	if len(eps) != 1 {
+		t.Errorf("runScheduled 应合并 1 集，实际 %d", len(eps))
+	}
+}
