@@ -89,6 +89,28 @@ func TestParaphraseHandler_NoSegmentRejected(t *testing.T) {
 	}
 }
 
+// TestParaphraseHandler_ReferenceNotFound 验证参考片段不在当前转录稿中时 400。
+func TestParaphraseHandler_ReferenceNotFound(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "ph3@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	// 请求引用一个 transcript 中不存在的片段
+	rec := postForm(t, srv, cookie, "/api/paraphrase",
+		"source_type=episode&source_id="+sourceID+"&segment_ids=[\"seg-9999\"]&question=q")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("参考片段不存在应 400，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "参考片段在当前转录稿中不存在") {
+		t.Errorf("应返回参考片段不存在错误，实际 %s", rec.Body.String())
+	}
+}
+
 // TestStudyChat_ScopeTethered (ADR-0018 R3 硬约束一)
 // 模型返回无 reference → handler 给出 out_of_scope 反馈，不生成。
 func TestStudyChat_ScopeTethered(t *testing.T) {
