@@ -852,6 +852,21 @@ func TestPodcasts_ClosedDB500(t *testing.T) {
 	}
 }
 
+// TestPodcasts_DBTabularError 通过删除 podcasts 表（保留 sessions 让认证通过）
+// 触发 handlePodcasts 内部的列表查询错误分支，返回 500。
+func TestPodcasts_DBTabularError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podclient@example.com", "password123")
+	// 删表仅影响后续 podcasts 查询；sessions 表仍在，认证可通过。
+	if _, err := srv.store.DB.Exec(`DROP TABLE podcasts`); err != nil {
+		t.Fatalf("DROP TABLE podcasts: %v", err)
+	}
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/podcasts")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("podcasts 表缺失应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestPodcastDetail_Renders 验证播客详情页渲染（含批量入队回显参数）。
 func TestPodcastDetail_Renders(t *testing.T) {
 	srv := newTestServer(t)
@@ -1115,6 +1130,23 @@ func TestKeyPointsPage_ClosedDB500(t *testing.T) {
 	}
 }
 
+// TestKeyPointsPage_DBTabularError 通过删除 keypoint_index 表（保留 sessions 使认证通过）
+// 触发 handleKeyPoints 内部查询错误分支，返回 500。
+func TestKeyPointsPage_DBTabularError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "kptbl@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE keypoint_index`); err != nil {
+		t.Fatalf("DROP TABLE keypoint_index: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/keypoints", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("keypoint_index 表缺失应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestGraphAPI 验证图谱 JSON 接口返回结构（nodes/links/collections）。
 func TestGraphAPI(t *testing.T) {
 	srv := newTestServer(t)
@@ -1144,6 +1176,23 @@ func TestGraphAPI_ClosedDB500(t *testing.T) {
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("数据库关闭后图谱 API 应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestGraphAPI_DBTabularError 通过删除 keypoint_index 表（保留 sessions 使认证通过）
+// 触发 handleGraphAPI 内部查询错误分支，返回 500。
+func TestGraphAPI_DBTabularError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "graph500tbl@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE keypoint_index`); err != nil {
+		t.Fatalf("DROP TABLE keypoint_index: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/graph", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("keypoint_index 表缺失应 500，实际 %d", rec.Code)
 	}
 }
 
@@ -1689,6 +1738,28 @@ func TestPodcastNew_POST_FetchError(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "抓取/解析 feed 失败") {
 		t.Errorf("应显示抓取错误，实际 %s", rec.Body.String())
+	}
+}
+
+// TestPodcastNew_POST_DuplicateFeed 验证重复订阅同一 feed 时渲染"可能已订阅"错误。
+func TestPodcastNew_POST_DuplicateFeed(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "poddup@example.com", "password123")
+	ctx := context.Background()
+	// 先订阅一次
+	srv.store.CreatePodcast(ctx, "https://feed.example.com/dup.xml", "已订阅播客", "desc", "")
+
+	// 再次订阅相同 feed（fetchFeed 仍成功，但 CreatePodcast 因 UNIQUE(feed_url) 失败）
+	srv.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL, Title: "已订阅播客", Description: "desc"},
+			[]models.Episode{{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"}}, nil
+	}
+	rec := postForm(t, srv, cookie, "/podcasts/new", "feed_url=https://feed.example.com/dup.xml")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("重复订阅应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "订阅失败（可能已订阅）") {
+		t.Errorf("应显示重复订阅错误，实际 %s", rec.Body.String())
 	}
 }
 
