@@ -194,7 +194,7 @@ go build ./cmd/cloudwisepod
 git diff --check
 ```
 
-测试覆盖（298+ 测试函数）：迁移（含数据修复 0015、破坏性迁移单 Owner 守卫）、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复（含 Run 主循环/doHighlight/fetchRawAudio/默认 bundleFor）、Citation 校验、EvalSet（含 ReferenceCheck 6 场景 + CheckReferenceSamples 评测入口）、Markdown golden、分段搜索、EvidenceQA/StudyChat 完整 handler、StudyChat 硬约束、Paraphrase 最近 N 次淘汰、Narration 合成（含 runCLI）、Highlight 稳定 ID、DJ 页渲染、Narration serve、批量入队、RSS 抓取与解析（FetchFeed/parseFeed/Refresher）、auth 中间件（含会话 cookie/限流/CSRF/RequireAuth）、store 生命周期与迁移安全、server 全部 handler（含 source 详情）、provider HTTP 层与模型路径（经 WithBaseURL + httptest 隔离）。各包覆盖率：markdown 94%、config 93%、auth 88%、safehttp 87%、provider 87%、rss 83%、evalset 83%、store 80%、queue 78%、server 78%、backup 74%。
+测试覆盖（301+ 测试函数）：迁移（含数据修复 0015、破坏性迁移单 Owner 守卫与备份）、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复（含 Run 主循环/doHighlight/fetchRawAudio/默认 bundleFor）、Citation 校验、EvalSet（含 ReferenceCheck 6 场景 + CheckReferenceSamples 评测入口）、Markdown golden、分段搜索、EvidenceQA/StudyChat 完整 handler、StudyChat 硬约束、Paraphrase 最近 N 次淘汰、Narration 合成（含 runCLI）、Highlight 稳定 ID、DJ 页渲染、Narration serve、批量入队、RSS 抓取与解析（FetchFeed/parseFeed/Refresher）、auth 中间件（含会话 cookie/限流/CSRF/RequireAuth 无效 token）、store 生命周期与迁移安全、server 全部 handler（含 source 详情）、provider HTTP 层与模型路径（经 WithBaseURL + httptest 隔离）。各包覆盖率：markdown 94%、config 93%、auth 92%、safehttp 87%、provider 87%、rss 83%、evalset 83%、store 81%、queue 78%、server 78%、backup 74%。
 
 ---
 
