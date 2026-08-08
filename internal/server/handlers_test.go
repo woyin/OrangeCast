@@ -731,6 +731,76 @@ func TestProcessBatch_NonPost405(t *testing.T) {
 	}
 }
 
+// TestPurge_Success 验证 purge POST（正确 CSRF）成功后重定向到 /uploads。
+func TestPurge_Success(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "purgeok@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	srv.store.UpsertEvidenceAudio(ctx, models.SourceEpisode, eps[0].ID, "ep.mp3", "mp3", 10, "abc")
+
+	// 取 CSRF token
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	body := "_csrf=" + csrf + "&source_type=episode&source_id=" + eps[0].ID
+	req := httptest.NewRequest(http.MethodPost, "/api/purge", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("purge 成功应 303 重定向，实际 %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/uploads" {
+		t.Errorf("应重定向到 /uploads，实际 %q", loc)
+	}
+}
+
+// TestPurge_DBTabularError 通过删除 purges 表（保留 sessions 使认证通过）
+// 触发 handlePurge 内部 PurgeSource 错误分支，返回 500。
+func TestPurge_DBTabularError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "purgestbl@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE purges`); err != nil {
+		t.Fatalf("DROP TABLE purges: %v", err)
+	}
+
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	body := "_csrf=" + csrf + "&source_type=episode&source_id=ep-none"
+	req := httptest.NewRequest(http.MethodPost, "/api/purge", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("purges 表缺失应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestPageParam 验证 pageParam 的解析：缺省/非法回退 1，合法保留。
 func TestPageParam(t *testing.T) {
 	cases := []struct {
@@ -991,6 +1061,23 @@ func TestProgressAPI_ClosedDB500(t *testing.T) {
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("数据库关闭后进度 API 应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestProgressAPI_DBTabularError 通过删除 processing_jobs 表（保留 sessions 使认证通过）
+// 触发 handleProgressAPI 内部查询错误分支，返回 500。
+func TestProgressAPI_DBTabularError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "progtbl@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("processing_jobs 表缺失应 500，实际 %d", rec.Code)
 	}
 }
 
