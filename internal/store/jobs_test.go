@@ -313,3 +313,14 @@ func TestClaimHeartbeatReset(t *testing.T) {
 		t.Errorf("启动恢复后应 queued，实际 %q", got.Status)
 	}
 }
+
+// TestIndexSearch_ClosedDBNerror 验证数据库关闭后 IndexSearch 报错（覆盖错误分支）。
+func TestIndexSearch_ClosedDBNerror(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	s.Close()
+	if err := s.IndexSearch(ctx, models.SourceEpisode, "ep-1", "T", "S", []provider.Segment{{ID: "s1", Start: 0, End: 1, Text: "x"}}); err == nil {
+		t.Fatal("数据库关闭后 IndexSearch 应报错")
+	}
+}
