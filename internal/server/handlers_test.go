@@ -829,6 +829,17 @@ func TestPodcastsList_Renders(t *testing.T) {
 	}
 }
 
+// TestPodcasts_ClosedDB500 验证数据库关闭后播客列表页返回 500。
+func TestPodcasts_ClosedDB500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podclosed@example.com", "password123")
+	srv.store.Close()
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/podcasts")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("数据库关闭后应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestPodcastDetail_Renders 验证播客详情页渲染（含批量入队回显参数）。
 func TestPodcastDetail_Renders(t *testing.T) {
 	srv := newTestServer(t)
