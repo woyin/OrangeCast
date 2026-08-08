@@ -462,20 +462,7 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.OpenAIBaseURL = strPtr(r.FormValue("openai_base_url"))
 		_ = srv.store.UpdateSettings(r.Context(), st)
 		// 立即刷新 Selector 的 key/URL
-		gKey, gURL, oKey, oURL := "", "", "", ""
-		if st.GroqAPIKey != nil {
-			gKey = *st.GroqAPIKey
-		}
-		if st.GroqBaseURL != nil {
-			gURL = *st.GroqBaseURL
-		}
-		if st.OpenAIAPIKey != nil {
-			oKey = *st.OpenAIAPIKey
-		}
-		if st.OpenAIBaseURL != nil {
-			oURL = *st.OpenAIBaseURL
-		}
-		srv.selector.ApplySettings(gKey, gURL, oKey, oURL)
+		srv.selector.ApplySettingsFrom(st)
 		http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 		return
 	}

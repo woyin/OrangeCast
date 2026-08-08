@@ -62,20 +62,7 @@ func runServe() {
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
 	// 从 SQLite settings 覆盖 key/URL（可页面配置，ADR-0009 扩展）
 	if st, err := s.GetSettings(context.Background()); err == nil {
-		gKey, gURL, oKey, oURL := "", "", "", ""
-		if st.GroqAPIKey != nil {
-			gKey = *st.GroqAPIKey
-		}
-		if st.GroqBaseURL != nil {
-			gURL = *st.GroqBaseURL
-		}
-		if st.OpenAIAPIKey != nil {
-			oKey = *st.OpenAIAPIKey
-		}
-		if st.OpenAIBaseURL != nil {
-			oURL = *st.OpenAIBaseURL
-		}
-		selector.ApplySettings(gKey, gURL, oKey, oURL)
+		selector.ApplySettingsFrom(st)
 	}
 	// Narration 解说音轨（ADR-0019）：自托管 Kokoro TTS，独立于 groq/openai。
 	// 引擎未安装时 Available()==false，worker 跳过合成、不阻塞主流程。

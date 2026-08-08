@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/woyin/orangecast/internal/models"
+)
 
 func TestSelector_Bundle_GroqDefault(t *testing.T) {
 	sel := NewSelector("groq-key", "openai-key")
@@ -68,6 +72,35 @@ func TestSelector_ApplySettings(t *testing.T) {
 	g := bundle.Analysis.(*GroqProvider)
 	if g.baseURL != "https://custom.groq.com/v1" {
 		t.Errorf("baseURL 应被覆盖，实际 %s", g.baseURL)
+	}
+}
+
+// TestSelector_ApplySettingsFrom 验证从 Settings 对象覆盖 key/URL（含 nil 指针安全）。
+func TestSelector_ApplySettingsFrom(t *testing.T) {
+	sel := NewSelector("", "")
+	gk := "from-settings-groq"
+	gurl := "https://custom.groq.com/v1"
+	okey := "from-settings-openai"
+	st := &models.Settings{
+		GroqAPIKey: &gk, GroqBaseURL: &gurl, OpenAIAPIKey: &okey,
+	}
+	sel.ApplySettingsFrom(st)
+	if !sel.HasGroq() || !sel.HasOpenAI() {
+		t.Fatal("应从 settings 覆盖 key")
+	}
+	bundle, err := sel.Bundle("groq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := bundle.Analysis.(*GroqProvider)
+	if g.baseURL != gurl {
+		t.Errorf("Groq baseURL 应覆盖，实际 %q", g.baseURL)
+	}
+	// nil Settings 安全
+	sel2 := NewSelector("", "")
+	sel2.ApplySettingsFrom(nil)
+	if sel2.HasGroq() {
+		t.Error("nil settings 不应覆盖 key")
 	}
 }
 

@@ -5,6 +5,8 @@ package provider
 
 import (
 	"fmt"
+
+	"github.com/woyin/orangecast/internal/models"
 )
 
 // Selector 按 Provider 名称构造 provider bundle。
@@ -45,6 +47,28 @@ func (sel *Selector) ApplySettings(groqKey, groqURL, openaiKey, openaiURL string
 	if openaiURL != "" {
 		sel.openaiBaseURL = openaiURL
 	}
+}
+
+// ApplySettingsFrom 从实例级 Settings 覆盖 Provider 的 key/URL（ADR-0009 扩展）。
+// 收敛 main.go 启动装配与 handleSettings 保存后立即刷新的重复解引用逻辑。
+func (sel *Selector) ApplySettingsFrom(st *models.Settings) {
+	if st == nil {
+		return
+	}
+	gKey, gURL, oKey, oURL := "", "", "", ""
+	if st.GroqAPIKey != nil {
+		gKey = *st.GroqAPIKey
+	}
+	if st.GroqBaseURL != nil {
+		gURL = *st.GroqBaseURL
+	}
+	if st.OpenAIAPIKey != nil {
+		oKey = *st.OpenAIAPIKey
+	}
+	if st.OpenAIBaseURL != nil {
+		oURL = *st.OpenAIBaseURL
+	}
+	sel.ApplySettings(gKey, gURL, oKey, oURL)
 }
 
 // Bundle 按 provider 名返回对应的全套实现。
