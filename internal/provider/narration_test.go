@@ -56,3 +56,14 @@ func TestKokoroProvider_SynthesizeEmptyTextRejected(t *testing.T) {
 		t.Error("空文本应报错")
 	}
 }
+
+// TestKokoroProvider_Getters 验证 Name/DefaultVoice 返回配置值。
+func TestKokoroProvider_Getters(t *testing.T) {
+	k := NewKokoroProvider("kokoro", "af_heart", "model.bin")
+	if k.Name() != "kokoro" {
+		t.Errorf("Name() = %q", k.Name())
+	}
+	if k.DefaultVoice() != "af_heart" {
+		t.Errorf("DefaultVoice() = %q", k.DefaultVoice())
+	}
+}

@@ -145,3 +145,12 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("空串应原样，实际 %q", got)
 	}
 }
+
+// TestErrNoValidCitations_Error 验证 ErrNoValidCitations 的错误消息格式。
+func TestErrNoValidCitations_Error(t *testing.T) {
+	e := &ErrNoValidCitations{Detail: "无有效引用"}
+	want := "证据校验失败：无有效引用"
+	if got := e.Error(); got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
