@@ -146,27 +146,35 @@ type Issue struct {
 func Check() []Issue {
 	var issues []Issue
 	for _, smp := range Samples {
-		// schema：ValidateCard 要求核心字段 + 有效 Citation（同时覆盖 citation 存在性）
-		_, err := provider.ValidateCard(smp.Card, smp.Segments)
-		if err != nil {
-			issues = append(issues, Issue{SampleID: smp.ID, Kind: "schema", Detail: err.Error()})
+		issues = append(issues, checkSample(smp)...)
+	}
+	return issues
+}
+
+// checkSample 对单个样本执行自动校验，返回问题列表。
+// 独立函数便于用故意构造的非法样本直接覆盖各类问题分支。
+func checkSample(smp Sample) []Issue {
+	var issues []Issue
+	// schema：ValidateCard 要求核心字段 + 有效 Citation（同时覆盖 citation 存在性）
+	_, err := provider.ValidateCard(smp.Card, smp.Segments)
+	if err != nil {
+		issues = append(issues, Issue{SampleID: smp.ID, Kind: "schema", Detail: err.Error()})
+	}
+	// 时间边界：每个 Segment start>=0 且 start<end；Citation 时间范围合法
+	for _, seg := range smp.Segments {
+		if seg.Start < 0 || seg.End <= seg.Start {
+			issues = append(issues, Issue{SampleID: smp.ID, Kind: "time", Detail: fmt.Sprintf("segment %s 时间非法: %.2f-%.2f", seg.ID, seg.Start, seg.End)})
 		}
-		// 时间边界：每个 Segment start>=0 且 start<end；Citation 时间范围合法
-		for _, seg := range smp.Segments {
-			if seg.Start < 0 || seg.End <= seg.Start {
-				issues = append(issues, Issue{SampleID: smp.ID, Kind: "time", Detail: fmt.Sprintf("segment %s 时间非法: %.2f-%.2f", seg.ID, seg.Start, seg.End)})
-			}
+	}
+	for _, c := range allCitations(smp.Card) {
+		if _, _, ok := provider.ResolveCitationRange(c, smp.Segments); !ok {
+			issues = append(issues, Issue{SampleID: smp.ID, Kind: "citation", Detail: fmt.Sprintf("citation %q 不存在", c)})
 		}
-		for _, c := range allCitations(smp.Card) {
-			if _, _, ok := provider.ResolveCitationRange(c, smp.Segments); !ok {
-				issues = append(issues, Issue{SampleID: smp.ID, Kind: "citation", Detail: fmt.Sprintf("citation %q 不存在", c)})
-			}
-		}
-		// verbatim：金句逐字（由 ValidateCard 已覆盖，这里单独记录失败详情）
-		for _, q := range smp.Card.Quotes {
-			if !quoteInSegments(q.Text, q.Citations, smp.Segments) {
-				issues = append(issues, Issue{SampleID: smp.ID, Kind: "verbatim", Detail: fmt.Sprintf("quote %q 非逐字", q.Text)})
-			}
+	}
+	// verbatim：金句逐字（由 ValidateCard 已覆盖，这里单独记录失败详情）
+	for _, q := range smp.Card.Quotes {
+		if !quoteInSegments(q.Text, q.Citations, smp.Segments) {
+			issues = append(issues, Issue{SampleID: smp.ID, Kind: "verbatim", Detail: fmt.Sprintf("quote %q 非逐字", q.Text)})
 		}
 	}
 	return issues

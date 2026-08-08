@@ -1,6 +1,8 @@
 package evalset
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/provider"
@@ -72,6 +74,36 @@ func TestCheckReferenceSamples_NilChecker(t *testing.T) {
 		t.Fatalf("nil 校验器应报告 (nil-checker)，实际 %+v", issues)
 	}
 }
+
+// TestCheckReferenceSamples_CheckerError 验证：校验器返回错误时逐条报告"校验报错"。
+func TestCheckReferenceSamples_CheckerError(t *testing.T) {
+	issues := CheckReferenceSamples(errChecker{})
+	if len(issues) == 0 {
+		t.Fatal("报错校验器应报告 issue")
+	}
+	wantCount := len(ReferenceCheckSamples)
+	if len(issues) != wantCount {
+		t.Fatalf("报错校验器应对每个样本报告一条，期望 %d 实际 %d", wantCount, len(issues))
+	}
+	for _, iss := range issues {
+		if iss.Got != false {
+			t.Errorf("报错 issue 应 Got=false，实际 %+v", iss)
+		}
+		if !strings.Contains(iss.Reason, "校验报错") {
+			t.Errorf("报错 issue 应含原因，实际 %+v", iss)
+		}
+	}
+}
+
+// errChecker 恒返回错误，用于覆盖 CheckReferenceSamples 的报错分支。
+type errChecker struct{}
+
+func (errChecker) Name() string { return "err" }
+func (errChecker) CheckReference(question, answer string, segs []provider.Segment) (provider.ReferenceCheckResult, error) {
+	return provider.ReferenceCheckResult{}, errReferenceCheck
+}
+
+var errReferenceCheck = errors.New("reference check failed")
 
 // exactChecker 严格按样本期望返回相关性（总是正确）。
 type exactChecker struct{}
