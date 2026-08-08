@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
@@ -102,6 +103,28 @@ func TestDownloadAudio_InvalidURL(t *testing.T) {
 	}
 }
 
+// TestFetchRawAudio_UploadMissingFile 验证 upload 源原始文件缺失时 fetchRawAudio 报错。
+func TestFetchRawAudio_UploadMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{}, dir)
+	// job 指向 upload 源；tempDir/uploads 下无该 id 文件 → os.Stat 报错
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: "up-missing"}
+	os.MkdirAll(w.tempDir, 0o755)
+	if _, _, err := w.fetchRawAudio(context.Background(), job); err == nil {
+		t.Fatal("upload 原始文件缺失应报错")
+	}
+}
+
+// TestFetchRawAudio_EpisodeGetError 验证 episode 源查询失败时 fetchRawAudio 报错。
+func TestFetchRawAudio_EpisodeGetError(t *testing.T) {
+	s := newTestStoreForDownload(t)
+	w := NewWorker(s, provider.NewSelector("g", "o"), t.TempDir(), t.TempDir(), t.TempDir())
+	job := &models.ProcessingJob{SourceType: models.SourceEpisode, SourceID: "ep-none"}
+	if _, _, err := w.fetchRawAudio(context.Background(), job); err == nil {
+		t.Fatal("不存在的 episode 应报错")
+	}
+}
+
 // TestQueueFileSHA256_NotFound 验证 fileSHA256 对不存在的文件报错。
 func TestQueueFileSHA256_NotFound(t *testing.T) {
 	if _, err := fileSHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
@@ -132,4 +155,15 @@ func TestQueueFileSHA256_Deterministic(t *testing.T) {
 func NewWorkerWithClient(client *http.Client, dir string) *Worker {
 	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
 	return &Worker{client: client, tempDir: filepath.Join(dir, "tmp")}
+}
+
+// newTestStoreForDownload 构造一个独立 store（供需真实 DB 的测试复用）。
+func newTestStoreForDownload(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
 }
