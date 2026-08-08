@@ -313,6 +313,15 @@ func TestEvidenceBitrateKbps_RejectsAudioNeedingSegmentation(t *testing.T) {
 	}
 }
 
+// TestEvidenceBitrateKbps_RejectsInvalidDuration 验证非正时长直接报错。
+func TestEvidenceBitrateKbps_RejectsInvalidDuration(t *testing.T) {
+	for _, d := range []float64{0, -1, -3.5} {
+		if _, err := evidenceBitrateKbps(d); err == nil {
+			t.Errorf("evidenceBitrateKbps(%.1f) 非正时长应报错", d)
+		}
+	}
+}
+
 func TestPurgeSource_RemovesFilesAndRows(t *testing.T) {
 	s, w := newTestWorker(t)
 	ctx := context.Background()
