@@ -1093,6 +1093,20 @@ func TestGraphAPI(t *testing.T) {
 	}
 }
 
+// TestGraphAPI_ClosedDB500 验证数据库关闭后图谱 API 返回 500。
+func TestGraphAPI_ClosedDB500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "graph500@example.com", "password123")
+	srv.store.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/graph", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("数据库关闭后图谱 API 应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestGraphPage_Renders 验证知识图谱页渲染。
 func TestGraphPage_Renders(t *testing.T) {
 	srv := newTestServer(t)
