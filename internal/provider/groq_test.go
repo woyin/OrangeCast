@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestGroq_Transcribe 验证 Groq 转录：multipart 上传 + 稳定 Segment ID 分配。
@@ -233,5 +234,16 @@ func TestGroq_ChatCompleteEmptyChoices(t *testing.T) {
 	g := NewGroqProvider("key").WithBaseURL(srv.URL)
 	if _, _, err := g.chatComplete(nil, ""); err == nil {
 		t.Fatal("空 choices 应报错")
+	}
+}
+
+// TestGroqWaitBetweenAnalysisWindows 验证 sleepFn 注入时被调用（不实际 sleep）。
+func TestGroqWaitBetweenAnalysisWindows(t *testing.T) {
+	called := 0
+	g := NewGroqProvider("key")
+	g.sleepFn = func(d time.Duration) { called++ }
+	g.waitBetweenAnalysisWindows()
+	if called != 1 {
+		t.Errorf("sleepFn 应被调用 1 次，实际 %d", called)
 	}
 }
