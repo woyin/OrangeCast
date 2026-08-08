@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,5 +159,39 @@ func TestSaveUploadFile(t *testing.T) {
 	}
 	if string(got) != content {
 		t.Errorf("文件内容 = %q, want %q", got, content)
+	}
+}
+
+// TestSourceStatusAndError 验证 sourceStatusAndError：正常状态、失败状态取 last_error、未知 source。
+func TestSourceStatusAndError(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 未处理 → Unprocessed + 无错误
+	status, errMsg := srv.sourceStatusAndError(ctx, models.SourceEpisode, sourceID)
+	if status != models.StatusUnprocessed || errMsg != "" {
+		t.Errorf("未处理应 Unprocessed+空，实际 %q %q", status, errMsg)
+	}
+
+	// 失败状态 → 取 last_error
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	srv.store.MarkJobRunning(ctx, job.ID)
+	srv.store.MarkJobFailed(ctx, job.ID, "429 限流")
+	srv.store.UpdateEpisodeStatus(ctx, sourceID, models.StatusFailedEp)
+
+	status, errMsg = srv.sourceStatusAndError(ctx, models.SourceEpisode, sourceID)
+	if status != models.StatusFailedEp || errMsg != "429 限流" {
+		t.Errorf("失败应取 last_error，实际 %q %q", status, errMsg)
+	}
+
+	// 未知 source → Unprocessed
+	status, _ = srv.sourceStatusAndError(ctx, models.SourceEpisode, "nonexistent")
+	if status != models.StatusUnprocessed {
+		t.Errorf("未知 source 应 Unprocessed，实际 %q", status)
 	}
 }
