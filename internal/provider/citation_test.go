@@ -154,3 +154,31 @@ func TestErrNoValidCitations_Error(t *testing.T) {
 		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
+
+// TestValidateCard_NilCard 验证传入 nil 卡片返回 ErrNoValidCitations。
+func TestValidateCard_NilCard(t *testing.T) {
+	_, err := ValidateCard(nil, testSegments())
+	if err == nil {
+		t.Fatal("nil 卡片应报错")
+	}
+	if _, ok := err.(*ErrNoValidCitations); !ok {
+		t.Errorf("应返回 ErrNoValidCitations，实际 %T", err)
+	}
+}
+
+// TestValidateCard_ChaptersMissing 验证缺少有效 Citation 的 chapters 导致直接拒绝。
+func TestValidateCard_ChaptersMissing(t *testing.T) {
+	card := &KnowledgeCard{
+		Title:     "T",
+		Summary:   CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}},
+		Chapters:  []Chapter{{Title: "", Citations: []string{"seg-9999"}}}, // 无效
+	}
+	_, err := ValidateCard(card, testSegments())
+	if err == nil {
+		t.Fatal("chapters 全部缺少有效 Citation 应报错")
+	}
+	if _, ok := err.(*ErrNoValidCitations); !ok {
+		t.Errorf("应返回 ErrNoValidCitations，实际 %T", err)
+	}
+}
