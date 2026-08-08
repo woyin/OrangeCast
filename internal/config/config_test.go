@@ -97,15 +97,16 @@ func TestLoad_TrustedProxies_Invalid(t *testing.T) {
 func TestEnsureDirs(t *testing.T) {
 	dir := t.TempDir()
 	c := &Config{
-		DataDir:     filepath.Join(dir, "data"),
-		EvidenceDir: filepath.Join(dir, "data/evidence"),
-		TempDir:     filepath.Join(dir, "data/tmp"),
-		BackupDir:   filepath.Join(dir, "data/backups"),
+		DataDir:      filepath.Join(dir, "data"),
+		EvidenceDir:  filepath.Join(dir, "data/evidence"),
+		TempDir:      filepath.Join(dir, "data/tmp"),
+		BackupDir:    filepath.Join(dir, "data/backups"),
+		NarrationDir: filepath.Join(dir, "data/narrations"),
 	}
 	if err := c.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir} {
+	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir} {
 		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
 			t.Errorf("目录 %s 未创建", d)
 		}

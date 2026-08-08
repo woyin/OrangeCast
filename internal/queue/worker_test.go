@@ -25,7 +25,7 @@ func newTestWorker(t *testing.T) (*store.Store, *Worker) {
 	}
 	t.Cleanup(func() { s.Close() })
 	sel := provider.NewSelector("fake-groq", "fake-openai")
-	w := NewWorker(s, sel, filepath.Join(dir, "tmp"), filepath.Join(dir, "evidence"))
+	w := NewWorker(s, sel, filepath.Join(dir, "tmp"), filepath.Join(dir, "evidence"), filepath.Join(dir, "narrations"))
 	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "evidence"), 0o755)
 	return s, w
@@ -123,7 +123,7 @@ func TestClaimNextJob_OnlyOneWorkerWins(t *testing.T) {
 	s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
 
 	// 两个 worker 并发领取同一 job → 只有一个成功
-	w2 := NewWorker(s, provider.NewSelector("g", "o"), w.tempDir, w.evidenceDir)
+	w2 := NewWorker(s, provider.NewSelector("g", "o"), w.tempDir, w.evidenceDir, w.narrationDir)
 	done := make(chan *models.ProcessingJob, 2)
 	run := func(ww *Worker) {
 		job, err := ww.store.ClaimNextJob(ctx, leaseDuration)

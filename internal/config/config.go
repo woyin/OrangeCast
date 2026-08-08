@@ -21,6 +21,10 @@ type Config struct {
 	DataDir        string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
 	EvidenceDir    string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
 	BackupDir      string   // 备份输出目录（DATA_DIR/backups）
+	NarrationDir   string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	KokoroBinary   string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	KokoroVoice    string   // Kokoro 默认音色（默认 af_heart）
+	KokoroModel    string   // Kokoro 模型文件路径（可选，某些发行版需要）
 }
 
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
@@ -39,6 +43,10 @@ func Load() (*Config, error) {
 	c.TempDir = envOrDefault("TEMP_DIR", filepath.Join(c.DataDir, "tmp"))
 	c.EvidenceDir = filepath.Join(c.DataDir, "evidence")
 	c.BackupDir = filepath.Join(c.DataDir, "backups")
+	c.NarrationDir = envOrDefault("NARRATION_DIR", filepath.Join(c.DataDir, "narrations"))
+	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
+	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
+	c.KokoroModel = os.Getenv("KOKORO_MODEL")
 
 	if c.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET 必须设置")
@@ -66,7 +74,7 @@ func (c *Config) PublicSchemeIsHTTPS() bool {
 
 // EnsureDirs 创建 DataDir/EvidenceDir/TempDir/BackupDir。
 func (c *Config) EnsureDirs() error {
-	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir} {
+	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return fmt.Errorf("创建目录 %s: %w", d, err)
 		}

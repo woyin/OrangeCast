@@ -14,10 +14,17 @@ type Selector struct {
 	groqBaseURL   string
 	openaiAPIKey  string
 	openaiBaseURL string
+	narration     NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
 }
 
 func NewSelector(groqAPIKey, openaiAPIKey string) *Selector {
 	return &Selector{groqAPIKey: groqAPIKey, openaiAPIKey: openaiAPIKey}
+}
+
+// WithNarration 注入 Narration Provider（自托管 Kokoro，独立于 groq/openai 切换）。
+func (sel *Selector) WithNarration(np NarrationProvider) *Selector {
+	sel.narration = np
+	return sel
 }
 
 // HasGroq 返回 Groq key 是否就绪。
@@ -51,7 +58,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.openaiBaseURL != "" {
 			oa.baseURL = sel.openaiBaseURL
 		}
-		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa}, nil
+		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
@@ -60,7 +67,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.groqBaseURL != "" {
 			g.baseURL = sel.groqBaseURL
 		}
-		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g}, nil
+		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g, Narration: sel.narration}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}

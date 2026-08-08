@@ -48,4 +48,6 @@ DJ 模式是一个**编排好的播放清单页面**，不是生成的音频文�
 
 ## 修订记录
 
-- 2026-08-07：在信息分层升级（PrimarySource / Derivative / CitedDerivative / GeneratedDerivative / Reference）下正名 Gist 的关联类型。原文描述 Gist 的证据来自 Citations，但 Gist 一直是非逐字、重新组织语言的产物，与 Citation 的可核验语义冲突。本次修订将 Gist 明确为 GeneratedDerivative，关联类型改为 Reference；Highlight 区间本身的 Citation 不变。决策结论（Highlight 独立版本化、不做 TTS、Gist 非逐字）未变。
+- 2026-08-07：在信息分层升级（PrimarySource / Derivative / CitedDerivative / GeneratedDerivative / Reference）下正名 Gist 的关联类型。原文描述 Gist 的证据来自 Citations，但 Gist 一直是非逐字、重新组织语言的产物，与 Citation 的可核验语义冲突。本次修订将 Gist 明确为 GeneratedDerivative，关联类型改为 Reference；Highlight 区间本身的 Citation 不变。决策结论中 Highlight 独立版本化与 Gist 非逐字未变；但不做 TTS 一条后被 2026-08-08 修订（见下）推翻。
+
+- 2026-08-08：第 5 节关于不做 TTS 的决定被 ADR-0019 推翻。ADR-0019 引入 Narration（解说音轨），为 Highlight 的 Gist 合成 TTS 解说音轨。三条原反对理由在 ADR-0018 信息分层升级后全部消解——Narration 属衍生层不进 EvidenceAudio（第一条）；显著合成音色加固定开场白实现听觉分级（第二条）；默认 TTS 改用自托管 Kokoro 守住零成本（第三条）。第 4 节 DJ 播放序列里关于不做 TTS 的部分相应失效，改为 Narration 解说音轨与原音区间交替，详见 ADR-0019。

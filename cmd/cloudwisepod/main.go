@@ -77,7 +77,10 @@ func runServe() {
 		}
 		selector.ApplySettings(gKey, gURL, oKey, oURL)
 	}
-	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir)
+	// Narration 解说音轨（ADR-0019）：自托管 Kokoro TTS，独立于 groq/openai。
+	// 引擎未安装时 Available()==false，worker 跳过合成、不阻塞主流程。
+	selector.WithNarration(provider.NewKokoroProvider(cfg.KokoroBinary, cfg.KokoroVoice, cfg.KokoroModel))
+	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir, cfg.NarrationDir)
 	refresher := rss.NewRefresher(s)
 	refresher.Start()
 	defer refresher.Stop()

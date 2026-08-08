@@ -20,7 +20,7 @@ func TestDownloadAudio_RealEpisodeURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	w := NewWorker(s, provider.NewSelector("g", "o"), filepath.Join(dir, "tmp"), filepath.Join(dir, "evidence"))
+	w := NewWorker(s, provider.NewSelector("g", "o"), filepath.Join(dir, "tmp"), filepath.Join(dir, "evidence"), filepath.Join(dir, "narrations"))
 	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
 
 	url := "https://dai.transistor.fm/550311e4.mp3?s=ee18a55b532243160598698dcd4afc6dc933306d"

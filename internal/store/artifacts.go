@@ -92,6 +92,8 @@ func (s *Store) SetCurrentVersion(ctx context.Context, sourceType models.SourceT
 	col := "current_card_version"
 	if kind == KindTranscript {
 		col = "current_transcript_version"
+	} else if kind == KindHighlight {
+		col = "current_highlight_version"
 	}
 	table := "episodes"
 	if sourceType == models.SourceUpload {
@@ -111,6 +113,8 @@ func (s *Store) GetCurrentVersion(ctx context.Context, sourceType models.SourceT
 	col := "current_card_version"
 	if kind == KindTranscript {
 		col = "current_transcript_version"
+	} else if kind == KindHighlight {
+		col = "current_highlight_version"
 	}
 	table := "episodes"
 	if sourceType == models.SourceUpload {

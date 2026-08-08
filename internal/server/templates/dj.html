@@ -2,18 +2,31 @@
 {{define "content"}}
 <div class="page-head"><h1>AI DJ：{{.Title}}</h1><a href="/sources/{{.SourceType}}/{{.SourceID}}" class="btn">返回详情</a></div>
 
-<audio id="dj-player" src="{{.AudioURL}}" preload="metadata"></audio>
+<!-- 原音播放器（EvidenceAudio） -->
+<audio id="dj-evidence" src="{{.AudioURL}}" preload="metadata"></audio>
+<!-- Narration 解说音轨播放器（独立，wav） -->
+<audio id="dj-narration" preload="metadata"></audio>
 
-<p class="hint">AI 选取的本集高光片段。依次播放每段原音，配合文字解说。</p>
+<p class="hint">AI 选取的本集高光片段。点「自动播放全集」按 <strong>AI 解说 → 原音区间</strong> 顺序连播；每段可单独试听。</p>
+
+<div style="margin: 1rem 0;">
+  <button id="dj-autoplay" class="btn" type="button">▶▶ 自动播放全集</button>
+  <button id="dj-stop" class="btn" type="button" disabled>■ 停止</button>
+  <span id="dj-status" style="margin-left:0.5rem;color:var(--muted)"></span>
+</div>
 
 <div id="playlist">
 {{range $i, $h := .Highlights}}
-<div class="dj-item" data-start="{{$h.Start}}" data-end="{{$h.End}}">
+<div class="dj-item" data-idx="{{$i}}" data-start="{{$h.Start}}" data-end="{{$h.End}}" data-narration="{{$h.NarrationURL}}" data-highlight-id="{{$h.HighlightID}}">
   <div class="dj-gist">
     <strong>高光 {{$i}}</strong>（{{formatTime $h.Start}} – {{formatTime $h.End}}）
+    {{if not $h.NarrationURL}}<span class="narration-missing" style="color:var(--muted);font-size:0.8rem"> · AI 解说未生成</span>{{end}}
     <p>{{$h.Gist}}</p>
   </div>
-  <button class="btn dj-play" data-start="{{$h.Start}}" data-end="{{$h.End}}" type="button">▶ 播放这段</button>
+  <div class="dj-controls">
+    {{if $h.NarrationURL}}<button class="btn dj-narration-play" data-narration="{{$h.NarrationURL}}" type="button">🎧 试听 AI 解说</button>{{end}}
+    <button class="btn dj-play" data-start="{{$h.Start}}" data-end="{{$h.End}}" type="button">▶ 播放这段原音</button>
+  </div>
 </div>
 {{else}}
 <p class="empty">无高光片段。</p>
@@ -33,27 +46,114 @@
 
 <script>
 (function() {
-  const audio = document.getElementById('dj-player');
+  const evidence = document.getElementById('dj-evidence');
+  const narration = document.getElementById('dj-narration');
+  const autoplayBtn = document.getElementById('dj-autoplay');
+  const stopBtn = document.getElementById('dj-stop');
+  const statusEl = document.getElementById('dj-status');
   let endTimer = null;
+  let queue = [];        // 自动连播队列：[{type:'narration'|'evidence', ...}]
+  let queueIdx = 0;
+  let stopped = true;
 
-  function playSegment(start, end) {
-    if (endTimer) clearTimeout(endTimer);
-    audio.currentTime = start;
-    audio.play();
-    const duration = (end - start) * 1000 + 500; // 多放 0.5s 缓冲
-    endTimer = setTimeout(function() { audio.pause(); }, duration);
+  function setStatus(s) { if (statusEl) statusEl.textContent = s; }
+
+  function clearEndTimer() { if (endTimer) { clearTimeout(endTimer); endTimer = null; } }
+
+  // 播放原音区间 [start, end]
+  function playEvidence(start, end) {
+    return new Promise(function(resolve) {
+      clearEndTimer();
+      evidence.currentTime = start;
+      evidence.play().then(function() {
+        const dur = (end - start) * 1000 + 300;
+        endTimer = setTimeout(function() { evidence.pause(); resolve(); }, dur);
+      }).catch(function() { resolve(); }); // autoplay 被拦等：跳过
+      evidence.onpause = function() { if (!stopped) { resolve(); } };
+    });
   }
 
+  // 播放一段 Narration wav
+  function playNarration(url) {
+    return new Promise(function(resolve) {
+      if (!url) { resolve(); return; }
+      narration.src = url;
+      narration.play().then(function() {
+        narration.onended = function() { resolve(); };
+      }).catch(function() { resolve(); }); // 播放失败：跳过，不阻塞原音
+    });
+  }
+
+  function buildQueue() {
+    queue = [];
+    document.querySelectorAll('.dj-item').forEach(function(item) {
+      const start = parseFloat(item.dataset.start);
+      const end = parseFloat(item.dataset.end);
+      const narURL = item.dataset.narration;
+      const idx = item.dataset.idx;
+      // AI 解说（若有）→ 原音区间。Narration 缺失则跳过、直接原音（ADR-0019 R3）。
+      if (narURL) queue.push({type: 'narration', url: narURL, idx: idx});
+      queue.push({type: 'evidence', start: start, end: end, idx: idx});
+    });
+  }
+
+  async function runAutoplay() {
+    stopped = false;
+    autoplayBtn.disabled = true;
+    stopBtn.disabled = false;
+    for (queueIdx = 0; queueIdx < queue.length; queueIdx++) {
+      if (stopped) break;
+      const item = queue[queueIdx];
+      if (item.type === 'narration') {
+        setStatus('高光 ' + (parseInt(item.idx)+1) + '：AI 解说…');
+        await playNarration(item.url);
+      } else {
+        setStatus('高光 ' + (parseInt(item.idx)+1) + '：原音区间…');
+        await playEvidence(item.start, item.end);
+      }
+    }
+    stopped = true;
+    autoplayBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStatus('连播结束');
+  }
+
+  if (autoplayBtn) autoplayBtn.addEventListener('click', function() {
+    buildQueue();
+    runAutoplay();
+  });
+  if (stopBtn) stopBtn.addEventListener('click', function() {
+    stopped = true;
+    clearEndTimer();
+    evidence.pause();
+    narration.pause();
+    autoplayBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStatus('已停止');
+  });
+
+  // 手动按钮：单段原音
   document.querySelectorAll('.dj-play').forEach(function(btn) {
     btn.addEventListener('click', function() {
+      stopped = true; // 手动操作打断自动连播
       const start = parseFloat(btn.dataset.start);
       const end = parseFloat(btn.dataset.end);
-      playSegment(start, end);
+      clearEndTimer();
+      evidence.currentTime = start;
+      evidence.play();
+      const dur = (end - start) * 1000 + 300;
+      endTimer = setTimeout(function() { evidence.pause(); }, dur);
     });
   });
 
-  audio.addEventListener('pause', function() {
-    if (endTimer) { clearTimeout(endTimer); endTimer = null; }
+  // 手动按钮：单段 AI 解说
+  document.querySelectorAll('.dj-narration-play').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      stopped = true;
+      evidence.pause();
+      narration.src = btn.dataset.narration;
+      narration.play();
+    });
   });
 })();
 </script>

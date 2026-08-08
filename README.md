@@ -14,7 +14,7 @@
 - **音频上传**：mp3/m4a/wav，每个 Source 持久保存标准化 EvidenceAudio（SHA256 校验）
 - **AI 转录**：Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳
 - **知识卡片**：不可变 ArtifactVersion；摘要/要点/章节/金句全部携带真实 Citation；金句逐字校验
-- **高光片段（AI DJ）**：AI 自动选出最值得听的高光区间，播放清单页面（文字解说 + 原音区间交替播放）
+- **高光片段（AI DJ）**：AI 自动选出最值得听的高光区间，播放清单页面（AI 解说音轨 Narration + 原音区间交替播放；Narration 由自托管 Kokoro TTS 合成，默认零成本）
 
 ### 知识管理
 
@@ -188,6 +188,6 @@ git diff --check
 
 **CloudWisePod 是 EvidenceArchive**——所有衍生内容都有真实 Citation 可核验。
 
-**明确不做**：多用户/SaaS、跨 Source RAG、语义搜索、TTS 语音合成、Obsidian 插件/双向同步、自动处理所有新 Episode。
+**明确不做**：多用户/SaaS、跨 Source RAG、语义搜索、Obsidian 插件/双向同步、自动处理所有新 Episode。
 
 详细产品目标见 [`docs/product-goal.md`](docs/product-goal.md)，部署指南见 [`docs/production-deployment.md`](docs/production-deployment.md)。

@@ -34,7 +34,7 @@ func newTestServer(t *testing.T) *Server {
 		DataDir:   dir, EvidenceDir: dir + "/evidence", BackupDir: dir + "/backups",
 	}
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
-	worker := queue.NewWorker(s, selector, cfg.TempDir, dir+"/evidence")
+	worker := queue.NewWorker(s, selector, cfg.TempDir, dir+"/evidence", dir+"/narrations")
 	refresher := rss.NewRefresher(s)
 	srv, err := New(cfg, s, worker, refresher, selector)
 	if err != nil {

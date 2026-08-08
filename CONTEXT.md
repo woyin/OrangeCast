@@ -46,7 +46,7 @@ _避免使用：File、Attachment_
 
 **EvidenceAudio（证据音频）**：
 为每个 Source 长期保存、可独立播放的标准化音频。它保证 Citation 不依赖外部音频地址，但不承诺保留输入时的原始文件格式。
-_避免使用：TemporaryAudio、OriginalAudio、Cache_
+_避免使用：TemporaryAudio、OriginalAudio、Cache、Narration（后者是 AI 生成音轨，见 Narration）_
 
 **Transcript（转录稿）**：
 EvidenceAudio 的带时间对齐文本表达，由一组有起止时间的 Segment 组成。
@@ -110,7 +110,7 @@ Owner 要求系统将一个 Source 转化为可核验证据的持久意图。Pro
 _避免使用：Goroutine、BackgroundTask、QueueMessage；它们是实现机制_
 
 **ArtifactVersion（产物版本）**：
-一次 ProcessingJob 尝试生成的不可变产物，覆盖 Transcript、KnowledgeCard、Highlight；每种产物以 kind 区分（如 kind = 'transcript' | 'knowledge_card' | 'highlight'）。Source 可以选择当前采用的版本，但重新处理不能覆盖历史版本。Paraphrase 与 StudyChat 不纳入 ArtifactVersion：前者是高频、试错的阅读时按需触发，与 ProcessingJob 的低频有意重新分析语义不同，按锚点保留最近 N 次而非版本化（见 Paraphrase）；后者是多轮有状态会话，按 StudySession 单独保存。
+一次 ProcessingJob 尝试生成的不可变产物，覆盖 Transcript、KnowledgeCard、Highlight、Narration；每种产物以 kind 区分（如 kind = 'transcript' | 'knowledge_card' | 'highlight' | 'narration'）。Source 可以选择当前采用的版本，但重新处理不能覆盖历史版本。Narration 的版本化粒度特殊：不是整集一组，而是每个 Highlight 的 Gist 各有一段独立版本化的 Narration，通过 highlight_id 关联到所属 Highlight（见 Narration）。Paraphrase 与 StudyChat 不纳入 ArtifactVersion：前者是高频、试错的阅读时按需触发，与 ProcessingJob 的低频有意重新分析语义不同，按锚点保留最近 N 次而非版本化（见 Paraphrase）；后者是多轮有状态会话，按 StudySession 单独保存。
 _避免使用：CurrentResult、Upsert、Latest；它们会掩盖历史产物的身份_
 
 **Provider（AI 供应商）**：
@@ -123,12 +123,19 @@ _避免使用：Delete、Archive、Remove；它们没有表达完整且不可逆
 
 **Highlight（高光片段）**：
 AI 根据整集 Transcript 判断出的、按价值密度选出的连续音频区间，属于 CitedDerivative。每个 Highlight 的 Citation 是一组 Segment 的并集（程序取 min(start)–max(end)），AI 只能选择 Segment ID，不能自行估算时间范围；区间本身可核验，点开即可回听原音。它与按主题划分的 Chapter、逐字的 Quote、文字要点的 KeyPoint 是并列关系，粒度比 Chapter 粗（按价值而非主题）、比 Quote 广（区间而非单句）。挂在 Highlight 上的文字讲解是 Gist，属 GeneratedDerivative，与 Highlight 本身的类别不同。
+稳定身份：每个 Highlight 携带程序生成的稳定 ID（Highlight.ID），用于让挂在它上的 Gist 与 Narration 在 HighlightSet 刷新（重新生成高光）后仍能正确关联；刷新时程序尽量保留旧 ID 或按 Citation 集合重映射，避免 Gist/Narration 错挂到错误区间。
 _避免使用：MustHear、Spotlight、Takeaway、BestPart；它们要么语义模糊，要么与 KeyPoint 冲突_
 
 **Gist（要点说明）**：
 对一段音频区间（Highlight 或 Chapter）内容的简短文字说明，由 AI 重新组织语言生成，非逐字原文。Gist 是 GeneratedDerivative：它通过 Reference 关联区间内的 Segment，表示参考了这些片段，但不声称逐字忠实，也不挂 Citation。所属区间本身（Highlight 或 Chapter）仍是 CitedDerivative，区间可核验，区间上的讲解自由。
-_避免使用：Narration、Annotation、Summary；它们要么偏实现，要么与整集 Summary 冲突_
+_避免使用：Annotation、Summary；它们要么偏实现，要么与整集 Summary 冲突_
 Gist 与 Paraphrase 的区别：Gist 是 AI 主动为每个区间生成的概括，覆盖全部区间；Paraphrase 是 Owner 按需触发的重讲，局部且不一定覆盖。
+
+**Narration（解说音轨）**：
+AI 将一个 GeneratedDerivative（首版仅 Gist）的文字用 TTS 合成为音频产物。Narration 是 GeneratedDerivative 的音频形态，明确标注为 AI 生成音、非原音；它不进入 EvidenceAudio，不作为 Citation 或 Reference 的核验依据，仅供收听。Narration 与 EvidenceAudio 是对照关系：EvidenceAudio 是原音事实层的音频，Narration 是衍生层的 AI 解说音频，二者不可混用。Narration 按音色与模型版本化（不可变、可比较回退、可重新生成），TTS 合成有成本，版本化避免重复付费。版本化粒度为每个 Highlight 的 Gist 各一段独立版本化的 Narration（通过 highlight_id 关联到所属 Highlight），换音色/模型时可只重生成某几段，满意的段落不受影响。
+听觉分级：Narration 统一使用与原音明显不同的合成音色，且每段强制以固定开场白（如“AI 解说：”）开头，让 Owner 一耳朵可辨这是 AI 串场、非主播原话——这是信息分层视觉分级在音频通道的等价物。
+音频格式与存储：Narration 以 wav（无损、Kokoro 原生输出）存储于独立的 narrations 目录（DATA_DIR/narrations），物理隔离于 EvidenceAudio 的 evidence 目录，二者目录与 serve 路径均不混用。Narration 不进入备份包（可重新生成的衍生层产物，全新实例恢复后按需重合成），备份只保核心证据 EvidenceAudio 与 DB。
+_避免使用：TTS、Voiceover、AudioSummary；TTS 是技术词偏实现，Voiceover 暗示覆盖原音，AudioSummary 与 KnowledgeCard.Summary 混淆_
 
 **Paraphrase（复述讲解）**：
 Owner 按需触发的、针对自己未理解部分的重新讲解，属 GeneratedDerivative。它用别的话重新讲同一件事，可包含类比、举例或拆解，目的是帮 Owner 消化 PrimarySource 中某处的内容。Paraphrase 通过 Reference 关联一个或多个 Segment，参考这些片段但不声称逐字忠实；可锚定在单个 Segment（如“这句没懂”）或一个区间（Highlight/Chapter，如“这段没懂”）。它与 Gist 互补：Gist 是主动、全覆盖的概括，Paraphrase 是按需、局部的重讲。不做整集 Paraphrase，以免与整集 Summary 重叠。

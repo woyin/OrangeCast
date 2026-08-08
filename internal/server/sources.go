@@ -128,6 +128,31 @@ func (srv *Server) handleAudio(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// handleNarration serve 一个 Highlight 的当前 Narration wav（ADR-0019）。
+// 路径：/api/narration/{sourceType}/{sourceID}/{highlightID}
+// Narration 存于 NarrationDir（独立于 evidence），wav 格式。
+func (srv *Server) handleNarration(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/narration/"), "/")
+	if len(parts) < 3 {
+		http.NotFound(w, r)
+		return
+	}
+	sourceType := models.SourceType(parts[0])
+	sourceID := parts[1]
+	highlightID := parts[2]
+	nar, err := srv.store.GetCurrentNarration(r.Context(), sourceType, sourceID, highlightID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	path := filepath.Join(srv.cfg.NarrationDir, nar.RelPath)
+	if _, serr := os.Stat(path); serr != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, path)
+}
+
 // handleVersions 查看一个 Source 的不可变版本历史（ADR-0011）。
 func (srv *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
@@ -248,20 +273,28 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 
 	// 构造播放清单：每个 Highlight 解析时间范围
 	type highlightView struct {
-		Gist      string
-		Start     float64
-		End       float64
-		Citations []string
+		HighlightID  string
+		Gist         string
+		Start        float64
+		End          float64
+		Citations    []string
+		NarrationURL string // 当前 Narration wav 的 URL；空=未生成（前端跳过+显示标记）
 	}
+	narrations, _ := srv.store.ListCurrentNarrationsForSource(r.Context(), sourceType, sourceID)
 	var highlights []highlightView
 	for _, h := range hs.Highlights {
 		start, end, ok := provider.ResolveCitationSpan(h.Citations, tp.Segments)
 		if !ok {
 			continue
 		}
-		highlights = append(highlights, highlightView{
-			Gist: h.Gist, Start: start, End: end, Citations: h.Citations,
-		})
+		hv := highlightView{
+			HighlightID: h.ID, Gist: h.Gist, Start: start, End: end, Citations: h.Citations,
+		}
+		if nar, ok := narrations[h.ID]; ok {
+			hv.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + h.ID
+			_ = nar
+		}
+		highlights = append(highlights, hv)
 	}
 
 	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID

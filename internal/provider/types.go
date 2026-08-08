@@ -96,11 +96,13 @@ type ProviderBundle struct {
 	Paraphrase    ParaphraseProvider
 	StudyChat     StudyChatProvider
 	RefChecker    ReferenceChecker
+	Narration     NarrationProvider
 }
 
 // Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。
 // Citation 是一组 Segment ID 的集合，程序取 min(start)–max(end) 算时间范围。
 type Highlight struct {
+	ID        string   `json:"id"`        // 稳定 ID（Citation 集合的 hash，刷新后保持关联 Gist/Narration，ADR-0019）
 	Gist      string   `json:"gist"`      // AI 生成的"为什么这段值得听"说明（非逐字原文）
 	Citations []string `json:"citations"` // Segment ID 列表
 }
@@ -159,6 +161,27 @@ type ReferenceCheckResult struct {
 // 输入三元组（问题 + 回答 + Reference 段文本），只判相关、不判逐字忠实。
 type ReferenceChecker interface {
 	CheckReference(question, answer string, referenceSegments []Segment) (ReferenceCheckResult, error)
+	Name() string
+}
+
+// NarrationResult 一次 TTS 合成的结果（ADR-0019）。
+type NarrationResult struct {
+	AudioPath       string  // 合成出的 wav 文件绝对路径
+	DurationSeconds float64 // 合成音频时长
+	CharCount       int     // 合成文本的字符数
+	Voice           string  // 实际使用的音色标识
+	Model           string  // 引擎+模型标识
+}
+
+// NarrationProvider 将文字合成为解说音轨（GeneratedDerivative 的音频形态，ADR-0019）。
+// 默认实现是自托管的免费 TTS（Kokoro CLI），付费 TTS 作为可选实现（按 ADR-0009 单次授权）。
+// Narration 永不读可核验内容（Summary/KeyPoint/Quote），只读 GeneratedDerivative（Gist）。
+type NarrationProvider interface {
+	// Synthesize 将 text 合成为 wav，写入 outPath（调用方提供，确保目录存在）。
+	// voice 为空时用 Provider 默认音色。返回合成结果含时长/字符数。
+	Synthesize(text, voice, outPath string) (*NarrationResult, error)
+	// Available 探测引擎是否可用（如 kokoro 二进制是否安装）；不可用时 worker 跳过合成、不阻塞。
+	Available() bool
 	Name() string
 }
 

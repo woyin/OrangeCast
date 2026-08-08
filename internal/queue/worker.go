@@ -30,20 +30,21 @@ const (
 // SQLite 驱动（ADR-0006）：启动时回收 running 任务，周期领取 queued 任务，
 // 领取时设置租约，处理中心跳续约；失败/中断后任务可被重新领取（至少一次执行）。
 type Worker struct {
-	store       *store.Store
-	selector    *provider.Selector
-	tempDir     string
-	evidenceDir string
-	client      *http.Client
-	poll        time.Duration
+	store        *store.Store
+	selector     *provider.Selector
+	tempDir      string
+	evidenceDir  string
+	narrationDir string
+	client       *http.Client
+	poll         time.Duration
 	// bundleFor 选择本次任务的 provider bundle（ADR-0009 默认 Groq；测试可注入 fake）。
 	bundleFor func(*models.ProcessingJob) (*provider.ProviderBundle, error)
 }
 
-func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir string) *Worker {
+func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, narrationDir string) *Worker {
 	client := safehttp.NewClient(10, maxAudioSize, 15*time.Minute)
 	w := &Worker{
-		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir,
+		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir, narrationDir: narrationDir,
 		client: client, poll: pollInterval,
 	}
 	w.bundleFor = func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
@@ -257,6 +258,10 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	if err := w.doHighlight(ctx, job, bundle, payload.Segments); err != nil {
 		log.Printf("任务 %s 高光生成失败（不阻塞主流程）: %v", job.ID, err)
 	}
+	// 自动合成 Narration 解说音轨（ADR-0019：紧接 Highlight 后，按段合成，失败不阻塞）
+	if err := w.doNarration(ctx, job, bundle); err != nil {
+		log.Printf("任务 %s Narration 合成失败（不阻塞主流程）: %v", job.ID, err)
+	}
 	return nil
 }
 
@@ -425,6 +430,7 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 		// 使 PersonalKnowledgeBase 中指向该 Source 的 Citation 与 Reference 一并失效。
 		_ = w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID)
 		_ = w.store.DeleteStudySessionsForSource(ctx, p.SourceType, p.SourceID)
+		_ = w.store.DeleteNarrationsForSource(ctx, p.SourceType, p.SourceID)
 		// 3) 事务性删除 DB 行
 		if err := w.store.DeleteSourceRows(ctx, p.SourceType, p.SourceID); err != nil {
 			return fmt.Errorf("purge 删除 DB 行（%s/%s）: %w", p.SourceType, p.SourceID, err)
@@ -463,4 +469,88 @@ func ptrStr(p *string) string {
 		return *p
 	}
 	return ""
+}
+
+// doNarration 为当前 HighlightSet 的每个 Gist 合成一段 Narration（解说音轨，ADR-0019）。
+//
+// 触发：紧接 doHighlight 成功后（analyze 流水线末尾），失败不阻塞主流程。
+// 依赖：读当前 Highlight 版本（取已校验的 Gist 与 Highlight.ID）。
+// 容错：
+//   - Narration Provider 不可用（如 Kokoro 未安装）→ 跳过、记 log、不阻塞。
+//   - 单段合成失败 → 跳过该段、继续其他段、记 log。
+//   - 已存在该 (highlight_id, voice, model) 的 Narration → 跳过（幂等，避免重复合成）。
+//
+// 存储位置：w.narrationDir/{sourceType}_{sourceID}_{highlightID}_{version}.wav，独立于 evidence 目录。
+func (w *Worker) doNarration(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle) error {
+	// Provider 不可用 → 优雅跳过（ADR-0019 R1）。
+	if bundle.Narration == nil || !bundle.Narration.Available() {
+		log.Printf("任务 %s Narration Provider 不可用，跳过合成（不阻塞）", job.ID)
+		return nil
+	}
+
+	// 读当前 Highlight 版本（取已校验的 HighlightSet，含稳定 Highlight.ID）。
+	hv, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindHighlight)
+	if err != nil {
+		return fmt.Errorf("读取当前高光版本失败: %w", err)
+	}
+	var hs provider.HighlightSet
+	if err := json.Unmarshal([]byte(hv.Payload), &hs); err != nil {
+		return fmt.Errorf("解析高光载荷失败: %w", err)
+	}
+	if len(hs.Highlights) == 0 {
+		return nil // 无高光，无需合成
+	}
+
+	// 取已存在的 Narration，做幂等（同 voice+model 已合成则跳过）。
+	existing, err := w.store.ListCurrentNarrationsForSource(ctx, job.SourceType, job.SourceID)
+	if err != nil {
+		return fmt.Errorf("读取已有 Narration 失败: %w", err)
+	}
+
+	np := bundle.Narration
+	voice := "" // 用 Provider 默认音色
+	for _, h := range hs.Highlights {
+		if h.ID == "" || h.Gist == "" {
+			continue
+		}
+		// 幂等：同 highlight_id 已有该 provider 的 Narration → 跳过（避免重复合成）。
+		if cur, ok := existing[h.ID]; ok && cur.Provider == np.Name() {
+			continue
+		}
+		// 合成到 narrations 目录（文件名含 source + highlight_id + version placeholder）。
+		// version 在 CreateNarration 后才确定；这里用临时名 + 重命名，或预查 version。
+		nextVer := w.nextNarrationVersion(ctx, job.SourceType, job.SourceID, h.ID)
+		relPath := fmt.Sprintf("%s_%s_%s_%d.wav", job.SourceType, job.SourceID, h.ID, nextVer)
+		outPath := filepath.Join(w.narrationDir, relPath)
+		if err := os.MkdirAll(w.narrationDir, 0o755); err != nil {
+			return fmt.Errorf("创建 narrations 目录: %w", err)
+		}
+		res, err := np.Synthesize(h.Gist, voice, outPath)
+		if err != nil {
+			log.Printf("任务 %s Highlight %s 的 Narration 合成失败（跳过该段）: %v", job.ID, h.ID, err)
+			continue
+		}
+		// 探测时长（复用 audio.go 的 audioDuration）。
+		dur, _ := audioDuration(outPath)
+		if dur <= 0 {
+			dur = 0 // 探测失败记 0，不阻塞
+		}
+		if _, err := w.store.CreateNarration(ctx, job.SourceType, job.SourceID, h.ID, res.Voice, res.Model, relPath, dur, res.CharCount, np.Name()); err != nil {
+			log.Printf("任务 %s Highlight %s 的 Narration 写库失败（音频已合成）: %v", job.ID, h.ID, err)
+			continue
+		}
+	}
+	return nil
+}
+
+// nextNarrationVersion 返回某 highlight_id 下一个版本号（用于预生成文件名）。
+// 与 CreateNarration 的版本号计算独立，并发下 CreateNarration 的 UNIQUE 会兜底；
+// 文件名版本号与 DB version 偶尔不一致（并发重生成）可接受——relpath 仅是文件名，真理在 DB。
+func (w *Worker) nextNarrationVersion(ctx context.Context, sourceType models.SourceType, sourceID, highlightID string) int {
+	// 简化：直接查当前 MAX(version)+1；与 CreateNarration 内部逻辑重复但可接受（文件名不要求严格一致）。
+	cur, err := w.store.GetCurrentNarration(ctx, sourceType, sourceID, highlightID)
+	if err != nil {
+		return 1
+	}
+	return cur.Version + 1
 }

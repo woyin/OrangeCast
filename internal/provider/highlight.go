@@ -3,7 +3,10 @@
 package provider
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -43,6 +46,7 @@ func ValidateHighlightSet(hs *HighlightSet, segments []Segment) (*HighlightSet, 
 			continue // 省略无效项
 		}
 		cleaned.Highlights = append(cleaned.Highlights, Highlight{
+			ID:        stableHighlightID(cites),
 			Gist:      strings.TrimSpace(h.Gist),
 			Citations: cites,
 		})
@@ -51,4 +55,28 @@ func ValidateHighlightSet(hs *HighlightSet, segments []Segment) (*HighlightSet, 
 		return nil, fmt.Errorf("全部高光片段缺少有效 Citation")
 	}
 	return cleaned, nil
+}
+
+// stableHighlightID 由 Citation 集合生成稳定 ID（ADR-0019）。
+// HighlightSet 刷新（重新生成高光）时，相同 Citation 集合的 Highlight 得到相同 ID，
+// 让挂在它上的 Gist 与 Narration 在刷新后仍能正确关联，避免错挂到错误区间。
+// 算法：排序去重 Citation → sha256 → 取前 12 个 hex 字符（够防碰撞，够短可读）。
+func stableHighlightID(citations []string) string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, c := range citations {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		ids = append(ids, c)
+	}
+	sort.Strings(ids)
+	h := sha256.New()
+	for _, id := range ids {
+		h.Write([]byte(id))
+		h.Write([]byte{0}) // 分隔符防 "ab"+"cd" == "a"+"bcd"
+	}
+	return hex.EncodeToString(h.Sum(nil)[:6]) // 12 hex chars
 }

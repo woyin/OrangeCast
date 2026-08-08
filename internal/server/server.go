@@ -86,6 +86,7 @@ func (srv *Server) Router() http.Handler {
 	protected.HandleFunc("/api/process", srv.handleProcess)
 	protected.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	protected.HandleFunc("/api/audio/", srv.handleAudio)
+	protected.HandleFunc("/api/narration/", srv.handleNarration) // Narration 解说音轨（ADR-0019）
 	mux.Handle("/", authMw(auth.CSRFProtect(protected)))
 	return mux
 }

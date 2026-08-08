@@ -6,6 +6,9 @@
 //	cloudwisepod.db  —— SQLite 一致性快照（VACUUM INTO，非直接复制运行中文件）
 //	evidence/…       —— 全部 EvidenceAudio（原始 rel_path）
 //
+//	Narration（DATA_DIR/narrations）是可重新生成的衍生层产物，不进备份包（ADR-0019 R2）；
+//	全新实例恢复后按需重合成，备份只保核心证据。
+//
 // 恢复：校验 manifest 格式版本与文件哈希；目标目录为空或显式 --force 才允许覆盖。
 package backup
 
