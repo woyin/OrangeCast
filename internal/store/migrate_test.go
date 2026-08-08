@@ -214,3 +214,52 @@ func countAll(t *testing.T, db *sql.DB) map[string]int {
 	}
 	return out
 }
+
+// TestHasPendingDestructiveMigration 验证破坏性迁移判定：
+// 无迁移表 → pending；已应用 ≥2 → 无 pending；应用 <2 → pending。
+func TestHasPendingDestructiveMigration(t *testing.T) {
+	ctx := context.Background()
+
+	// 全新库（无迁移表）→ pending
+	raw := openRaw(t, filepath.Join(t.TempDir(), "raw.db"))
+	pending, err := hasPendingDestructiveMigration(ctx, raw)
+	if err != nil {
+		t.Fatalf("hasPendingDestructiveMigration: %v", err)
+	}
+	if !pending {
+		t.Error("无迁移表应判定 pending")
+	}
+
+	// 已应用 ≥2 → 无 pending
+	s2 := newTestStore(t)
+	if _, err := Migrate(ctx, s2.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	pending, err = hasPendingDestructiveMigration(ctx, s2.DB)
+	if err != nil {
+		t.Fatalf("hasPendingDestructiveMigration: %v", err)
+	}
+	if pending {
+		t.Error("已应用全部迁移应无 pending")
+	}
+
+	// 插入 version=1 记录 → pending（<2）
+	s3 := newTestStore(t)
+	if _, err := Migrate(ctx, s3.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// 清空迁移表并插入 version=1
+	if _, err := s3.DB.ExecContext(ctx, `DELETE FROM schema_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3.DB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = hasPendingDestructiveMigration(ctx, s3.DB)
+	if err != nil {
+		t.Fatalf("hasPendingDestructiveMigration: %v", err)
+	}
+	if !pending {
+		t.Error("应用版本 <2 应判定 pending")
+	}
+}
