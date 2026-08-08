@@ -192,3 +192,22 @@ func (c *countingNarration) Synthesize(text, voice, outPath string) (*provider.N
 }
 func (c *countingNarration) Available() bool { return c.ninner.Available() }
 func (c *countingNarration) Name() string    { return c.ninner.Name() }
+
+// TestNextNarrationVersion 验证下一 Narration 版本号计算。
+func TestNextNarrationVersion(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+
+	// 无现有 Narration → 1
+	if v := w.nextNarrationVersion(ctx, models.SourceUpload, up.ID, "hl-a"); v != 1 {
+		t.Errorf("无现有 Narration 应为 1，实际 %d", v)
+	}
+	// 有 version=1 → 2
+	if _, err := s.CreateNarration(ctx, models.SourceUpload, up.ID, "hl-a", "af_heart", "kokoro-82m", "x.wav", 1, 5, "kokoro"); err != nil {
+		t.Fatal(err)
+	}
+	if v := w.nextNarrationVersion(ctx, models.SourceUpload, up.ID, "hl-a"); v != 2 {
+		t.Errorf("现有 version=1 应返回 2，实际 %d", v)
+	}
+}
