@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -221,6 +222,39 @@ func TestRestore_InvalidFormat(t *testing.T) {
 
 	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
 		t.Fatal("格式不符应报错")
+	}
+}
+
+// TestRestore_DBHashMismatch 验证 DB 内容被篡改后哈希校验失败。
+func TestRestore_DBHashMismatch(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
+	m, err := Create(context.Background(), srcStore, filepath.Join(srcDir, "evidence"), backupFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 重新打包：manifest 保留原哈希，但 DB 内容被篡改 → 哈希不匹配
+	dir := t.TempDir()
+	tamperedFile := filepath.Join(dir, "tampered.tar.gz")
+	f, _ := os.Create(tamperedFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	tampered := []byte("tampered-db-content")
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len(tampered))}
+	tw.WriteHeader(dh)
+	tw.Write(tampered)
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), tamperedFile, t.TempDir(), false); err == nil {
+		t.Fatal("DB 哈希不匹配应报错")
 	}
 }
 
