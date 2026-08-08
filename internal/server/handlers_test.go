@@ -1395,6 +1395,33 @@ func TestDownloadMarkdown_WithGenerated(t *testing.T) {
 	}
 }
 
+// TestDownloadMarkdown_CorruptCardPayload 验证知识卡片载荷损坏时返回 500。
+func TestDownloadMarkdown_CorruptCardPayload(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdcorrupt@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	vt, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"通胀是物价上升"}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, vt)
+	// 写入损坏的卡片载荷
+	vc, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID, `{bad json`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, vc)
+
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("卡片载荷损坏应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestAudio_ServesEvidence 验证 /api/audio 优先返回证据音频文件。
 func TestAudio_ServesEvidence(t *testing.T) {
 	srv := newTestServer(t)
