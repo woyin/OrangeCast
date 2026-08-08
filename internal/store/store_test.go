@@ -208,3 +208,21 @@ func TestOpen_InvalidPath(t *testing.T) {
 		t.Fatal("非法数据库路径应报错")
 	}
 }
+
+// TestGetUserByEmail 验证按邮箱查用户（命中与 ErrNotFound）。
+func TestGetUserByEmail(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u := seedUser(t, s, "find@example.com")
+
+	got, err := s.GetUserByEmail(ctx, "find@example.com")
+	if err != nil {
+		t.Fatalf("GetUserByEmail: %v", err)
+	}
+	if got.ID != u.ID {
+		t.Errorf("应返回匹配用户，实际 %+v", got)
+	}
+	if _, err := s.GetUserByEmail(ctx, "missing@example.com"); err != ErrNotFound {
+		t.Errorf("不存在的邮箱应 ErrNotFound，实际 %v", err)
+	}
+}
