@@ -203,6 +203,30 @@ func TestDoWithRetry_ContextCancel(t *testing.T) {
 	}
 }
 
+// TestDoWithRetry_Exhaustion 验证所有重试均失败（持续 500）时返回“重试耗尽”错误。
+// 用 Retry-After: 0 使退避立即完成，避免真实等待。
+func TestDoWithRetry_Exhaustion(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	_, err := doWithRetry(context.Background(), req)
+	if err == nil {
+		t.Fatal("所有重试失败后应返回错误")
+	}
+	if !strings.Contains(err.Error(), "请求失败（已重试 3 次）") {
+		t.Errorf("应包含重试计数提示，实际: %v", err)
+	}
+	if calls != maxRetries+1 {
+		t.Errorf("应调用 %d 次（含重试），实际 %d", maxRetries+1, calls)
+	}
+}
+
 // TestPostJSON 验证 postJSON 发送 JSON 请求并携带 Authorization 头。
 func TestPostJSON(t *testing.T) {
 	var gotAuth string
@@ -231,6 +255,26 @@ func TestPostJSON(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte(`"ok":true`)) {
 		t.Errorf("应返回响应体，实际 %s", data)
+	}
+}
+
+// TestPostJSON_RetryError 验证服务端持续 5xx 时 postJSON 返回重试失败错误。
+func TestPostJSON_RetryError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	if _, code, err := postJSON(context.Background(), srv.URL, "k", map[string]any{"q": 1}); err == nil || code != 0 {
+		t.Fatalf("应返回错误且 code=0，实际 code=%d err=%v", code, err)
+	}
+}
+
+// TestPostJSON_BadURL 验证非法 URL 时 postJSON 报错。
+func TestPostJSON_BadURL(t *testing.T) {
+	if _, _, err := postJSON(context.Background(), "://bad-url", "k", map[string]any{"q": 1}); err == nil {
+		t.Fatal("非法 URL 应报错")
 	}
 }
 
@@ -272,5 +316,35 @@ func TestUploadFileAsMultipart(t *testing.T) {
 	}
 	if !gotFilePart {
 		t.Error("应包含 audio 文件部分")
+	}
+}
+
+// TestUploadFileAsMultipart_MissingFile 验证文件不存在时上传报错。
+func TestUploadFileAsMultipart_MissingFile(t *testing.T) {
+	_, code, err := uploadFileAsMultipart(context.Background(), "http://127.0.0.1:1/upload", "k", "file",
+		"/nonexistent-file-xyz.mp3", nil)
+	if err == nil {
+		t.Fatal("文件不存在应报错")
+	}
+	if code != 0 {
+		t.Errorf("code 应为 0，实际 %d", code)
+	}
+}
+
+// TestUploadFileAsMultipart_RetryError 验证服务端持续 5xx 时上传返回重试失败错误。
+func TestUploadFileAsMultipart_RetryError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(path, []byte("fake-audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code, err := uploadFileAsMultipart(context.Background(), srv.URL, "k", "file", path, nil); err == nil || code != 0 {
+		t.Fatalf("应返回错误且 code=0，实际 code=%d err=%v", code, err)
 	}
 }

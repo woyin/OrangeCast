@@ -39,6 +39,43 @@ func TestGroq_Transcribe(t *testing.T) {
 	}
 }
 
+// TestGroq_Transcribe_HTTPError 验证转录服务端返回非 200 时报错。
+func TestGroq_Transcribe_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audio.mp3")
+	if err := os.WriteFile(path, []byte("fake-audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Transcribe(path); err == nil {
+		t.Fatal("转录 HTTP 400 应报错")
+	}
+}
+
+// TestGroq_Transcribe_BadJSON 验证转录响应 JSON 非法时报错。
+func TestGroq_Transcribe_BadJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not-json`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audio.mp3")
+	if err := os.WriteFile(path, []byte("fake-audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Transcribe(path); err == nil {
+		t.Fatal("非法 JSON 应报错")
+	}
+}
+
 // TestGroq_Analyze 验证 Analyze 用假 chatCompleteFn 解析知识卡片。
 func TestGroq_Analyze(t *testing.T) {
 	g := NewGroqProvider("key")
