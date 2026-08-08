@@ -164,6 +164,19 @@ func TestSaveUploadFile(t *testing.T) {
 	}
 }
 
+// TestSaveUploadFile_CreateError 验证 uploads 目录不可创建时报错。
+func TestSaveUploadFile_CreateError(t *testing.T) {
+	dir := t.TempDir()
+	// 用文件占用 uploads 目录路径 → MkdirAll 失败
+	blk := filepath.Join(dir, "uploads")
+	if err := os.WriteFile(blk, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveUploadFile(dir, "up-1", strings.NewReader("data")); err == nil {
+		t.Fatal("uploads 目录不可创建应报错")
+	}
+}
+
 // TestSourceStatusAndError 验证 sourceStatusAndError：正常状态、失败状态取 last_error、未知 source。
 func TestSourceStatusAndError(t *testing.T) {
 	srv := newTestServer(t)
