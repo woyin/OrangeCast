@@ -36,6 +36,19 @@ func NewGroqProvider(apiKey string) *GroqProvider {
 
 func (g *GroqProvider) Name() string { return "groq" }
 
+// base 返回 API base URL（未覆盖时用默认 groqBaseURL）。
+func (g *GroqProvider) base() string {
+	if g.baseURL != "" {
+		return g.baseURL
+	}
+	return groqBaseURL
+}
+
+// WithBaseURL 返回指向自定义 base URL 的新实例（测试/兼容 API 用）。
+func (g *GroqProvider) WithBaseURL(url string) *GroqProvider {
+	return &GroqProvider{apiKey: g.apiKey, baseURL: url, model: g.model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
+}
+
 // WithModel 返回使用指定分析模型的新实例（转录模型不变）。
 func (g *GroqProvider) WithModel(model string) *GroqProvider {
 	return &GroqProvider{apiKey: g.apiKey, baseURL: g.baseURL, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
@@ -45,7 +58,7 @@ func (g *GroqProvider) WithModel(model string) *GroqProvider {
 // filePath 是已临时落盘的音频文件。
 func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	data, code, err := uploadFileAsMultipart(
-		context.Background(), groqBaseURL+"/audio/transcriptions", g.apiKey, "file", filePath,
+		context.Background(), g.base()+"/audio/transcriptions", g.apiKey, "file", filePath,
 		map[string]string{
 			"model":                     groqTranscribeModel,
 			"response_format":           "verbose_json",
@@ -105,7 +118,7 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 	case "object":
 		payload["response_format"] = map[string]any{"type": "json_object"}
 	}
-	data, code, err := postJSON(context.Background(), groqBaseURL+"/chat/completions", g.apiKey, payload)
+	data, code, err := postJSON(context.Background(), g.base()+"/chat/completions", g.apiKey, payload)
 	if err != nil {
 		return "", code, err
 	}

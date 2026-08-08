@@ -35,6 +35,11 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 
 func (o *OpenAIProvider) Name() string { return "openai" }
 
+// WithBaseURL 返回指向自定义 base URL 的新实例（测试/兼容 API 用）。
+func (o *OpenAIProvider) WithBaseURL(url string) *OpenAIProvider {
+	return &OpenAIProvider{apiKey: o.apiKey, baseURL: url, analysisModel: o.analysisModel}
+}
+
 // WithModel 返回使用指定分析模型的新实例。
 func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
 	return &OpenAIProvider{apiKey: o.apiKey, baseURL: o.baseURL, analysisModel: model}
