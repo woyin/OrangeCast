@@ -104,6 +104,30 @@ func TestSelector_ApplySettingsFrom(t *testing.T) {
 	}
 }
 
+// TestSelector_BundleForTask_OpenAIModelOverride 验证 openai 模型名注入。
+func TestSelector_BundleForTask_OpenAIModelOverride(t *testing.T) {
+	sel := NewSelector("", "openai-key")
+	bundle, err := sel.BundleForTask(TaskConfig{Provider: "openai", Model: "gpt-4o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, ok := bundle.Analysis.(*OpenAIProvider)
+	if !ok {
+		t.Fatal("Analysis 应为 *OpenAIProvider")
+	}
+	if o.analysisModel != "gpt-4o" {
+		t.Errorf("model 应为 gpt-4o，实际 %s", o.analysisModel)
+	}
+}
+
+// TestSelector_BundleForTask_GroqMissingKey 验证 groq 无 key 时报错。
+func TestSelector_BundleForTask_GroqMissingKey(t *testing.T) {
+	sel := NewSelector("", "")
+	if _, err := sel.BundleForTask(TaskConfig{Provider: "groq"}); err == nil {
+		t.Fatal("groq 无 key 应报错")
+	}
+}
+
 func TestSelector_HasGroq_HasOpenAI(t *testing.T) {
 	sel := NewSelector("g", "")
 	if !sel.HasGroq() || sel.HasOpenAI() {
