@@ -112,3 +112,15 @@ func TestEnsureDirs(t *testing.T) {
 		}
 	}
 }
+
+// TestEnsureDirs_Error 验证目录创建失败时报错。
+func TestEnsureDirs_Error(t *testing.T) {
+	dir := t.TempDir()
+	// 用文件占用父目录 → MkdirAll 失败
+	blocker := filepath.Join(dir, "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	c := &Config{DataDir: filepath.Join(blocker, "data")}
+	if err := c.EnsureDirs(); err == nil {
+		t.Fatal("目录不可创建应报错")
+	}
+}
