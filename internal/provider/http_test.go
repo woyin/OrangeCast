@@ -1,9 +1,14 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +200,77 @@ func TestDoWithRetry_ContextCancel(t *testing.T) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
 	if _, err := doWithRetry(ctx, req); err == nil {
 		t.Fatal("context 取消后应返回错误")
+	}
+}
+
+// TestPostJSON 验证 postJSON 发送 JSON 请求并携带 Authorization 头。
+func TestPostJSON(t *testing.T) {
+	var gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	data, code, err := postJSON(context.Background(), srv.URL, "secret-key", map[string]any{"q": "hello"})
+	if err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+	if code != http.StatusOK {
+		t.Errorf("应 200，实际 %d", code)
+	}
+	if gotAuth != "Bearer secret-key" {
+		t.Errorf("Authorization 头错误: %q", gotAuth)
+	}
+	if gotBody["q"] != "hello" {
+		t.Errorf("请求体错误: %+v", gotBody)
+	}
+	if !bytes.Contains(data, []byte(`"ok":true`)) {
+		t.Errorf("应返回响应体，实际 %s", data)
+	}
+}
+
+// TestUploadFileAsMultipart 验证 multipart 文件上传携带字段与认证头。
+func TestUploadFileAsMultipart(t *testing.T) {
+	var gotAuth string
+	var gotField string
+	var gotFilePart bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if err := r.ParseMultipartForm(1 << 20); err == nil {
+			gotField = r.FormValue("model")
+			_, gotFilePart = r.MultipartForm.File["audio"]
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// 建临时文件
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.mp3")
+	if err := os.WriteFile(path, []byte("fake-audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, code, err := uploadFileAsMultipart(context.Background(), srv.URL, "key", "audio", path,
+		map[string]string{"model": "whisper"})
+	if err != nil {
+		t.Fatalf("uploadFileAsMultipart: %v", err)
+	}
+	if code != http.StatusOK {
+		t.Errorf("应 200，实际 %d", code)
+	}
+	if gotAuth != "Bearer key" {
+		t.Errorf("Authorization 头错误: %q", gotAuth)
+	}
+	if gotField != "whisper" {
+		t.Errorf("额外字段 model 应传，实际 %q", gotField)
+	}
+	if !gotFilePart {
+		t.Error("应包含 audio 文件部分")
 	}
 }
