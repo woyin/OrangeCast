@@ -177,6 +177,18 @@ func TestCreate_InvalidDestDir(t *testing.T) {
 	}
 }
 
+// TestCreate_DestIsDirectory 验证目标路径已是目录时 os.Create 失败并报错。
+func TestCreate_DestIsDirectory(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	ctx := context.Background()
+	// 目标路径本身是已存在的目录 → os.Create(destFile) 失败
+	destDir := t.TempDir()
+	if _, err := Create(ctx, srcStore, filepath.Join(srcDir, "evidence"), destDir); err == nil {
+		t.Fatal("目标路径为目录应报错")
+	}
+}
+
 // TestRestore_MissingManifest 验证备份包缺 manifest 时 Restore 报错。
 func TestRestore_MissingManifest(t *testing.T) {
 	// 构造一个只有 db 文件、无 manifest 的 tar.gz
