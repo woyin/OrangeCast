@@ -123,3 +123,21 @@ func TestCardView(t *testing.T) {
 		t.Errorf("tags 映射错误: %+v", view["tags"])
 	}
 }
+
+// TestStrPtr 验证 strPtr 与 ptrStr 互为逆操作：非空串转指针，空串返回 nil。
+func TestStrPtr(t *testing.T) {
+	if p := strPtr(""); p != nil {
+		t.Errorf("空串应返回 nil，实际 %v", p)
+	}
+	p := strPtr("openai")
+	if p == nil || *p != "openai" {
+		t.Errorf("非空串应返回指针，实际 %v", p)
+	}
+	// 与 ptrStr 互逆
+	if got := ptrStr(strPtr("gpt-4o")); got != "gpt-4o" {
+		t.Errorf("ptrStr(strPtr(x)) 应还原 x，实际 %q", got)
+	}
+	if got := ptrStr(strPtr("")); got != "" {
+		t.Errorf("ptrStr(strPtr(\"\")) 应为空串，实际 %q", got)
+	}
+}

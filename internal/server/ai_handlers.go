@@ -337,3 +337,11 @@ func ptrStr(p *string) string {
 	}
 	return ""
 }
+
+// strPtr 把非空字符串转为 *string，空串返回 nil（settings 里空值表示"使用默认"）。
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

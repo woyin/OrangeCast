@@ -448,12 +448,6 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		// 每个任务独立配置 Provider + Model（ADR-0009 扩展）
 		st := &models.Settings{}
-		strPtr := func(v string) *string {
-			if v != "" {
-				return &v
-			}
-			return nil
-		}
 		st.TranscriptionModel = strPtr(r.FormValue("transcription_model"))
 		st.AnalysisModel = strPtr(r.FormValue("analysis_model"))
 		st.HighlightModel = strPtr(r.FormValue("highlight_model"))
