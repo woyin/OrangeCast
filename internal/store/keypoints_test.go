@@ -115,6 +115,33 @@ func TestSearchKeyPoints(t *testing.T) {
 	}
 }
 
+// TestSearchKeyPoints_PageNormalization 验证 SearchKeyPoints 的 page/perPage 边界归一化。
+func TestSearchKeyPoints_PageNormalization(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "沟通"}}
+	card := &provider.KnowledgeCard{
+		Title:     "T",
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{{Content: "communication skills", Citations: []string{"seg-0001"}}},
+	}
+	s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs)
+
+	// 非法 page/perPage（0/负数）应归一化不报错
+	if _, total, err := s.SearchKeyPoints(ctx, "communication", 0, 0); err != nil {
+		t.Fatalf("page=0/perPage=0 应归一化不报错: %v", err)
+	} else if total != 1 {
+		t.Errorf("命中数应为 1，实际 %d", total)
+	}
+	if _, _, err := s.SearchKeyPoints(ctx, "communication", -1, -5); err != nil {
+		t.Fatalf("负数 page/perPage 应归一化不报错: %v", err)
+	}
+}
+
 func TestTokenizeKp(t *testing.T) {
 	tokens := tokenizeKp("沟通技巧很重要")
 	if len(tokens) == 0 {
