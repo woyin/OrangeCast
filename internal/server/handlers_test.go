@@ -972,6 +972,16 @@ func TestCollection_CreateAndList(t *testing.T) {
 	}
 }
 
+// TestCollection_MissingTitle 验证创建 Collection 缺 title 返回 400。
+func TestCollection_MissingTitle(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "coltitle@example.com", "password123")
+	rec := postForm(t, srv, cookie, "/api/collection", "description=desc")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺 title 应 400，实际 %d", rec.Code)
+	}
+}
+
 // TestSettings_POST_SavesAndRedirects 验证设置保存 POST 更新 settings 并重定向。
 func TestSettings_POST_SavesAndRedirects(t *testing.T) {
 	srv := newTestServer(t)
