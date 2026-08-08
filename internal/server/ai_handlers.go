@@ -84,11 +84,6 @@ func evidenceQAResultToResponse(res *provider.QAResult) (int, map[string]any) {
 	}
 }
 
-// handleQA 是 handleEvidenceQA 的向后兼容别名（ADR-0018 证据问答正名）。
-func (srv *Server) handleQA(w http.ResponseWriter, r *http.Request) {
-	srv.handleEvidenceQA(w, r)
-}
-
 // handleParaphrase 处理复述讲解（Paraphrase，GeneratedDerivative，ADR-0018 R2）。
 //
 // Owner 在阅读转录稿时对某段（或某区间）触发"重讲"。系统：

@@ -68,7 +68,7 @@ func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType
 			continue
 		}
 		kpID := uuid.NewString()
-		created := fmt.Sprintf("%s", card.Title) // 用 card 标题做排序辅助
+		created := card.Title // 用 card 标题做排序辅助
 		_ = created
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, created_at)

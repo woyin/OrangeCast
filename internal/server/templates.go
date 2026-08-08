@@ -21,8 +21,7 @@ func StaticFS() (fs.FS, error) {
 
 // Templates 用两阶段渲染：layout 定义骨架，每个页面只覆盖 "content"（和可选 "title"）块。
 type Templates struct {
-	layout *template.Template
-	pages  map[string]*template.Template
+	pages map[string]*template.Template
 }
 
 func NewTemplates() (*Templates, error) {

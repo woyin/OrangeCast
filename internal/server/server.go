@@ -90,6 +90,7 @@ func (srv *Server) Router() http.Handler {
 	protected.HandleFunc("/api/study-chat", srv.handleStudyChat)                // StudyChat（GeneratedDerivative，ADR-0018 R3）
 	protected.HandleFunc("/api/study-chat/history", srv.handleStudyChatHistory) // StudyChat 历史回看
 	protected.HandleFunc("/api/process", srv.handleProcess)
+	protected.HandleFunc("/api/purge", srv.handlePurge) // Purge（ADR-0012）：完整删除 Source
 	protected.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	protected.HandleFunc("/api/audio/", srv.handleAudio)
 	protected.HandleFunc("/api/narration/", srv.handleNarration) // Narration 解说音轨（ADR-0019）

@@ -35,6 +35,12 @@
   <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download?with_generated=1" title="在证据之外，额外纳入 AI 复述讲解与学习对话（明确标注为非原文）">下载 Markdown（含 AI 讲解）</a>
   <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/versions">版本历史</a>
   <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/dj">AI DJ</a>
+  <form action="/api/purge" method="POST" style="display:inline" onsubmit="return confirm('确认彻底删除该条内容及其全部证据与处理历史？此操作不可撤销。');">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="source_type" value="{{.SourceType}}">
+    <input type="hidden" name="source_id" value="{{.SourceID}}">
+    <button class="btn btn-danger" type="submit" style="color:#fff;background:#b91c1c;">彻底删除</button>
+  </form>
   {{end}}
 </div>
 
