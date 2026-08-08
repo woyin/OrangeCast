@@ -161,3 +161,24 @@ func TestGetPodcastByID_NotFound(t *testing.T) {
 		t.Errorf("不存在的播客应 ErrNotFound，实际 %v", err)
 	}
 }
+
+// TestListEpisodesPaginated_InvalidParams 验证 page/perPage 边界归一化（0/负数回退默认）。
+func TestListEpisodesPaginated_InvalidParams(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep1", AudioURL: "https://a.mp3"}})
+
+	// 非法 page/perPage（0/负数）应归一化不报错
+	eps, total, err := s.ListEpisodesPaginated(ctx, p.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("page=0/perPage=0 应归一化不报错: %v", err)
+	}
+	if total != 1 || len(eps) != 1 {
+		t.Errorf("应归一化后返回 1 集，实际 total=%d len=%d", total, len(eps))
+	}
+	if _, _, err := s.ListEpisodesPaginated(ctx, p.ID, -1, -5); err != nil {
+		t.Fatalf("负数 page/perPage 应归一化不报错: %v", err)
+	}
+}
