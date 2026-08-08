@@ -68,6 +68,20 @@ func TestKokoroProvider_Getters(t *testing.T) {
 	}
 }
 
+// TestNewKokoroProvider_Defaults 验证空参数时应用默认值。
+func TestNewKokoroProvider_Defaults(t *testing.T) {
+	k := NewKokoroProvider("", "", "model.bin")
+	if k.binaryPath != "kokoro" {
+		t.Errorf("binaryPath 应默认 kokoro，实际 %q", k.binaryPath)
+	}
+	if k.defaultVoice != "af_heart" {
+		t.Errorf("defaultVoice 应默认 af_heart，实际 %q", k.defaultVoice)
+	}
+	if k.model != "model.bin" {
+		t.Errorf("model 应保留，实际 %q", k.model)
+	}
+}
+
 // TestKokoroProvider_RunCLI 验证 runCLI 调用外部二进制并成功生成文件。
 func TestKokoroProvider_RunCLI(t *testing.T) {
 	// 用 shell 脚本模拟 kokoro CLI：写入输出文件并成功退出。
