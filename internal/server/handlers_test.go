@@ -335,6 +335,18 @@ func TestRegister_InvalidEmailRejected(t *testing.T) {
 	}
 }
 
+// TestRegister_ClosedDB500 验证数据库关闭后注册页 GET 返回 500（isClaimed 失败）。
+func TestRegister_ClosedDB500(t *testing.T) {
+	srv := newTestServer(t)
+	srv.store.Close()
+	req := httptest.NewRequest(http.MethodGet, "/register", nil)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("数据库关闭后注册页应 500，实际 %d", rec.Code)
+	}
+}
+
 func TestSourceDetailRender_FailedStatus(t *testing.T) {
 	tmpl, err := NewTemplates()
 	if err != nil {
