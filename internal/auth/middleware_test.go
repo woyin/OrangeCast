@@ -96,6 +96,41 @@ func TestCSRFValue_FromContext(t *testing.T) {
 	}
 }
 
+// TestCSRFValue_FromCookie 验证无 context 值时从 cookie 读取 CSRF token。
+func TestCSRFValue_FromCookie(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "cookie-token"})
+	if got := CSRFValue(req); got != "cookie-token" {
+		t.Errorf("应从 cookie 读取 token，实际 %q", got)
+	}
+}
+
+// TestRequireAuth_InvalidTokenClearsCookie 验证无效 session token 清除 cookie 并 303。
+func TestRequireAuth_InvalidTokenClearsCookie(t *testing.T) {
+	s := newTestStore(t)
+	hw := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("不应到达 handler")
+	})
+	// 无效 token（不存在于 sessions 表）
+	req := httptest.NewRequest(http.MethodGet, "/sources/x", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "invalid-token"})
+	rec := httptest.NewRecorder()
+	RequireAuth(s)(hw).ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("无效 token 应 303 重定向，实际 %d", rec.Code)
+	}
+	// cookie 应被清除
+	var cleared bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("无效 token 应清除 cookie")
+	}
+}
+
 // store 测试辅助：打开临时 SQLite。
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
