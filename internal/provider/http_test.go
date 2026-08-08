@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +109,91 @@ func TestSplitAnalysisWindows_DoesNotSplitSegment(t *testing.T) {
 	windows := splitAnalysisWindows(segments, 10)
 	if len(windows) != 2 || len(windows[0]) != 1 || windows[0][0].ID != "a" || windows[1][0].ID != "b" {
 		t.Fatalf("segments must remain whole across windows: %+v", windows)
+	}
+}
+
+// TestDoWithRetry_Success 验证 200 成功立即返回，不重试。
+func TestDoWithRetry_Success(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	resp, err := doWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("成功请求不应报错: %v", err)
+	}
+	defer resp.Body.Close()
+	if calls != 1 {
+		t.Errorf("成功请求应只调用 1 次，实际 %d", calls)
+	}
+}
+
+// TestDoWithRetry_NonRetryableError 验证 4xx 错误立即返回不重试。
+func TestDoWithRetry_NonRetryableError(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	resp, err := doWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("4xx 应返回响应而非错误: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("应返回 400，实际 %d", resp.StatusCode)
+	}
+	if calls != 1 {
+		t.Errorf("4xx 不应重试，实际 %d 次", calls)
+	}
+}
+
+// TestDoWithRetry_RetryAfterSucceeds 验证 429 带 Retry-After 后重试成功。
+func TestDoWithRetry_RetryAfterSucceeds(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "1") // 1 秒后重试
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	resp, err := doWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("重试后应成功: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("重试后应 200，实际 %d", resp.StatusCode)
+	}
+	if calls != 2 {
+		t.Errorf("应重试 1 次共 2 次调用，实际 %d", calls)
+	}
+}
+
+// TestDoWithRetry_ContextCancel 验证 context 取消时立即返回错误，不重试。
+func TestDoWithRetry_ContextCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	if _, err := doWithRetry(ctx, req); err == nil {
+		t.Fatal("context 取消后应返回错误")
 	}
 }
