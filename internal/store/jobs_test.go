@@ -334,3 +334,26 @@ func TestGetJob_NotFound(t *testing.T) {
 		t.Errorf("不存在的 job 应 ErrNotFound，实际 %v", err)
 	}
 }
+
+// TestClaimNextJob_ReclaimsExpiredLease 验证租约过期的 running 任务可被重新领取。
+func TestClaimNextJob_ReclaimsExpiredLease(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForJob(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	s.MarkJobRunning(ctx, job.ID)
+
+	// 把 lease_until 改为过去 → 视为 stale，可被重新领取
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET lease_until = datetime('now', '-1 hour') WHERE id = ?`, job.ID); err != nil {
+		t.Fatalf("设置过期租约: %v", err)
+	}
+	claimed, err := s.ClaimNextJob(ctx, "60 seconds")
+	if err != nil {
+		t.Fatalf("ClaimNextJob: %v", err)
+	}
+	if claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("应重新领取过期租约的 job，实际 %+v", claimed)
+	}
+}
