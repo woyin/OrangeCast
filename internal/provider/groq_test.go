@@ -247,3 +247,24 @@ func TestGroqWaitBetweenAnalysisWindows(t *testing.T) {
 		t.Errorf("sleepFn 应被调用 1 次，实际 %d", called)
 	}
 }
+
+// TestGroqComplete_RealHTTPPath 验证未注入 chatCompleteFn 时 complete 走真实 HTTP 路径。
+func TestGroqComplete_RealHTTPPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"真实回答"}}]}`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	content, code, err := g.complete([]map[string]string{{"role": "user", "content": "hi"}}, "")
+	if err != nil {
+		t.Fatalf("complete 真实路径: %v", err)
+	}
+	if code != http.StatusOK {
+		t.Errorf("应 200，实际 %d", code)
+	}
+	if content != "真实回答" {
+		t.Errorf("应返回消息内容，实际 %q", content)
+	}
+}
