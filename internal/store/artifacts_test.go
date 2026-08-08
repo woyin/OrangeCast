@@ -91,3 +91,15 @@ func (s *Store) mustList(ctx context.Context, st models.SourceType, sid string, 
 	}
 	return vs
 }
+
+// TestCreateArtifactVersion_InvalidJobID 验证引用不存在的 job 时因外键约束报错。
+func TestCreateArtifactVersion_InvalidJobID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	if _, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript,
+		"groq", "m", "1", "nonexistent-job", `{"text":"x"}`); err == nil {
+		t.Fatal("引用不存在的 job 应因外键约束报错")
+	}
+}
