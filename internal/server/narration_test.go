@@ -107,6 +107,25 @@ func TestNarrationServe_ReturnsWav(t *testing.T) {
 	}
 }
 
+// TestNarrationServe_MissingFile_404 验证 Narration 记录存在但 wav 文件缺失时 404。
+func TestNarrationServe_MissingFile_404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "nsm@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 写入 Narration 记录，但 wav 文件不存在
+	srv.store.CreateNarration(ctx, models.SourceEpisode, sourceID, "hl-a", "af_heart", "kokoro-82m", "missing.wav", 1.5, 10, "kokoro")
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/narration/episode/"+sourceID+"/hl-a")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("wav 文件缺失应 404，实际 %d", rec.Code)
+	}
+}
+
 // TestDJ_NoHighlight_404 验证无高光版本时 DJ 页返回 404。
 func TestDJ_NoHighlight_404(t *testing.T) {
 	srv := newTestServer(t)
