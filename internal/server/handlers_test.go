@@ -347,6 +347,33 @@ func TestRegister_ClosedDB500(t *testing.T) {
 	}
 }
 
+// TestRegister_AlreadyClaimed 验证已有 Owner 后再次 POST 注册提示"已被认领"。
+func TestRegister_AlreadyClaimed(t *testing.T) {
+	srv := newTestServer(t)
+	// 先成功认领一次
+	claimOwnerAndLogin(t, srv, "owner2@example.com", "password123")
+
+	// GET /register 已重定向到 /login，故从 /login 取 CSRF cookie
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	csrf := ""
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	req = httptest.NewRequest(http.MethodPost, "/register",
+		strings.NewReader("_csrf="+csrf+"&email=second@example.com&password=password123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "已被认领") {
+		t.Errorf("已有 Owner 再注册应提示已被认领，实际 %s", rec.Body.String())
+	}
+}
+
 func TestSourceDetailRender_FailedStatus(t *testing.T) {
 	tmpl, err := NewTemplates()
 	if err != nil {
