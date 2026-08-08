@@ -358,6 +358,63 @@ func TestLogin_RateLimited(t *testing.T) {
 	}
 }
 
+// TestLogin_Success 验证正确密码登录成功后重定向到 dashboard。
+func TestLogin_Success(t *testing.T) {
+	srv := newTestServer(t)
+	claimOwnerAndLogin(t, srv, "logins@example.com", "password123")
+
+	// GET /login 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("_csrf="+csrf+"&email=logins@example.com&password=password123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("登录成功应 303 重定向，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "/dashboard") {
+		t.Errorf("应重定向到 dashboard，实际 %q", rec.Header().Get("Location"))
+	}
+}
+
+// TestLogin_WrongPassword 验证错误密码渲染错误页（200 + 错误提示）。
+func TestLogin_WrongPassword(t *testing.T) {
+	srv := newTestServer(t)
+	claimOwnerAndLogin(t, srv, "loginw@example.com", "password123")
+
+	req0 := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/login",
+		strings.NewReader("_csrf="+csrf+"&email=loginw@example.com&password=wrongpass"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("错误密码应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "邮箱或密码错误") {
+		t.Errorf("应显示登录错误，实际 %s", rec.Body.String())
+	}
+}
+
 func TestQAResponse_RefusesWithoutCitations(t *testing.T) {
 	// 模型有答案但未引用任何片段 → 拒答（Phase 7）
 	code, body := evidenceQAResultToResponse(&provider.QAResult{Answer: "好像是这样的", Sources: nil})
