@@ -810,3 +810,68 @@ func TestGraphPage_Renders(t *testing.T) {
 		t.Fatalf("图谱页应 200，实际 %d", rec.Code)
 	}
 }
+
+// TestAnnotation_SaveAndDelete 验证标注 API：保存返回 action=saved，空 body 删除。
+func TestAnnotation_SaveAndDelete(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "annot@example.com", "password123")
+
+	// 空 body → 删除
+	rec := postForm(t, srv, cookie, "/api/annotation",
+		"source_type=episode&source_id=ep-1&segment_ids=seg-0001&body=")
+	if !strings.Contains(rec.Body.String(), `"action":"deleted"`) {
+		t.Errorf("空 body 应删除，实际 %s", rec.Body.String())
+	}
+
+	// 非空 body → 保存
+	rec = postForm(t, srv, cookie, "/api/annotation",
+		"source_type=episode&source_id=ep-1&segment_ids=seg-0001&body=重要+标注&time_start=0&time_end=5")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("保存标注应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"action":"saved"`) {
+		t.Errorf("非空 body 应保存，实际 %s", rec.Body.String())
+	}
+}
+
+// TestPin_Toggle 验证 Pin API：首次 pin 返回 pinned=true，再次 toggle 返回 false。
+func TestPin_Toggle(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "pin@example.com", "password123")
+
+	body := "source_type=episode&source_id=ep-1&segment_ids=seg-0001&source_title=Ep&time_start=0&time_end=5"
+	rec := postForm(t, srv, cookie, "/api/pin", body)
+	if !strings.Contains(rec.Body.String(), `"pinned":true`) {
+		t.Errorf("首次 pin 应 true，实际 %s", rec.Body.String())
+	}
+	rec = postForm(t, srv, cookie, "/api/pin", body)
+	if !strings.Contains(rec.Body.String(), `"pinned":false`) {
+		t.Errorf("再次 toggle 应 false，实际 %s", rec.Body.String())
+	}
+}
+
+// TestCollection_CreateAndList 验证 Collection API：POST 创建、GET 列表。
+func TestCollection_CreateAndList(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "col@example.com", "password123")
+
+	rec := postForm(t, srv, cookie, "/api/collection", "title=主权基金专题&description=desc")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("创建 Collection 应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "主权基金专题") {
+		t.Errorf("应返回创建的 Collection，实际 %s", rec.Body.String())
+	}
+
+	// GET 列表
+	req := httptest.NewRequest(http.MethodGet, "/api/collection", nil)
+	req.AddCookie(cookie)
+	rec2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("Collection 列表应 200，实际 %d", rec2.Code)
+	}
+	if !strings.Contains(rec2.Body.String(), "主权基金专题") {
+		t.Errorf("列表应含 Collection，实际 %s", rec2.Body.String())
+	}
+}
