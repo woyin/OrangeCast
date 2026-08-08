@@ -282,6 +282,23 @@ func TestStudyChatHistory(t *testing.T) {
 	}
 }
 
+// TestStudyChatHistory_DBError 通过删除 study_messages 表（保留 sessions 使认证通过）
+// 触发 handleStudyChatHistory 读历史错误分支，返回 500。
+func TestStudyChatHistory_DBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "schist5@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_messages`); err != nil {
+		t.Fatalf("DROP TABLE study_messages: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/study-chat/history?session_id=any", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("study_messages 表缺失应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestStudyChat_EmptyQuestion 验证空问题返回 400。
 func TestStudyChat_EmptyQuestion(t *testing.T) {
 	srv := newTestServer(t)
