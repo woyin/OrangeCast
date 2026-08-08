@@ -226,6 +226,42 @@ func TestStudyChat_EmptyQuestion(t *testing.T) {
 	}
 }
 
+// TestStudyChat_LongQuestionTitleTruncated 验证超过 40 字的问题作为会话标题被截断。
+func TestStudyChat_LongQuestionTitleTruncated(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sclong@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	longQ := "这是一个非常长的学习问题，用来测试会话标题超过四十个字符时是否会被正确截断并加上省略号以确保标题不会过长"
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "回答", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&question="+longQ)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	// 会话标题应为截断后的 40 字 + 省略号
+	sessions, _ := srv.store.ListStudySessions(ctx, models.SourceEpisode, sourceID)
+	if len(sessions) != 1 {
+		t.Fatalf("应创建 1 个会话，实际 %d", len(sessions))
+	}
+	if len([]rune(sessions[0].Title)) != 41 {
+		t.Errorf("标题应截断为 40 字+省略号，实际长度 %d", len([]rune(sessions[0].Title)))
+	}
+	if !strings.HasSuffix(sessions[0].Title, "…") {
+		t.Errorf("标题应以省略号结尾，实际 %q", sessions[0].Title)
+	}
+}
+
 // TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
 // 无引用拒答 422、有引用 200。
 func TestEvidenceQA_Handler(t *testing.T) {
