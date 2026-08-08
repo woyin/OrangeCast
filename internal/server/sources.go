@@ -18,29 +18,27 @@ import (
 )
 
 func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
-	if len(parts) < 2 {
+	sourceType, sourceID, rest, ok := parseSourcePath(r)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	if len(parts) >= 3 && parts[2] == "download" {
+	if len(rest) >= 1 && rest[0] == "download" {
 		srv.handleDownloadMarkdown(w, r)
 		return
 	}
-	if len(parts) >= 3 && parts[2] == "dj" {
+	if len(rest) >= 1 && rest[0] == "dj" {
 		srv.handleDJ(w, r)
 		return
 	}
-	if len(parts) >= 4 && parts[2] == "versions" && parts[3] == "revert" {
+	if len(rest) >= 2 && rest[0] == "versions" && rest[1] == "revert" {
 		srv.handleRevertVersion(w, r)
 		return
 	}
-	if len(parts) >= 3 && parts[2] == "versions" {
+	if len(rest) >= 1 && rest[0] == "versions" {
 		srv.handleVersions(w, r)
 		return
 	}
-	sourceType := models.SourceType(parts[0])
-	sourceID := parts[1]
 
 	// 取 source 处理状态与最近一次失败原因（供前端展示进度/错误/重试）
 	status, lastError := srv.sourceStatusAndError(r.Context(), sourceType, sourceID)
@@ -155,13 +153,11 @@ func (srv *Server) handleNarration(w http.ResponseWriter, r *http.Request) {
 
 // handleVersions 查看一个 Source 的不可变版本历史（ADR-0011）。
 func (srv *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
-	if len(parts) < 3 {
+	sourceType, sourceID, _, ok := parseSourcePath(r)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	sourceType := models.SourceType(parts[0])
-	sourceID := parts[1]
 
 	title := sourceID
 	if sourceType == models.SourceEpisode {
@@ -206,13 +202,11 @@ func (srv *Server) handleRevertVersion(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
-	if len(parts) < 4 {
+	sourceType, sourceID, rest, ok := parseSourcePath(r)
+	if !ok || len(rest) < 2 || rest[0] != "versions" || rest[1] != "revert" {
 		http.NotFound(w, r)
 		return
 	}
-	sourceType := models.SourceType(parts[0])
-	sourceID := parts[1]
 	kindStr := r.FormValue("kind")
 	version, err := strconv.Atoi(r.FormValue("version"))
 	if err != nil {
@@ -233,13 +227,11 @@ func (srv *Server) handleRevertVersion(w http.ResponseWriter, r *http.Request) {
 
 // handleDJ 渲染 DJ 播放清单页面。
 func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
-	if len(parts) < 3 || parts[2] != "dj" {
+	sourceType, sourceID, rest, ok := parseSourcePath(r)
+	if !ok || len(rest) < 1 || rest[0] != "dj" {
 		http.NotFound(w, r)
 		return
 	}
-	sourceType := models.SourceType(parts[0])
-	sourceID := parts[1]
 
 	// 读取当前 Highlight 版本
 	hv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindHighlight)

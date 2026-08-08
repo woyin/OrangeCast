@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,5 +195,33 @@ func TestSourceStatusAndError(t *testing.T) {
 	status, _ = srv.sourceStatusAndError(ctx, models.SourceEpisode, "nonexistent")
 	if status != models.StatusUnprocessed {
 		t.Errorf("未知 source 应 Unprocessed，实际 %q", status)
+	}
+}
+
+// TestParseSourcePath 验证 /sources/{type}/{id}[/rest] 路径解析。
+func TestParseSourcePath(t *testing.T) {
+	// 合法：/sources/episode/{id}/download
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/ep-1/download", nil)
+	st, id, rest, ok := parseSourcePath(req)
+	if !ok || st != models.SourceEpisode || id != "ep-1" || len(rest) != 1 || rest[0] != "download" {
+		t.Errorf("解析失败: type=%v id=%v rest=%v ok=%v", st, id, rest, ok)
+	}
+
+	// 合法：/sources/upload/{id}
+	req = httptest.NewRequest(http.MethodGet, "/sources/upload/up-1", nil)
+	st, id, rest, ok = parseSourcePath(req)
+	if !ok || st != models.SourceUpload || id != "up-1" || len(rest) != 0 {
+		t.Errorf("解析失败: type=%v id=%v rest=%v ok=%v", st, id, rest, ok)
+	}
+
+	// 非法：缺 id
+	req = httptest.NewRequest(http.MethodGet, "/sources/episode", nil)
+	if _, _, _, ok := parseSourcePath(req); ok {
+		t.Error("缺 id 应解析失败")
+	}
+	// 非法：非 /sources/ 前缀
+	req = httptest.NewRequest(http.MethodGet, "/uploads", nil)
+	if _, _, _, ok := parseSourcePath(req); ok {
+		t.Error("非 /sources/ 前缀应解析失败")
 	}
 }

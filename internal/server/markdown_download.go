@@ -5,11 +5,9 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/woyin/orangecast/internal/markdown"
-	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
@@ -17,13 +15,11 @@ import (
 // handleDownloadMarkdown 下载单 Source 的 KnowledgeNote Markdown（Roadmap Phase 5）。
 // 确定性渲染：frontmatter + 摘要/要点/章节/金句（全部带 Citation 链接）+ 标签。
 func (srv *Server) handleDownloadMarkdown(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
-	if len(parts) < 3 || parts[2] != "download" {
+	sourceType, sourceID, rest, ok := parseSourcePath(r)
+	if !ok || len(rest) < 1 || rest[0] != "download" {
 		http.NotFound(w, r)
 		return
 	}
-	sourceType := models.SourceType(parts[0])
-	sourceID := parts[1]
 
 	card, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard)
 	if err != nil {

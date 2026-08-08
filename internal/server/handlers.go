@@ -78,6 +78,16 @@ func totalPages(total, perPage int) int {
 	return (total + perPage - 1) / perPage
 }
 
+// parseSourcePath 从 /sources/{sourceType}/{sourceID}[/...] 路径解析出 sourceType 与 sourceID。
+// 返回剩余路径段（如 ["download"]、["dj"]、["versions"]）。路径不合法时 ok=false。
+func parseSourcePath(r *http.Request) (models.SourceType, string, []string, bool) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/sources/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", nil, false
+	}
+	return models.SourceType(parts[0]), parts[1], parts[2:], true
+}
+
 // sourceStatusAndError 返回 source 的处理状态与最近一次失败原因。
 func (srv *Server) sourceStatusAndError(ctx context.Context, sourceType models.SourceType, sourceID string) (models.EpisodeProcessingStatus, string) {
 	var status models.EpisodeProcessingStatus
