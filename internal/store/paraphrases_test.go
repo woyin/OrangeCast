@@ -75,3 +75,23 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// TestCreateParaphrase_NoRefs 验证无参考片段时报错。
+func TestCreateParaphrase_NoRefs(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateParaphrase(ctx, models.SourceEpisode, "ep-1", "q", "讲解", "groq", "m", nil, nil); err == nil {
+		t.Fatal("无参考片段应报错")
+	}
+}
+
+// TestCreateParaphrase_InvalidTime 验证参考片段无法解析出有效时间范围时报错。
+func TestCreateParaphrase_InvalidTime(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 参考片段 ID 在 segments 中不存在 → 无法解析时间范围
+	if _, err := s.CreateParaphrase(ctx, models.SourceEpisode, "ep-1", "q", "讲解", "groq", "m",
+		[]string{"seg-9999"}, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("参考片段无法解析时间范围应报错")
+	}
+}
