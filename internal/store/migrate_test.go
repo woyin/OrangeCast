@@ -367,3 +367,16 @@ func TestOpen_RejectsMultipleUsers(t *testing.T) {
 		t.Errorf("多用户应 ErrMultipleUsers，实际 %v", err)
 	}
 }
+
+// TestAppliedVersion_NoMigrationTable 验证无 schema_migrations 表时 AppliedVersion 返回 0。
+func TestAppliedVersion_NoMigrationTable(t *testing.T) {
+	ctx := context.Background()
+	db := openRaw(t, filepath.Join(t.TempDir(), "raw.db"))
+	v, err := AppliedVersion(ctx, db)
+	if err != nil {
+		t.Fatalf("AppliedVersion: %v", err)
+	}
+	if v != 0 {
+		t.Errorf("无迁移表应返回 0，实际 %d", v)
+	}
+}
