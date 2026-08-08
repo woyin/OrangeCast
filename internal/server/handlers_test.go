@@ -998,3 +998,49 @@ func TestUploadNew_POST_CreatesAndRedirects(t *testing.T) {
 		t.Errorf("应创建 1 个 upload，实际 %+v", us)
 	}
 }
+
+// TestDownloadMarkdown 验证 KnowledgeNote Markdown 下载：
+// 有卡片+转录返回 200 与 frontmatter，无卡片返回 404。
+func TestDownloadMarkdown(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "downloadmd@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 无卡片 → 404
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无卡片应 404，实际 %d", rec.Code)
+	}
+
+	// 写入 transcript 与知识卡片版本（同一 job）
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	vt, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"通胀是物价上升"}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, vt)
+	cardPayload := `{"title":"通胀解析","summary":{"text":"概览","citations":["seg-0001"]},"keyPoints":[{"content":"要点","description":"d","citations":["seg-0001"]}],"chapters":[],"quotes":[],"tags":["经济"]}`
+	v, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID, cardPayload)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, v)
+
+	// 有卡片 → 200 + frontmatter
+	req = httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("有卡片应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "通胀解析") {
+		t.Errorf("Markdown 应含标题，实际 %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/markdown") {
+		t.Errorf("Content-Type 应为 markdown，实际 %q", rec.Header().Get("Content-Type"))
+	}
+}
