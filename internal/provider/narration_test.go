@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,5 +112,16 @@ func TestKokoroProvider_RunCLIError(t *testing.T) {
 	k := NewKokoroProvider(script, "af_heart", "model.bin")
 	if err := k.runCLI("text", "voice", filepath.Join(dir, "x.wav")); err == nil {
 		t.Fatal("失败脚本应返回错误")
+	}
+}
+
+// TestKokoroProvider_SynthesizeSynthFnError 验证 synthFn 返回错误时 Synthesize 传播该错误。
+func TestKokoroProvider_SynthesizeSynthFnError(t *testing.T) {
+	k := NewKokoroProvider("kokoro", "af_heart", "").
+		WithSynthFunc(func(text, voice, outPath string) error {
+			return fmt.Errorf("合成失败")
+		})
+	if _, err := k.Synthesize("文本", "voice", "/tmp/x.wav"); err == nil {
+		t.Fatal("synthFn 报错时 Synthesize 应返回错误")
 	}
 }
