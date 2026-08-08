@@ -131,6 +131,34 @@ func TestParseFeed_GUIDFallbackToLink(t *testing.T) {
 	}
 }
 
+// TestParseFeed_PublishedDate 验证带 pubDate 的条目解析出 PublishedAt（RFC3339 UTC）。
+func TestParseFeed_PublishedDate(t *testing.T) {
+	xml := `<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item>
+    <guid>ep-1</guid>
+    <pubDate>Wed, 01 Aug 2026 08:00:00 GMT</pubDate>
+    <enclosure url="https://cdn.example.com/a.mp3" type="audio/mpeg"/>
+  </item>
+</channel></rss>`
+	fp := gofeed.NewParser()
+	feed, err := fp.ParseString(xml)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	_, eps, err := parseFeed(feed, "https://feed.example.com/x")
+	if err != nil {
+		t.Fatalf("parseFeed 失败: %v", err)
+	}
+	if len(eps) != 1 || eps[0].PublishedAt == nil {
+		t.Fatalf("应解析出 PublishedAt，实际 %+v", eps)
+	}
+	// 应为 UTC RFC3339（08:00 GMT → 08:00Z）
+	if *eps[0].PublishedAt != "2026-08-01T08:00:00Z" {
+		t.Errorf("PublishedAt 应为 UTC RFC3339，实际 %q", *eps[0].PublishedAt)
+	}
+}
+
 // TestFirstEnclosureURL 验证只接受 audio 类型或常见音频扩展名的 enclosure，
 // 以及 item 无 enclosure 或类型不匹配时返回空串。
 func TestFirstEnclosureURL(t *testing.T) {
