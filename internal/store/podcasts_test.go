@@ -151,3 +151,13 @@ func TestListPodcasts(t *testing.T) {
 		t.Errorf("应按标题排序，实际 %+v", list)
 	}
 }
+
+// TestGetPodcastByID_NotFound 验证查询不存在的播客返回 ErrNotFound。
+func TestGetPodcastByID_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	if _, err := s.GetPodcastByID(ctx, "nonexistent"); err != ErrNotFound {
+		t.Errorf("不存在的播客应 ErrNotFound，实际 %v", err)
+	}
+}
