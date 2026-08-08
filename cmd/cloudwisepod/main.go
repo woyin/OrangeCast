@@ -148,14 +148,20 @@ func runBackup(args []string) {
 	}
 	defer s.Close()
 
-	if filepath.Ext(dest) == "" {
-		dest += ".tar.gz"
-	}
+	dest = ensureArchiveExt(dest)
 	m, err := backup.Create(context.Background(), s, cfg.EvidenceDir, dest)
 	if err != nil {
 		log.Fatalf("备份失败: %v", err)
 	}
 	fmt.Printf("备份完成：%s（DB sha256=%s，证据 %d 个）\n", dest, m.DBSHA256, len(m.Evidence))
+}
+
+// ensureArchiveExt 无扩展名时补 .tar.gz（纯函数，便于测试）。
+func ensureArchiveExt(dest string) string {
+	if filepath.Ext(dest) == "" {
+		return dest + ".tar.gz"
+	}
+	return dest
 }
 
 // runRestore cloudwisepod restore <backup.tar.gz> [--force]

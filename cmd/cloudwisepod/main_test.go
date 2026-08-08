@@ -31,3 +31,16 @@ func TestParseCommand(t *testing.T) {
 		})
 	}
 }
+
+// TestEnsureArchiveExt 验证备份目标路径扩展名补全。
+func TestEnsureArchiveExt(t *testing.T) {
+	if got := ensureArchiveExt("backup"); got != "backup.tar.gz" {
+		t.Errorf("ensureArchiveExt(backup)=%q want backup.tar.gz", got)
+	}
+	if got := ensureArchiveExt("backup.tar.gz"); got != "backup.tar.gz" {
+		t.Errorf("已带扩展名应原样，实际 %q", got)
+	}
+	if got := ensureArchiveExt("/path/to/x"); got != "/path/to/x.tar.gz" {
+		t.Errorf("绝对路径无扩展应补全，实际 %q", got)
+	}
+}
