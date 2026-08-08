@@ -2,7 +2,10 @@ package rss
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/mmcdole/gofeed"
 	"github.com/woyin/orangecast/internal/safehttp"
@@ -157,5 +160,61 @@ func TestFirstEnclosureURL(t *testing.T) {
 	}}
 	if got := firstEnclosureURL(upper); got != "https://cdn.example.com/pod.MP3" {
 		t.Errorf("大写 .MP3 后缀应识别，实际 %q", got)
+	}
+}
+
+// TestFetchFeed 验证 FetchFeed 完整路径：抓取、解析、校验音频 URL。
+func TestFetchFeed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>测试播客</title>
+  <item><guid>ep-1</guid><title>第一集</title>
+    <enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/>
+  </item>
+</channel></rss>`))
+	}))
+	defer srv.Close()
+
+	// 替换共享客户端为普通客户端（绕过 SSRF，指向测试服务器）
+	origClient := feedClient
+	feedClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { feedClient = origClient }()
+
+	podcast, eps, err := FetchFeed(srv.URL)
+	if err != nil {
+		t.Fatalf("FetchFeed: %v", err)
+	}
+	if podcast.Title != "测试播客" {
+		t.Errorf("标题错误: %q", podcast.Title)
+	}
+	if len(eps) != 1 || eps[0].GUID != "ep-1" {
+		t.Errorf("单集解析错误: %+v", eps)
+	}
+	if eps[0].AudioURL != "https://cdn.example.com/1.mp3" {
+		t.Errorf("音频 URL 错误: %q", eps[0].AudioURL)
+	}
+}
+
+// TestFetchFeed_InvalidURL 验证非法 URL 被拒绝。
+func TestFetchFeed_InvalidURL(t *testing.T) {
+	if _, _, err := FetchFeed("ftp://x.com/feed"); err == nil {
+		t.Fatal("非 http(s) URL 应被拒绝")
+	}
+}
+
+// TestFetchFeed_HTTPError 验证非 200 响应返回错误。
+func TestFetchFeed_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	origClient := feedClient
+	feedClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { feedClient = origClient }()
+
+	if _, _, err := FetchFeed(srv.URL); err == nil {
+		t.Fatal("404 应返回错误")
 	}
 }
