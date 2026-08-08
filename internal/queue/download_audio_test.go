@@ -102,6 +102,32 @@ func TestDownloadAudio_InvalidURL(t *testing.T) {
 	}
 }
 
+// TestQueueFileSHA256_NotFound 验证 fileSHA256 对不存在的文件报错。
+func TestQueueFileSHA256_NotFound(t *testing.T) {
+	if _, err := fileSHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
+		t.Fatal("文件不存在应报错")
+	}
+}
+
+// TestQueueFileSHA256_Deterministic 验证 fileSHA256 确定性计算。
+func TestQueueFileSHA256_Deterministic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.bin")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h1, err := fileSHA256(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, _ := fileSHA256(path)
+	if h1 != h2 {
+		t.Errorf("哈希应确定: %s vs %s", h1, h2)
+	}
+	if len(h1) != 64 {
+		t.Errorf("sha256 hex 应为 64 字符，实际 %d", len(h1))
+	}
+}
+
 // NewWorkerWithClient 构造一个使用指定 HTTP client 的 worker（测试用）.
 func NewWorkerWithClient(client *http.Client, dir string) *Worker {
 	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
