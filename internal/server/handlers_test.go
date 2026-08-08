@@ -1669,6 +1669,8 @@ func TestDownloadMarkdown_WithGenerated(t *testing.T) {
 	srv.store.CreateParaphrase(ctx, models.SourceEpisode, sourceID, "解释通胀", "通胀就是购买力下降", "groq", "m", []string{"seg-0001"},
 		[]provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
 	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
+	// 加一条 user 消息（Role 非 assistant → 触发 continue 分支，不应下沉）
+	srv.store.AppendStudyMessage(ctx, sess.ID, "user", "通胀是什么意思", nil, false)
 	srv.store.AppendStudyMessage(ctx, sess.ID, "assistant", "通胀就是货币购买力下降", []string{"seg-0001"}, false)
 
 	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download?with_generated=1", nil)
@@ -1710,6 +1712,70 @@ func TestDownloadMarkdown_CorruptCardPayload(t *testing.T) {
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("卡片载荷损坏应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestDownloadMarkdown_NoTranscript 验证有卡片但无转录稿时返回 404。
+func TestDownloadMarkdown_NoTranscript(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdno@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 只写卡片、不写转录稿
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	v, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID,
+		`{"title":"T","summary":{"text":"S","citations":[]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, v)
+
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无转录稿应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestDownloadMarkdown_BadPath 验证非 download 后缀路径返回 404。
+func TestDownloadMarkdown_BadPath(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdbad@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/x/other", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestDownloadMarkdown_CorruptTranscriptPayload 验证转录稿载荷损坏时返回 500。
+func TestDownloadMarkdown_CorruptTranscriptPayload(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdtcorrupt@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	vc, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID,
+		`{"title":"T","summary":{"text":"S","citations":[]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, vc)
+	vt, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID, `{bad json`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, vt)
+
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("转录载荷损坏应 500，实际 %d", rec.Code)
 	}
 }
 
