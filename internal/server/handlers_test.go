@@ -669,6 +669,16 @@ func TestProcess_EnqueuesSingleAndRedirects(t *testing.T) {
 	}
 }
 
+// TestProcess_NonPost405 验证非 POST 请求返回 405。
+func TestProcess_NonPost405(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "proc405@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/process")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("非 POST 应 405，实际 %d", rec.Code)
+	}
+}
+
 // TestPodcastsList_Renders 验证播客列表页在认证后正常渲染。
 func TestPodcastsList_Renders(t *testing.T) {
 	srv := newTestServer(t)
