@@ -953,6 +953,20 @@ func TestProgressAPI_ReturnsJSON(t *testing.T) {
 	}
 }
 
+// TestProgressAPI_ClosedDB500 验证数据库关闭后进度 API 返回 500。
+func TestProgressAPI_ClosedDB500(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "prog500@example.com", "password123")
+	srv.store.Close()
+	req := httptest.NewRequest(http.MethodGet, "/api/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("数据库关闭后进度 API 应 500，实际 %d", rec.Code)
+	}
+}
+
 // TestProgress_Page_Renders 验证进度页渲染（含队列标题）。
 func TestProgress_Page_Renders(t *testing.T) {
 	srv := newTestServer(t)
