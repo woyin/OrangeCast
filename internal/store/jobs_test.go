@@ -205,6 +205,14 @@ func TestSourceTitleAndStatus(t *testing.T) {
 	if got := s.SourceStatus(ctx, models.SourceEpisode, "nonexistent-id"); got != models.StatusUnprocessed {
 		t.Errorf("未知 source 应 StatusUnprocessed，实际 %q", got)
 	}
+	// upload source → 返回文件名 + 状态
+	up, _ := s.CreateUpload(ctx, "音轨.wav", "audio/wav", 10)
+	if got := s.SourceTitle(ctx, models.SourceUpload, up.ID); got != "音轨.wav" {
+		t.Errorf("SourceTitle 应返回 upload 文件名，实际 %q", got)
+	}
+	if got := s.SourceStatus(ctx, models.SourceUpload, up.ID); got != models.StatusUnprocessed {
+		t.Errorf("upload 应 StatusUnprocessed，实际 %q", got)
+	}
 }
 
 // TestListRecentCompleted 验证按 updated_at 倒序返回最近完成的 N 个任务。
