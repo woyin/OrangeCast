@@ -106,3 +106,19 @@ func TestNarrationServe_ReturnsWav(t *testing.T) {
 		t.Errorf("不存在的 Narration 应 404，实际 %d", rec404.Code)
 	}
 }
+
+// TestDJ_NoHighlight_404 验证无高光版本时 DJ 页返回 404。
+func TestDJ_NoHighlight_404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "dj404@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	// 不写 Highlight 版本 → DJ 页 404
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("无高光应 404，实际 %d", rec.Code)
+	}
+}
