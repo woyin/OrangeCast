@@ -486,21 +486,15 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := srv.store.GetSettings(r.Context())
-	deref := func(p *string) string {
-		if p != nil {
-			return *p
-		}
-		return ""
-	}
 	srv.tmpl.Render(w, "settings.html", map[string]any{
-		"TranscriptionModel":    deref(st.TranscriptionModel),
-		"AnalysisModel":         deref(st.AnalysisModel),
-		"HighlightModel":        deref(st.HighlightModel),
-		"QAModel":               deref(st.QAModel),
-		"TranscriptionProvider": deref(st.TranscriptionProvider),
-		"AnalysisProvider":      deref(st.AnalysisProvider),
-		"HighlightProvider":     deref(st.HighlightProvider),
-		"QAProvider":            deref(st.QAProvider),
+		"TranscriptionModel":    ptrStr(st.TranscriptionModel),
+		"AnalysisModel":         ptrStr(st.AnalysisModel),
+		"HighlightModel":        ptrStr(st.HighlightModel),
+		"QAModel":               ptrStr(st.QAModel),
+		"TranscriptionProvider": ptrStr(st.TranscriptionProvider),
+		"AnalysisProvider":      ptrStr(st.AnalysisProvider),
+		"HighlightProvider":     ptrStr(st.HighlightProvider),
+		"QAProvider":            ptrStr(st.QAProvider),
 		"HasOpenAI":             srv.selector.HasOpenAI(),
 		"Saved":                 r.URL.Query().Get("saved") == "1",
 		"CSRF":                  auth.CSRFValue(r),

@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -25,27 +26,13 @@ func (srv *Server) handleEvidenceQA(w http.ResponseWriter, r *http.Request) {
 	sourceID := r.FormValue("source_id")
 	question := r.FormValue("question")
 
-	av, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "无转录稿"})
-		return
-	}
-	var tp provider.TranscriptPayload
-	if err := json.Unmarshal([]byte(av.Payload), &tp); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
+	tp, ok := srv.loadTranscriptJSON(w, r.Context(), sourceType, sourceID)
+	if !ok {
 		return
 	}
 	// 读 settings 选 Q&A Provider + Model
 	st, _ := srv.store.GetSettings(r.Context())
-	qaProvider := "groq"
-	if st.QAProvider != nil && *st.QAProvider != "" {
-		qaProvider = *st.QAProvider
-	}
-	qaModel := ""
-	if st.QAModel != nil {
-		qaModel = *st.QAModel
-	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: qaProvider, Model: qaModel})
+	bundle, err := srv.bundleFor(taskConfigFrom(st.QAProvider, st.QAModel))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -108,14 +95,8 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	av, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "无转录稿"})
-		return
-	}
-	var tp provider.TranscriptPayload
-	if err := json.Unmarshal([]byte(av.Payload), &tp); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
+	tp, ok := srv.loadTranscriptJSON(w, r.Context(), sourceType, sourceID)
+	if !ok {
 		return
 	}
 	segMap := make(map[string]provider.Segment, len(tp.Segments))
@@ -134,15 +115,8 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	st, _ := srv.store.GetSettings(r.Context())
-	pProvider := "groq"
-	if st.HighlightProvider != nil && *st.HighlightProvider != "" {
-		pProvider = *st.HighlightProvider
-	}
-	pModel := ""
-	if st.HighlightModel != nil {
-		pModel = *st.HighlightModel
-	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: pProvider, Model: pModel})
+	cfg := taskConfigFrom(st.HighlightProvider, st.HighlightModel)
+	bundle, err := srv.bundleFor(cfg)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -154,7 +128,7 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row, err := srv.store.CreateParaphrase(r.Context(), sourceType, sourceID, question, res.Text,
-		bundle.Paraphrase.Name(), pModel, res.ReferenceSegmentIDs, tp.Segments)
+		bundle.Paraphrase.Name(), cfg.Model, res.ReferenceSegmentIDs, tp.Segments)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "持久化复述讲解失败"})
 		return
@@ -195,14 +169,8 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 读取当前 Transcript 作为可检索候选 Segment。
-	av, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "无转录稿"})
-		return
-	}
-	var tp provider.TranscriptPayload
-	if err := json.Unmarshal([]byte(av.Payload), &tp); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
+	tp, ok := srv.loadTranscriptJSON(w, r.Context(), sourceType, sourceID)
+	if !ok {
 		return
 	}
 
@@ -237,15 +205,7 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 
 	// 选 Provider（复用 QA Provider/Model 设置，学习对话与问答同属"对话型"任务）。
 	st, _ := srv.store.GetSettings(r.Context())
-	scProvider := "groq"
-	if st.QAProvider != nil && *st.QAProvider != "" {
-		scProvider = *st.QAProvider
-	}
-	scModel := ""
-	if st.QAModel != nil {
-		scModel = *st.QAModel
-	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: scProvider, Model: scModel})
+	bundle, err := srv.bundleFor(taskConfigFrom(st.QAProvider, st.QAModel))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -341,4 +301,39 @@ func (srv *Server) handleStudyChatHistory(w http.ResponseWriter, r *http.Request
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": out})
+}
+
+// loadTranscriptJSON 读取并解析当前 Transcript 版本，返回 TranscriptPayload。
+// 失败时写入 JSON 错误响应并返回 false（供 handler 直接 return）。
+// 收敛 EvidenceQA/Paraphrase/StudyChat 三处重复的"读转录稿 + 解析 payload"。
+func (srv *Server) loadTranscriptJSON(w http.ResponseWriter, ctx context.Context, sourceType models.SourceType, sourceID string) (provider.TranscriptPayload, bool) {
+	av, err := srv.store.GetCurrentVersion(ctx, sourceType, sourceID, store.KindTranscript)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "无转录稿"})
+		return provider.TranscriptPayload{}, false
+	}
+	var tp provider.TranscriptPayload
+	if err := json.Unmarshal([]byte(av.Payload), &tp); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "转录载荷损坏"})
+		return provider.TranscriptPayload{}, false
+	}
+	return tp, true
+}
+
+// taskConfigFrom 从 settings 的 Provider/Model 指针构建任务级 TaskConfig。
+// Provider 为空时回退默认 "groq"（ADR-0009），Model 可为空（由 selector 决定默认模型）。
+func taskConfigFrom(providerPtr, modelPtr *string) provider.TaskConfig {
+	tc := provider.TaskConfig{Provider: ptrStr(providerPtr), Model: ptrStr(modelPtr)}
+	if tc.Provider == "" {
+		tc.Provider = "groq"
+	}
+	return tc
+}
+
+// ptrStr 安全解引用 *string，nil 返回空串。
+func ptrStr(p *string) string {
+	if p != nil {
+		return *p
+	}
+	return ""
 }

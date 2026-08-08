@@ -501,3 +501,42 @@ func TestProcessBatch_SkipsAlreadyQueued(t *testing.T) {
 		t.Errorf("应 enqueued=0&skipped=1（已 queued），实际 %s", loc)
 	}
 }
+
+// TestPageParam 验证 pageParam 的解析：缺省/非法回退 1，合法保留。
+func TestPageParam(t *testing.T) {
+	cases := []struct {
+		query string
+		want  int
+	}{
+		{"", 1},           // 缺省
+		{"page=0", 1},     // 非法（≤0）
+		{"page=abc", 1},   // 非法（非数字）
+		{"page=3", 3},     // 合法
+		{"page=2&x=1", 2}, // 与其他参数共存
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/?"+c.query, nil)
+		if got := pageParam(req); got != c.want {
+			t.Errorf("pageParam(%q) = %d, want %d", c.query, got, c.want)
+		}
+	}
+}
+
+// TestTotalPages 验证 totalPages 向上取整分页。
+func TestTotalPages(t *testing.T) {
+	if got := totalPages(0, 10); got != 0 {
+		t.Errorf("totalPages(0,10) = %d, want 0", got)
+	}
+	if got := totalPages(1, 10); got != 1 {
+		t.Errorf("totalPages(1,10) = %d, want 1", got)
+	}
+	if got := totalPages(10, 10); got != 1 {
+		t.Errorf("totalPages(10,10) = %d, want 1", got)
+	}
+	if got := totalPages(11, 10); got != 2 {
+		t.Errorf("totalPages(11,10) = %d, want 2", got)
+	}
+	if got := totalPages(5, 0); got != 0 {
+		t.Errorf("totalPages(5,0) = %d, want 0", got)
+	}
+}

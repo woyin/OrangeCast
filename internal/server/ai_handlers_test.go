@@ -179,3 +179,90 @@ func TestStudyChat_ValidAnswerReturned(t *testing.T) {
 		t.Error("应标注 generated")
 	}
 }
+
+// TestTaskConfigFrom 验证 taskConfigFrom 从 settings 指针构建 TaskConfig：
+// Provider 空指针回退 "groq"，显式 Provider 保留，Model 空指针得空串。
+func TestTaskConfigFrom(t *testing.T) {
+	// 显式 Provider + Model
+	providerName := "openai"
+	modelName := "gpt-4o"
+	tc := taskConfigFrom(&providerName, &modelName)
+	if tc.Provider != "openai" || tc.Model != "gpt-4o" {
+		t.Fatalf("显式配置应保留，实际 %+v", tc)
+	}
+
+	// Provider 空指针 → 回退 groq
+	tc = taskConfigFrom(nil, nil)
+	if tc.Provider != "groq" {
+		t.Fatalf("空 Provider 应回退 groq，实际 %q", tc.Provider)
+	}
+	if tc.Model != "" {
+		t.Fatalf("空 Model 应得空串，实际 %q", tc.Model)
+	}
+
+	// Provider 为空字符串 → 也回退 groq
+	empty := ""
+	tc = taskConfigFrom(&empty, &empty)
+	if tc.Provider != "groq" {
+		t.Fatalf("空串 Provider 应回退 groq，实际 %q", tc.Provider)
+	}
+}
+
+// TestLoadTranscriptJSON 验证 loadTranscriptJSON 的三种分支：
+// 正常解析、无转录稿（404）、载荷损坏（500）。
+func TestLoadTranscriptJSON(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	// 无转录稿 → 404
+	rec := httptest.NewRecorder()
+	_, ok := srv.loadTranscriptJSON(rec, ctx, models.SourceEpisode, "missing")
+	if ok {
+		t.Fatal("缺转录稿应返回 false")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("缺转录稿应 404，实际 %d", rec.Code)
+	}
+
+	// 建一个 episode 作为 source
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 载荷损坏 → 500
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	v1, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID, `{bad json`)
+	if err != nil {
+		t.Fatalf("创建版本失败: %v", err)
+	}
+	if err := srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, v1); err != nil {
+		t.Fatalf("设置当前版本失败: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	_, ok = srv.loadTranscriptJSON(rec, ctx, models.SourceEpisode, sourceID)
+	if ok {
+		t.Fatal("载荷损坏应返回 false")
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("载荷损坏应 500，实际 %d", rec.Code)
+	}
+
+	// 正常解析 → true
+	v2, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "2", job.ID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"通胀是物价上升"}]}`)
+	if err != nil {
+		t.Fatalf("创建版本失败: %v", err)
+	}
+	if err := srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, v2); err != nil {
+		t.Fatalf("设置当前版本失败: %v", err)
+	}
+	rec = httptest.NewRecorder()
+	tp, ok := srv.loadTranscriptJSON(rec, ctx, models.SourceEpisode, sourceID)
+	if !ok {
+		t.Fatal("正常载荷应返回 true")
+	}
+	if len(tp.Segments) != 1 || tp.Segments[0].ID != "seg-0001" {
+		t.Fatalf("应解析出 1 个 segment，实际 %d 个", len(tp.Segments))
+	}
+}

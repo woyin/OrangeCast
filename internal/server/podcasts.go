@@ -4,7 +4,6 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
@@ -54,15 +53,9 @@ func (srv *Server) handlePodcastDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	page := 1
-	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-		}
-	}
+	page := pageParam(r)
 	const perPage = 10
 	eps, total, _ := srv.store.ListEpisodesPaginated(r.Context(), path, page, perPage)
-	totalPages := (total + perPage - 1) / perPage
 	batchEnqueued := r.URL.Query().Get("enqueued")
 	batchSkipped := r.URL.Query().Get("skipped")
 	batchDone := ""
@@ -72,7 +65,7 @@ func (srv *Server) handlePodcastDetail(w http.ResponseWriter, r *http.Request) {
 	srv.tmpl.Render(w, "podcast_detail.html", map[string]any{
 		"Podcast": p, "Episodes": eps, "CSRF": auth.CSRFValue(r),
 		"BatchDone": batchDone, "BatchEnqueued": batchEnqueued, "BatchSkipped": batchSkipped,
-		"Page": page, "TotalPages": totalPages, "Total": total,
+		"Page": page, "TotalPages": totalPages(total, perPage), "Total": total,
 		"PrevPage": page - 1, "NextPage": page + 1,
 	})
 }

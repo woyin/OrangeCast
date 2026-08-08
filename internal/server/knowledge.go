@@ -5,7 +5,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
@@ -13,23 +12,17 @@ import (
 )
 
 func (srv *Server) handleKeyPoints(w http.ResponseWriter, r *http.Request) {
-	page := 1
-	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-		}
-	}
+	page := pageParam(r)
 	const perPage = 20
 	kps, total, err := srv.store.ListKeyPoints(r.Context(), page, perPage)
 	if err != nil {
 		http.Error(w, "加载失败", http.StatusInternalServerError)
 		return
 	}
-	totalPages := (total + perPage - 1) / perPage
 	srv.tmpl.Render(w, "keypoints.html", map[string]any{
 		"KeyPoints":  kps,
 		"Page":       page,
-		"TotalPages": totalPages,
+		"TotalPages": totalPages(total, perPage),
 		"Total":      total,
 		"PrevPage":   page - 1,
 		"NextPage":   page + 1,

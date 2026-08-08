@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -57,6 +58,24 @@ func sanitizeFilename(s string) string {
 		return "cloudwisepod-note"
 	}
 	return out
+}
+
+// pageParam 解析 ?page= 查询参数，非法或缺省回退 1。
+func pageParam(r *http.Request) int {
+	if v := r.URL.Query().Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+// totalPages 由总数与每页数量计算总页数（向上取整）。
+func totalPages(total, perPage int) int {
+	if perPage <= 0 {
+		return 0
+	}
+	return (total + perPage - 1) / perPage
 }
 
 // sourceStatusAndError 返回 source 的处理状态与最近一次失败原因。
