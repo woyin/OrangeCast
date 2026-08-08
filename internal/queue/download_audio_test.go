@@ -38,3 +38,21 @@ func TestDownloadAudio_RealEpisodeURL(t *testing.T) {
 	}
 	t.Logf("下载成功，大小=%d", fi.Size())
 }
+
+// TestGuessAudioExt 验证音频扩展名推断（含大小写与未知回退）。
+func TestGuessAudioExt(t *testing.T) {
+	cases := map[string]string{
+		"https://cdn.example.com/a.mp3": ".mp3",
+		"https://cdn.example.com/b.M4A": ".m4a",
+		"https://cdn.example.com/c.wav": ".wav",
+		"https://cdn.example.com/d.aac": ".aac",
+		"https://cdn.example.com/e.ogg": ".ogg",
+		"https://cdn.example.com/noext": ".mp3", // 未知回退
+		"https://cdn.example.com/f.pdf": ".mp3", // 非音频扩展回退
+	}
+	for in, want := range cases {
+		if got := guessAudioExt(in); got != want {
+			t.Errorf("guessAudioExt(%q)=%q want %q", in, got, want)
+		}
+	}
+}
