@@ -724,3 +724,38 @@ func (f *fakeHighlightOK) GenerateHighlights(segments []provider.Segment) (*prov
 	}, nil
 }
 func (f *fakeHighlightOK) Name() string { return "fake-highlight" }
+
+// TestFetchRawAudio_Upload 验证 upload 源返回原始落盘文件路径。
+func TestFetchRawAudio_Upload(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 在 tempDir/uploads 落盘
+	rawDir := filepath.Join(w.tempDir, "uploads")
+	os.MkdirAll(rawDir, 0o755)
+	os.WriteFile(filepath.Join(rawDir, up.ID), []byte("audio"), 0o644)
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID}
+	path, cleanup, err := w.fetchRawAudio(ctx, job)
+	if err != nil {
+		t.Fatalf("fetchRawAudio: %v", err)
+	}
+	if path != filepath.Join(rawDir, up.ID) {
+		t.Errorf("路径错误: %q", path)
+	}
+	if cleanup == nil {
+		t.Error("cleanup 不应为 nil")
+	}
+	cleanup() // 应安全调用
+}
+
+// TestFetchRawAudio_UploadMissing 验证 upload 文件不存在时返回错误。
+func TestFetchRawAudio_UploadMissing(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID}
+	if _, _, err := w.fetchRawAudio(ctx, job); err == nil {
+		t.Fatal("upload 文件不存在应报错")
+	}
+}
