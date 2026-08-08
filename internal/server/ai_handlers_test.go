@@ -385,6 +385,16 @@ func TestEvidenceQA_Handler(t *testing.T) {
 	}
 }
 
+// TestEvidenceQA_NonPost405 验证非 POST 请求返回 405。
+func TestEvidenceQA_NonPost405(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "eqa405@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/evidence-qa")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("非 POST 应 405，实际 %d", rec.Code)
+	}
+}
+
 // TestTaskConfigFrom 验证 taskConfigFrom 从 settings 指针构建 TaskConfig：
 // Provider 空指针回退 "groq"，显式 Provider 保留，Model 空指针得空串。
 func TestTaskConfigFrom(t *testing.T) {
