@@ -89,3 +89,12 @@ func TestRefreshAll_FetchErrorContinues(t *testing.T) {
 type feedErr struct{}
 
 func (e *feedErr) Error() string { return "抓取失败" }
+
+// TestRefresher_StartStop 验证 Refresher 的 cron 启动/停止可安全调用（不 panic）。
+func TestRefresher_StartStop(t *testing.T) {
+	r := NewRefresher(nil)
+	r.Start()
+	r.Start() // 重复启动应安全
+	r.Stop()
+	r.Stop() // 重复停止应安全
+}
