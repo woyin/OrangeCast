@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -350,6 +351,71 @@ type errGenFailed struct{}
 
 func (errGenFailed) Error() string { return "生成失败" }
 
+// TestStudyChat_MissingTranscript 验证无转录稿时 StudyChat 返回 404。
+func TestStudyChat_MissingTranscript(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scmiss@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 不 seedTranscript → 无转录稿
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+eps[0].ID+"&question=通胀是啥")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无转录稿应 404，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestStudyChat_BundleForError 验证 bundleFor 失败时返回 500。
+func TestStudyChat_BundleForError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scbundle@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return nil, errors.New("bundle failed")
+	}
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("bundleFor 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestStudyChat_SessionDBError 通过删除 study_sessions 表（保留 sessions 使认证通过）
+// 触发 handleStudyChat 建会话/读历史/追加消息的 DB 错误分支，返回 500。
+func TestStudyChat_SessionDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scdbtbl@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
+		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	}
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{
+			Answer: &provider.StudyChatMessage{Role: "assistant", Content: "回答", ReferenceSegmentIDs: []string{"seg-0001"}},
+		}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("study_sessions 表缺失应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
 // 无引用拒答 422、有引用 200。
 func TestEvidenceQA_Handler(t *testing.T) {
@@ -392,6 +458,62 @@ func TestEvidenceQA_NonPost405(t *testing.T) {
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/evidence-qa")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("非 POST 应 405，实际 %d", rec.Code)
+	}
+}
+
+// TestEvidenceQA_MissingTranscript 验证无转录稿时 EvidenceQA 返回 404（loadTranscriptJSON 拒绝）。
+func TestEvidenceQA_MissingTranscript(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "eqamiss@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 不 seedTranscript → 无转录稿
+	rec := postForm(t, srv, cookie, "/api/evidence-qa",
+		"source_type=episode&source_id="+eps[0].ID+"&question=通胀是啥")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无转录稿应 404，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestEvidenceQA_AnswerError 验证 QA Provider 报错时返回 500。
+func TestEvidenceQA_AnswerError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "eqaerr@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = fakeBundleFor(&fakeQA{err: errors.New("qa down")}, nil, nil, nil)
+	rec := postForm(t, srv, cookie, "/api/evidence-qa",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("QA 报错应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestEvidenceQA_BundleForError 验证 bundleFor 失败时返回 500。
+func TestEvidenceQA_BundleForError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "eqabundle@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return nil, errors.New("bundle failed")
+	}
+	rec := postForm(t, srv, cookie, "/api/evidence-qa",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("bundleFor 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
