@@ -705,3 +705,47 @@ func TestProgress_Page_Renders(t *testing.T) {
 		t.Errorf("页面应含队列中的集标题，实际 %s", rec.Body.String())
 	}
 }
+
+// TestKeyPointsSearch 验证 KeyPoint 搜索接口：空查询返回空、命中返回结果。
+func TestKeyPointsSearch(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "kpsearch@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	card := &provider.KnowledgeCard{
+		Title:     "T",
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{{Content: "sovereign wealth funds change global investment", Description: "long-term investors", Citations: []string{"seg-0001"}}},
+	}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "sovereign wealth"}}
+	if err := srv.store.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep1", 1, card, segs); err != nil {
+		t.Fatalf("IndexKeyPoints: %v", err)
+	}
+
+	// 空查询 → 空 results
+	req := httptest.NewRequest(http.MethodGet, "/api/keypoints/search?q=", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("空查询应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"results":[]`) {
+		t.Errorf("空查询应返回空 results，实际 %s", rec.Body.String())
+	}
+
+	// 命中查询
+	req = httptest.NewRequest(http.MethodGet, "/api/keypoints/search?q=wealth", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("搜索应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "sovereign wealth funds") {
+		t.Errorf("应命中 KeyPoint，实际 %s", rec.Body.String())
+	}
+}

@@ -180,6 +180,42 @@ func TestStudyChat_ValidAnswerReturned(t *testing.T) {
 	}
 }
 
+// TestStudyChatHistory 验证历史回放接口返回会话消息（含 Reference）。
+func TestStudyChatHistory(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "schist@example.com", "password123")
+	ctx := context.Background()
+
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, "ep-1", "会话")
+	srv.store.AppendStudyMessage(ctx, sess.ID, "user", "通胀是什么", nil, false)
+	srv.store.AppendStudyMessage(ctx, sess.ID, "assistant", "通胀是物价上涨", []string{"seg-0001"}, false)
+
+	// 缺 session_id → 400
+	req := httptest.NewRequest(http.MethodGet, "/api/study-chat/history", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("缺 session_id 应 400，实际 %d", rec.Code)
+	}
+
+	// 正常历史
+	req = httptest.NewRequest(http.MethodGet, "/api/study-chat/history?session_id="+sess.ID, nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("历史接口应 200，实际 %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "通胀是物价上涨") {
+		t.Errorf("应含 assistant 消息，实际 %s", body)
+	}
+	if !strings.Contains(body, "seg-0001") {
+		t.Errorf("应含 reference_segment_ids，实际 %s", body)
+	}
+}
+
 // TestTaskConfigFrom 验证 taskConfigFrom 从 settings 指针构建 TaskConfig：
 // Provider 空指针回退 "groq"，显式 Provider 保留，Model 空指针得空串。
 func TestTaskConfigFrom(t *testing.T) {
