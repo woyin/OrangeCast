@@ -372,3 +372,19 @@ func TestRestore_InvalidGzip(t *testing.T) {
 		t.Fatal("非 gzip 备份包应报错")
 	}
 }
+
+// TestCreate_UnreadableEvidence 验证证据文件不可读时 Create 报错（覆盖证据扫描错误分支）。
+func TestCreate_UnreadableEvidence(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	// 追加一个不可读的证据文件 → filepath.Walk 中 fileSHA256 打开失败
+	evDir := filepath.Join(srcDir, "evidence")
+	bad := filepath.Join(evDir, "unreadable.mp3")
+	if err := os.WriteFile(bad, []byte("secret"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
+	if _, err := Create(context.Background(), srcStore, evDir, backupFile); err == nil {
+		t.Fatal("存在不可读证据文件时 Create 应报错")
+	}
+}
