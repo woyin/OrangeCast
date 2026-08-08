@@ -216,6 +216,16 @@ func TestStudyChatHistory(t *testing.T) {
 	}
 }
 
+// TestStudyChat_EmptyQuestion 验证空问题返回 400。
+func TestStudyChat_EmptyQuestion(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sce@example.com", "password123")
+	rec := postForm(t, srv, cookie, "/api/study-chat", "source_type=episode&source_id=ep-1&question=")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("空问题应 400，实际 %d", rec.Code)
+	}
+}
+
 // TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
 // 无引用拒答 422、有引用 200。
 func TestEvidenceQA_Handler(t *testing.T) {
