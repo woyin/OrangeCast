@@ -166,3 +166,20 @@ func TestValidCitations(t *testing.T) {
 		t.Errorf("应去重+过滤后返回 [s1 s2]，实际 %v", out)
 	}
 }
+
+// TestListKeyPoints_PageNormalization 验证 page/perPage 边界归一化（负数/0 回退到默认）。
+func TestListKeyPoints_PageNormalization(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+
+	// 用非法 page/perPage（0/负数）调用，不应报错且应为默认分页。
+	if _, total, err := s.ListKeyPoints(ctx, 0, 0); err != nil {
+		t.Fatalf("page=0/perPage=0 应归一化不报错: %v", err)
+	} else if total != 0 {
+		t.Errorf("空库 total 应为 0，实际 %d", total)
+	}
+	if _, _, err := s.ListKeyPoints(ctx, -1, -5); err != nil {
+		t.Fatalf("page=-1/perPage=-5 应归一化不报错: %v", err)
+	}
+}
