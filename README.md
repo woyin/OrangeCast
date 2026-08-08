@@ -194,7 +194,7 @@ go build ./cmd/cloudwisepod
 git diff --check
 ```
 
-测试覆盖：迁移（含数据修复 0015）、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet（含 ReferenceCheck 6 场景）、Markdown golden、分段搜索、EvidenceQA 拒答、StudyChat 硬约束（scope 缰绳 + ReferenceCheck 抑制）、Paraphrase 最近 N 次淘汰、Narration 合成（Provider 不可用跳过/幂等/单段失败不阻塞）、Highlight 稳定 ID、DJ 页渲染、Narration serve、批量入队。
+测试覆盖（220+ 测试函数）：迁移（含数据修复 0015）、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet（含 ReferenceCheck 6 场景 + CheckReferenceSamples 评测入口）、Markdown golden、分段搜索、EvidenceQA 拒答、StudyChat 硬约束（scope 缰绳 + ReferenceCheck 抑制）、Paraphrase 最近 N 次淘汰、Narration 合成（Provider 不可用跳过/幂等/单段失败不阻塞）、Highlight 稳定 ID、DJ 页渲染、Narration serve、批量入队、RSS 解析（parseFeed/firstEnclosureURL）、Refresher 刷新（合并/去重/失败继续）、auth 中间件（RequireAuth/CSRFProtect/RateLimiter/ClientIP）、store 生命周期（证据音频/Purge 意图/学习会话/Upload/分页/知识图谱/worker 租约）。各包覆盖率：config 93%、markdown 94%、evalset 83%、auth 80%、store 80%、backup 74%、queue 62%、rss 59%、provider 50%、server 51%。
 
 ---
 
