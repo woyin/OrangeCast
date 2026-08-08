@@ -298,6 +298,36 @@ func TestStudyChat_ReuseSession(t *testing.T) {
 	}
 }
 
+// TestStudyChat_GenerationError 验证生成失败时返回 500。
+func TestStudyChat_GenerationError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scgen@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	// 注入生成失败的 fake
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{err: errGenFailed{}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("生成失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "学习对话生成失败") {
+		t.Errorf("应返回生成失败错误，实际 %s", rec.Body.String())
+	}
+}
+
+type errGenFailed struct{}
+
+func (errGenFailed) Error() string { return "生成失败" }
+
 // TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
 // 无引用拒答 422、有引用 200。
 func TestEvidenceQA_Handler(t *testing.T) {
