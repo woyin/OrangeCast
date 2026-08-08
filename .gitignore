@@ -48,3 +48,4 @@ go.work.sum
 .agents/
 .claude/
 skills-lock.json
+internal/server/*_hl-a_1.wav

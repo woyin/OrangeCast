@@ -45,7 +45,7 @@ func (srv *Server) handleEvidenceQA(w http.ResponseWriter, r *http.Request) {
 	if st.QAModel != nil {
 		qaModel = *st.QAModel
 	}
-	bundle, err := srv.selector.BundleForTask(provider.TaskConfig{Provider: qaProvider, Model: qaModel})
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: qaProvider, Model: qaModel})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -147,7 +147,7 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 	if st.HighlightModel != nil {
 		pModel = *st.HighlightModel
 	}
-	bundle, err := srv.selector.BundleForTask(provider.TaskConfig{Provider: pProvider, Model: pModel})
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: pProvider, Model: pModel})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -250,7 +250,7 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 	if st.QAModel != nil {
 		scModel = *st.QAModel
 	}
-	bundle, err := srv.selector.BundleForTask(provider.TaskConfig{Provider: scProvider, Model: scModel})
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: scProvider, Model: scModel})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return

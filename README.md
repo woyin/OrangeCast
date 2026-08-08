@@ -48,6 +48,7 @@
 - Go 1.25+
 - ffmpeg（音频转码，适配 Groq Whisper 上传限制）
 - Groq API key（https://console.groq.com/keys，免费）
+- Kokoro TTS（可选，仅 Narration 解说音轨需要；未安装时 Narration 自动跳过、不影响其他功能）
 
 ### 本地运行
 
@@ -98,6 +99,10 @@ docker compose up -d
 | `DATA_DIR` | 否 | 统一数据目录（DB/evidence/tmp/backups） | ./data |
 | `PUBLIC_URL` | 否 | 公网 URL；决定 Secure Cookie 与 Citation 链接 | http://localhost:8080 |
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
+| `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
+| `KOKORO_BINARY` | 否 | Kokoro TTS 二进制路径（自托管，零成本） | `kokoro`（PATH 查找） |
+| `KOKORO_VOICE` | 否 | Narration 默认音色 | `af_heart` |
+| `KOKORO_MODEL` | 否 | Kokoro 模型文件路径（某些发行版需要） | 空 |
 
 ---
 
@@ -161,7 +166,16 @@ CONTEXT.md              领域词汇表
 | **Segment** | 有起止时间的连续文本，Citation 的最小核验单位 |
 | **Citation** | 衍生内容与 Segment 之间的可验证关系；时间范围由程序计算 |
 | **KnowledgeCard** | AI 生成的结构化中间产物（摘要/要点/章节/金句，全部带 Citation） |
-| **Highlight** | AI 选出的高光音频区间（DJ 模式） |
+| **Highlight** | AI 选出的高光音频区间（DJ 模式），带稳定 ID |
+| **Reference** | GeneratedDerivative 与 Segment 的弱关联（表示参考，非可核验） |
+| **CitedDerivative** | 忠实于原文、挂 Citation 可核验的衍生内容 |
+| **GeneratedDerivative** | AI 重新组织/讲解、挂 Reference 非原文的衍生内容 |
+| **Gist** | 高光/章节的 AI 概括解说（GeneratedDerivative） |
+| **Paraphrase** | 按需触发的局部重讲（GeneratedDerivative，按锚点保留最近 3 次） |
+| **EvidenceQA** | 查证型问答，挂 Citation、无可靠引用拒答 |
+| **StudyChat** | 学习型对话（GeneratedDerivative），两条硬约束防脱稿 |
+| **StudySession** | 一次 StudyChat 交互的会话容器 |
+| **Narration** | 高光 Gist 的 TTS 解说音轨（GeneratedDerivative 音频形态，自托管 Kokoro） |
 | **Annotation** | Owner 在 Citation 上的个人标注 |
 | **Pin** | Owner 标记 Citation 值得记住 |
 | **Collection** | Owner 把跨 Source 的 Citation 按主题组织成的集合 |
@@ -180,13 +194,16 @@ go build ./cmd/cloudwisepod
 git diff --check
 ```
 
-测试覆盖：迁移、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet（含 ReferenceCheck 6 场景）、Markdown golden、分段搜索、EvidenceQA 拒答、StudyChat 硬约束、Paraphrase 最近 N 次淘汰、批量入队。
+测试覆盖：迁移（含数据修复 0015）、备份/恢复 E2E、Owner 认领、CSRF/限流、EvidenceAudio、worker 崩溃恢复、Citation 校验、EvalSet（含 ReferenceCheck 6 场景）、Markdown golden、分段搜索、EvidenceQA 拒答、StudyChat 硬约束（scope 缰绳 + ReferenceCheck 抑制）、Paraphrase 最近 N 次淘汰、Narration 合成（Provider 不可用跳过/幂等/单段失败不阻塞）、Highlight 稳定 ID、DJ 页渲染、Narration serve、批量入队。
 
 ---
 
 ## 产品边界
 
-**CloudWisePod 是 EvidenceArchive**——所有衍生内容都有真实 Citation 可核验。
+**CloudWisePod 是分层学习平台**——原始来源（EvidenceAudio + Transcript）不可改写，AI 衍生内容分两级：
+- **CitedDerivative（带证衍生）**：忠实于原文，挂 Citation 可逐字核验（摘要/要点/章节/金句）。
+- **GeneratedDerivative（生成衍生）**：AI 重新组织/讲解，明确标注非原文，挂 Reference 仅表示参考（Gist/Paraphrase/StudyChat/Narration）。
+平台帮 Owner 一眼区分两类，而不是替 Owner 判断。
 
 **明确不做**：多用户/SaaS、跨 Source RAG、语义搜索、Obsidian 插件/双向同步、自动处理所有新 Episode。
 

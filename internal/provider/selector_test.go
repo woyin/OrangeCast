@@ -81,3 +81,40 @@ func TestSelector_HasGroq_HasOpenAI(t *testing.T) {
 		t.Error("HasGroq/HasOpenAI 返回不正确")
 	}
 }
+
+// fakeNarrationP minimal NarrationProvider for selector test.
+type fakeNarrationP struct{}
+
+func (fakeNarrationP) Synthesize(text, voice, outPath string) (*NarrationResult, error) {
+	return nil, nil
+}
+func (fakeNarrationP) Available() bool { return true }
+func (fakeNarrationP) Name() string    { return "fake-narration" }
+
+// TestSelector_WithNarration_AttachesToBundles (ADR-0019)
+// WithNarration 注入了 Narration provider，且不随 groq/openai 开关丢失。
+func TestSelector_WithNarration_AttachesToBundles(t *testing.T) {
+	sel := NewSelector("g", "o").WithNarration(fakeNarrationP{})
+	// Groq bundle
+	gb, err := sel.Bundle("groq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gb.Narration == nil || gb.Narration.Name() != "fake-narration" {
+		t.Error("Groq bundle 应携带注入的 Narration provider")
+	}
+	// OpenAI bundle
+	ob, err := sel.Bundle("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ob.Narration == nil || ob.Narration.Name() != "fake-narration" {
+		t.Error("OpenAI bundle 应携带注入的 Narration provider")
+	}
+	// 未注入时 Narration 为 nil
+	sel2 := NewSelector("g", "o")
+	b2, _ := sel2.Bundle("groq")
+	if b2.Narration != nil {
+		t.Error("未注入 WithNarration 时 Narration 应为 nil")
+	}
+}
