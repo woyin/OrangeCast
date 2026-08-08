@@ -1120,6 +1120,46 @@ func TestDownloadMarkdown(t *testing.T) {
 	}
 }
 
+// TestDownloadMarkdown_WithGenerated 验证 with_generated=1 时下沉 Paraphrase 与 StudyChat 块。
+func TestDownloadMarkdown_WithGenerated(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdgen@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	vt, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"通胀是物价上升"}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, vt)
+	cardPayload := `{"title":"通胀解析","summary":{"text":"概览","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`
+	vc, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, "groq", "m", "1", job.ID, cardPayload)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard, vc)
+
+	// 造 Paraphrase + StudyChat 消息
+	srv.store.CreateParaphrase(ctx, models.SourceEpisode, sourceID, "解释通胀", "通胀就是购买力下降", "groq", "m", []string{"seg-0001"},
+		[]provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
+	srv.store.AppendStudyMessage(ctx, sess.ID, "assistant", "通胀就是货币购买力下降", []string{"seg-0001"}, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/sources/episode/"+sourceID+"/download?with_generated=1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("with_generated 应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "通胀就是购买力下降") {
+		t.Errorf("应下沉 Paraphrase 块，实际 %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "通胀就是货币购买力下降") {
+		t.Errorf("应下沉 StudyChat 块，实际 %s", rec.Body.String())
+	}
+}
+
 // TestAudio_ServesEvidence 验证 /api/audio 优先返回证据音频文件。
 func TestAudio_ServesEvidence(t *testing.T) {
 	srv := newTestServer(t)
