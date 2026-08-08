@@ -755,6 +755,38 @@ func TestPodcastsList_Renders(t *testing.T) {
 	}
 }
 
+// TestPodcastDetail_Renders 验证播客详情页渲染（含批量入队回显参数）。
+func TestPodcastDetail_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "poddet@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "测试播客", "desc", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+
+	// 带批量入队回显参数
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/podcasts/"+p.ID+"?enqueued=1&skipped=0")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("播客详情应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "测试播客") {
+		t.Errorf("页面应含播客标题，实际 %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Ep") {
+		t.Errorf("页面应含单集标题，实际 %s", rec.Body.String())
+	}
+}
+
+// TestPodcastDetail_NotFound 验证不存在的播客返回 404。
+func TestPodcastDetail_NotFound(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "pod404@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/podcasts/nonexistent")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("不存在的播客应 404，实际 %d", rec.Code)
+	}
+}
+
 // TestUploads_Renders 验证上传列表页在认证后正常渲染（含上传条目）。
 func TestUploads_Renders(t *testing.T) {
 	srv := newTestServer(t)
