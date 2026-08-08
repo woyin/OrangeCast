@@ -312,6 +312,29 @@ func TestRegister_WeakPasswordRejected(t *testing.T) {
 	}
 }
 
+// TestRegister_InvalidEmailRejected 验证非法邮箱被拒绝。
+func TestRegister_InvalidEmailRejected(t *testing.T) {
+	srv := newTestServer(t)
+	req0 := httptest.NewRequest(http.MethodGet, "/register", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/register",
+		strings.NewReader("_csrf="+csrf+"&email=not-an-email&password=password123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "邮箱格式无效") {
+		t.Errorf("非法邮箱应被拒绝并提示，实际 %s", rec.Body.String())
+	}
+}
+
 func TestSourceDetailRender_FailedStatus(t *testing.T) {
 	tmpl, err := NewTemplates()
 	if err != nil {
