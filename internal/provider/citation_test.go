@@ -90,3 +90,58 @@ func TestResolveCitationRange(t *testing.T) {
 		t.Error("未知 citation 不应解析成功")
 	}
 }
+
+// TestResolveCitationSpan 验证多 Citation 聚合时间范围：min(start)–max(end)。
+func TestResolveCitationSpan(t *testing.T) {
+	segs := testSegments()
+	// 跨 seg-0001(0-5) 与 seg-0003(10-15) → 0-15
+	start, end, ok := ResolveCitationSpan([]string{"seg-0001", "seg-0003"}, segs)
+	if !ok || start != 0 || end != 15 {
+		t.Errorf("跨段聚合错误: %v %v %v", start, end, ok)
+	}
+	// 空引用 → ok=false
+	if _, _, ok := ResolveCitationSpan(nil, segs); ok {
+		t.Error("空引用应 ok=false")
+	}
+	// 含未知引用 → 忽略未知，已知仍解析
+	start, end, ok = ResolveCitationSpan([]string{"seg-9999", "seg-0002"}, segs)
+	if !ok || start != 5 || end != 10 {
+		t.Errorf("应忽略未知引用并解析已知: %v %v %v", start, end, ok)
+	}
+	// 全部未知 → ok=false
+	if _, _, ok := ResolveCitationSpan([]string{"seg-x", "seg-y"}, segs); ok {
+		t.Error("全部未知引用应 ok=false")
+	}
+}
+
+// TestResolveReferenceRange 验证 Reference 聚合时间范围（程序计算，不声称逐字）。
+func TestResolveReferenceRange(t *testing.T) {
+	segs := testSegments()
+	start, end := ResolveReferenceRange([]string{"seg-0001", "seg-0003"}, segs)
+	if start != 0 || end != 15 {
+		t.Errorf("Reference 聚合错误: %v %v", start, end)
+	}
+	// 空引用 → 0,0
+	start, end = ResolveReferenceRange(nil, segs)
+	if start != 0 || end != 0 {
+		t.Errorf("空引用应 0,0，实际 %v %v", start, end)
+	}
+	// 未知引用 → 0,0
+	start, end = ResolveReferenceRange([]string{"seg-x"}, segs)
+	if start != 0 || end != 0 {
+		t.Errorf("未知引用应 0,0，实际 %v %v", start, end)
+	}
+}
+
+// TestTruncate 验证 truncate 截断逻辑：短于等于 n 原样返回，超长截断加省略号。
+func TestTruncate(t *testing.T) {
+	if got := truncate("abc", 5); got != "abc" {
+		t.Errorf("短文本应原样，实际 %q", got)
+	}
+	if got := truncate("abcdef", 3); got != "abc..." {
+		t.Errorf("超长应截断加省略号，实际 %q", got)
+	}
+	if got := truncate("", 3); got != "" {
+		t.Errorf("空串应原样，实际 %q", got)
+	}
+}
