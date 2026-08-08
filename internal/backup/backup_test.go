@@ -1,6 +1,8 @@
 package backup
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"os"
@@ -171,6 +173,54 @@ func TestCreate_InvalidDestDir(t *testing.T) {
 	badDest := filepath.Join(blocker, "sub", "b.tar.gz")
 	if _, err := Create(ctx, srcStore, filepath.Join(srcDir, "evidence"), badDest); err == nil {
 		t.Fatal("目标目录不可创建应报错")
+	}
+}
+
+// TestRestore_MissingManifest 验证备份包缺 manifest 时 Restore 报错。
+func TestRestore_MissingManifest(t *testing.T) {
+	// 构造一个只有 db 文件、无 manifest 的 tar.gz
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("缺 manifest 应报错")
+	}
+}
+
+// TestRestore_InvalidFormat 验证 manifest 格式版本不符时 Restore 报错。
+func TestRestore_InvalidFormat(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// 写入格式错误的 manifest
+	manifest := []byte(`{"format":"wrong-format","version":99}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("格式不符应报错")
 	}
 }
 
