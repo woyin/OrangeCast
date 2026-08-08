@@ -813,3 +813,36 @@ func TestProcessJob_UnknownType(t *testing.T) {
 		t.Fatal("未知 job_type 应报错")
 	}
 }
+
+// TestSetSourceStatus_Episode 验证 episode source 状态更新。
+func TestSetSourceStatus_Episode(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job := &models.ProcessingJob{SourceType: models.SourceEpisode, SourceID: sourceID}
+	w.setSourceStatus(ctx, job, models.StatusTranscribing)
+	// 验证已更新
+	ep, err := s.GetEpisodeByID(ctx, sourceID)
+	if err != nil {
+		t.Fatalf("GetEpisodeByID: %v", err)
+	}
+	if ep.ProcessingStatus != models.StatusTranscribing {
+		t.Errorf("episode 状态应 Transcribing，实际 %q", ep.ProcessingStatus)
+	}
+}
+
+// TestSetSourceStatus_Upload 验证 upload source 状态更新。
+func TestSetSourceStatus_Upload(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID}
+	w.setSourceStatus(ctx, job, models.StatusTranscribing)
+	got, err := s.GetUploadByID(ctx, up.ID)
+	if err != nil {
+		t.Fatalf("GetUploadByID: %v", err)
+	}
+	if got.ProcessingStatus != models.StatusTranscribing {
+		t.Errorf("upload 状态应 Transcribing，实际 %q", got.ProcessingStatus)
+	}
+}
