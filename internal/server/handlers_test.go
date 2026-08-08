@@ -540,3 +540,64 @@ func TestTotalPages(t *testing.T) {
 		t.Errorf("totalPages(5,0) = %d, want 0", got)
 	}
 }
+
+// TestProcess_EnqueuesSingleAndRedirects 验证单集入队并重定向到 source 详情。
+func TestProcess_EnqueuesSingleAndRedirects(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "proc@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+
+	// GET 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	body := "_csrf=" + csrf + "&source_type=episode&source_id=" + eps[0].ID
+	req := httptest.NewRequest(http.MethodPost, "/api/process", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("应 303 重定向，实际 %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "/sources/episode/"+eps[0].ID) {
+		t.Errorf("重定向应指向 source 详情，实际 %q", rec.Header().Get("Location"))
+	}
+	jobs, _ := srv.store.ListQueuedOrRunning(ctx)
+	if len(jobs) != 1 {
+		t.Errorf("应入队 1 个 job，实际 %d", len(jobs))
+	}
+}
+
+// TestPodcastsList_Renders 验证播客列表页在认证后正常渲染。
+func TestPodcastsList_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podlist@example.com", "password123")
+	ctx := context.Background()
+
+	srv.store.CreatePodcast(ctx, "https://feed.xml", "甲播客", "desc", "")
+	req := httptest.NewRequest(http.MethodGet, "/podcasts", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("播客列表应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "甲播客") {
+		t.Errorf("页面应含播客标题，实际 %s", rec.Body.String())
+	}
+}
