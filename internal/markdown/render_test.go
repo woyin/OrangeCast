@@ -163,3 +163,45 @@ func TestRender_GeneratedBlocks_Tiered(t *testing.T) {
 		t.Error("默认下载不应包含 GeneratedDerivative 区块（禁止自动写入，ADR-0018）")
 	}
 }
+
+// TestFmtTime 验证时间格式化（秒 → m:ss 或 h:mm:ss）。
+func TestFmtTime(t *testing.T) {
+	if got := fmtTime(0); got != "0:00" {
+		t.Errorf("fmtTime(0)=%q want 0:00", got)
+	}
+	if got := fmtTime(65); got != "1:05" {
+		t.Errorf("fmtTime(65)=%q want 1:05", got)
+	}
+	if got := fmtTime(3661); got != "1:01:01" {
+		t.Errorf("fmtTime(3661)=%q want 1:01:01", got)
+	}
+}
+
+// TestFrontmatterValue 验证 frontmatter 值转义与引号包裹。
+func TestFrontmatterValue(t *testing.T) {
+	if got := frontmatterValue(""); got != `""` {
+		t.Errorf("空串应返回空引号，实际 %q", got)
+	}
+	if got := frontmatterValue("普通值"); got != "普通值" {
+		t.Errorf("普通值不应加引号，实际 %q", got)
+	}
+	if got := frontmatterValue("含:冒号"); got != `"含:冒号"` {
+		t.Errorf("含冒号应加引号，实际 %q", got)
+	}
+	if got := frontmatterValue(`含"引号"`); got != `"含\"引号\""` {
+		t.Errorf("含引号应转义并加引号，实际 %q", got)
+	}
+}
+
+// TestReferenceLinks 验证参考链接生成：有效引用生成链接、无效引用跳过。
+func TestReferenceLinks(t *testing.T) {
+	segs := []provider.Segment{{ID: "s1", Start: 0, End: 5, Text: "x"}}
+	got := referenceLinks("episode", "ep-1", "https://cwp.example.com", []string{"s1"}, segs)
+	if !strings.Contains(got, "/sources/episode/ep-1?ref=0.0#seg-s1") {
+		t.Errorf("应生成参考链接，实际 %q", got)
+	}
+	// 无效引用 → 空串
+	if got := referenceLinks("episode", "ep-1", "https://cwp.example.com", []string{"nope"}, segs); got != "" {
+		t.Errorf("无效引用应返回空串，实际 %q", got)
+	}
+}
