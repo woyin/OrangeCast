@@ -6,6 +6,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1042,5 +1044,47 @@ func TestDownloadMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(rec.Header().Get("Content-Type"), "text/markdown") {
 		t.Errorf("Content-Type 应为 markdown，实际 %q", rec.Header().Get("Content-Type"))
+	}
+}
+
+// TestAudio_ServesEvidence 验证 /api/audio 优先返回证据音频文件。
+func TestAudio_ServesEvidence(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audio@example.com", "password123")
+	ctx := context.Background()
+
+	// 建 episode 作为 source
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 写入证据音频记录 + 文件
+	if err := srv.store.UpsertEvidenceAudio(ctx, models.SourceEpisode, sourceID, "episode_"+sourceID+".mp3", "mp3", 11, "abc"); err != nil {
+		t.Fatalf("UpsertEvidenceAudio: %v", err)
+	}
+	os.MkdirAll(srv.cfg.EvidenceDir, 0o755)
+	if err := os.WriteFile(filepath.Join(srv.cfg.EvidenceDir, "episode_"+sourceID+".mp3"), []byte("fake-audio"), 0o644); err != nil {
+		t.Fatalf("写证据文件: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/episode/"+sourceID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("证据音频应 200，实际 %d", rec.Code)
+	}
+	if rec.Body.String() != "fake-audio" {
+		t.Errorf("应返回证据音频内容，实际 %q", rec.Body.String())
+	}
+
+	// 无音频 → 404
+	req = httptest.NewRequest(http.MethodGet, "/api/audio/episode/nonexistent", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无音频应 404，实际 %d", rec.Code)
 	}
 }
