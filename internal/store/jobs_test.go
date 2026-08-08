@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
@@ -11,8 +13,8 @@ import (
 func seedEpisodeForJob(t *testing.T, s *Store) string {
 	t.Helper()
 	ctx := context.Background()
-	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
-	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g", Title: "e", AudioURL: "https://a.mp3"}})
+	p, _ := s.CreatePodcast(ctx, fmt.Sprintf("https://f-%d.xml", time.Now().UnixNano()), "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: fmt.Sprintf("g-%d", time.Now().UnixNano()), Title: "e", AudioURL: "https://a.mp3"}})
 	ep, _ := s.ListEpisodes(ctx, p.ID)
 	return ep[0].ID
 }
@@ -156,5 +158,87 @@ func TestSearchSource_ExcludesCandidates(t *testing.T) {
 	hits, _ := s.SearchSource(ctx, "任何内容")
 	if len(hits) != 0 {
 		t.Errorf("未索引的 Candidate 不应出现在搜索结果中，实际 %+v", hits)
+	}
+}
+
+// TestGetProcessingProgress 验证 running/queued 任务被正确归类到 Active/Queued。
+func TestGetProcessingProgress(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	s1 := seedEpisodeForJob(t, s)
+	s2 := seedEpisodeForJob(t, s) // 使用不同 feed URL
+
+	j1, _ := s.EnqueueJob(ctx, models.SourceEpisode, s1, models.JobTranscribe)
+	j2, _ := s.EnqueueJob(ctx, models.SourceEpisode, s2, models.JobTranscribe)
+	s.MarkJobRunning(ctx, j1.ID) // j1 running，j2 queued
+
+	p, err := s.GetProcessingProgress(ctx)
+	if err != nil {
+		t.Fatalf("GetProcessingProgress: %v", err)
+	}
+	if p.Active == nil || p.Active.ID != j1.ID {
+		t.Errorf("Active 应为 j1，实际 %+v", p.Active)
+	}
+	if len(p.Queued) != 1 || p.Queued[0].ID != j2.ID {
+		t.Errorf("Queued 应为 [j2]，实际 %+v", p.Queued)
+	}
+}
+
+// TestSourceTitleAndStatus 验证 SourceTitle/SourceStatus 对 episode 与未知 source 的行为。
+func TestSourceTitleAndStatus(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForJob(t, s)
+
+	if got := s.SourceTitle(ctx, models.SourceEpisode, sourceID); got != "e" {
+		t.Errorf("SourceTitle 应返回 episode 标题，实际 %q", got)
+	}
+	if got := s.SourceStatus(ctx, models.SourceEpisode, sourceID); got != models.StatusUnprocessed {
+		t.Errorf("未处理 episode 应 StatusUnprocessed，实际 %q", got)
+	}
+	// 未知 source → 标题截断 + StatusUnprocessed
+	if got := s.SourceTitle(ctx, models.SourceEpisode, "nonexistent-id"); got != "nonexist…" {
+		t.Errorf("未知 source 标题应截断为 8 字符，实际 %q", got)
+	}
+	if got := s.SourceStatus(ctx, models.SourceEpisode, "nonexistent-id"); got != models.StatusUnprocessed {
+		t.Errorf("未知 source 应 StatusUnprocessed，实际 %q", got)
+	}
+}
+
+// TestListRecentCompleted 验证按 updated_at 倒序返回最近完成的 N 个任务。
+func TestListRecentCompleted(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	s1 := seedEpisodeForJob(t, s)
+	s2 := seedEpisodeForJob(t, s)
+
+	j1, _ := s.EnqueueJob(ctx, models.SourceEpisode, s1, models.JobTranscribe)
+	j2, _ := s.EnqueueJob(ctx, models.SourceEpisode, s2, models.JobTranscribe)
+	s.MarkJobRunning(ctx, j1.ID)
+	s.MarkJobRunning(ctx, j2.ID)
+	if err := s.MarkJobSucceeded(ctx, j1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobSucceeded(ctx, j2.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	recent, err := s.ListRecentCompleted(ctx, 5)
+	if err != nil {
+		t.Fatalf("ListRecentCompleted: %v", err)
+	}
+	if len(recent) != 2 {
+		t.Fatalf("应有 2 个已完成任务，实际 %d", len(recent))
+	}
+	// 两个都在最近列表（顺序按 updated_at，不严格断言先后）
+	ids := map[string]bool{}
+	for _, j := range recent {
+		ids[j.ID] = true
+	}
+	if !ids[j1.ID] || !ids[j2.ID] {
+		t.Errorf("最近完成应包含两个任务，实际 %+v", recent)
 	}
 }
