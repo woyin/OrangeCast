@@ -160,3 +160,42 @@ func TestUpdateSettings(t *testing.T) {
 		t.Errorf("转录 Provider 应为 %s，实际 %v", tp, got.TranscriptionProvider)
 	}
 }
+
+// TestGetUserByID 验证按 ID 查用户与未知 ID 的 ErrNotFound。
+func TestGetUserByID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u := seedUser(t, s, "a@b.com")
+
+	got, err := s.GetUserByID(ctx, u.ID)
+	if err != nil || got.Email != "a@b.com" {
+		t.Fatalf("GetUserByID: %v %+v", err, got)
+	}
+	if _, err := s.GetUserByID(ctx, "nope"); err != ErrNotFound {
+		t.Errorf("未知 ID 应 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestDeleteExpiredSessions 验证过期会话被清理、未过期保留。
+func TestDeleteExpiredSessions(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u := seedUser(t, s, "a@b.com")
+
+	// 过期会话
+	expired, _ := s.CreateSession(ctx, u.ID, "2000-01-01T00:00:00Z")
+	// 未过期会话
+	active, _ := s.CreateSession(ctx, u.ID, "2099-01-01T00:00:00Z")
+
+	if err := s.DeleteExpiredSessions(ctx); err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	// 过期 token 查不到
+	if _, err := s.GetSessionByToken(ctx, expired); err != ErrNotFound {
+		t.Errorf("过期会话应被清理，实际 err=%v", err)
+	}
+	// 未过期 token 仍有效
+	if _, err := s.GetSessionByToken(ctx, active); err != nil {
+		t.Errorf("未过期会话应保留，err=%v", err)
+	}
+}

@@ -130,3 +130,24 @@ func TestMergeEpisodes_Dedup(t *testing.T) {
 		t.Errorf("去重后应 1 集，实际 %d", len(all))
 	}
 }
+
+// TestListPodcasts 验证按标题排序列出全部订阅。
+func TestListPodcasts(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+
+	s.CreatePodcast(ctx, "https://b.xml", "乙播客", "", "")
+	s.CreatePodcast(ctx, "https://a.xml", "甲播客", "", "")
+	list, err := s.ListPodcasts(ctx)
+	if err != nil {
+		t.Fatalf("ListPodcasts: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("应有 2 个播客，实际 %d", len(list))
+	}
+	// 按标题排序（SQLite 按 Unicode 码点：乙 U+4E59 < 甲 U+7532）
+	if list[0].Title != "乙播客" || list[1].Title != "甲播客" {
+		t.Errorf("应按标题排序，实际 %+v", list)
+	}
+}
