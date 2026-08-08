@@ -199,3 +199,12 @@ func TestDeleteExpiredSessions(t *testing.T) {
 		t.Errorf("未过期会话应保留，err=%v", err)
 	}
 }
+
+// TestOpen_InvalidPath 验证 Open 对非法数据库路径报错。
+func TestOpen_InvalidPath(t *testing.T) {
+	// 路径指向一个目录 → sqlite 无法打开
+	dir := t.TempDir()
+	if _, err := Open(dir); err == nil {
+		t.Fatal("非法数据库路径应报错")
+	}
+}
