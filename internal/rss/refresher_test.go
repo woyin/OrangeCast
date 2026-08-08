@@ -117,3 +117,12 @@ func TestRefresher_RunScheduled(t *testing.T) {
 		t.Errorf("runScheduled 应合并 1 集，实际 %d", len(eps))
 	}
 }
+
+// TestRefresher_RunScheduled_Error 验证 RefreshAll 失败时 runScheduled 记录日志且不 panic。
+func TestRefresher_RunScheduled_Error(t *testing.T) {
+	s := newTestStore(t)
+	r := NewRefresher(s)
+	// 关闭 DB → ListPodcastsForRefresh 失败 → RefreshAll 返回错误 → runScheduled 记录日志
+	s.Close()
+	r.runScheduled()
+}

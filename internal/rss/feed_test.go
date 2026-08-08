@@ -131,6 +131,38 @@ func TestParseFeed_GUIDFallbackToLink(t *testing.T) {
 	}
 }
 
+// TestParseFeed_SkipItemsWithoutEnclosureAndGuid 验证无有效音频 URL 和无 GUID/Link 的条目被跳过。
+func TestParseFeed_SkipItemsWithoutEnclosureAndGuid(t *testing.T) {
+	xml := `<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item>
+    <title>非 http 音频</title>
+    <enclosure url="ftp://cdn.example.com/a.mp3" type="audio/mpeg"/>
+  </item>
+  <item>
+    <title>无 GUID 无 Link</title>
+    <enclosure url="https://cdn.example.com/b.mp3" type="audio/mpeg"/>
+  </item>
+  <item>
+    <guid>ok-001</guid>
+    <title>正常条目</title>
+    <enclosure url="https://cdn.example.com/c.mp3" type="audio/mpeg"/>
+  </item>
+</channel></rss>`
+	fp := gofeed.NewParser()
+	feed, err := fp.ParseString(xml)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	_, eps, err := parseFeed(feed, "https://feed.example.com/x")
+	if err != nil {
+		t.Fatalf("parseFeed 失败: %v", err)
+	}
+	if len(eps) != 1 || eps[0].GUID != "ok-001" {
+		t.Fatalf("应仅保留 1 个正常条目，实际 %+v", eps)
+	}
+}
+
 // TestParseFeed_PublishedDate 验证带 pubDate 的条目解析出 PublishedAt（RFC3339 UTC）。
 func TestParseFeed_PublishedDate(t *testing.T) {
 	xml := `<?xml version="1.0"?>
