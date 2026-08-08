@@ -344,3 +344,26 @@ func TestPreMigrationSafety_CreatesBackup(t *testing.T) {
 		t.Errorf("应生成备份文件 %s: %v", bakPath, err)
 	}
 }
+
+// TestOpen_RejectsMultipleUsers 验证 Open 在待破坏性迁移且多用户时报 ErrMultipleUsers。
+func TestOpen_RejectsMultipleUsers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "multi.db")
+	db := openRaw(t, path)
+	ctx := context.Background()
+	// 构造 V01 schema（含 user_id，版本 0 → 存在待破坏性迁移 0002）
+	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
+		t.Fatalf("建立 v0.1 schema: %v", err)
+	}
+	seedV01Fixture(t, db)
+	// 插入第二个用户 → 多用户
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u2','second@example.com','x')`); err != nil {
+		t.Fatalf("插入第二用户: %v", err)
+	}
+	db.Close()
+
+	// Open 应因多用户拒绝自动迁移
+	if _, err := Open(path); err != ErrMultipleUsers {
+		t.Errorf("多用户应 ErrMultipleUsers，实际 %v", err)
+	}
+}
