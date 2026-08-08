@@ -655,3 +655,53 @@ func TestSettings_GET_Renders(t *testing.T) {
 		t.Errorf("设置页应含默认 groq provider，实际 %s", rec.Body.String())
 	}
 }
+
+// TestProgressAPI_ReturnsJSON 验证进度 API 返回 active/queued/recent JSON。
+func TestProgressAPI_ReturnsJSON(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "progapi@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	srv.store.MarkJobRunning(ctx, job.ID) // 让其为 active
+
+	req := httptest.NewRequest(http.MethodGet, "/api/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("进度 API 应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"active"`) {
+		t.Errorf("应含 active 字段，实际 %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), eps[0].ID) {
+		t.Errorf("应含 source_id，实际 %s", rec.Body.String())
+	}
+}
+
+// TestProgress_Page_Renders 验证进度页渲染（含队列标题）。
+func TestProgress_Page_Renders(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "progpage@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "进度测试集", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+
+	req := httptest.NewRequest(http.MethodGet, "/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("进度页应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "进度测试集") {
+		t.Errorf("页面应含队列中的集标题，实际 %s", rec.Body.String())
+	}
+}
