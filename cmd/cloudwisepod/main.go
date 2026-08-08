@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -125,13 +127,8 @@ func runServe() {
 // runBackup cloudwisepod backup <dest.tar.gz>
 // 生成一致性备份包（数据库快照 + EvidenceAudio + manifest），不含密钥。
 func runBackup(args []string) {
-	fs := flag.NewFlagSet("backup", flag.ExitOnError)
-	fs.Parse(args)
-	dest := ""
-	if fs.NArg() >= 1 {
-		dest = fs.Arg(0)
-	}
-	if dest == "" {
+	dest, err := parseBackupArgs(args)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "用法：cloudwisepod backup <dest.tar.gz>")
 		os.Exit(2)
 	}
@@ -156,6 +153,20 @@ func runBackup(args []string) {
 	fmt.Printf("备份完成：%s（DB sha256=%s，证据 %d 个）\n", dest, m.DBSHA256, len(m.Evidence))
 }
 
+// parseBackupArgs 解析 backup 子命令位置参数，返回目标文件路径。
+// flag.ExitOnError 会直接 os.Exit，故单独用 ContinueOnError 解析以便单元测试。
+func parseBackupArgs(args []string) (string, error) {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if fs.NArg() < 1 {
+		return "", errors.New("缺少目标文件")
+	}
+	return fs.Arg(0), nil
+}
+
 // ensureArchiveExt 无扩展名时补 .tar.gz（纯函数，便于测试）。
 func ensureArchiveExt(dest string) string {
 	if filepath.Ext(dest) == "" {
@@ -167,14 +178,8 @@ func ensureArchiveExt(dest string) string {
 // runRestore cloudwisepod restore <backup.tar.gz> [--force]
 // 恢复到 DATA_DIR（默认要求目标为空，--force 显式覆盖）。
 func runRestore(args []string) {
-	fs := flag.NewFlagSet("restore", flag.ExitOnError)
-	force := fs.Bool("force", false, "目标目录已有数据时显式覆盖")
-	fs.Parse(args)
-	src := ""
-	if fs.NArg() >= 1 {
-		src = fs.Arg(0)
-	}
-	if src == "" {
+	src, force, err := parseRestoreArgs(args)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "用法：cloudwisepod restore <backup.tar.gz> [--force]")
 		os.Exit(2)
 	}
@@ -182,9 +187,23 @@ func runRestore(args []string) {
 	if err != nil {
 		log.Fatalf("配置错误: %v", err)
 	}
-	m, err := backup.Restore(context.Background(), src, cfg.DataDir, *force)
+	m, err := backup.Restore(context.Background(), src, cfg.DataDir, force)
 	if err != nil {
 		log.Fatalf("恢复失败: %v", err)
 	}
 	fmt.Printf("恢复完成：%s（证据 %d 个，DB sha256=%s）\n", cfg.DataDir, len(m.Evidence), m.DBSHA256)
+}
+
+// parseRestoreArgs 解析 restore 子命令参数，返回备份包路径与 force 标识。
+func parseRestoreArgs(args []string) (src string, force bool, err error) {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&force, "force", false, "目标目录已有数据时显式覆盖")
+	if err := fs.Parse(args); err != nil {
+		return "", false, err
+	}
+	if fs.NArg() < 1 {
+		return "", false, errors.New("缺少备份包")
+	}
+	return fs.Arg(0), force, nil
 }

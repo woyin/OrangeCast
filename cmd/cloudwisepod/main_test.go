@@ -44,3 +44,32 @@ func TestEnsureArchiveExt(t *testing.T) {
 		t.Errorf("绝对路径无扩展应补全，实际 %q", got)
 	}
 }
+
+func TestParseBackupArgs(t *testing.T) {
+	if dest, err := parseBackupArgs([]string{"out.tar.gz"}); err != nil || dest != "out.tar.gz" {
+		t.Errorf("parseBackupArgs([out.tar.gz]) = %q, %v", dest, err)
+	}
+	if _, err := parseBackupArgs(nil); err == nil {
+		t.Error("无参数应报错")
+	}
+	if _, err := parseBackupArgs([]string{"-bad-flag"}); err == nil {
+		t.Error("非法 flag 应报错")
+	}
+}
+
+func TestParseRestoreArgs(t *testing.T) {
+	src, force, err := parseRestoreArgs([]string{"in.tar.gz"})
+	if err != nil || src != "in.tar.gz" || force {
+		t.Errorf("parseRestoreArgs([in.tar.gz]) = %q, %v, %v", src, force, err)
+	}
+	src, force, err = parseRestoreArgs([]string{"--force", "in.tar.gz"})
+	if err != nil || src != "in.tar.gz" || !force {
+		t.Errorf("带 --force 应解析为 force=true，实际 %q, %v, %v", src, force, err)
+	}
+	if _, _, err := parseRestoreArgs(nil); err == nil {
+		t.Error("无参数应报错")
+	}
+	if _, _, err := parseRestoreArgs([]string{"-bad"}); err == nil {
+		t.Error("非法 flag 应报错")
+	}
+}
