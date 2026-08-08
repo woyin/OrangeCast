@@ -206,3 +206,58 @@ func TestCSRFProtect(t *testing.T) {
 		t.Fatalf("token 不匹配应 403，实际 %d", rec.Code)
 	}
 }
+
+// TestSetSessionCookie 验证设置会话 cookie：写入 session 记录并 Set-Cookie。
+func TestSetSessionCookie(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, err := s.ClaimOwner(ctx, "a@b.com", "$argon2id$fakehash")
+	if err != nil {
+		t.Fatalf("ClaimOwner: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	if err := SetSessionCookie(rec, req, s, u.ID, true); err != nil {
+		t.Fatalf("SetSessionCookie: %v", err)
+	}
+	// 应设置 secure cookie
+	c := rec.Result().Cookies()
+	if len(c) != 1 || c[0].Name != sessionCookieName {
+		t.Fatalf("应设置 session cookie，实际 %+v", c)
+	}
+	if !c[0].Secure || !c[0].HttpOnly {
+		t.Errorf("cookie 应为 Secure+HttpOnly，实际 %+v", c[0])
+	}
+	// session 记录应存在
+	if _, err := s.GetSessionByToken(ctx, c[0].Value); err != nil {
+		t.Errorf("session 记录应存在: %v", err)
+	}
+}
+
+// TestClearSessionCookie 验证登出：删除 session 记录并清除 cookie。
+func TestClearSessionCookie(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, _ := s.ClaimOwner(ctx, "a@b.com", "$argon2id$fakehash")
+	token, _ := s.CreateSession(ctx, u.ID, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	ClearSessionCookie(rec, req, s)
+	// session 记录已删除
+	if _, err := s.GetSessionByToken(ctx, token); err != store.ErrNotFound {
+		t.Errorf("session 应被删除，err=%v", err)
+	}
+	// cookie 被清除（MaxAge -1）
+	var cleared bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("应清除 session cookie")
+	}
+}
