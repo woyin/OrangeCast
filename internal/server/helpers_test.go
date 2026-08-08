@@ -1,6 +1,9 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -139,5 +142,21 @@ func TestStrPtr(t *testing.T) {
 	}
 	if got := ptrStr(strPtr("")); got != "" {
 		t.Errorf("ptrStr(strPtr(\"\")) 应为空串，实际 %q", got)
+	}
+}
+
+// TestSaveUploadFile 验证 saveUploadFile 把 reader 内容写入 tempDir/uploads/<id>。
+func TestSaveUploadFile(t *testing.T) {
+	dir := t.TempDir()
+	content := "fake-audio-bytes-fiction"
+	if err := saveUploadFile(dir, "up-1", strings.NewReader(content)); err != nil {
+		t.Fatalf("saveUploadFile: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "uploads", "up-1"))
+	if err != nil {
+		t.Fatalf("读取文件: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("文件内容 = %q, want %q", got, content)
 	}
 }

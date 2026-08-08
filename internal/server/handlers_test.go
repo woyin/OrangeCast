@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -950,5 +951,50 @@ func TestCollectionItem_AddAndRemove(t *testing.T) {
 	items, _ = srv.store.ListCollectionItems(ctx, col.ID)
 	if len(items) != 0 {
 		t.Errorf("移除后应 0 个条目，实际 %d", len(items))
+	}
+}
+
+// TestUploadNew_POST_CreatesAndRedirects 验证上传新文件 POST：校验类型、保存并重定向。
+func TestUploadNew_POST_CreatesAndRedirects(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "uppost@example.com", "password123")
+
+	// GET 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads/new", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	// multipart 上传音频
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	mw.WriteField("_csrf", csrf)
+	fw, _ := mw.CreateFormFile("audio", "test.mp3")
+	fw.Write([]byte("fake-audio"))
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/uploads/new", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("上传成功应 303 重定向，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Location"), "/sources/upload/") {
+		t.Errorf("重定向应指向上传 source，实际 %q", rec.Header().Get("Location"))
+	}
+	// 验证 upload 已创建
+	us, _ := srv.store.ListUploads(context.Background())
+	if len(us) != 1 || us[0].OriginalFilename != "test.mp3" {
+		t.Errorf("应创建 1 个 upload，实际 %+v", us)
 	}
 }
