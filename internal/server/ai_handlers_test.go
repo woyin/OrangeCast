@@ -57,7 +57,7 @@ func TestParaphraseHandler_ReturnsNarration(t *testing.T) {
 	sourceID := eps[0].ID
 	seedTranscript(t, srv, sourceID)
 
-	srv.bundleFor = fakeBundleFor(
+	srv.bundleFor = fakeBundleFor(nil,
 		&fakeParaphrase{result: &provider.ParaphraseResult{Text: "通胀就是钱越来越不值钱", ReferenceSegmentIDs: []string{"seg-0001"}}},
 		nil, nil)
 
@@ -101,7 +101,7 @@ func TestStudyChat_ScopeTethered(t *testing.T) {
 	sourceID := eps[0].ID
 	seedTranscript(t, srv, sourceID)
 
-	srv.bundleFor = fakeBundleFor(nil,
+	srv.bundleFor = fakeBundleFor(nil, nil,
 		&fakeStudyChat{result: &provider.StudyChatResult{ScopeFeedback: "超出本集范围"}},
 		nil)
 
@@ -130,7 +130,7 @@ func TestStudyChat_ReferenceRejected(t *testing.T) {
 	sourceID := eps[0].ID
 	seedTranscript(t, srv, sourceID)
 
-	srv.bundleFor = fakeBundleFor(nil,
+	srv.bundleFor = fakeBundleFor(nil, nil,
 		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
 			Role: "assistant", Content: "跑题回答", ReferenceSegmentIDs: []string{"seg-0001"},
 		}}},
@@ -161,7 +161,7 @@ func TestStudyChat_ValidAnswerReturned(t *testing.T) {
 	sourceID := eps[0].ID
 	seedTranscript(t, srv, sourceID)
 
-	srv.bundleFor = fakeBundleFor(nil,
+	srv.bundleFor = fakeBundleFor(nil, nil,
 		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
 			Role: "assistant", Content: "通胀就是货币购买力下降", ReferenceSegmentIDs: []string{"seg-0001"}},
 		}},
@@ -213,6 +213,41 @@ func TestStudyChatHistory(t *testing.T) {
 	}
 	if !strings.Contains(body, "seg-0001") {
 		t.Errorf("应含 reference_segment_ids，实际 %s", body)
+	}
+}
+
+// TestEvidenceQA_Handler 验证 EvidenceQA 完整 handler：
+// 无引用拒答 422、有引用 200。
+func TestEvidenceQA_Handler(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "evidenceqa@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	// 无引用 → 拒答 422
+	srv.bundleFor = fakeBundleFor(&fakeQA{result: &provider.QAResult{Answer: "好像是", Sources: nil}}, nil, nil, nil)
+	rec := postForm(t, srv, cookie, "/api/evidence-qa",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("无引用应 422，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 有引用 → 200
+	srv.bundleFor = fakeBundleFor(&fakeQA{result: &provider.QAResult{
+		Answer:  "通胀是物价上涨",
+		Sources: []provider.Source{{SegmentID: "seg-0001", Content: "通胀是物价总水平上升", Start: 0, End: 5}},
+	}}, nil, nil, nil)
+	rec = postForm(t, srv, cookie, "/api/evidence-qa",
+		"source_type=episode&source_id="+sourceID+"&question=通胀是啥")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("有引用应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "通胀是物价上涨") {
+		t.Errorf("应返回答案，实际 %s", rec.Body.String())
 	}
 }
 

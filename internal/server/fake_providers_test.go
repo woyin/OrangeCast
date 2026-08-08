@@ -49,10 +49,26 @@ func (f *fakeRefChecker) CheckReference(question, answer string, refs []provider
 }
 func (f *fakeRefChecker) Name() string { return "fake-refcheck" }
 
+// ---- Fake provider: QA ----
+
+type fakeQA struct {
+	result *provider.QAResult
+	err    error
+}
+
+func (f *fakeQA) Answer(question string, segments []provider.Segment) (*provider.QAResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
+}
+func (f *fakeQA) Name() string { return "fake-qa" }
+
 // fakeBundleFor 构造一个可注入的 bundleFor 函数，返回带 fake providers 的 bundle。
-func fakeBundleFor(paraphrase *fakeParaphrase, studyChat *fakeStudyChat, refCheck *fakeRefChecker) func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+func fakeBundleFor(qa *fakeQA, paraphrase *fakeParaphrase, studyChat *fakeStudyChat, refCheck *fakeRefChecker) func(provider.TaskConfig) (*provider.ProviderBundle, error) {
 	return func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return &provider.ProviderBundle{
+			QA:         qa,
 			Paraphrase: paraphrase,
 			StudyChat:  studyChat,
 			RefChecker: refCheck,
