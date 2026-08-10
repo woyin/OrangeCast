@@ -2453,3 +2453,22 @@ func TestProcessBatch_EnqueueErrorSkips(t *testing.T) {
 		t.Errorf("EnqueueJob 失败应计入 skipped=2，实际 %s", loc)
 	}
 }
+
+// TestProcessBatch_ParseFormError 验证直接调用 handler 时表单解析失败返回 400。
+// 覆盖 handleProcessBatch 中 "表单解析失败" 分支（绕过路由/CSRF 直接调用）。
+func TestProcessBatch_ParseFormError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "batchpf@example.com", "password123")
+	// 直接调用 handler（绕过 CSRF 中间件），用非法 multipart boundary 触发 ParseForm 报错
+	req := httptest.NewRequest(http.MethodPost, "/api/process-batch", strings.NewReader("--broken"))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handleProcessBatch(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("表单解析失败应 400，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "表单解析失败") {
+		t.Errorf("应提示表单解析失败，实际 %s", rec.Body.String())
+	}
+}
