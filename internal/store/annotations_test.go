@@ -187,3 +187,35 @@ func TestAnnotations_DBErrors(t *testing.T) {
 		t.Error("collection_items 表缺失时 ListCollectionItems 应报错")
 	}
 }
+
+// TestTogglePin_DeleteError 验证已 pin 时删除失败返回错误。
+// 覆盖 TogglePin 中已存在记录时 DELETE 失败分支（先 pin 再删表再 toggle）。
+func TestTogglePin_DeleteError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 先 pin
+	if _, err := s.TogglePin(ctx, models.SourceEpisode, "ep1", `["seg-0001"]`, 0, 5, "t"); err != nil {
+		t.Fatal(err)
+	}
+	// 删除 pins 表 → 已存在分支的 DELETE 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE pins`); err != nil {
+		t.Fatal(err)
+	}
+	// 第一次 toggle 因表缺失返回错误（SELECT 阶段）
+	if _, err := s.TogglePin(ctx, models.SourceEpisode, "ep1", `["seg-0001"]`, 0, 5, "t"); err == nil {
+		t.Fatal("pins 表缺失时 TogglePin 应报错")
+	}
+}
+
+// TestUpsertAnnotation_DBError 验证 UpsertAnnotation 写入失败返回错误。
+// 覆盖 UpsertAnnotation 中 ExecContext 失败分支（删除 annotations 表）。
+func TestUpsertAnnotation_DBError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE annotations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAnnotation(ctx, models.SourceEpisode, "ep1", `["seg-0001"]`, 0, 5, "body"); err == nil {
+		t.Fatal("annotations 表缺失时 UpsertAnnotation 应报错")
+	}
+}
