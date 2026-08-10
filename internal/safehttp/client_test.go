@@ -141,3 +141,13 @@ func TestNewClient_TooManyRedirects(t *testing.T) {
 		t.Errorf("应返回 ErrTooManyRedirects，实际 %v", err)
 	}
 }
+
+// TestSafeDialer_DNSResolveThenBlocked 验证 DNS 解析成功但解析到私网时被拦截。
+// 覆盖 Dial 中 net.ParseIP(host) 失败 → net.LookupIP 成功 → ip = ips[0] 分支，
+// 随后 IsBlockedIP 拦截（localhost 解析到 127.0.0.1 是私网）。
+func TestSafeDialer_DNSResolveThenBlocked(t *testing.T) {
+	d := safeDialer{inner: net.Dialer{Timeout: time.Second}}
+	if _, err := d.Dial("tcp", "localhost:8080"); err != ErrBlockedAddress {
+		t.Errorf("localhost 解析到私网应 ErrBlockedAddress，实际 %v", err)
+	}
+}
