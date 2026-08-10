@@ -861,6 +861,39 @@ func TestStudyChat_PersistAnswerError(t *testing.T) {
 	}
 }
 
+// TestStudyChat_PersistAssistantAnswerError 验证通过硬约束后 assistant 回答写库失败返回 500。
+// 覆盖 handleStudyChat 中 "持久化回答失败" 错误分支（触发器只中止 assistant 消息 INSERT，
+// user 问题写库成功，隔离到 assistant 持久化步骤）。
+func TestStudyChat_PersistAssistantAnswerError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scasst@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
+	// 只中止 assistant 消息的 INSERT（user 问题不受影响）
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER abort_asst BEFORE INSERT ON study_messages WHEN NEW.role='assistant' BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatalf("CREATE TRIGGER: %v", err)
+	}
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "通胀是物价上升", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=通胀")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("assistant 写库失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "持久化回答失败") {
+		t.Errorf("应提示持久化回答失败，实际 %s", rec.Body.String())
+	}
+}
+
 // TestStudyChat_CreateSessionDBError 验证首次提问时建会话失败返回 500。
 // 覆盖 handleStudyChat 中 "创建学习会话失败" 错误分支（删除 study_sessions 表）。
 func TestStudyChat_CreateSessionDBError(t *testing.T) {
