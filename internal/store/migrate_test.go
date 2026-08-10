@@ -536,3 +536,15 @@ func TestMigrateHelpers_DBErrors(t *testing.T) {
 		t.Error("关闭 DB 时 Migrate 应报错")
 	}
 }
+
+// TestApplyOne_BeginTxError 验证 applyOne 的 BeginTx 失败时报错。
+// 覆盖 applyOne 中 db.BeginTx 错误分支（关闭 DB）。
+func TestApplyOne_BeginTxError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if err := applyOne(ctx, db, migration{version: 1, name: "test", up: "SELECT 1"}); err == nil {
+		t.Fatal("关闭 DB 时 applyOne 应报错")
+	}
+}
