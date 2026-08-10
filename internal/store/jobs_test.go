@@ -578,3 +578,18 @@ func TestGetProcessingProgress_ScanError(t *testing.T) {
 		t.Fatal("attempt_count 非整数应导致 Scan 失败")
 	}
 }
+
+// TestListRecentCompleted_DefaultLimit 验证 limit<=0 时回退到默认 5。
+// 覆盖 ListRecentCompleted 中 limit <= 0 → limit = 5 分支。
+func TestListRecentCompleted_DefaultLimit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 无任务时 limit=0 也应正常返回空（不报错）
+	jobs, err := s.ListRecentCompleted(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListRecentCompleted(0): %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Errorf("无任务时应返回空列表，实际 %d", len(jobs))
+	}
+}
