@@ -505,3 +505,52 @@ func TestGroq_AnalyzeWindowParseError(t *testing.T) {
 		t.Errorf("错误应含 '解析 KnowledgeCard 失败'，实际 %v", err)
 	}
 }
+
+// TestGroq_StudyChat_AssistantHistory 验证历史中含 assistant 消息时角色映射。
+// 覆盖 StudyChatAnswer 中 m.Role == "assistant" → role = "assistant" 分支。
+func TestGroq_StudyChat_AssistantHistory(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return `{"answer":"回答","referenceSegmentIds":["seg-0001"]}`, 200, nil
+	}
+	history := []StudyChatMessage{
+		{Role: "user", Content: "问题"},
+		{Role: "assistant", Content: "回答"},
+	}
+	res, err := g.StudyChatAnswer("追问", history, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer == nil {
+		t.Error("应生成回答")
+	}
+}
+
+// TestGroq_StudyChat_CompleteError 验证 complete 失败时报错。
+// 覆盖 StudyChatAnswer 中 complete err → return nil, err 分支。
+func TestGroq_StudyChat_CompleteError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "", 0, errors.New("complete 失败")
+	}
+	_, err := g.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("complete 失败应报错")
+	}
+}
+
+// TestGroq_StudyChat_ParseError 验证输出非 JSON 时报错。
+// 覆盖 StudyChatAnswer 中 "解析 StudyChat 输出失败" 分支。
+func TestGroq_StudyChat_ParseError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "not json", 200, nil
+	}
+	_, err := g.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("非 JSON 输出应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 StudyChat 输出失败") {
+		t.Errorf("错误应含 '解析 StudyChat 输出失败'，实际 %v", err)
+	}
+}
