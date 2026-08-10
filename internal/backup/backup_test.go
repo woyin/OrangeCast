@@ -775,3 +775,34 @@ func TestRestore_EvidenceHashVerifyError(t *testing.T) {
 		t.Fatal("证据哈希校验失败应报错")
 	}
 }
+
+// TestRestore_EvidenceRenameFails 验证落地时证据文件重命名失败返回错误。
+// 覆盖 Restore 中证据落地 os.Rename 错误分支（目标路径已被目录占用）。
+func TestRestore_EvidenceRenameFails(t *testing.T) {
+	// 构造一个含证据的合法备份包
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[{"rel_path":"ep-1.mp3","sha256":"` + sha256Hex("data") + `","size_bytes":4}]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Mode: 0o644, Size: int64(len("data"))}
+	tw.WriteHeader(eh)
+	tw.Write([]byte("data"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 目标 evidence/ep-1.mp3 已被目录占用 → os.Rename 失败
+	targetDir := t.TempDir()
+	os.MkdirAll(filepath.Join(targetDir, "evidence", "ep-1.mp3"), 0o755)
+	if _, err := Restore(context.Background(), backupFile, targetDir, false); err == nil {
+		t.Fatal("证据重命名目标被占用时恢复应报错")
+	}
+}
