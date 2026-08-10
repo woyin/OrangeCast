@@ -1,3 +1,8 @@
+// Package store 是项目的持久层：SQLite 数据库、迁移系统与全部仓储。
+//
+// Open 打开数据库并执行有序迁移（migrate.go），含破坏性迁移前的单 Owner 守卫与
+// 一致性备份（ADR-0010）。各领域仓储按文件拆分：podcasts/keypoints/narrations/
+// annotations/jobs/evidence/study_sessions 等；search_index 为 FTS5 分段级全文索引。
 package store
 
 import (

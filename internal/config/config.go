@@ -1,3 +1,9 @@
+// Package config 负责应用配置的加载与统一数据目录布局（ADR-0010）。
+//
+// 配置从环境变量读取（见 README「配置」表）：SESSION_SECRET / GROQ_API_KEY /
+// PORT / DATA_DIR / PUBLIC_URL / TRUSTED_PROXIES 等。DATA_DIR 是唯一数据根目录，
+// DB / evidence / tmp / backups / narrations 全部落在其下（可通过 DB_PATH/TEMP_DIR/
+// NARRATION_DIR 覆盖）。EnsureDirs 在启动与备份/恢复前创建目录树。
 package config
 
 import (

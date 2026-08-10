@@ -1,3 +1,8 @@
+// Package models 定义跨包共享的领域类型（领域词汇见 CONTEXT.md）。
+//
+// 涵盖：多态来源（SourceType：episode/upload）、处理任务与状态机（JobType/JobStatus）、
+// 播客/单集/上传、证据音频、不可变产物版本、Purge、实例设置与 Citation/Reference
+// 关系种类。本包不依赖任何其它 internal 包，是领域层的稳定地基。
 package models
 
 // SourceType 多态来源抽象。

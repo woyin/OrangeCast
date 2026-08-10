@@ -1,3 +1,9 @@
+// Package queue 实现 SQLite 驱动的可恢复处理队列（ADR-0006）。
+//
+// worker.go 是核心：启动时回收 running 任务、周期领取 queued 任务、租约 + 心跳续约，
+// 失败/中断后可重新领取（至少一次执行）。流水线：doTranscribe（证据持久化 + 转录）→
+// doAnalyze（知识卡片 + KeyPoint 索引 + 高光 + Narration）。audio.go 提供码率选择、
+// 时长探测与 ffmpeg 转码工具。
 package queue
 
 import (
