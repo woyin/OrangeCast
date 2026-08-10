@@ -90,6 +90,27 @@ type feedErr struct{}
 
 func (e *feedErr) Error() string { return "抓取失败" }
 
+// TestRefreshOne_MergeError 验证 MergeEpisodes 失败时 refreshOne 返回错误。
+// 覆盖 refreshOne 中 MergeEpisodes err 分支（删除 episodes 表）。
+func TestRefreshOne_MergeError(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	p, _ := s.CreatePodcast(ctx, "https://feed.example.com/pod.xml", "P", "", "")
+	r := NewRefresher(s)
+	r.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL}, []models.Episode{
+			{GUID: "ep-1", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"},
+		}, nil
+	}
+	// 删除 episodes 表 → MergeEpisodes 写入失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatalf("DROP TABLE episodes: %v", err)
+	}
+	if err := r.refreshOne(ctx, p); err == nil {
+		t.Fatal("episodes 表缺失时 refreshOne 应报错")
+	}
+}
+
 // TestRefresher_StartStop 验证 Refresher 的 cron 启动/停止可安全调用（不 panic）。
 func TestRefresher_StartStop(t *testing.T) {
 	r := NewRefresher(nil)

@@ -108,6 +108,27 @@ func TestParseFeed(t *testing.T) {
 	}
 }
 
+// TestParseFeed_Image 验证 feed 含 image 时 ImageURL 被填充。
+// 覆盖 parseFeed 中 feed.Image != nil 分支。
+func TestParseFeed_Image(t *testing.T) {
+	fp := gofeed.NewParser()
+	feed, err := fp.ParseString(`<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>带封面播客</title>
+  <image><url>https://cdn.example.com/cover.jpg</url></image>
+</channel></rss>`)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	podcast, _, err := parseFeed(feed, "https://feed.example.com/pod.xml")
+	if err != nil {
+		t.Fatalf("parseFeed: %v", err)
+	}
+	if podcast.ImageURL != "https://cdn.example.com/cover.jpg" {
+		t.Errorf("ImageURL = %q, want https://cdn.example.com/cover.jpg", podcast.ImageURL)
+	}
+}
+
 // TestParseFeed_GUIDFallbackToLink 验证 GUID 为空时回退到 item.Link。
 func TestParseFeed_GUIDFallbackToLink(t *testing.T) {
 	xml := `<?xml version="1.0"?>
@@ -276,5 +297,39 @@ func TestFetchFeed_HTTPError(t *testing.T) {
 
 	if _, _, err := FetchFeed(srv.URL); err == nil {
 		t.Fatal("404 应返回错误")
+	}
+}
+
+// TestFetchFeed_NetworkError 验证网络错误（连接失败）返回错误。
+// 覆盖 FetchFeed 中 "抓取 feed" 错误分支。
+func TestFetchFeed_NetworkError(t *testing.T) {
+	// 关闭的服务器 → 连接被拒绝 → feedClient.Get 报错
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	origClient := feedClient
+	feedClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { feedClient = origClient }()
+
+	if _, _, err := FetchFeed(url); err == nil {
+		t.Fatal("网络错误应返回错误")
+	}
+}
+
+// TestFetchFeed_ParseError 验证响应非 XML 时解析失败返回错误。
+// 覆盖 FetchFeed 中 "解析 feed" 错误分支。
+func TestFetchFeed_ParseError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("this is not xml"))
+	}))
+	defer srv.Close()
+
+	origClient := feedClient
+	feedClient = &http.Client{Timeout: 5 * time.Second}
+	defer func() { feedClient = origClient }()
+
+	if _, _, err := FetchFeed(srv.URL); err == nil {
+		t.Fatal("非 XML 响应应解析失败返回错误")
 	}
 }
