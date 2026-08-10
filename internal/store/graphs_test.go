@@ -102,3 +102,69 @@ func mustSeedUser(t *testing.T, s *Store) {
 		t.Fatalf("认领 Owner: %v", err)
 	}
 }
+
+// TestTokenizeKp_CJK 验证中日韩 bigram 分词（含拉丁字母/数字复用 cjk 缓冲）。
+func TestTokenizeKp_CJK(t *testing.T) {
+	tokens := tokenizeKp("主权财富基金")
+	// 4 字 → 3 个 bigram
+	if tokens["主权"] != 1 || tokens["权财"] != 1 || tokens["财富"] != 1 {
+		t.Errorf("CJK bigram 不符: %+v", tokens)
+	}
+}
+
+// TestTokenizeKp_English 验证英文分词（去标点、长度>1）。
+func TestTokenizeKp_English(t *testing.T) {
+	tokens := tokenizeKp("sovereign wealth fund.")
+	if tokens["sovereign"] != 1 || tokens["wealth"] != 1 || tokens["fund"] != 1 {
+		t.Errorf("英文分词不符: %+v", tokens)
+	}
+	// 单字符词应被忽略
+	tokens2 := tokenizeKp("a I")
+	if _, ok := tokens2["a"]; ok {
+		t.Error("单字符英文词应被忽略")
+	}
+}
+
+// TestTokenizeKp_Empty 验证空串返回空 map。
+func TestTokenizeKp_Empty(t *testing.T) {
+	tokens := tokenizeKp("")
+	if len(tokens) != 0 {
+		t.Errorf("空串应返回空 map，实际 %+v", tokens)
+	}
+}
+
+// TestTokenizeKp_Lowercase 验证大写转小写。
+func TestTokenizeKp_Lowercase(t *testing.T) {
+	tokens := tokenizeKp("Hello")
+	if tokens["hello"] != 1 {
+		t.Errorf("应转小写，实际 %+v", tokens)
+	}
+}
+
+// TestJaccard_Empty 验证空 map 返回 0。
+func TestJaccard_Empty(t *testing.T) {
+	if got := jaccard(map[string]int{}, map[string]int{"a": 1}); got != 0 {
+		t.Errorf("空 map 应返回 0，实际 %f", got)
+	}
+	if got := jaccard(map[string]int{"a": 1}, map[string]int{}); got != 0 {
+		t.Errorf("空 map 应返回 0，实际 %f", got)
+	}
+}
+
+// TestJaccard_Identical 验证完全相同的 map 相似度为 1。
+func TestJaccard_Identical(t *testing.T) {
+	a := map[string]int{"主权": 2, "财富": 1}
+	b := map[string]int{"主权": 2, "财富": 1}
+	if got := jaccard(a, b); got != 1.0 {
+		t.Errorf("完全相同应相似度 1.0，实际 %f", got)
+	}
+}
+
+// TestJaccard_Disjoint 验证无交集时相似度为 0。
+func TestJaccard_Disjoint(t *testing.T) {
+	a := map[string]int{"主权": 1}
+	b := map[string]int{"投资": 1}
+	if got := jaccard(a, b); got != 0 {
+		t.Errorf("无交集应相似度 0，实际 %f", got)
+	}
+}

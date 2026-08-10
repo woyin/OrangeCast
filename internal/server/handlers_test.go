@@ -1977,3 +1977,109 @@ func TestCollection_CreateDBError(t *testing.T) {
 		t.Errorf("CreateCollection 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestAudio_MissingSourceID 验证 /api/audio 路径缺 sourceID 时返回 404。
+// 覆盖 handleAudio 中 len(parts) < 2 分支。
+func TestAudio_MissingSourceID(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audioid@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/episode/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("缺 sourceID 应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestAudio_UploadFallbackMissingFile 验证 upload 回退时原始文件不存在返回 404。
+// 覆盖 handleAudio 中 upload 分支文件缺失 → 末尾 http.NotFound 分支。
+func TestAudio_UploadFallbackMissingFile(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audiomf@example.com", "password123")
+	ctx := context.Background()
+	up, _ := srv.store.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 不创建原始落盘文件 → ServeFile 仍会 404
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/upload/"+up.ID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("upload 原始文件缺失应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestNarration_MissingHighlightID 验证 /api/narration 路径缺 highlightID 时返回 404。
+// 覆盖 handleNarration 中 len(parts) < 3 分支。
+func TestNarration_MissingHighlightID(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "narrhid@example.com", "password123")
+	ctx := context.Background()
+	up, _ := srv.store.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 只给 sourceType/sourceID，缺 highlightID
+	req := httptest.NewRequest(http.MethodGet, "/api/narration/upload/"+up.ID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("缺 highlightID 应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestNarration_NoCurrentRecord 验证 narration 记录不存在时返回 404。
+// 覆盖 handleNarration 中 GetCurrentNarration err 分支（已有 highlightID 但 DB 无记录）。
+func TestNarration_NoCurrentRecord(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "narrnr@example.com", "password123")
+	ctx := context.Background()
+	up, _ := srv.store.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	req := httptest.NewRequest(http.MethodGet, "/api/narration/upload/"+up.ID+"/hl-nonexistent", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("无 narration 记录应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestVersions_UploadNonexistent404 验证 upload source 版本页对不存在的 upload 返回 404。
+// 覆盖 handleVersions 中 upload 分支 GetUploadByID err 分支。
+func TestVersions_UploadNonexistent404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "verup404@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/upload/nonexistent/versions")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("不存在的 upload 版本页应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestVersions_BadPath404 验证版本页对非法路径（无法解析）返回 404。
+// 覆盖 handleVersions 中 parseSourcePath !ok 分支。
+func TestVersions_BadPath404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "verbad@example.com", "password123")
+	// sources/ 不带 type/id 的非法路径
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestProcess_EnqueueFails 验证 EnqueueJob 失败（非法 source）时返回 500。
+// 覆盖 handleProcess 中 "入队失败" 错误分支。
+func TestProcess_EnqueueFails(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "procfail@example.com", "password123")
+	// 删除 episodes 表 → EnqueueJob 中 UPDATE episodes 报错（claim source 失败）
+	if _, err := srv.store.DB.Exec(`DROP TABLE episodes`); err != nil {
+		t.Fatalf("DROP TABLE episodes: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/process", "source_type=episode&source_id=nonexistent-episode")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("入队失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "入队失败") {
+		t.Errorf("应提示入队失败，实际 %s", rec.Body.String())
+	}
+}
+
