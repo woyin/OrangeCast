@@ -103,6 +103,43 @@ func TestDownloadAudio_InvalidURL(t *testing.T) {
 	}
 }
 
+// TestDownloadAudio_CreateTempError 验证临时目录不可写时 downloadAudio 报错。
+func TestDownloadAudio_CreateTempError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("fake-audio"))
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	// tempDir 用文件占位，使 os.CreateTemp 失败
+	blocker := filepath.Join(dir, "tmp")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	w := &Worker{client: &http.Client{}, tempDir: blocker}
+	if _, err := w.downloadAudio(context.Background(), srv.URL+"/audio.mp3"); err == nil {
+		t.Fatal("临时目录不可写应报错")
+	}
+}
+
+// TestDownloadAudio_BodyCopyError 验证响应体读取失败时 downloadAudio 报错并清理临时文件。
+func TestDownloadAudio_BodyCopyError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj := w.(http.Hijacker)
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort"))
+		conn.Close() // 提前关闭让 io.Copy 报错
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{}, dir)
+	if _, err := w.downloadAudio(context.Background(), srv.URL+"/audio.mp3"); err == nil {
+		t.Fatal("响应体读取失败应报错")
+	}
+}
+
 // TestFetchRawAudio_UploadMissingFile 验证 upload 源原始文件缺失时 fetchRawAudio 报错。
 func TestFetchRawAudio_UploadMissingFile(t *testing.T) {
 	dir := t.TempDir()
