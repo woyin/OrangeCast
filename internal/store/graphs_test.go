@@ -168,3 +168,98 @@ func TestJaccard_Disjoint(t *testing.T) {
 		t.Errorf("无交集应相似度 0，实际 %f", got)
 	}
 }
+
+// TestJaccard_IntersectTakesMin 验证交集取较小值（va < vb 分支）。
+// 覆盖 jaccard 中 va < vb → intersect += va 分支。
+func TestJaccard_IntersectTakesMin(t *testing.T) {
+	a := map[string]int{"主权": 1, "财富": 1}
+	b := map[string]int{"主权": 3, "投资": 2}
+	// 交集 = min(1,3)=1；并集 = a 的总值(主权1+财富1) + b 中不在 a 的(投资2) = 4
+	got := jaccard(a, b)
+	if got != 1.0/4.0 {
+		t.Errorf("交集应取 min 得 0.25，实际 %f", got)
+	}
+}
+
+// TestJaccard_ZeroUnion 验证并集为 0 时返回 0。
+// 覆盖 jaccard 中 union == 0 → return 0 分支。
+func TestJaccard_ZeroUnion(t *testing.T) {
+	a := map[string]int{"主权": 0}
+	b := map[string]int{"主权": 0}
+	if got := jaccard(a, b); got != 0 {
+		t.Errorf("并集为 0 应返回 0，实际 %f", got)
+	}
+}
+
+// TestGetKpGraph_ListCollectionsError 验证 ListCollections 失败时 GetKpGraph 报错。
+// 覆盖 GetKpGraph 中 ListCollections err 分支（删除 collections 表）。
+func TestGetKpGraph_ListCollectionsError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	seedKpEpisode(t, s, "https://f1.xml", "g1", "ep1", "要点甲", "甲描述")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE collections`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetKpGraph(ctx); err == nil {
+		t.Fatal("collections 表缺失时 GetKpGraph 应报错")
+	}
+}
+
+// TestGetKpGraph_QueryError 验证 collection_items 查询失败时 GetKpGraph 报错。
+// 覆盖 GetKpGraph 中 ciRows 查询 err 分支（删除 collection_items 表）。
+func TestGetKpGraph_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	seedKpEpisode(t, s, "https://f1.xml", "g1", "ep1", "要点甲", "甲描述")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE collection_items`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetKpGraph(ctx); err == nil {
+		t.Fatal("collection_items 表缺失时 GetKpGraph 应报错")
+	}
+}
+
+// TestGetKpGraph_SameEpisodeNoEdge 验证同一 Episode 的 KeyPoint 不产生相似边。
+// 覆盖 GetKpGraph 中 kps[i].SourceID == kps[j].SourceID → continue 分支。
+func TestGetKpGraph_SameEpisodeNoEdge(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	// 同一 feed 的两个 episode 同属一个 podcast，但 seedKpEpisode 各建独立 podcast
+	// 为制造"同一 SourceID"，直接在同一 episode 上索引两个 KeyPoint
+	p, _ := s.CreatePodcast(ctx, "https://f1.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep1", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	card := &provider.KnowledgeCard{
+		Title:     "T",
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []provider.KeyPoint{{Content: "主权财富基金改变全球投资", Description: "长期投资者", Citations: []string{"seg-0001"}}},
+	}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "主权财富基金"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 1, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	// 再次索引（同一 source）不同内容
+	card2 := &provider.KnowledgeCard{
+		Title:     "T2",
+		Summary:   provider.CitedText{Text: "S2", Citations: []string{"seg-0002"}},
+		KeyPoints: []provider.KeyPoint{{Content: "主权财富基金是长期投资者", Description: "全球投资", Citations: []string{"seg-0002"}}},
+	}
+	segs2 := []provider.Segment{{ID: "seg-0002", Start: 5, End: 10, Text: "主权财富基金"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 2, card2, segs2); err != nil {
+		t.Fatal(err)
+	}
+
+	gd, err := s.GetKpGraph(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range gd.Links {
+		if l.Type == "similar" {
+			t.Error("同一 Episode 的 KeyPoint 不应产生 similar 边")
+		}
+	}
+}
