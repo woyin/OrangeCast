@@ -514,3 +514,4 @@ func TestMainUnknownCommandExits(t *testing.T) {
 	defer func() { os.Args = oldArgs }()
 	main()
 }
+
