@@ -278,6 +278,176 @@ func TestBackupCore_StoreOpenFails(t *testing.T) {
 	}
 }
 
+// TestBackupCore_EnsureDirsFails 验证数据目录不可创建时 backupCore 报错。
+// 覆盖 backupCore 中 "创建数据目录" 错误分支（DataDir 被文件占用）。
+func TestBackupCore_EnsureDirsFails(t *testing.T) {
+	dir := t.TempDir()
+	// DataDir 被文件占用 → EnsureDirs 的 MkdirAll 失败
+	blocker := filepath.Join(dir, "data-blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Port:         "0",
+		DBPath:       filepath.Join(blocker, "cloudwisepod.db"),
+		DataDir:      blocker, // 文件，非目录
+		EvidenceDir:  filepath.Join(blocker, "evidence"),
+		BackupDir:    filepath.Join(blocker, "backups"),
+		NarrationDir: filepath.Join(blocker, "narrations"),
+		TempDir:      filepath.Join(blocker, "tmp"),
+	}
+	if _, err := backupCore(cfg, filepath.Join(cfg.BackupDir, "b.tar.gz")); err == nil {
+		t.Fatal("DataDir 为文件时 backupCore 应报错")
+	}
+}
+
+// TestRunBackup_ConfigErrorExits 验证 runBackup 配置错误时 log.Fatalf 退出。
+// 覆盖 runBackup 中 "配置错误" log.Fatalf 分支（缺 SESSION_SECRET）。
+func TestRunBackup_ConfigErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunBackup_ConfigErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=", // 空 → config.Load 报错
+			"DATA_DIR="+t.TempDir(),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runBackup 配置错误应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	os.Args = []string{"cloudwisepod", "backup", "out.tar.gz"}
+	runBackup([]string{"out.tar.gz"})
+}
+
+// TestRunRestore_ConfigErrorExits 验证 runRestore 配置错误时 log.Fatalf 退出。
+// 覆盖 runRestore 中 "配置错误" log.Fatalf 分支（缺 SESSION_SECRET）。
+func TestRunRestore_ConfigErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunRestore_ConfigErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=", // 空 → config.Load 报错
+			"DATA_DIR="+t.TempDir(),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runRestore 配置错误应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	runRestore([]string{"in.tar.gz"})
+}
+
+// TestRunServe_ConfigErrorExits 验证 runServe 配置错误时 log.Fatalf 退出。
+// 覆盖 runServe 中 "配置错误" log.Fatalf 分支（缺 SESSION_SECRET）。
+func TestRunServe_ConfigErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunServe_ConfigErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=", // 空 → config.Load 报错
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runServe 配置错误应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	runServe()
+}
+
+// TestRunBackup_FailureExits 验证 runBackup 备份失败时 log.Fatalf 退出。
+// 覆盖 runBackup 中备份失败 log.Fatalf 分支（目标路径不可创建）。
+func TestRunBackup_FailureExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunBackup_FailureExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test-secret",
+			"DATA_DIR="+t.TempDir(),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runBackup 备份失败应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	// 目标路径父目录被文件占用 → 备份失败
+	blocker := filepath.Join(os.TempDir(), "cwp-block-"+strconv.Itoa(os.Getpid()))
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	defer os.Remove(blocker)
+	runBackup([]string{filepath.Join(blocker, "sub", "out.tar.gz")})
+}
+
+// TestRunServe_EnsureDirsErrorExits 验证 runServe 创建数据目录失败时 log.Fatalf 退出。
+// 覆盖 runServe 中 "创建数据目录" log.Fatalf 分支。
+func TestRunServe_EnsureDirsErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		dir := t.TempDir()
+		blocker := filepath.Join(dir, "blocked")
+		os.WriteFile(blocker, []byte("x"), 0o644)
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunServe_EnsureDirsErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test-secret",
+			"DATA_DIR="+filepath.Join(dir, "blocked", "data"),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runServe EnsureDirs 失败应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	// 子进程：DATA_DIR 父目录被文件占用 → EnsureDirs 失败 → log.Fatalf 退出
+	runServe()
+}
+
+// TestRunRestore_FailureExits 验证 runRestore 恢复失败时 log.Fatalf 退出。
+// 覆盖 runRestore 中恢复失败 log.Fatalf 分支（备份包不存在）。
+func TestRunRestore_FailureExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunRestore_FailureExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test-secret",
+			"DATA_DIR="+t.TempDir(),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runRestore 恢复失败应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	// 备份包不存在 → Restore 失败 → log.Fatalf 退出
+	runRestore([]string{filepath.Join(t.TempDir(), "missing.tar.gz")})
+}
+
+// TestRunServe_OpenDBErrorExits 验证 runServe 打开数据库失败时 log.Fatalf 退出。
+// 覆盖 runServe 中 "打开数据库" log.Fatalf 分支（DB_PATH 父目录为文件）。
+func TestRunServe_OpenDBErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		dir := t.TempDir()
+		blocker := filepath.Join(dir, "db-blocker")
+		os.WriteFile(blocker, []byte("x"), 0o644)
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunServe_OpenDBErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test-secret",
+			"DATA_DIR="+filepath.Join(dir, "data"),
+			"DB_PATH="+filepath.Join(blocker, "cloudwisepod.db"),
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runServe 打开数据库失败应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	// 子进程：DB_PATH 父目录被文件占用 → store.Open 失败 → log.Fatalf 退出
+	runServe()
+}
+
 // TestRestoreCore_Fails 验证恢复缺失备份包时 restoreCore 包装错误返回。
 // 覆盖 restoreCore 中 "恢复失败" 错误分支。
 func TestRestoreCore_Fails(t *testing.T) {
