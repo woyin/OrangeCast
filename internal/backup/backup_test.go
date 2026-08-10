@@ -653,3 +653,19 @@ func TestRestore_CorruptTarEntry(t *testing.T) {
 		t.Fatal("截断的 tar 条目应报错")
 	}
 }
+
+// TestCreate_BrokenSymlinkEvidence 验证证据目录含指向不存在目标的符号链接时 Create 报错。
+// 覆盖 Create 中 filepath.Walk 内 filehash.SHA256 读取失败分支（符号链接目标缺失）。
+func TestCreate_BrokenSymlinkEvidence(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	evDir := filepath.Join(srcDir, "evidence")
+	// 指向不存在目标的符号链接 → Walk 收集时 filehash.SHA256 打开失败
+	if err := os.Symlink(filepath.Join(evDir, "missing-target.mp3"), filepath.Join(evDir, "broken.mp3")); err != nil {
+		t.Skipf("无法创建符号链接: %v", err)
+	}
+	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
+	if _, err := Create(context.Background(), srcStore, evDir, backupFile); err == nil {
+		t.Fatal("含损坏符号链接的证据目录 Create 应报错")
+	}
+}

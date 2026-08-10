@@ -325,6 +325,36 @@ func TestIndexSearch_ClosedDBNerror(t *testing.T) {
 	}
 }
 
+// TestIndexSearch_DeleteError 验证 search_index 表缺失时 DELETE 失败。
+// 覆盖 IndexSearch 中 DELETE FROM search_index 失败分支。
+func TestIndexSearch_DeleteError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE search_index`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IndexSearch(ctx, models.SourceEpisode, "ep-1", "T", "S", nil); err == nil {
+		t.Fatal("search_index 表缺失时 IndexSearch 应报错")
+	}
+}
+
+// TestIndexSearch_InsertError 验证 summary INSERT 失败。
+// 覆盖 IndexSearch 中 summary INSERT 失败分支（重建含 source_type/source_id 但缺
+// segment_id 等列的表，使 DELETE 成功但 summary INSERT 因缺列失败）。
+func TestIndexSearch_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE search_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE search_index (source_type TEXT, source_id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IndexSearch(ctx, models.SourceEpisode, "ep-1", "T", "S", nil); err == nil {
+		t.Fatal("summary INSERT 应因缺列失败")
+	}
+}
+
 // TestGetJob_NotFound 验证查询不存在的 job 返回 ErrNotFound。
 func TestGetJob_NotFound(t *testing.T) {
 	s := newTestStore(t)
