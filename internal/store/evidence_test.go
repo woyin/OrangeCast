@@ -136,3 +136,33 @@ func TestDeleteSourceRows_CascadeFails(t *testing.T) {
 		t.Fatal("evidence_audio 表缺失时 DeleteSourceRows 应报错")
 	}
 }
+
+// TestDeleteSourceRows_Upload 验证 upload 源的 DeleteSourceRows 删除 uploads 行。
+// 覆盖 DeleteSourceRows 中 sourceType == SourceUpload 分支。
+func TestDeleteSourceRows_Upload(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSourceRows(ctx, models.SourceUpload, up.ID); err != nil {
+		t.Fatalf("DeleteSourceRows(upload): %v", err)
+	}
+	if _, err := s.GetUploadByID(ctx, up.ID); err != ErrNotFound {
+		t.Errorf("upload 应被删除，实际 err=%v", err)
+	}
+}
+
+// TestDeleteSourceRows_UploadDeleteFails 验证 upload 源删除失败时报错。
+// 覆盖 DeleteSourceRows 中 source 本体删除失败分支（删除 uploads 表）。
+func TestDeleteSourceRows_UploadDeleteFails(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE uploads`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSourceRows(ctx, models.SourceUpload, "up-1"); err == nil {
+		t.Fatal("uploads 表缺失时 DeleteSourceRows 应报错")
+	}
+}
