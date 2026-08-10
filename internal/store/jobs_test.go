@@ -547,3 +547,34 @@ func TestMarkJobFailed_Error(t *testing.T) {
 		t.Fatal("processing_jobs 表缺失时 MarkJobFailed 应报错")
 	}
 }
+
+// TestListQueuedOrRunning_ScanError 验证 job 行数据异常时 Scan 失败。
+// 覆盖 ListQueuedOrRunning 中 rows.Scan 失败分支（attempt_count 非整数）。
+func TestListQueuedOrRunning_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 插入 attempt_count 为字符串的记录 → Scan 到 int 失败
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, attempt_count)
+		 VALUES ('j1', 'episode', 'ep1', 'transcribe', 'queued', 'bad')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListQueuedOrRunning(ctx); err == nil {
+		t.Fatal("attempt_count 非整数应导致 Scan 失败")
+	}
+}
+
+// TestGetProcessingProgress_ScanError 验证进度查询行数据异常时 Scan 失败。
+// 覆盖 GetProcessingProgress 中 rows.Scan 失败分支。
+func TestGetProcessingProgress_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, attempt_count)
+		 VALUES ('j1', 'episode', 'ep1', 'transcribe', 'queued', 'bad')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetProcessingProgress(ctx); err == nil {
+		t.Fatal("attempt_count 非整数应导致 Scan 失败")
+	}
+}
