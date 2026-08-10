@@ -165,3 +165,25 @@ func TestConsistencyBackup_MkdirFails(t *testing.T) {
 		t.Fatal("父目录不可创建应报错")
 	}
 }
+
+// TestConsistencyBackup_EmptyProduct 验证 VACUUM INTO 产物无效时报错。
+// 覆盖 ConsistencyBackup 中 "备份产物无效" 分支（目标为目录导致 Stat 失败）。
+func TestConsistencyBackup_EmptyProduct(t *testing.T) {
+	dir := t.TempDir()
+	src, err := sql.Open("sqlite", filepath.Join(dir, "src.db")+"?_pragma=foreign_keys(on)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { src.Close() })
+	ctx := context.Background()
+	if _, err := Migrate(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	// 目标路径是一个已存在的目录 → VACUUM INTO 可能失败或产物无效
+	// 若 VACUUM INTO 对目录报错走 "VACUUM INTO 备份失败"，若静默成功则 Stat 目录失败走 "备份产物无效"
+	dstDir := filepath.Join(dir, "dst")
+	os.MkdirAll(dstDir, 0o755)
+	if err := ConsistencyBackup(ctx, src, dstDir); err == nil {
+		t.Fatal("目标为目录时备份应报错")
+	}
+}

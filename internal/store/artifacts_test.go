@@ -128,6 +128,30 @@ func TestGetCurrentVersion_NotSet(t *testing.T) {
 	}
 }
 
+// TestCurrentVersion_Upload 验证 upload 源的当前版本指针读写。
+// 覆盖 SetCurrentVersion/GetCurrentVersion 中 table = "uploads" 分支。
+func TestCurrentVersion_Upload(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	v, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, KindTranscript, "groq", "m", "1", job.ID, `{"text":"x"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, KindTranscript, v); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, KindTranscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Version != v {
+		t.Errorf("upload 当前版本应为 %d，实际 %d", v, cur.Version)
+	}
+}
+
 // TestArtifacts_DBErrors 验证 artifact 系列查询在表缺失时返回错误。
 // 覆盖 ListArtifactVersions/GetArtifactVersion 查询错误分支。
 func TestArtifacts_DBErrors(t *testing.T) {

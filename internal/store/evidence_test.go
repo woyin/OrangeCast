@@ -94,3 +94,45 @@ func TestPurgeIntent_Lifecycle(t *testing.T) {
 		t.Errorf("完成后 pending 应为空，实际 %d", len(purges))
 	}
 }
+
+// TestGetEvidenceAudio_NotFound 验证不存在的证据返回 ErrNotFound。
+// 覆盖 GetEvidenceAudio 中 sql.ErrNoRows 分支。
+func TestGetEvidenceAudio_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetEvidenceAudio(ctx, models.SourceEpisode, "ep-none"); err != ErrNotFound {
+		t.Errorf("不存在的证据应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestEvidence_DBErrors 验证 evidence 系列查询在表缺失时返回错误。
+// 覆盖 GetEvidenceAudio/ListPendingPurges 查询错误分支。
+func TestEvidence_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, tbl := range []string{"evidence_audio", "purges"} {
+		if _, err := s.DB.ExecContext(ctx, `DROP TABLE `+tbl); err != nil {
+			t.Fatalf("DROP TABLE %s: %v", tbl, err)
+		}
+	}
+	if _, err := s.GetEvidenceAudio(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Error("evidence_audio 表缺失时 GetEvidenceAudio 应报错")
+	}
+	if _, err := s.ListPendingPurges(ctx); err == nil {
+		t.Error("purges 表缺失时 ListPendingPurges 应报错")
+	}
+}
+
+// TestDeleteSourceRows_CascadeFails 验证级联删除失败时返回错误。
+// 覆盖 DeleteSourceRows 中某条 DELETE 失败分支（删除 evidence_audio 表）。
+func TestDeleteSourceRows_CascadeFails(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 删除 evidence_audio 表 → 循环中的 DELETE 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE evidence_audio`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSourceRows(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("evidence_audio 表缺失时 DeleteSourceRows 应报错")
+	}
+}
