@@ -151,3 +151,21 @@ func TestSafeDialer_DNSResolveThenBlocked(t *testing.T) {
 		t.Errorf("localhost 解析到私网应 ErrBlockedAddress，实际 %v", err)
 	}
 }
+
+// TestSafeDialer_PublicIPReachesInnerDial 验证公网 IP 通过私网校验后调用 inner.Dial。
+// 覆盖 Dial 中 inner.Dial 成功调用分支：公网 IP 不被拦截，inner.Dial 被实际调用。
+// 离线环境返回网络错误（证明已到达 inner.Dial），在线则成功连接。
+func TestSafeDialer_PublicIPReachesInnerDial(t *testing.T) {
+	d := safeDialer{inner: net.Dialer{Timeout: 500 * time.Millisecond}}
+	conn, err := d.Dial("tcp", "8.8.8.8:80")
+	if err == ErrBlockedAddress {
+		t.Fatal("公网 IP 不应被私网拦截")
+	}
+	if err != nil {
+		// 离线：网络错误证明 inner.Dial 已被调用（而非被 IsBlockedIP 拦截）
+		t.Logf("inner.Dial 返回网络错误（离线预期）: %v", err)
+	}
+	if conn != nil {
+		conn.Close()
+	}
+}
