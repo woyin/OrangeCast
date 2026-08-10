@@ -2,14 +2,16 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
-	"database/sql"
-	"encoding/json"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/filehash"
@@ -288,10 +290,10 @@ func TestRestore_MissingEvidenceFile(t *testing.T) {
 	f, _ := os.Create(backupFile)
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
-	// manifest 声明一个证据文件，但包内不含它
+	// manifest 声明一个证据文件，但包内不含它；DB 哈希正确以通过前置校验
 	m := Manifest{
 		Format: ManifestFormat, Version: ManifestVersion,
-		DBFile: dbFileName, DBSHA256: "deadbeef",
+		DBFile: dbFileName, DBSHA256: sha256Hex("fake-db"),
 		Evidence: []EvidenceEntry{{RelPath: "ep-1.mp3", SHA256: "abc", SizeBytes: 10}},
 	}
 	manifestJSON, _ := json.Marshal(m)
@@ -319,10 +321,10 @@ func TestRestore_EvidenceHashMismatch(t *testing.T) {
 	f, _ := os.Create(backupFile)
 	gz := gzip.NewWriter(f)
 	tw := tar.NewWriter(gz)
-	// manifest 声明证据文件 ep-1.mp3 的哈希为错误值
+	// manifest 声明证据文件 ep-1.mp3 的哈希为错误值；DB 哈希正确以通过前置校验
 	m := Manifest{
 		Format: ManifestFormat, Version: ManifestVersion,
-		DBFile: dbFileName, DBSHA256: "deadbeef",
+		DBFile: dbFileName, DBSHA256: sha256Hex("fake-db"),
 		Evidence: []EvidenceEntry{{RelPath: "ep-1.mp3", SHA256: "wrong-hash", SizeBytes: 4}},
 	}
 	manifestJSON, _ := json.Marshal(m)
@@ -508,5 +510,125 @@ func TestRestore_NilDBSHA(t *testing.T) {
 
 	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
 		t.Fatal("空 DBSHA256 应导致哈希校验失败")
+	}
+}
+
+// TestRestore_DBRenameFails 验证落地时 DB 重命名失败返回错误。
+// 覆盖 Restore 中 os.Rename(dbPath, targetDB) 错误分支：
+// force=true 且目标 DB 路径已存在为一个目录 → rename 失败。
+func TestRestore_DBRenameFails(t *testing.T) {
+	// 先构造一个合法备份包（manifest + db，无证据）
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 目标目录中 cloudwisepod.db 已存在为一个目录 → os.Rename 失败
+	targetDir := t.TempDir()
+	os.MkdirAll(filepath.Join(targetDir, "cloudwisepod.db"), 0o755)
+	if _, err := Restore(context.Background(), backupFile, targetDir, true); err == nil {
+		t.Fatal("目标 DB 路径为目录时恢复应报错")
+	}
+}
+
+// TestRestore_EvidenceMkdirFails 验证落地时证据目录创建失败返回错误。
+// 覆盖 Restore 中证据落地 os.MkdirAll 错误分支。
+func TestRestore_EvidenceMkdirFails(t *testing.T) {
+	// 构造一个含证据的合法备份包
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[{"rel_path":"ep-1.mp3","sha256":"` + sha256Hex("data") + `","size_bytes":4}]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Mode: 0o644, Size: int64(len("data"))}
+	tw.WriteHeader(eh)
+	tw.Write([]byte("data"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 目标证据目录不可创建：evidence 路径被文件占用
+	targetDir := t.TempDir()
+	os.WriteFile(filepath.Join(targetDir, "evidence"), []byte("x"), 0o644)
+	if _, err := Restore(context.Background(), backupFile, targetDir, false); err == nil {
+		t.Fatal("证据目录不可创建时恢复应报错")
+	}
+}
+
+// TestCopyFromTar_CreateFails 验证 copyFromTar 目标文件不可创建时返回错误。
+// 覆盖 copyFromTar 中 os.Create 失败分支。
+func TestCopyFromTar_CreateFails(t *testing.T) {
+	// 目标路径父目录被文件占用 → os.Create 失败
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	badDest := filepath.Join(blocker, "sub", "out.bin")
+
+	// 构造一个空的 tar.Reader
+	tr := tar.NewReader(strings.NewReader(""))
+	if err := copyFromTar(tr, badDest); err == nil {
+		t.Fatal("目标文件不可创建应报错")
+	}
+}
+
+// TestCopyFromTar_CopyFails 验证 io.Copy 写入失败时返回错误。
+// 覆盖 copyFromTar 中 io.Copy 失败分支。
+func TestCopyFromTar_CopyFails(t *testing.T) {
+	dir := t.TempDir()
+	// 目标是一个目录 → os.Create 成功但 io.Copy 写入失败
+	destDir := filepath.Join(dir, "destdir")
+	os.MkdirAll(destDir, 0o755)
+
+	// 构造一个包含内容的 tar.Reader（从内存 tar 读取）
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{Name: "f.txt", Mode: 0o644, Size: 5}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte("hello"))
+	tw.Close()
+	tr := tar.NewReader(&buf)
+	if _, err := tr.Next(); err != nil {
+		t.Fatalf("tr.Next: %v", err)
+	}
+	// 目标是目录 → io.Copy 打开失败 → 报错
+	if err := copyFromTar(tr, filepath.Join(destDir, "sub", "out.bin")); err == nil {
+		t.Fatal("目标为目录应报错")
+	}
+}
+
+// TestCreate_DBSnapshotFails 验证数据库快照失败时 Create 报错。
+// 覆盖 Create 中 "数据库快照" 错误分支（关闭 DB 使 VACUUM INTO 失败）。
+func TestCreate_DBSnapshotFails(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "evidence"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
+	s, err := store.Open(filepath.Join(dir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 关闭 DB → ConsistencyBackup 的 VACUUM INTO 失败
+	s.Close()
+
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	if _, err := Create(context.Background(), s, filepath.Join(dir, "evidence"), backupFile); err == nil {
+		t.Fatal("数据库已关闭时 Create 应报错")
 	}
 }
