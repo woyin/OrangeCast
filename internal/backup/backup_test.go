@@ -719,3 +719,59 @@ func TestRestore_ManifestReadError(t *testing.T) {
 		t.Fatal("manifest 截断应报错")
 	}
 }
+
+// TestRestore_MkdirTempFails 验证临时目录创建失败时 Restore 报错。
+// 覆盖 Restore 中 os.MkdirTemp 失败分支。
+func TestRestore_MkdirTempFails(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 将 TMPDIR 指向文件占用的路径 → MkdirTemp 失败
+	blocker := filepath.Join(t.TempDir(), "blockfile")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	t.Setenv("TMPDIR", blocker)
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("临时目录创建失败应报错")
+	}
+}
+
+// TestRestore_EvidenceHashVerifyError 验证提取的证据文件不可读时哈希校验失败。
+// 覆盖 Restore 中 filehash.SHA256(p) 失败分支。
+func TestRestore_EvidenceHashVerifyError(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 声明证据文件，DB 哈希正确
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[{"rel_path":"ep-1.mp3","sha256":"abc","size_bytes":4}]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	// 证据条目是目录（无法作为文件读取哈希）→ 校验失败
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Typeflag: tar.TypeDir, Mode: 0o755}
+	tw.WriteHeader(eh)
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("证据哈希校验失败应报错")
+	}
+}
