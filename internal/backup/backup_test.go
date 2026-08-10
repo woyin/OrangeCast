@@ -806,3 +806,20 @@ func TestRestore_EvidenceRenameFails(t *testing.T) {
 		t.Fatal("证据重命名目标被占用时恢复应报错")
 	}
 }
+
+// TestRestore_CorruptTarNextError 验证 tar 条目头部损坏时 Restore 报错。
+// 覆盖 Restore 中 tr.Next() 非 EOF 错误分支（写入无效 tar 头）。
+func TestRestore_CorruptTarNextError(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	// 写入无效的 tar 头数据（不完整的 512 字节块）→ tr.Next 报错
+	gz.Write([]byte("not a valid tar header block at all"))
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("损坏 tar 头应报错")
+	}
+}
