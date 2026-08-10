@@ -2146,7 +2146,9 @@ func TestCollection_CreateDBError(t *testing.T) {
 func TestAudio_MissingSourceID(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "audioid@example.com", "password123")
-	req := httptest.NewRequest(http.MethodGet, "/api/audio/episode/", nil)
+	// 注意：尾斜杠会让 ServeMux 重定向并落到 mux 404；无尾斜杠时才进入 handleAudio
+	// 的 len(parts) < 2 分支（TrimPrefix 后剩 "episode"）。
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/episode", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rec, req)
@@ -2169,6 +2171,53 @@ func TestAudio_UploadFallbackMissingFile(t *testing.T) {
 	srv.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("upload 原始文件缺失应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestAudio_EvidenceMissingFallsBackToUpload 验证证据记录存在但文件缺失时回退 upload 原始文件。
+// 覆盖 handleAudio 中 GetEvidenceAudio 成功但 os.Stat 失败 → 回退分支。
+func TestAudio_EvidenceMissingFallsBackToUpload(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audioeb@example.com", "password123")
+	ctx := context.Background()
+	up, _ := srv.store.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 写一条证据记录，但文件不存在（evidence 目录为空）
+	if err := srv.store.UpsertEvidenceAudio(ctx, models.SourceUpload, up.ID, "upload_"+up.ID+".mp3", "mp3", 10, "abc"); err != nil {
+		t.Fatal(err)
+	}
+	// 原始落盘文件存在 → 回退成功
+	rawDir := filepath.Join(srv.cfg.TempDir, "uploads")
+	os.MkdirAll(rawDir, 0o755)
+	os.WriteFile(filepath.Join(rawDir, up.ID), []byte("raw-audio"), 0o644)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/upload/"+up.ID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("证据文件缺失应回退 upload，实际 %d", rec.Code)
+	}
+	if rec.Body.String() != "raw-audio" {
+		t.Errorf("应返回原始音频，实际 %q", rec.Body.String())
+	}
+}
+
+// TestAudio_EpisodeNoEvidence404 验证 episode 无证据记录时返回 404。
+// 覆盖 handleAudio 中 episode 分支（无证据、非 upload）→ 末尾 http.NotFound。
+func TestAudio_EpisodeNoEvidence404(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "audioen@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 不写任何证据记录 → episode 且非 upload → http.NotFound
+	req := httptest.NewRequest(http.MethodGet, "/api/audio/episode/"+eps[0].ID, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("episode 无证据应 404，实际 %d", rec.Code)
 	}
 }
 
