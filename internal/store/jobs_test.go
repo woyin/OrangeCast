@@ -593,3 +593,16 @@ func TestListRecentCompleted_DefaultLimit(t *testing.T) {
 		t.Errorf("无任务时应返回空列表，实际 %d", len(jobs))
 	}
 }
+
+// TestMarkJobSucceeded_Error 验证标记成功失败时报错。
+// 覆盖 MarkJobSucceeded 中 UPDATE 失败分支（删除 processing_jobs 表）。
+func TestMarkJobSucceeded_Error(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobSucceeded(ctx, "job-1"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 MarkJobSucceeded 应报错")
+	}
+}
