@@ -125,3 +125,43 @@ func TestKokoroProvider_SynthesizeSynthFnError(t *testing.T) {
 		t.Fatal("synthFn 报错时 Synthesize 应返回错误")
 	}
 }
+
+// TestKokoroProvider_SynthesizeRunCLI 验证 Synthesize 走 runCLI 分支（synthFn 为 nil）。
+// 覆盖 Synthesize 中 else → runCLI 分支。
+func TestKokoroProvider_SynthesizeRunCLI(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-kokoro.sh")
+	outPath := filepath.Join(dir, "out.wav")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch \"$6\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(script, "af_heart", "model.bin")
+	res, err := k.Synthesize("合成文本", "", outPath)
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	if _, err := os.Stat(outPath); err != nil {
+		t.Errorf("输出文件应被创建: %v", err)
+	}
+	// 空 voice 用默认音色；开场白计入字符数
+	if res.Voice != "af_heart" {
+		t.Errorf("默认音色应为 af_heart，实际 %q", res.Voice)
+	}
+	if res.CharCount == 0 {
+		t.Error("字符数不应为 0")
+	}
+}
+
+// TestKokoroProvider_SynthesizeRunCLIError 验证 Synthesize 走 runCLI 且二进制失败时报错。
+// 覆盖 Synthesize 中 runCLI err → return nil, err 分支。
+func TestKokoroProvider_SynthesizeRunCLIError(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fail.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(script, "af_heart", "model.bin")
+	if _, err := k.Synthesize("文本", "voice", filepath.Join(dir, "x.wav")); err == nil {
+		t.Fatal("runCLI 失败时 Synthesize 应返回错误")
+	}
+}
