@@ -63,3 +63,12 @@ func TestHashAndVerifyPassword(t *testing.T) {
 		t.Error("相同密码两次哈希应不同（随机 salt）")
 	}
 }
+
+// TestValidateEmail_TooShort 验证长度不足 5 的邮箱被拒绝。
+// 覆盖 ValidateEmail 中 len(email) < 5 分支。
+func TestValidateEmail_TooShort(t *testing.T) {
+	// "a@.c" 域名部分含 "." 但总长 4 < 5 → 触发长度分支
+	if ValidateEmail("a@.c") == nil {
+		t.Error(`"a@.c" 应判定为无效 email（长度不足）`)
+	}
+}

@@ -296,3 +296,85 @@ func TestClearSessionCookie(t *testing.T) {
 		t.Error("应清除 session cookie")
 	}
 }
+
+// TestSetSessionCookie_CreateError 验证 CreateSession 失败时返回错误。
+// 覆盖 SetSessionCookie 中 CreateSession err != nil 分支（删除 sessions 表）。
+func TestSetSessionCookie_CreateError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, _ := s.ClaimOwner(ctx, "a@b.com", "$argon2id$fakehash")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE sessions`); err != nil {
+		t.Fatalf("DROP TABLE sessions: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	if err := SetSessionCookie(rec, req, s, u.ID, true); err == nil {
+		t.Fatal("sessions 表缺失时 SetSessionCookie 应报错")
+	}
+}
+
+// TestRequireAuth_DBError 验证 GetSessionByToken 非 ErrNotFound 错误时返回 500。
+// 覆盖 RequireAuth 中 "内部错误" 分支（删除 sessions 表）。
+func TestRequireAuth_DBError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	u, _ := s.ClaimOwner(ctx, "a@b.com", "$argon2id$fakehash")
+	token, _ := s.CreateSession(ctx, u.ID, time.Now().Add(time.Hour).UTC().Format(time.RFC3339))
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE sessions`); err != nil {
+		t.Fatalf("DROP TABLE sessions: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	handler := RequireAuth(s)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("sessions 表缺失应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestClientIP_NoPort 验证 RemoteAddr 无端口时直接使用。
+// 覆盖 ClientIP 中 net.SplitHostPort 失败分支。
+func TestClientIP_NoPort(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.7" // 无端口
+	if got := ClientIP(req, nil); got != "198.51.100.7" {
+		t.Errorf("无端口应返回 RemoteAddr，实际 %q", got)
+	}
+}
+
+// TestClientIP_InvalidCIDR 验证非法 CIDR 被跳过（continue）。
+// 覆盖 ClientIP 中 net.ParseCIDR 失败 continue 分支。
+func TestClientIP_InvalidCIDR(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "198.51.100.7:1234"
+	// 非法 CIDR 被跳过 → 返回 host
+	if got := ClientIP(req, []string{"not-a-cidr"}); got != "198.51.100.7" {
+		t.Errorf("非法 CIDR 应被跳过，实际 %q", got)
+	}
+}
+
+// TestClientIP_TrustedProxyInvalidXFF 验证可信代理但 XFF 非法时返回代理 host。
+// 覆盖 ClientIP 中 XFF 存在但第一个 IP 非法 → return host 分支。
+func TestClientIP_TrustedProxyInvalidXFF(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "10.0.0.9:9999"
+	req.Header.Set("X-Forwarded-For", "not-an-ip")
+	if got := ClientIP(req, []string{"10.0.0.0/8"}); got != "10.0.0.9" {
+		t.Errorf("XFF 非法应返回代理 host，实际 %q", got)
+	}
+}
+
+// TestCSRFValue_FromContextValue 验证 context 值为非空字符串时直接返回。
+// 覆盖 CSRFValue 中 context 值分支。
+func TestCSRFValue_FromContextValue(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := context.WithValue(req.Context(), csrfCtxKey, "ctx-token")
+	req = req.WithContext(ctx)
+	if got := CSRFValue(req); got != "ctx-token" {
+		t.Errorf("应从 context 读取 token，实际 %q", got)
+	}
+}
