@@ -205,3 +205,46 @@ func TestReferenceLinks(t *testing.T) {
 		t.Errorf("无效引用应返回空串，实际 %q", got)
 	}
 }
+
+// TestRender_NilCard 验证传入 nil Card 返回错误。
+// 覆盖 Render 中 "card 不能为空" 错误分支。
+func TestRender_NilCard(t *testing.T) {
+	_, err := Render(Input{})
+	if err == nil {
+		t.Fatal("nil card 应报错")
+	}
+}
+
+// TestRender_TitleFallbackToCard 验证 Title 为空时回退到 Card.Title。
+// 覆盖 Render 中 title == "" → title = in.Card.Title 分支。
+func TestRender_TitleFallbackToCard(t *testing.T) {
+	in := Input{
+		Card: &provider.KnowledgeCard{Title: "卡片标题", Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}}, KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}, Chapters: []provider.Chapter{{Title: "CH", Citations: []string{"seg-0001"}}}},
+		Segments:   []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "文本"}},
+		SourceType: "episode", SourceID: "ep-1",
+		Title: "", // 空 → 回退 Card.Title
+	}
+	md, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(md, "卡片标题") {
+		t.Errorf("应回退到卡片标题，实际输出:\n%s", md)
+	}
+}
+
+// TestCitationLinks_InvalidCitationSkipped 验证无效引用（不存在于 segments）被跳过。
+// 覆盖 citationLinks 中 ResolveCitationRange 返回 !ok → continue 分支。
+func TestCitationLinks_InvalidCitationSkipped(t *testing.T) {
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "文本"}}
+	// 全部无效 → 返回空串
+	got := citationLinks("episode", "ep-1", "http://localhost:8080", []string{"seg-9999"}, segs)
+	if got != "" {
+		t.Errorf("全部无效引用应返回空串，实际 %q", got)
+	}
+	// 混合：有效 + 无效 → 只保留有效的
+	got = citationLinks("episode", "ep-1", "http://localhost:8080", []string{"seg-9999", "seg-0001"}, segs)
+	if !strings.Contains(got, "seg-0001") || strings.Contains(got, "seg-9999") {
+		t.Errorf("应跳过无效引用并保留有效引用，实际 %q", got)
+	}
+}
