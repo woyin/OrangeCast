@@ -221,3 +221,35 @@ func TestDJ_CorruptTranscript_500(t *testing.T) {
 		t.Errorf("转录载荷损坏应 500，实际 %d", rec.Code)
 	}
 }
+
+// TestDJ_InvalidCitationSkipped 验证高光引用不存在的 Segment 时被跳过。
+// 覆盖 handleDJ 中 ResolveCitationSpan !ok → continue 分支。
+func TestDJ_InvalidCitationSkipped(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djskip@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+
+	// 高光引用不存在的 segment（seg-9999）→ ResolveCitationSpan !ok → 跳过
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	hs := &provider.HighlightSet{Highlights: []provider.Highlight{
+		{ID: "h1", Gist: "gist", Citations: []string{"seg-9999"}},
+	}}
+	hsJSON, _ := json.Marshal(hs)
+	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID, string(hsJSON))
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
+	// 转录版本存在（含有效 segment）
+	tp := &provider.TranscriptPayload{Language: "en", Text: "x", Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}}
+	tpJSON, _ := json.Marshal(tp)
+	tv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "groq", "m", "1", job.ID, string(tpJSON))
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, tv)
+
+	// 页面应正常渲染，但高光因引用无效被跳过（不 panic）
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DJ 页应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
