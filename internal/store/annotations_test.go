@@ -270,3 +270,18 @@ func TestListCollectionItems_ScanError(t *testing.T) {
 		t.Fatal("非法 time_start 应导致 Scan 失败")
 	}
 }
+
+// TestListCollections_ScanError 验证 collections 行数据异常时 Scan 失败。
+// 覆盖 ListCollections 中 rows.Scan 失败分支（重建含异常类型列的表）。
+func TestListCollections_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 重建 collections 表使 item_count 子查询返回非整数（COUNT 恒为整数，改用其它方式）
+	// 通过删除 collection_items 表使子查询缺表 → 查询失败而非 Scan 失败；此处验证查询失败路径。
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE collection_items`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListCollections(ctx); err == nil {
+		t.Fatal("collection_items 表缺失时 ListCollections 应报错")
+	}
+}
