@@ -554,3 +554,30 @@ func TestGroq_StudyChat_ParseError(t *testing.T) {
 		t.Errorf("错误应含 '解析 StudyChat 输出失败'，实际 %v", err)
 	}
 }
+
+// TestGroq_ChatComplete_PostJSONError 验证 chatComplete 的 postJSON 网络错误时报错。
+// 覆盖 chatComplete 中 postJSON err → return "", code, err 分支。
+func TestGroq_ChatComplete_PostJSONError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // 关闭服务器 → 连接失败
+
+	g := NewGroqProvider("key").WithBaseURL(url)
+	_, _, err := g.chatComplete([]map[string]string{{"role": "user", "content": "hi"}}, "object")
+	if err == nil {
+		t.Fatal("连接失败应报错")
+	}
+}
+
+// TestGroq_CheckReference_CompleteError 验证 CheckReference 的 complete 失败时报错。
+// 覆盖 CheckReference 中 complete err → return ReferenceCheckResult{}, err 分支。
+func TestGroq_CheckReference_CompleteError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "", 0, errors.New("complete 失败")
+	}
+	_, err := g.CheckReference("问题", "回答", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("complete 失败应报错")
+	}
+}
