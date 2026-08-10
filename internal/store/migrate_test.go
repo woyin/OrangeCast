@@ -505,3 +505,19 @@ func TestApplyOne_ExecError(t *testing.T) {
 		t.Error("失败迁移的版本不应被记录到 schema_migrations")
 	}
 }
+
+// TestUsersHelpers_DBErrors 验证 users 辅助函数在表缺失/关闭 DB 时返回错误。
+// 覆盖 usersTableExists/CountUsers 查询错误分支。
+func TestUsersHelpers_DBErrors(t *testing.T) {
+	// 用关闭的 DB 触发查询错误
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if _, err := usersTableExists(ctx, db); err == nil {
+		t.Error("关闭 DB 时 usersTableExists 应报错")
+	}
+	if _, err := CountUsers(ctx, db); err == nil {
+		t.Error("关闭 DB 时 CountUsers 应报错")
+	}
+}
