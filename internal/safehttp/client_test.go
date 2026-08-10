@@ -1,8 +1,12 @@
 package safehttp
 
 import (
+	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestValidateURL(t *testing.T) {
@@ -103,5 +107,37 @@ func TestSafeDialer_BlockedIP(t *testing.T) {
 	// 非法地址 → 报错
 	if _, err := d.Dial("tcp", "not-an-addr"); err == nil {
 		t.Fatal("非法地址应报错")
+	}
+}
+
+// TestSafeDialer_UnresolvableHost 验证 DNS 解析失败返回错误。
+// 覆盖 Dial 中 "无法解析主机" 分支（用 .invalid 域名触发 DNS 失败）。
+func TestSafeDialer_UnresolvableHost(t *testing.T) {
+	d := safeDialer{inner: net.Dialer{Timeout: time.Second}}
+	if _, err := d.Dial("tcp", "nonexistent.invalid:80"); err == nil {
+		t.Fatal("无法解析的主机应报错")
+	}
+}
+
+// TestNewClient_TooManyRedirects 验证超过最大重定向次数返回 ErrTooManyRedirects。
+// 覆盖 CheckRedirect 中 len(via) > maxRedirects 分支。
+func TestNewClient_TooManyRedirects(t *testing.T) {
+	// 服务器始终重定向到自身 → 无限重定向 → 触发 ErrTooManyRedirects
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/loop", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	// 用 NewClient 本身（maxRedirects=2），其 CheckRedirect 在超限时返回 ErrTooManyRedirects。
+	// 测试服务器是本地地址；用自定义 Transport 直连以避免 SSRF 拦截影响（CheckRedirect 仍生效）。
+	client := NewClient(2, 0, 5*time.Second)
+	client.Transport = &http.Transport{}
+	resp, err := client.Get(srv.URL + "/loop")
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("无限重定向应报错")
+	}
+	if !errors.Is(err, ErrTooManyRedirects) {
+		t.Errorf("应返回 ErrTooManyRedirects，实际 %v", err)
 	}
 }
