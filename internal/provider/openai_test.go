@@ -430,3 +430,50 @@ func TestOpenAI_Answer_NoSegments(t *testing.T) {
 		t.Errorf("应返回拒答文本，实际 %q", res.Answer)
 	}
 }
+
+// TestOpenAI_GenerateHighlights_ParseError 验证高光输出非 JSON 时报错。
+// 覆盖 GenerateHighlights 中 "解析 openai 高光" 分支。
+func TestOpenAI_GenerateHighlights_ParseError(t *testing.T) {
+	srv := newOpenAITestServer(t, `不是 JSON`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.GenerateHighlights([]Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("非 JSON 输出应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 openai 高光") {
+		t.Errorf("错误应含 '解析 openai 高光'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_Paraphrase_DoResponsesError 验证 Paraphrase 的 doResponses 失败时报错。
+// 覆盖 Paraphrase 中 doResponses err → return nil, err 分支。
+func TestOpenAI_Paraphrase_DoResponsesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.Paraphrase("解释", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+}
+
+// TestOpenAI_Paraphrase_ParseError 验证 Paraphrase 响应 JSON 解析失败时报错。
+// 覆盖 Paraphrase 中 "解析 openai 复述讲解响应" 分支。
+func TestOpenAI_Paraphrase_ParseError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`不是 JSON`)) // 非法 JSON 响应体
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.Paraphrase("解释", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("非 JSON 响应应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 openai 复述讲解响应") {
+		t.Errorf("错误应含 '解析 openai 复述讲解响应'，实际 %v", err)
+	}
+}
