@@ -260,3 +260,28 @@ func TestListEpisodes_QueryError(t *testing.T) {
 		t.Fatal("episodes 表缺失时 ListEpisodes 应报错")
 	}
 }
+
+// TestEpisodesUploads_DBErrors 验证 episodes/uploads 系列查询在表缺失时返回错误。
+// 覆盖 GetEpisodeByID/CreateUpload/GetUploadByID/ListUploads 错误分支。
+func TestEpisodesUploads_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetEpisodeByID(ctx, "ep1"); err == nil {
+		t.Error("episodes 表缺失时 GetEpisodeByID 应报错")
+	}
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE uploads`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateUpload(ctx, "a.mp3", "audio/mpeg", 10); err == nil {
+		t.Error("uploads 表缺失时 CreateUpload 应报错")
+	}
+	if _, err := s.GetUploadByID(ctx, "up1"); err == nil {
+		t.Error("uploads 表缺失时 GetUploadByID 应报错")
+	}
+	if _, err := s.ListUploads(ctx); err == nil {
+		t.Error("uploads 表缺失时 ListUploads 应报错")
+	}
+}
