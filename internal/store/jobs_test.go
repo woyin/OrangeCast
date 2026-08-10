@@ -502,3 +502,48 @@ func TestClaimNextJob_QueryError(t *testing.T) {
 		t.Fatal("processing_jobs 表缺失时 ClaimNextJob 应报错")
 	}
 }
+
+// TestJobs_QueryErrors 验证 jobs 系列查询在表缺失时返回错误。
+// 覆盖 ListQueuedOrRunning/GetProcessingProgress/ListRecentCompleted 查询失败分支。
+func TestJobs_QueryErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListQueuedOrRunning(ctx); err == nil {
+		t.Error("processing_jobs 表缺失时 ListQueuedOrRunning 应报错")
+	}
+	if _, err := s.GetProcessingProgress(ctx); err == nil {
+		t.Error("processing_jobs 表缺失时 GetProcessingProgress 应报错")
+	}
+	if _, err := s.ListRecentCompleted(ctx, 5); err == nil {
+		t.Error("processing_jobs 表缺失时 ListRecentCompleted 应报错")
+	}
+}
+
+// TestHeartbeatJob_Error 验证心跳更新失败时报错。
+// 覆盖 HeartbeatJob 中 UPDATE 失败分支（删除 processing_jobs 表）。
+func TestHeartbeatJob_Error(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatJob(ctx, "job-1", "60 seconds"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 HeartbeatJob 应报错")
+	}
+}
+
+// TestMarkJobFailed_Error 验证标记失败时报错。
+// 覆盖 MarkJobFailed 中 UPDATE 失败分支（删除 processing_jobs 表）。
+func TestMarkJobFailed_Error(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobFailed(ctx, "job-1", "boom"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 MarkJobFailed 应报错")
+	}
+}
