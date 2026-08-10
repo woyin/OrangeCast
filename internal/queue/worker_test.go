@@ -1314,3 +1314,54 @@ func TestHeartbeatLoop_HeartbeatError(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestDoTranscribe_SetCurrentVersionFails 验证设置当前转录版本失败时报错。
+// 覆盖 doTranscribe 中 "设置当前转录版本" 分支（删除 episodes 表）。
+func TestDoTranscribe_SetCurrentVersionFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	job, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	// 删除 uploads 表 → SetCurrentVersion 的 UPDATE uploads 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE uploads`); err != nil {
+		t.Fatalf("DROP TABLE uploads: %v", err)
+	}
+	bundle := &provider.ProviderBundle{Transcription: &fakeTranscriber{}}
+	err := w.doTranscribe(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("SetCurrentVersion 失败应报错")
+	}
+	if !strings.Contains(err.Error(), "设置当前转录版本") {
+		t.Errorf("错误应含 '设置当前转录版本'，实际 %v", err)
+	}
+}
+
+// TestDoAnalyze_IndexKeyPointsFails 验证 KeyPoint 索引刷新失败不阻塞主流程。
+// 覆盖 doAnalyze 中 IndexKeyPoints err → log 分支（删除 keypoint_index 表）。
+func TestDoAnalyze_IndexKeyPointsFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+	// 删除 keypoint_index 表 → IndexKeyPoints 失败（不阻塞 doAnalyze）
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatalf("DROP TABLE keypoint_index: %v", err)
+	}
+	bundle := &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err != nil {
+		t.Fatalf("IndexKeyPoints 失败不应阻塞 doAnalyze，实际 %v", err)
+	}
+}
