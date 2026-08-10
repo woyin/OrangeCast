@@ -448,6 +448,29 @@ func TestRunServe_OpenDBErrorExits(t *testing.T) {
 	runServe()
 }
 
+// TestRunServe_ListenErrorExits 验证 runServe 监听失败时 log.Fatalf 退出。
+// 覆盖 runServe 中 "服务器错误" log.Fatalf 分支（PORT 非法使 ListenAndServe 立即失败）。
+// 与端口占用不同：非法端口号在地址解析阶段即报错，不依赖 SO_REUSEADDR，稳定可测。
+func TestRunServe_ListenErrorExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		dir := t.TempDir()
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunServe_ListenErrorExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test-secret",
+			"DATA_DIR="+filepath.Join(dir, "data"),
+			"PORT=notaport",
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("runServe 监听失败应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	// 子进程：PORT 非法 → httpServer.ListenAndServe 立即返回错误 → log.Fatalf 退出
+	runServe()
+}
+
 // TestRestoreCore_Fails 验证恢复缺失备份包时 restoreCore 包装错误返回。
 // 覆盖 restoreCore 中 "恢复失败" 错误分支。
 func TestRestoreCore_Fails(t *testing.T) {
@@ -514,4 +537,3 @@ func TestMainUnknownCommandExits(t *testing.T) {
 	defer func() { os.Args = oldArgs }()
 	main()
 }
-
