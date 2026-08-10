@@ -1584,3 +1584,21 @@ func TestEnsureEvidence_SHA256Fails(t *testing.T) {
 		t.Fatal("转码产物为目录时 SHA256 应报错")
 	}
 }
+
+// TestDoTranscribe_EnqueueAnalyzeFails 验证入队分析任务失败时报错。
+// 覆盖 doTranscribe 中 EnqueueAnalyze err 分支（删除 processing_jobs 表）。
+func TestDoTranscribe_EnqueueAnalyzeFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	job, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	// 删除 processing_jobs 表 → EnqueueAnalyze 查询失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	bundle := &provider.ProviderBundle{Transcription: &fakeTranscriber{}}
+	if err := w.doTranscribe(ctx, job, bundle); err == nil {
+		t.Fatal("processing_jobs 表缺失时 doTranscribe 应报错")
+	}
+}
