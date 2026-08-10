@@ -387,3 +387,46 @@ func TestClaimNextJob_ReclaimsExpiredLease(t *testing.T) {
 		t.Fatalf("应重新领取过期租约的 job，实际 %+v", claimed)
 	}
 }
+
+// TestEnqueueJob_ClaimError 验证 claim source 更新失败时报错。
+// 覆盖 EnqueueJob 中 "claim source" 错误分支（删除 episodes 表）。
+func TestEnqueueJob_ClaimError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueJob(ctx, models.SourceEpisode, "ep1", models.JobTranscribe); err == nil {
+		t.Fatal("episodes 表缺失时 EnqueueJob 应报错")
+	}
+}
+
+// TestEnqueueJob_InsertError 验证插入 job 失败时报错。
+// 覆盖 EnqueueJob 中 "插入 job" 错误分支（删除 processing_jobs 表）。
+func TestEnqueueJob_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 需要 episode 存在使 claim 成功，再删 processing_jobs 使 INSERT 失败
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe); err == nil {
+		t.Fatal("processing_jobs 表缺失时 EnqueueJob 应报错")
+	}
+}
+
+// TestMarkJobRunning_Error 验证更新失败时报错。
+// 覆盖 MarkJobRunning 中 UPDATE 失败分支（删除 processing_jobs 表）。
+func TestMarkJobRunning_Error(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkJobRunning(ctx, "job-1"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 MarkJobRunning 应报错")
+	}
+}
