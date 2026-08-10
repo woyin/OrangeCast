@@ -1175,6 +1175,23 @@ func TestKeyPointsSearch(t *testing.T) {
 	}
 }
 
+// TestKeyPointsSearch_DBError 验证 SearchKeyPoints 失败时返回 500。
+// 覆盖 handleKeyPointsSearch 中错误分支（删除 keypoints 表）。
+func TestKeyPointsSearch_DBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "kpsdb@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE keypoint_index`); err != nil {
+		t.Fatalf("DROP TABLE keypoint_index: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/keypoints/search?q=wealth", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("SearchKeyPoints 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestKeyPointsPage_Renders 验证 KeyPoint 全局页渲染（含 KeyPoint 内容）。
 func TestKeyPointsPage_Renders(t *testing.T) {
 	srv := newTestServer(t)
@@ -1360,6 +1377,36 @@ func TestPin_Toggle(t *testing.T) {
 	rec = postForm(t, srv, cookie, "/api/pin", body)
 	if !strings.Contains(rec.Body.String(), `"pinned":false`) {
 		t.Errorf("再次 toggle 应 false，实际 %s", rec.Body.String())
+	}
+}
+
+// TestPin_DBError 验证 TogglePin 失败时返回 500。
+// 覆盖 handlePin 中 TogglePin 错误分支（删除 pins 表）。
+func TestPin_DBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "pindb@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE pins`); err != nil {
+		t.Fatalf("DROP TABLE pins: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/pin",
+		"source_type=episode&source_id=ep-1&segment_ids=seg-0001&source_title=Ep&time_start=0&time_end=5")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("TogglePin 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAnnotation_DBError 验证 UpsertAnnotation 失败时返回 500。
+// 覆盖 handleAnnotation 中 UpsertAnnotation 错误分支（删除 annotations 表）。
+func TestAnnotation_DBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "annotdb@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE annotations`); err != nil {
+		t.Fatalf("DROP TABLE annotations: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/annotation",
+		"source_type=episode&source_id=ep-1&segment_ids=seg-0001&time_start=0&time_end=5&body=内容")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("UpsertAnnotation 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -2083,3 +2130,32 @@ func TestProcess_EnqueueFails(t *testing.T) {
 	}
 }
 
+// TestCollectionItem_RemoveDBError 验证 RemoveFromCollection 失败时返回 500。
+// 覆盖 handleCollectionItem 中 remove 分支错误路径。
+func TestCollectionItem_RemoveDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "colitemrm@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE collection_items`); err != nil {
+		t.Fatalf("DROP TABLE collection_items: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/collection/item",
+		"action=remove&collection_id=c1&source_type=episode&source_id=ep1&segment_ids=seg-0001")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("RemoveFromCollection 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCollectionItem_AddDBError 验证 AddToCollection 失败时返回 500。
+// 覆盖 handleCollectionItem 中 add 分支错误路径。
+func TestCollectionItem_AddDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "colitemadd@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE collection_items`); err != nil {
+		t.Fatalf("DROP TABLE collection_items: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/collection/item",
+		"collection_id=c1&source_type=episode&source_id=ep1&segment_ids=seg-0001&source_title=t")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("AddToCollection 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
