@@ -121,3 +121,69 @@ func TestCollection_CRUD(t *testing.T) {
 		t.Error("删除集合后应无集合")
 	}
 }
+
+// TestGetCollection_NotFound 验证不存在的集合返回 ErrNotFound。
+// 覆盖 GetCollection 中 sql.ErrNoRows 分支。
+func TestGetCollection_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetCollection(ctx, "nonexistent"); err != ErrNotFound {
+		t.Errorf("不存在的集合应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestGetCollection_DBError 验证查询出错时返回错误。
+// 覆盖 GetCollection 中非 ErrNoRows 错误分支（删除 collections 表）。
+func TestGetCollection_DBError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE collections`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCollection(ctx, "any"); err == nil {
+		t.Fatal("collections 表缺失应报错")
+	}
+}
+
+// TestGetAnnotation_NotFound 验证不存在的标注返回 ErrNotFound。
+// 覆盖 GetAnnotation 中 sql.ErrNoRows 分支。
+func TestGetAnnotation_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetAnnotation(ctx, models.SourceEpisode, "ep-x", `["seg-0001"]`); err != ErrNotFound {
+		t.Errorf("不存在的标注应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestAnnotations_DBErrors 验证 annotations/pins/collections 系列查询在表缺失时返回错误。
+// 覆盖 ListAnnotations/ListPins/CreateCollection/ListCollections/AddToCollection/
+// ListCollectionItems 的查询错误分支。
+func TestAnnotations_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// 删除三张表
+	for _, tbl := range []string{"annotations", "pins", "collections", "collection_items"} {
+		if _, err := s.DB.ExecContext(ctx, `DROP TABLE `+tbl); err != nil {
+			t.Fatalf("DROP TABLE %s: %v", tbl, err)
+		}
+	}
+	if _, err := s.ListAnnotations(ctx); err == nil {
+		t.Error("annotations 表缺失时 ListAnnotations 应报错")
+	}
+	if _, err := s.ListPins(ctx); err == nil {
+		t.Error("pins 表缺失时 ListPins 应报错")
+	}
+	if _, err := s.CreateCollection(ctx, "t", "d"); err == nil {
+		t.Error("collections 表缺失时 CreateCollection 应报错")
+	}
+	if _, err := s.ListCollections(ctx); err == nil {
+		t.Error("collections 表缺失时 ListCollections 应报错")
+	}
+	if err := s.AddToCollection(ctx, "c1", models.SourceEpisode, "ep1", `["s"]`, 0, 1, "t", ""); err == nil {
+		t.Error("collection_items 表缺失时 AddToCollection 应报错")
+	}
+	if _, err := s.ListCollectionItems(ctx, "c1"); err == nil {
+		t.Error("collection_items 表缺失时 ListCollectionItems 应报错")
+	}
+}
