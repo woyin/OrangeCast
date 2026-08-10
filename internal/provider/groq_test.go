@@ -606,3 +606,20 @@ func TestGroq_ChatComplete_SchemaMode(t *testing.T) {
 		t.Errorf("content 应为 ok，实际 %q", content)
 	}
 }
+
+// TestGroq_Transcribe_NetworkError 验证转录网络错误时报错。
+// 覆盖 Transcribe 中 "groq 转录请求" 分支（连接失败）。
+func TestGroq_Transcribe_NetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close() // 连接失败
+
+	g := NewGroqProvider("key").WithBaseURL(url)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audio.mp3")
+	os.WriteFile(path, []byte("fake-audio"), 0o644)
+	_, err := g.Transcribe(path)
+	if err == nil {
+		t.Fatal("连接失败应报错")
+	}
+}
