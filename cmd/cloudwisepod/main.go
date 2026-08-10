@@ -136,21 +136,31 @@ func runBackup(args []string) {
 	if err != nil {
 		log.Fatalf("配置错误: %v", err)
 	}
+	m, err := backupCore(cfg, dest)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	fmt.Printf("备份完成：%s（DB sha256=%s，证据 %d 个）\n", dest, m.DBSHA256, len(m.Evidence))
+}
+
+// backupCore 执行备份核心逻辑（可测试，不调用 os.Exit）。
+// 返回生成的 Manifest。调用方负责错误处理与退出。
+func backupCore(cfg *config.Config, dest string) (*backup.Manifest, error) {
 	if err := cfg.EnsureDirs(); err != nil {
-		log.Fatalf("创建数据目录: %v", err)
+		return nil, fmt.Errorf("创建数据目录: %w", err)
 	}
 	s, err := store.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("打开数据库: %v", err)
+		return nil, fmt.Errorf("打开数据库: %w", err)
 	}
 	defer s.Close()
 
 	dest = ensureArchiveExt(dest)
 	m, err := backup.Create(context.Background(), s, cfg.EvidenceDir, dest)
 	if err != nil {
-		log.Fatalf("备份失败: %v", err)
+		return nil, fmt.Errorf("备份失败: %w", err)
 	}
-	fmt.Printf("备份完成：%s（DB sha256=%s，证据 %d 个）\n", dest, m.DBSHA256, len(m.Evidence))
+	return &m, nil
 }
 
 // parseBackupArgs 解析 backup 子命令位置参数，返回目标文件路径。
@@ -187,11 +197,21 @@ func runRestore(args []string) {
 	if err != nil {
 		log.Fatalf("配置错误: %v", err)
 	}
-	m, err := backup.Restore(context.Background(), src, cfg.DataDir, force)
+	m, err := restoreCore(cfg, src, force)
 	if err != nil {
-		log.Fatalf("恢复失败: %v", err)
+		log.Fatalf("%v", err)
 	}
 	fmt.Printf("恢复完成：%s（证据 %d 个，DB sha256=%s）\n", cfg.DataDir, len(m.Evidence), m.DBSHA256)
+}
+
+// restoreCore 执行恢复核心逻辑（可测试，不调用 os.Exit）。
+// 返回恢复的 Manifest。调用方负责错误处理与退出。
+func restoreCore(cfg *config.Config, src string, force bool) (*backup.Manifest, error) {
+	m, err := backup.Restore(context.Background(), src, cfg.DataDir, force)
+	if err != nil {
+		return nil, fmt.Errorf("恢复失败: %w", err)
+	}
+	return &m, nil
 }
 
 // parseRestoreArgs 解析 restore 子命令参数，返回备份包路径与 force 标识。
