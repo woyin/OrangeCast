@@ -1557,3 +1557,30 @@ func TestDoAnalyze_NarrationFailureNonBlocking(t *testing.T) {
 		t.Fatalf("doNarration 失败不应阻塞 doAnalyze，实际 %v", err)
 	}
 }
+
+// TestEnsureEvidence_SHA256Fails 验证转码产物哈希计算失败时报错。
+// 覆盖 ensureEvidence 中 filehash.SHA256(tmpPath) 失败分支（fake ffmpeg 输出目录）。
+func TestEnsureEvidence_SHA256Fails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	os.WriteFile(rawPath, []byte("audio"), 0o644)
+	// fake ffprobe 输出有效时长
+	binDir := t.TempDir()
+	fakeProbe := filepath.Join(binDir, "ffprobe")
+	os.WriteFile(fakeProbe, []byte("#!/bin/sh\necho '1'\n"), 0o755)
+	// fake ffmpeg 把输出路径创建为目录（转码"成功"但产物是目录 → SHA256 读取失败）
+	fakeFfmpeg := filepath.Join(binDir, "ffmpeg")
+	os.WriteFile(fakeFfmpeg, []byte("#!/bin/sh\nmkdir -p \"${@: -1}\"\n"), 0o755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("转码产物为目录时 SHA256 应报错")
+	}
+}
