@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -879,5 +880,247 @@ func TestHeartbeatLoop_StopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("heartbeatLoop 应在取消后退出")
+	}
+}
+
+// TestNewWorker_DefaultBundleFor_AnalyzeCase 验证默认 bundleFor 对 analyze job
+// 读取 Analysis Provider/Model 配置（覆盖 JobAnalyze 分支）。
+func TestNewWorker_DefaultBundleFor_AnalyzeCase(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// 设置 Analysis Provider + Model
+	ap := "groq"
+	am := "llama-3.3-70b-versatile"
+	s.UpdateSettings(ctx, &models.Settings{AnalysisProvider: &ap, AnalysisModel: &am})
+
+	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobAnalyze})
+	if err != nil {
+		t.Fatalf("bundleFor(analyze): %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("应返回非空 bundle")
+	}
+}
+
+// TestNewWorker_DefaultBundleFor_UnknownJobType 验证默认 bundleFor 对未知 job_type
+// 回退到 groq（覆盖 default 分支）。
+func TestNewWorker_DefaultBundleFor_UnknownJobType(t *testing.T) {
+	s, w := newTestWorker(t)
+	_ = s
+	// 未知 job_type → default 分支 → Provider="groq"
+	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: "unknown-type"})
+	if err != nil {
+		t.Fatalf("未知 job_type 不应报错，实际 %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("default 分支应返回 groq bundle")
+	}
+}
+
+// TestNewWorker_DefaultBundleFor_EmptyProviderFallsBack 验证 settings 中 Provider 为空时
+// 回退到 groq（覆盖 tc.Provider == "" 分支）。
+func TestNewWorker_DefaultBundleFor_EmptyProviderFallsBack(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// TranscriptionProvider 为空字符串指针 → tc.Provider 空 → 回退 groq
+	empty := ""
+	s.UpdateSettings(ctx, &models.Settings{TranscriptionProvider: &empty, TranscriptionModel: &empty})
+
+	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe})
+	if err != nil {
+		t.Fatalf("空 Provider 回退不应报错，实际 %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("应回退到 groq bundle")
+	}
+}
+
+// TestNewWorker_DefaultBundleFor_GetSettingsError 验证 GetSettings 出错时降级到 groq 默认 bundle。
+// 覆盖 bundleFor 中 err != nil → return w.selector.Bundle("groq") 分支。
+func TestNewWorker_DefaultBundleFor_GetSettingsError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// 先正常迁移，然后删除 settings 表制造 GetSettings 错误
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE settings`); err != nil {
+		t.Fatalf("drop settings: %v", err)
+	}
+	// GetSettings 报错 → 应降级到 groq bundle（不报错）
+	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe})
+	if err != nil {
+		t.Fatalf("GetSettings 出错时应降级、不报错，实际 %v", err)
+	}
+	if bundle == nil {
+		t.Fatal("应返回降级 groq bundle")
+	}
+}
+
+// TestDoAnalyze_NoTranscriptVersion 验证无当前转录版本时 doAnalyze 报错。
+// 覆盖 doAnalyze 中 "读取当前转录版本" 错误分支。
+func TestDoAnalyze_NoTranscriptVersion(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+
+	bundle := &provider.ProviderBundle{
+		Analysis:  &fakeAnalyzer{},
+		Highlight: &fakeHighlight{},
+	}
+	err := w.doAnalyze(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("无转录版本应报错")
+	}
+	if !strings.Contains(err.Error(), "读取当前转录版本") {
+		t.Errorf("错误应含 '读取当前转录版本'，实际 %v", err)
+	}
+}
+
+// TestDoAnalyze_CorruptTranscriptPayload 验证转录载荷 JSON 损坏时 doAnalyze 报错。
+// 覆盖 doAnalyze 中 "解析转录载荷" 错误分支。
+func TestDoAnalyze_CorruptTranscriptPayload(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	// 写入一个 payload 非法 JSON 的转录版本
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript,
+		"fake", "m", "1", job.ID, "{not valid json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+
+	bundle := &provider.ProviderBundle{
+		Analysis:  &fakeAnalyzer{},
+		Highlight: &fakeHighlight{},
+	}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("损坏载荷应报错")
+	}
+	if !strings.Contains(err.Error(), "解析转录载荷") {
+		t.Errorf("错误应含 '解析转录载荷'，实际 %v", err)
+	}
+}
+
+// TestDoAnalyze_ValidationFails 验证分析产物通不过证据校验时 doAnalyze 报错。
+// 覆盖 doAnalyze 中 "证据校验" 错误分支（分析返回的卡片引用不存在 Segment）。
+func TestDoAnalyze_ValidationFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+
+	// 分析器返回引用不存在 Segment 的卡片 → ValidateCard 拒绝
+	bundle := &provider.ProviderBundle{
+		Analysis:  &fakeAnalyzerBadCitations{},
+		Highlight: &fakeHighlight{},
+	}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("证据校验失败应报错")
+	}
+	if !strings.Contains(err.Error(), "证据校验") {
+		t.Errorf("错误应含 '证据校验'，实际 %v", err)
+	}
+}
+
+// fakeAnalyzerBadCitations 返回引用不存在 Segment 的卡片（触发 ValidateCard 拒绝）。
+type fakeAnalyzerBadCitations struct{}
+
+func (f *fakeAnalyzerBadCitations) Analyze(transcript string, segments []provider.Segment) (*provider.KnowledgeCard, error) {
+	return &provider.KnowledgeCard{
+		Title:     "T",
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-9999"}}, // 不存在
+		KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-9999"}}},
+		Chapters:  []provider.Chapter{{Title: "CH", Citations: []string{"seg-9999"}}},
+	}, nil
+}
+func (f *fakeAnalyzerBadCitations) Name() string { return "fake-bad" }
+
+// TestDoHighlight_GenerationFails 验证 HighlightProvider 报错时 doHighlight 包装错误返回。
+// 覆盖 doHighlight 中 "生成高光" 错误分支。
+func TestDoHighlight_GenerationFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+
+	bundle := &provider.ProviderBundle{Highlight: &fakeHighlight{err: errFakeAnalyze}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	err := w.doHighlight(ctx, job, bundle, segs)
+	if err == nil {
+		t.Fatal("Highlight 生成失败应报错")
+	}
+	if !strings.Contains(err.Error(), "生成高光") {
+		t.Errorf("错误应含 '生成高光'，实际 %v", err)
+	}
+}
+
+// TestDoHighlight_ValidationFails 验证高光校验失败（全部 Citation 无效）时 doHighlight 报错。
+// 覆盖 doHighlight 中 "高光校验" 错误分支。
+func TestDoHighlight_ValidationFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+
+	// fakeHighlightBadCite 返回的 Citation 都不存在 → ValidateHighlightSet 拒绝
+	bundle := &provider.ProviderBundle{Highlight: &fakeHighlightBadCite{}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	err := w.doHighlight(ctx, job, bundle, segs)
+	if err == nil {
+		t.Fatal("高光校验失败应报错")
+	}
+	if !strings.Contains(err.Error(), "高光校验") {
+		t.Errorf("错误应含 '高光校验'，实际 %v", err)
+	}
+}
+
+// fakeHighlightBadCite 返回的高光引用不存在的 Segment（触发 ValidateHighlightSet 拒绝）。
+type fakeHighlightBadCite struct{}
+
+func (f *fakeHighlightBadCite) GenerateHighlights(segments []provider.Segment) (*provider.HighlightSet, error) {
+	return &provider.HighlightSet{
+		Highlights: []provider.Highlight{
+			{ID: "h1", Gist: "g", Citations: []string{"seg-9999"}}, // 不存在
+		},
+	}, nil
+}
+func (f *fakeHighlightBadCite) Name() string { return "fake-bad-cite" }
+
+// TestPurgeSource_CreateIntentFails 验证 PurgeSource 在记录 purge 意图失败时报错。
+// 覆盖 PurgeSource 中 CreatePurgeIntent err != nil 分支。
+func TestPurgeSource_CreateIntentFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	// 删除 purges 表 → CreatePurgeIntent 报错
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE purges`); err != nil {
+		t.Fatalf("drop purges: %v", err)
+	}
+	if err := w.PurgeSource(ctx, models.SourceEpisode, "ep-x"); err == nil {
+		t.Fatal("purges 表缺失时 PurgeSource 应报错")
+	}
+}
+
+// TestResumePurges_EmptyNoop 验证无 pending purge 时 ResumePurges 直接返回 nil。
+// 覆盖 ResumePurges 中无待恢复 purge 的循环不执行路径。
+func TestResumePurges_EmptyNoop(t *testing.T) {
+	_, w := newTestWorker(t)
+	if err := w.ResumePurges(context.Background()); err != nil {
+		t.Fatalf("无 pending purge 时 ResumePurges 不应报错，实际 %v", err)
 	}
 }

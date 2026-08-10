@@ -1946,3 +1946,34 @@ func TestPodcastNew_POST_DuplicateFeed(t *testing.T) {
 type errFetchFailed struct{}
 
 func (errFetchFailed) Error() string { return "fetch failed" }
+
+// TestCollection_ListDBError 验证 ListCollections 报错时返回 500。
+// 覆盖 handleCollection 中 GET 分支的 ListCollections 错误路径。
+func TestCollection_ListDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "colerr@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE collections`); err != nil {
+		t.Fatalf("DROP TABLE collections: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/collection", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("ListCollections 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCollection_CreateDBError 验证 CreateCollection 报错时返回 500。
+// 覆盖 handleCollection 中 POST 分支的 CreateCollection 错误路径。
+func TestCollection_CreateDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "colcerr@example.com", "password123")
+	if _, err := srv.store.DB.Exec(`DROP TABLE collections`); err != nil {
+		t.Fatalf("DROP TABLE collections: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/collection", "title=测试集合")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("CreateCollection 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}

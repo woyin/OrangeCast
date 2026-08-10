@@ -663,3 +663,149 @@ func TestLoadTranscriptJSON(t *testing.T) {
 		t.Fatalf("应解析出 1 个 segment，实际 %d 个", len(tp.Segments))
 	}
 }
+
+// TestStudyChat_ListMessagesDBError 通过删除 study_messages 表（保留 sessions 使建会话通过）
+// 触发 handleStudyChat 读历史错误分支，返回 500。
+func TestStudyChat_ListMessagesDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "schist6@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	// 删除 study_messages → ListStudyMessages 报错（在 CreateStudySession 之后）
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_messages`); err != nil {
+		t.Fatalf("DROP TABLE study_messages: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/study-chat", "source_type=episode&source_id="+sourceID+"&question=任意问题")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("study_messages 表缺失应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "读取会话历史失败") {
+		t.Errorf("应提示读取会话历史失败，实际 %s", rec.Body.String())
+	}
+}
+
+// TestStudyChat_AppendMessageDBError 通过删除 study_sessions 表触发记录问题失败分支。
+// ListStudyMessages 只查 study_messages（成功返回空历史）；AppendStudyMessage 写入
+// study_messages 成功后执行 UPDATE study_sessions → 报错 → 500 "记录问题失败"。
+func TestStudyChat_AppendMessageDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "schist7@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	// 预建会话（ListStudyMessages 会读到空历史，返回 nil slice 不报错）
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
+	// 删除 study_sessions 表 → AppendStudyMessage 的 UPDATE study_sessions 报错
+	// （INSERT study_messages 成功，但后续 UPDATE 失败 → 记录问题失败 500）
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
+		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=任意问题")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("AppendStudyMessage 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "记录问题失败") {
+		t.Errorf("应提示记录问题失败，实际 %s", rec.Body.String())
+	}
+}
+
+// TestParaphraseHandler_PersistError 验证 CreateParaphrase 写库失败时返回 500。
+// 覆盖 handleParaphrase 中 "持久化复述讲解失败" 错误分支。
+func TestParaphraseHandler_PersistError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "phpersist@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	// 删除 paraphrases 表 → CreateParaphrase 写入失败
+	if _, err := srv.store.DB.Exec(`DROP TABLE paraphrases`); err != nil {
+		t.Fatalf("DROP TABLE paraphrases: %v", err)
+	}
+
+	srv.bundleFor = fakeBundleFor(nil,
+		&fakeParaphrase{result: &provider.ParaphraseResult{Text: "讲解", ReferenceSegmentIDs: []string{"seg-0001"}}},
+		nil, nil)
+	rec := postForm(t, srv, cookie, "/api/paraphrase",
+		"source_type=episode&source_id="+sourceID+"&segment_ids=[\"seg-0001\"]&question=解释一下")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("持久化失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "持久化复述讲解失败") {
+		t.Errorf("应提示持久化复述讲解失败，实际 %s", rec.Body.String())
+	}
+}
+
+// TestStudyChat_PersistAnswerError 验证通过两条硬约束后持久化回答失败时返回 500。
+// 覆盖 handleStudyChat 中 "持久化回答失败" 错误分支。
+// 为让 AppendStudyMessage(assistant) 在 ListStudyMessages 成功后失败，删除
+// study_sessions 表：INSERT study_messages 成功，但 UPDATE study_sessions 报错。
+func TestStudyChat_PersistAnswerError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "scpersist@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	// 预建会话
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
+	// 删除 study_sessions 表 → AppendStudyMessage(assistant) 的 UPDATE study_sessions 失败
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
+		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	}
+
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "通胀是物价上升", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=通胀")
+	// 注意：用户问题 AppendStudyMessage 也会触发 UPDATE study_sessions 失败，
+	// 所以会在 "记录问题失败" 分支先返回（同样覆盖了 AppendStudyMessage 失败路径）。
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("持久化失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "记录问题失败") && !strings.Contains(body, "持久化回答失败") {
+		t.Errorf("应提示记录问题失败或持久化回答失败，实际 %s", body)
+	}
+}
+
+// TestStudyChat_CreateSessionDBError 验证首次提问时建会话失败返回 500。
+// 覆盖 handleStudyChat 中 "创建学习会话失败" 错误分支（删除 study_sessions 表）。
+func TestStudyChat_CreateSessionDBError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sccreate@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+	// 删除 study_sessions 表 → CreateStudySession 写入失败
+	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
+		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	}
+
+	rec := postForm(t, srv, cookie, "/api/study-chat", "source_type=episode&source_id="+sourceID+"&question=任意问题")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("建会话失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "创建学习会话失败") {
+		t.Errorf("应提示创建学习会话失败，实际 %s", rec.Body.String())
+	}
+}
