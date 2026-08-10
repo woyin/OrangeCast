@@ -600,3 +600,31 @@ func TestOpenAI_Analyze_DoResponsesError(t *testing.T) {
 		t.Fatal("HTTP 500 应报错")
 	}
 }
+
+// TestOpenAI_GenerateHighlights_DoResponsesError 验证 GenerateHighlights 的 doResponses 失败时报错。
+// 覆盖 GenerateHighlights 中 doResponses err → return nil, err 分支。
+func TestOpenAI_GenerateHighlights_DoResponsesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.GenerateHighlights([]Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+}
+
+// TestOpenAI_StudyChat_DoResponsesError2 验证 StudyChatAnswer 的 doResponses 失败时报错。
+// 覆盖 StudyChatAnswer 中 doResponses err → return nil, err 分支（HTTP 500 路径）。
+func TestOpenAI_StudyChat_DoResponsesError2(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+}
