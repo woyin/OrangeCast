@@ -316,3 +316,29 @@ func TestIndexKeyPoints_InsertError(t *testing.T) {
 		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
 	}
 }
+
+// TestSearchKeyPoints_DBErrors 验证 SearchKeyPoints 在表缺失时返回错误。
+// 覆盖 SearchKeyPoints 中 COUNT/分页查询失败分支。
+func TestSearchKeyPoints_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SearchKeyPoints(ctx, "wealth", 1, 10); err == nil {
+		t.Fatal("keypoint_search 表缺失时 SearchKeyPoints 应报错")
+	}
+}
+
+// TestDeleteKeyPointsForSource_Error 验证删除失败时报错。
+// 覆盖 DeleteKeyPointsForSource 中 DELETE 失败分支（删除 keypoint_search 表）。
+func TestDeleteKeyPointsForSource_Error(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteKeyPointsForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("keypoint_search 表缺失时 DeleteKeyPointsForSource 应报错")
+	}
+}
