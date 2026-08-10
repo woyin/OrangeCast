@@ -226,3 +226,24 @@ func TestGetUserByEmail(t *testing.T) {
 		t.Errorf("不存在的邮箱应 ErrNotFound，实际 %v", err)
 	}
 }
+
+// TestOpen_MigrateFails 验证 Open 时迁移失败返回错误。
+// 覆盖 Open 中 "执行迁移" 分支（迁移表创建失败场景）。
+func TestOpen_MigrateFails(t *testing.T) {
+	dir := t.TempDir()
+	// 构造一个已有 v0.1 schema 但 schema_migrations 表损坏的库
+	db := openRaw(t, filepath.Join(dir, "broken.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, schemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	// 预先创建一个 schema_migrations 表但结构错误 → 迁移时 INSERT 失败
+	if _, err := db.ExecContext(ctx, `CREATE TABLE schema_migrations (wrong_col TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	if _, err := Open(filepath.Join(dir, "broken.db")); err == nil {
+		t.Fatal("损坏的 schema_migrations 应导致迁移失败")
+	}
+}
