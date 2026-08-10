@@ -257,6 +257,57 @@ func TestOpenAI_StudyChat_NoCandidates(t *testing.T) {
 	}
 }
 
+// TestOpenAI_StudyChat_AssistantHistory 验证历史中含 assistant 消息时 role 映射。
+// 覆盖 StudyChatAnswer 中 m.Role == "assistant" → role = "助手" 分支。
+func TestOpenAI_StudyChat_AssistantHistory(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"answer":"回答","referenceSegmentIds":["seg-0001"]}`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	history := []StudyChatMessage{
+		{Role: "user", Content: "问题"},
+		{Role: "assistant", Content: "回答"},
+	}
+	res, err := o.StudyChatAnswer("追问", history, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer == nil {
+		t.Error("应生成回答")
+	}
+}
+
+// TestOpenAI_CheckReference_DoResponsesError 验证校验 doResponses 失败时报错。
+// 覆盖 CheckReference 中 doResponses err → return ReferenceCheckResult{}, err 分支。
+func TestOpenAI_CheckReference_DoResponsesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.CheckReference("问题", "回答", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+}
+
+// TestOpenAI_CheckReference_JSONUnmarshalError 验证响应体非法 JSON 时保守拒绝。
+// 覆盖 CheckReference 中 json.Unmarshal(data) 失败 → 保守拒绝分支。
+func TestOpenAI_CheckReference_JSONUnmarshalError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`不是 JSON`)) // 非法 JSON 响应体
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	res, err := o.CheckReference("问题", "回答", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err != nil {
+		t.Fatalf("CheckReference: %v", err)
+	}
+	if res.Related || res.Reason != "校验解析失败，保守拒绝" {
+		t.Errorf("响应解析失败应保守拒绝，实际 %+v", res)
+	}
+}
+
 // TestOpenAI_StudyChat_EmptyReferenceIDs 验证返回空参考片段时给出范围外反馈（不请求服务器）。
 func TestOpenAI_StudyChat_EmptyReferenceIDs(t *testing.T) {
 	srv := newOpenAITestServer(t, `{"answer":"","referenceSegmentIds":[]}`)
