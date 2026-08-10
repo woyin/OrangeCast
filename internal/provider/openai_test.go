@@ -575,3 +575,14 @@ func TestOpenAI_StudyChat_InvalidReferenceIDs(t *testing.T) {
 		t.Errorf("参考片段无效应返回范围外反馈，实际 %+v", res)
 	}
 }
+
+// TestOpenAI_Transcribe_CopyError 验证文件读取失败时报错。
+// 覆盖 Transcribe 中 io.Copy(part, f) 失败分支（用目录作为输入文件）。
+func TestOpenAI_Transcribe_CopyError(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	// 目录作为文件路径 → os.Open 成功（打开目录），但 io.Copy 读取失败
+	dir := t.TempDir()
+	if _, err := o.Transcribe(dir); err == nil {
+		t.Fatal("目录作为输入应读取失败报错")
+	}
+}
