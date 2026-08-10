@@ -463,3 +463,16 @@ func TestEnqueueAnalyze_InsertError(t *testing.T) {
 		t.Fatal("processing_jobs 表缺失时 EnqueueAnalyze 应报错")
 	}
 }
+
+// TestSearchSource_QueryError 验证搜索查询失败时报错。
+// 覆盖 SearchSource 中查询失败分支（删除 search_index 表）。
+func TestSearchSource_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE search_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SearchSource(ctx, "wealth"); err == nil {
+		t.Fatal("search_index 表缺失时 SearchSource 应报错")
+	}
+}
