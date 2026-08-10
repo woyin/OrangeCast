@@ -168,6 +168,36 @@ func TestOpenAI_StudyChat_EmptyReferenceIDs(t *testing.T) {
 	}
 }
 
+// TestOpenAI_StudyChat_ParseFail 验证输出非 JSON 时报错。
+// 覆盖 StudyChatAnswer 中 "解析 StudyChat 输出失败" 错误分支。
+func TestOpenAI_StudyChat_ParseFail(t *testing.T) {
+	srv := newOpenAITestServer(t, `不是 JSON`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err == nil {
+		t.Fatal("非 JSON 输出应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 StudyChat 输出失败") {
+		t.Errorf("错误应含 '解析 StudyChat 输出失败'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_CheckReference_ParseFail 验证校验输出非 JSON 时保守拒绝。
+// 覆盖 CheckReference 中 parseJSONLoose 失败分支。
+func TestOpenAI_CheckReference_ParseFail(t *testing.T) {
+	srv := newOpenAITestServer(t, `不是 JSON`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	res, err := o.CheckReference("问题", "回答", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "文本"}})
+	if err != nil {
+		t.Fatalf("CheckReference: %v", err)
+	}
+	if res.Related || res.Reason != "校验解析失败，保守拒绝" {
+		t.Errorf("解析失败应保守拒绝，实际 %+v", res)
+	}
+}
+
 // TestOpenAI_CheckReference_NoSegments 验证无参考片段时判定不相关。
 func TestOpenAI_CheckReference_NoSegments(t *testing.T) {
 	o := NewOpenAIProvider("key")
