@@ -179,6 +179,34 @@ func TestSaveUploadFile_CreateError(t *testing.T) {
 	}
 }
 
+// TestSaveUploadFile_OsCreateError 验证 os.Create 失败（目标路径为目录）时报错。
+// 覆盖 saveUploadFile 中 os.Create 失败分支。
+func TestSaveUploadFile_OsCreateError(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "uploads"), 0o755)
+	// 用目录占用 uploads/up-1 路径 → os.Create 失败
+	os.MkdirAll(filepath.Join(dir, "uploads", "up-1"), 0o755)
+	if err := saveUploadFile(dir, "up-1", strings.NewReader("data")); err == nil {
+		t.Fatal("目标路径为目录时 os.Create 应报错")
+	}
+}
+
+// TestSaveUploadFile_WriteError 验证写入失败时报错。
+// 覆盖 saveUploadFile 中 dst.Write 失败分支（预先创建只读目标文件）。
+func TestSaveUploadFile_WriteError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root 用户不受文件权限限制")
+	}
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "uploads"), 0o755)
+	// 预先创建只读目标文件 → os.Create 打开（写入）失败或写入失败
+	target := filepath.Join(dir, "uploads", "up-1")
+	os.WriteFile(target, []byte("x"), 0o444)
+	if err := saveUploadFile(dir, "up-1", strings.NewReader("data")); err == nil {
+		t.Fatal("目标文件不可写应报错")
+	}
+}
+
 // TestSourceStatusAndError 验证 sourceStatusAndError：正常状态、失败状态取 last_error、未知 source。
 func TestSourceStatusAndError(t *testing.T) {
 	srv := newTestServer(t)
@@ -210,6 +238,12 @@ func TestSourceStatusAndError(t *testing.T) {
 	status, _ = srv.sourceStatusAndError(ctx, models.SourceEpisode, "nonexistent")
 	if status != models.StatusUnprocessed {
 		t.Errorf("未知 source 应 Unprocessed，实际 %q", status)
+	}
+
+	// upload 未知 source → Unprocessed（覆盖 upload 分支 GetUploadByID 错误）
+	status, _ = srv.sourceStatusAndError(ctx, models.SourceUpload, "nonexistent-upload")
+	if status != models.StatusUnprocessed {
+		t.Errorf("未知 upload source 应 Unprocessed，实际 %q", status)
 	}
 }
 
