@@ -1212,3 +1212,39 @@ func TestDoTranscribe_CreateVersionFails(t *testing.T) {
 		t.Errorf("错误应含 '创建转录版本'，实际 %v", err)
 	}
 }
+
+// TestResumePurges_DeleteSourceRowsError 验证 DeleteSourceRows 失败时 ResumePurges 报错。
+// 覆盖 ResumePurges 中 "purge 删除 DB 行" 错误分支（删除 episodes 表）。
+func TestResumePurges_DeleteSourceRowsError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	if err := s.CreatePurgeIntent(ctx, models.SourceEpisode, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	// 删除 episodes 表 → DeleteSourceRows 中的 DELETE episodes 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatalf("DROP TABLE episodes: %v", err)
+	}
+	if err := w.ResumePurges(ctx); err == nil {
+		t.Fatal("episodes 表缺失时 ResumePurges 应报错")
+	}
+}
+
+// TestResumePurges_MarkDoneError 验证 MarkPurgeDone 失败时 ResumePurges 报错。
+// 覆盖 ResumePurges 中 MarkPurgeDone 错误分支（删除 purges 表）。
+func TestResumePurges_MarkDoneError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	if err := s.CreatePurgeIntent(ctx, models.SourceEpisode, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	// 删除 purges 表 → MarkPurgeDone 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE purges`); err != nil {
+		t.Fatalf("DROP TABLE purges: %v", err)
+	}
+	if err := w.ResumePurges(ctx); err == nil {
+		t.Fatal("purges 表缺失时 ResumePurges 应报错")
+	}
+}
