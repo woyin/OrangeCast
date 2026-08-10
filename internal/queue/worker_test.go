@@ -1466,3 +1466,32 @@ func TestEnsureEvidence_TranscodeFails(t *testing.T) {
 		t.Fatal("损坏音频应转码失败报错")
 	}
 }
+
+// TestEnsureEvidence_RenameFails 验证证据文件落盘 Rename 失败时报错。
+// 覆盖 ensureEvidence 中 "落盘证据音频" 分支（目标路径被目录占用）。
+func TestEnsureEvidence_RenameFails(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg 不可用")
+	}
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 原始文件是有效音频（ffmpeg 生成）
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2", "-f", "wav", rawPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg 无法生成音频: %v %s", err, out)
+	}
+	// 目标证据路径被目录占用 → os.Rename 失败
+	evPath := filepath.Join(w.evidenceDir, "upload_"+up.ID+".mp3")
+	os.MkdirAll(evPath, 0o755)
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("证据路径为目录时 Rename 应报错")
+	}
+}
