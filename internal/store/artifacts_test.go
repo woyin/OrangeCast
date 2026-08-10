@@ -103,3 +103,43 @@ func TestCreateArtifactVersion_InvalidJobID(t *testing.T) {
 		t.Fatal("引用不存在的 job 应因外键约束报错")
 	}
 }
+
+// TestGetArtifactVersion_NotFound 验证读取不存在的版本返回 ErrNotFound。
+// 覆盖 GetArtifactVersion 中 sql.ErrNoRows 分支。
+func TestGetArtifactVersion_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	if _, err := s.GetArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript, 99); err != ErrNotFound {
+		t.Errorf("不存在的版本应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestGetCurrentVersion_NotSet 验证未设置当前版本时返回 ErrNotFound。
+// 覆盖 GetCurrentVersion 中 version 未设置（NULL）分支。
+func TestGetCurrentVersion_NotSet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	if _, err := s.GetCurrentVersion(ctx, models.SourceEpisode, sourceID, KindTranscript); err != ErrNotFound {
+		t.Errorf("未设置当前版本应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestArtifacts_DBErrors 验证 artifact 系列查询在表缺失时返回错误。
+// 覆盖 ListArtifactVersions/GetArtifactVersion 查询错误分支。
+func TestArtifacts_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE artifact_versions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListArtifactVersions(ctx, models.SourceEpisode, "ep1", KindTranscript); err == nil {
+		t.Error("artifact_versions 表缺失时 ListArtifactVersions 应报错")
+	}
+	if _, err := s.GetArtifactVersion(ctx, models.SourceEpisode, "ep1", KindTranscript, 1); err == nil {
+		t.Error("artifact_versions 表缺失时 GetArtifactVersion 应报错")
+	}
+}

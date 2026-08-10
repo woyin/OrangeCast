@@ -8,6 +8,35 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+// TestParaphraseAnchor 验证锚点序列化：去重、保序排序、空白清理。
+func TestParaphraseAnchor(t *testing.T) {
+	// 去重 + 排序
+	got := ParaphraseAnchor([]string{"seg-0002", "seg-0001", "seg-0002"})
+	want := `["seg-0001","seg-0002"]`
+	if got != want {
+		t.Errorf("ParaphraseAnchor = %q, want %q", got, want)
+	}
+	// 空白清理 + 空 id 忽略
+	got = ParaphraseAnchor([]string{"  seg-0002  ", "", "seg-0001"})
+	want = `["seg-0001","seg-0002"]`
+	if got != want {
+		t.Errorf("空白清理不符: %q", got)
+	}
+	// 空输入 → nil 切片序列化为 null（调用方以 nil 判断无锚点）
+	if got := ParaphraseAnchor(nil); got != `null` {
+		t.Errorf("空输入应返回 null，实际 %q", got)
+	}
+}
+
+// TestGetParaphrase_NotFound 验证不存在的复述讲解返回 ErrNotFound。
+func TestGetParaphrase_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetParaphrase(ctx, "nonexistent"); err != ErrNotFound {
+		t.Errorf("不存在的复述讲解应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
 // TestParaphrase_RecentNRetention (ADR-0018 R2)
 // 每个锚点保留最近 3 次；同锚点第 4 次淘汰最旧的；不同锚点独立保留。
 func TestParaphrase_RecentNRetention(t *testing.T) {
