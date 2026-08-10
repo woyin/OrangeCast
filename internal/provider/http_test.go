@@ -375,3 +375,43 @@ func TestUploadFileAsMultipart_RetryError(t *testing.T) {
 		t.Fatalf("应返回错误且 code=0，实际 code=%d err=%v", code, err)
 	}
 }
+
+// TestDoWithRetry_CancelDuringBackoff 验证重试等待期间 context 取消返回错误。
+// 覆盖 doWithRetry 中 select 的 ctx.Done() 分支。
+func TestDoWithRetry_CancelDuringBackoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30") // 长退避
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	done := make(chan struct{})
+	var err error
+	go func() {
+		_, err = doWithRetry(ctx, req)
+		close(done)
+	}()
+	// 稍等片刻让请求发出并进入退避，然后取消
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+		if err == nil {
+			t.Fatal("取消后应返回错误")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("取消后 doWithRetry 应退出")
+	}
+}
+
+// TestPostJSON_MarshalError 验证 JSON 序列化失败时报错。
+// 覆盖 postJSON 中 json.Marshal 失败分支（不可序列化 payload）。
+func TestPostJSON_MarshalError(t *testing.T) {
+	// chan 类型不可序列化
+	_, _, err := postJSON(context.Background(), "http://example.com", "key", make(chan int))
+	if err == nil {
+		t.Fatal("不可序列化 payload 应报错")
+	}
+}
