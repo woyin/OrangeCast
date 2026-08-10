@@ -286,3 +286,33 @@ func TestListKeyPoints_QueryError(t *testing.T) {
 		t.Fatal("SELECT 缺列应报错")
 	}
 }
+
+// TestIndexKeyPoints_DBErrors 验证 IndexKeyPoints 在表缺失时返回错误。
+// 覆盖 IndexKeyPoints 中 DELETE keypoint_search/index 失败分支。
+func TestIndexKeyPoints_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+		t.Fatal("keypoint_search 表缺失时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_InsertError 验证写入 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 "写入 keypoint_index" 分支（删除 keypoint_index 表）。
+func TestIndexKeyPoints_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
+	}
+}
