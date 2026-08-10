@@ -285,3 +285,32 @@ func TestEpisodesUploads_DBErrors(t *testing.T) {
 		t.Error("uploads 表缺失时 ListUploads 应报错")
 	}
 }
+
+// TestListEpisodesPaginated_CountError 验证 COUNT 查询失败时报错。
+// 覆盖 ListEpisodesPaginated 中 COUNT 查询失败分支（删除 episodes 表）。
+func TestListEpisodesPaginated_CountError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListEpisodesPaginated(ctx, "p1", 1, 10); err == nil {
+		t.Fatal("episodes 表缺失时 ListEpisodesPaginated 应报错")
+	}
+}
+
+// TestListEpisodesPaginated_QueryError 验证分页查询失败时报错。
+// 覆盖 ListEpisodesPaginated 中 SELECT 查询失败分支（重建缺列表使 COUNT 成功但 SELECT 失败）。
+func TestListEpisodesPaginated_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE episodes (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListEpisodesPaginated(ctx, "p1", 1, 10); err == nil {
+		t.Fatal("SELECT 缺列应报错")
+	}
+}
