@@ -124,3 +124,36 @@ func TestCreateParaphrase_InvalidTime(t *testing.T) {
 		t.Fatal("参考片段无法解析时间范围应报错")
 	}
 }
+
+// TestParaphrases_DBErrors 验证 paraphrases 系列操作在表缺失时返回错误。
+// 覆盖 CreateParaphrase 写入失败与 listParaphrases 查询失败分支。
+func TestParaphrases_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE paraphrases`); err != nil {
+		t.Fatal(err)
+	}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	if _, err := s.CreateParaphrase(ctx, models.SourceEpisode, "ep1", "q", "b", "p", "m", []string{"seg-0001"}, segs); err == nil {
+		t.Error("paraphrases 表缺失时 CreateParaphrase 应报错")
+	}
+	if _, err := s.ListParaphrasesForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Error("paraphrases 表缺失时 ListParaphrasesForSource 应报错")
+	}
+}
+
+// TestListParaphrases_ScanError 验证 paraphrases 行数据异常时 Scan 失败。
+// 覆盖 listParaphrases 中 rows.Scan 失败分支（time_start 非数字）。
+func TestListParaphrases_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 插入 time_start 非数字的记录 → Scan 到 float 失败
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO paraphrases (id, source_type, source_id, anchor, segment_ids, relation_kind, time_start, time_end, question, body, provider, model)
+		 VALUES ('p1', 'episode', 'ep1', '["s"]', '["s"]', 'reference', 'bad', 0, 'q', 'b', 'p', 'm')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListParaphrasesForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("time_start 非数字应导致 Scan 失败")
+	}
+}
