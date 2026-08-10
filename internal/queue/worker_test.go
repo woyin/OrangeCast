@@ -1415,3 +1415,27 @@ func TestDoHighlight_CreateVersionFails(t *testing.T) {
 		t.Errorf("错误应含 '创建高光版本'，实际 %v", err)
 	}
 }
+
+// TestEnsureEvidence_BitrateTooLow 验证时长过长导致码率不足时报错。
+// 覆盖 ensureEvidence 中 evidenceBitrateKbps 失败分支（用 fake ffprobe 输出超长时长）。
+func TestEnsureEvidence_BitrateTooLow(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "long.wav", "audio/wav", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	os.WriteFile(rawPath, []byte("audio"), 0o644)
+	// 用 fake ffprobe 输出超长时长（如 999999 秒）→ evidenceBitrateKbps 返回错误
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "ffprobe")
+	os.WriteFile(fake, []byte("#!/bin/sh\necho '999999'\n"), 0o755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("超长时长应因码率不足报错")
+	}
+}
