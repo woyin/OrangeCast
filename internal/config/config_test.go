@@ -94,6 +94,22 @@ func TestLoad_TrustedProxies_Invalid(t *testing.T) {
 	os.Unsetenv("TRUSTED_PROXIES")
 }
 
+func TestLoad_TrustedProxies_EmptyParts(t *testing.T) {
+	os.Setenv("SESSION_SECRET", "test-secret")
+	defer os.Unsetenv("SESSION_SECRET")
+
+	// 空字符串部分被跳过（continue），有效部分仍解析
+	os.Setenv("TRUSTED_PROXIES", "127.0.0.1/32, , 10.0.0.0/8")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.TrustedProxies) != 2 {
+		t.Errorf("空部分应被跳过，应解析 2 个 CIDR，实际 %d", len(c.TrustedProxies))
+	}
+	os.Unsetenv("TRUSTED_PROXIES")
+}
+
 func TestEnsureDirs(t *testing.T) {
 	dir := t.TempDir()
 	c := &Config{
