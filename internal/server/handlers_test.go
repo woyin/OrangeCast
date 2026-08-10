@@ -1077,6 +1077,42 @@ func TestProgressAPI_ReturnsJSON(t *testing.T) {
 	}
 }
 
+// TestProgressAPI_QueuedAndRecent 验证进度 API 返回 queued 与 recent 数组。
+// 覆盖 handleProgressAPI 中 queued/recent 非空分支。
+func TestProgressAPI_QueuedAndRecent(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "progqr@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{
+		{GUID: "g1", Title: "排队集", AudioURL: "https://a.mp3"},
+		{GUID: "g2", Title: "完成集", AudioURL: "https://a2.mp3"},
+	})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// queued job
+	srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	// recent（已完成）job
+	job2, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[1].ID, models.JobTranscribe)
+	srv.store.MarkJobRunning(ctx, job2.ID)
+	srv.store.MarkJobSucceeded(ctx, job2.ID)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("进度 API 应 200，实际 %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "排队第 1 位") {
+		t.Errorf("应含 queued 队列位次，实际 %s", body)
+	}
+	if !strings.Contains(body, `"status":"succeeded"`) {
+		t.Errorf("应含 recent 已完成任务，实际 %s", body)
+	}
+}
+
 // TestProgressAPI_ClosedDB500 验证数据库关闭后进度 API 返回 500。
 func TestProgressAPI_ClosedDB500(t *testing.T) {
 	srv := newTestServer(t)
