@@ -166,3 +166,27 @@ func TestDeleteSourceRows_UploadDeleteFails(t *testing.T) {
 		t.Fatal("uploads 表缺失时 DeleteSourceRows 应报错")
 	}
 }
+
+// TestListPendingPurges_ScanError 验证 purges 行数据异常时 Scan 失败。
+// 覆盖 ListPendingPurges 中 rows.Scan 失败分支（非法 status 类型不触发，用列不匹配）。
+func TestListPendingPurges_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 重建含所有列的 purges 表，但 status 列 NOT NULL；插入 NULL 使 Scan 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE purges`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE purges (id TEXT NOT NULL, source_type TEXT NOT NULL, source_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	// 插入一条 created_at 为 NULL 的记录 → Scan 到 string 失败
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO purges (id, source_type, source_id, status, created_at) VALUES ('p1', 'episode', 'ep1', 'pending', '2026-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE purges SET created_at = NULL WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPendingPurges(ctx); err == nil {
+		t.Fatal("created_at 为 NULL 时 Scan 应失败")
+	}
+}
