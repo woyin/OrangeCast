@@ -219,3 +219,34 @@ func TestUpsertAnnotation_DBError(t *testing.T) {
 		t.Fatal("annotations 表缺失时 UpsertAnnotation 应报错")
 	}
 }
+
+// TestListPins_ScanError 验证 pins 行数据异常时 Scan 失败。
+// 覆盖 ListPins 中 rows.Scan 失败分支（插入非法 time_start）。
+func TestListPins_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 插入非法 time_start（字符串无法转 float）→ Scan 失败
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO pins (source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note)
+		 VALUES ('episode', 'ep1', '["s"]', 'citation', 'bad', 0, '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPins(ctx); err == nil {
+		t.Fatal("非法 time_start 应导致 Scan 失败")
+	}
+}
+
+// TestListAnnotations_ScanError 验证 annotations 行数据异常时 Scan 失败。
+// 覆盖 ListAnnotations 中 rows.Scan 失败分支。
+func TestListAnnotations_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO annotations (id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, body)
+		 VALUES ('a1', 'episode', 'ep1', '["s"]', 'citation', 'bad', 0, 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListAnnotations(ctx); err == nil {
+		t.Fatal("非法 time_start 应导致 Scan 失败")
+	}
+}
