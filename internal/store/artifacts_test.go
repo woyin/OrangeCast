@@ -167,3 +167,20 @@ func TestArtifacts_DBErrors(t *testing.T) {
 		t.Error("artifact_versions 表缺失时 GetArtifactVersion 应报错")
 	}
 }
+
+// TestCreateArtifactVersion_QueryError 验证查询最大版本失败时报错。
+// 覆盖 CreateArtifactVersion 中 QueryRow 失败分支（删除 artifact_versions 表）。
+func TestCreateArtifactVersion_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE artifact_versions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript,
+		"groq", "m", "1", job.ID, `{"text":"x"}`); err == nil {
+		t.Fatal("artifact_versions 表缺失时 CreateArtifactVersion 应报错")
+	}
+}
