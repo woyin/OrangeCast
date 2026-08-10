@@ -224,7 +224,7 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | filehash | 100% |
 | markdown | 100% |
 | rss | 100% |
-| cmd | 98% |
+| cmd | 99% |
 | safehttp | 97% |
 | server | 99% |
 | provider | 99% |
