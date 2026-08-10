@@ -2528,3 +2528,66 @@ func TestDJ_ParsePathError(t *testing.T) {
 		t.Errorf("非法路径应 404，实际 %d", rec.Code)
 	}
 }
+
+// TestRegister_ClaimDBError 验证 ClaimOwner 非已认领错误时渲染"认领失败"。
+// 覆盖 handleRegister 中 ClaimOwner 错误非 ErrOwnerExists 分支（删 users 表）。
+func TestRegister_ClaimDBError(t *testing.T) {
+	srv := newTestServer(t)
+	// 删 users 表 → ClaimOwner 报错（非 ErrOwnerExists）
+	if _, err := srv.store.DB.Exec(`DROP TABLE users`); err != nil {
+		t.Fatalf("DROP TABLE users: %v", err)
+	}
+	// 获取 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/register", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	body := "_csrf=" + csrf + "&email=a@b.com&password=password123"
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "认领失败") {
+		t.Errorf("应渲染认领失败，实际 %s", rec.Body.String())
+	}
+}
+
+// TestLogin_DBError 验证 GetUserByEmail 失败时渲染错误。
+// 覆盖 handleLogin 中 GetUserByEmail err 分支（删 users 表）。
+func TestLogin_DBError(t *testing.T) {
+	srv := newTestServer(t)
+	if _, err := srv.store.DB.Exec(`DROP TABLE users`); err != nil {
+		t.Fatalf("DROP TABLE users: %v", err)
+	}
+	// 获取 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	body := "_csrf=" + csrf + "&email=a@b.com&password=password123"
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应渲染错误页 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "邮箱或密码错误") {
+		t.Errorf("应渲染登录错误，实际 %s", rec.Body.String())
+	}
+}
