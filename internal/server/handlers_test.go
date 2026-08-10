@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/config"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
@@ -2603,5 +2604,70 @@ func TestDownloadMarkdown_ParsePathError(t *testing.T) {
 	srv.handleDownloadMarkdown(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestRegister_SetSessionError 验证注册后 SetSessionCookie 失败返回 500。
+// 覆盖 handleRegister 中 SetSessionCookie err 分支（删 sessions 表）。
+func TestRegister_SetSessionError(t *testing.T) {
+	srv := newTestServer(t)
+	if _, err := srv.store.DB.Exec(`DROP TABLE sessions`); err != nil {
+		t.Fatalf("DROP TABLE sessions: %v", err)
+	}
+	// 获取 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/register", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	body := "_csrf=" + csrf + "&email=a@b.com&password=password123"
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("SetSessionCookie 失败应 500，实际 %d", rec.Code)
+	}
+}
+
+// TestLogin_SetSessionError 验证登录后 SetSessionCookie 失败返回 500。
+// 覆盖 handleLogin 中 SetSessionCookie err 分支（删 sessions 表）。
+func TestLogin_SetSessionError(t *testing.T) {
+	srv := newTestServer(t)
+	// 先认领 Owner（注册时需 sessions 表正常）
+	ctx := context.Background()
+	hash, err := auth.HashPassword("password123")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	if _, err := srv.store.ClaimOwner(ctx, "a@b.com", hash); err != nil {
+		t.Fatalf("ClaimOwner: %v", err)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE sessions`); err != nil {
+		t.Fatalf("DROP TABLE sessions: %v", err)
+	}
+	// 获取 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	body := "_csrf=" + csrf + "&email=a@b.com&password=password123"
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("SetSessionCookie 失败应 500，实际 %d", rec.Code)
 	}
 }
