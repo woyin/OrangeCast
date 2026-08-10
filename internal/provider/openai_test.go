@@ -341,6 +341,39 @@ func TestOpenAI_Answer(t *testing.T) {
 	}
 }
 
+// TestOpenAI_Answer_NoValidCited 验证 cited 全无效时兜底第一个 chunk。
+// 覆盖 Answer 中 len(result.Sources)==0 → 追加 chunks[0] 分支。
+func TestOpenAI_Answer_NoValidCited(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"answer":"回答","cited":[99]}`) // cited 越界
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	res, err := o.Answer("通胀是啥", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if len(res.Sources) == 0 {
+		t.Fatal("cited 无效时应兜底第一个 chunk")
+	}
+	if res.Sources[0].Content != "通胀是物价上升" {
+		t.Errorf("兜底来源应为第一个 chunk，实际 %q", res.Sources[0].Content)
+	}
+}
+
+// TestOpenAI_Analyze_ParseError 验证 Analyze 输出非 JSON 时报错。
+// 覆盖 Analyze 中 "解析 openai KnowledgeCard" 分支。
+func TestOpenAI_Analyze_ParseError(t *testing.T) {
+	srv := newOpenAITestServer(t, `不是 JSON`)
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("非 JSON 输出应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 openai KnowledgeCard") {
+		t.Errorf("错误应含 '解析 openai KnowledgeCard'，实际 %v", err)
+	}
+}
+
 // newOpenAITestServer 构造返回固定 output_text 的 /responses 测试服务器。
 func newOpenAITestServer(t *testing.T, outputText string) *httptest.Server {
 	t.Helper()
