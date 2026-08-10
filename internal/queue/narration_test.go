@@ -327,3 +327,48 @@ func TestDoNarration_SkipsEmptyHighlightID(t *testing.T) {
 		t.Errorf("应只合成 1 段（空 ID/Gist 跳过），实际 %d", len(fn.written))
 	}
 }
+
+// TestDoNarration_ListNarrationsError 验证 ListCurrentNarrationsForSource 失败时报错。
+// 覆盖 doNarration 中 "读取已有 Narration 失败" 分支（删除 narrations 表）。
+func TestDoNarration_ListNarrationsError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, &provider.HighlightSet{
+		Highlights: []provider.Highlight{{ID: "hl-a", Gist: "gist", Citations: []string{"seg-0001"}}},
+	})
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE narrations`); err != nil {
+		t.Fatalf("DROP TABLE narrations: %v", err)
+	}
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: &fakeNarration{available: true}}
+	err := w.doNarration(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("narrations 表缺失应报错")
+	}
+	if !strings.Contains(err.Error(), "读取已有 Narration 失败") {
+		t.Errorf("错误应含 '读取已有 Narration 失败'，实际 %v", err)
+	}
+}
+
+// TestDoNarration_MkdirError 验证 narrations 目录创建失败时报错。
+// 覆盖 doNarration 中 "创建 narrations 目录" 分支（narrationDir 被文件占用）。
+func TestDoNarration_MkdirError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, &provider.HighlightSet{
+		Highlights: []provider.Highlight{{ID: "hl-a", Gist: "gist", Citations: []string{"seg-0001"}}},
+	})
+	// narrationDir 被文件占用 → MkdirAll 失败
+	os.WriteFile(w.narrationDir, []byte("x"), 0o644)
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: &fakeNarration{available: true}}
+	err := w.doNarration(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("narrationDir 为文件应报错")
+	}
+	if !strings.Contains(err.Error(), "创建 narrations 目录") {
+		t.Errorf("错误应含 '创建 narrations 目录'，实际 %v", err)
+	}
+}
