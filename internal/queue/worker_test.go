@@ -1439,3 +1439,30 @@ func TestEnsureEvidence_BitrateTooLow(t *testing.T) {
 		t.Fatal("超长时长应因码率不足报错")
 	}
 }
+
+// TestEnsureEvidence_TranscodeFails 验证 ffmpeg 转码失败时报错。
+// 覆盖 ensureEvidence 中 "音频转码失败" 分支（fake ffprobe 有效时长 + 损坏音频）。
+func TestEnsureEvidence_TranscodeFails(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg 不可用")
+	}
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "bad.mp3", "audio/mpeg", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	os.WriteFile(rawPath, []byte("this is not valid audio"), 0o644)
+	// 用 fake ffprobe 输出有效时长（1 秒），使转码阶段才失败
+	binDir := t.TempDir()
+	fake := filepath.Join(binDir, "ffprobe")
+	os.WriteFile(fake, []byte("#!/bin/sh\necho '1'\n"), 0o755)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("损坏音频应转码失败报错")
+	}
+}
