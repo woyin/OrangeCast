@@ -66,6 +66,78 @@ func TestOpenAI_Transcribe(t *testing.T) {
 	}
 }
 
+// TestOpenAI_Transcribe_HTTPError 验证转录 HTTP 非 200 时报错。
+// 覆盖 Transcribe 中 "openai 转录失败 HTTP" 分支。
+func TestOpenAI_Transcribe_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp3")
+	os.WriteFile(path, []byte("audio"), 0o644)
+	_, err := o.Transcribe(path)
+	if err == nil {
+		t.Fatal("HTTP 400 应报错")
+	}
+	if !strings.Contains(err.Error(), "转录失败 HTTP 400") {
+		t.Errorf("错误应含 '转录失败 HTTP 400'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_Transcribe_NetworkError 验证转录网络错误时报错。
+// 覆盖 Transcribe 中 "openai 转录请求" 分支（连接失败）。
+func TestOpenAI_Transcribe_NetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(url)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp3")
+	os.WriteFile(path, []byte("audio"), 0o644)
+	if _, err := o.Transcribe(path); err == nil {
+		t.Fatal("连接失败应报错")
+	}
+}
+
+// TestOpenAI_DoResponses_NetworkError 验证 doResponses 网络错误时报错。
+// 覆盖 doResponses 中 "openai %s 请求" 分支（经 Answer 触发）。
+func TestOpenAI_DoResponses_NetworkError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(url)
+	_, err := o.Answer("问题", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("连接失败应报错")
+	}
+	if !strings.Contains(err.Error(), "openai QA 请求") {
+		t.Errorf("错误应含 'openai QA 请求'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_DoResponses_HTTPError 验证 doResponses 非 200 时报错。
+// 覆盖 doResponses 中 "openai %s 失败 HTTP" 分支（经 Answer 触发）。
+func TestOpenAI_DoResponses_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.Answer("问题", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+	if !strings.Contains(err.Error(), "openai QA 失败 HTTP 500") {
+		t.Errorf("错误应含 'openai QA 失败 HTTP 500'，实际 %v", err)
+	}
+}
+
 // TestOpenAI_Getters 验证 Name/WithModel/WithBaseURL。
 func TestOpenAI_Getters(t *testing.T) {
 	o := NewOpenAIProvider("key")
