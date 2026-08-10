@@ -476,3 +476,29 @@ func TestSearchSource_QueryError(t *testing.T) {
 		t.Fatal("search_index 表缺失时 SearchSource 应报错")
 	}
 }
+
+// TestGetJob_DBError 验证查询出错时返回错误。
+// 覆盖 GetJob 中非 ErrNoRows 错误分支（删除 processing_jobs 表）。
+func TestGetJob_DBError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetJob(ctx, "job-1"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 GetJob 应报错")
+	}
+}
+
+// TestClaimNextJob_QueryError 验证查询 job 失败时报错。
+// 覆盖 ClaimNextJob 中非 ErrNoRows 查询错误分支（删除 processing_jobs 表）。
+func TestClaimNextJob_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextJob(ctx, "60 seconds"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 ClaimNextJob 应报错")
+	}
+}
