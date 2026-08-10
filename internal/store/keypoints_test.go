@@ -342,3 +342,18 @@ func TestDeleteKeyPointsForSource_Error(t *testing.T) {
 		t.Fatal("keypoint_search 表缺失时 DeleteKeyPointsForSource 应报错")
 	}
 }
+
+// TestIndexKeyPoints_DeleteIndexError 验证删除 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 DELETE keypoint_index 失败分支。
+func TestIndexKeyPoints_DeleteIndexError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
+	}
+}
