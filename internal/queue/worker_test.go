@@ -1124,3 +1124,43 @@ func TestResumePurges_EmptyNoop(t *testing.T) {
 		t.Fatalf("无 pending purge 时 ResumePurges 不应报错，实际 %v", err)
 	}
 }
+
+// TestRun_StartupRecoveryFailure 验证启动恢复失败时 Run 不 panic、继续运行。
+// 覆盖 Run 中 ResetRunningOnStartup/ResumePurges 失败仅记 log 的分支。
+func TestRun_StartupRecoveryFailure(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 删除 jobs 与 purges 表 → ResetRunningOnStartup/ResumePurges 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE purges`); err != nil {
+		t.Fatalf("DROP TABLE purges: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+	// 短暂运行后取消，确认 Run 不 panic
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run 取消后应退出")
+	}
+}
+
+// TestProcessOne_ClaimFails 验证领取任务失败时 ProcessOne 报错。
+// 覆盖 ProcessOne 中 ClaimNextJob err != nil 分支（删除 jobs 表）。
+func TestProcessOne_ClaimFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	if err := w.ProcessOne(ctx); err == nil {
+		t.Fatal("jobs 表缺失时 ProcessOne 应报错")
+	}
+}
