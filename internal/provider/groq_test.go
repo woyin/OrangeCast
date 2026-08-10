@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -165,6 +166,70 @@ func TestGroq_AnswerNoChunks(t *testing.T) {
 	}
 	if res.Answer == "" {
 		t.Error("应返回占位回答")
+	}
+}
+
+// TestGroq_AnswerParseFallback 验证 Answer 输出非 JSON 时退化为直接展示原文。
+// 覆盖 Answer 中 parseJSONLoose 失败 → return &QAResult{Answer: content} 分支。
+func TestGroq_AnswerParseFallback(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "这不是 JSON 内容", 200, nil
+	}
+	segs := []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	res, err := g.Answer("通胀是什么", segs)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if res.Answer != "这不是 JSON 内容" {
+		t.Errorf("解析失败应退化为原文，实际 %q", res.Answer)
+	}
+}
+
+// TestGroq_GenerateHighlightsParseError 验证高光输出非 JSON 时报错。
+// 覆盖 GenerateHighlights 中 "解析高光片段失败" 错误分支。
+func TestGroq_GenerateHighlightsParseError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "bad output", 200, nil
+	}
+	segs := []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	_, err := g.GenerateHighlights(segs)
+	if err == nil {
+		t.Fatal("高光输出非 JSON 应报错")
+	}
+	if !strings.Contains(err.Error(), "解析高光片段失败") {
+		t.Errorf("错误应含 '解析高光片段失败'，实际 %v", err)
+	}
+}
+
+// TestGroq_CheckReferenceNoSegments 验证无参考片段时返回"无参考片段"。
+// 覆盖 CheckReference 中 len(referenceSegments)==0 分支。
+func TestGroq_CheckReferenceNoSegments(t *testing.T) {
+	g := NewGroqProvider("key")
+	res, err := g.CheckReference("问题", "回答", nil)
+	if err != nil {
+		t.Fatalf("CheckReference: %v", err)
+	}
+	if res.Related || res.Reason != "无参考片段" {
+		t.Errorf("无参考片段应返回 related=false+无参考片段，实际 %+v", res)
+	}
+}
+
+// TestGroq_CheckReferenceParseFail 验证校验输出非 JSON 时保守拒绝。
+// 覆盖 CheckReference 中 parseJSONLoose 失败分支。
+func TestGroq_CheckReferenceParseFail(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "not json", 200, nil
+	}
+	segs := []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	res, err := g.CheckReference("问题", "回答", segs)
+	if err != nil {
+		t.Fatalf("CheckReference: %v", err)
+	}
+	if res.Related || res.Reason != "校验解析失败，保守拒绝" {
+		t.Errorf("解析失败应保守拒绝，实际 %+v", res)
 	}
 }
 
