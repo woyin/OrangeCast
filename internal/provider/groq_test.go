@@ -427,3 +427,41 @@ func TestGroqComplete_RealHTTPPath(t *testing.T) {
 		t.Errorf("应返回消息内容，实际 %q", content)
 	}
 }
+
+// TestGroq_AnalyzeEmptySegments 验证空 Segment 列表时报错。
+// 覆盖 Analyze 中 "无法分析空转录稿" 分支。
+func TestGroq_AnalyzeEmptySegments(t *testing.T) {
+	g := NewGroqProvider("key")
+	_, err := g.Analyze("", nil)
+	if err == nil {
+		t.Fatal("空 segments 应报错")
+	}
+	if !strings.Contains(err.Error(), "无法分析空转录稿") {
+		t.Errorf("错误应含 '无法分析空转录稿'，实际 %v", err)
+	}
+}
+
+// TestGroq_SplitAnalysisWindows_ZeroBudget 验证 charBudget<=0 时返回 nil。
+// 覆盖 splitAnalysisWindows 中 charBudget <= 0 → return nil 分支。
+func TestGroq_SplitAnalysisWindows_ZeroBudget(t *testing.T) {
+	segs := []Segment{{ID: "s1", Start: 0, End: 5, Text: "x"}}
+	if got := splitAnalysisWindows(segs, 0); got != nil {
+		t.Errorf("charBudget<=0 应返回 nil，实际 %+v", got)
+	}
+}
+
+// TestGroq_AnalyzeWindowParseError 验证 analyzeWindow 输出非 JSON 时报错。
+// 覆盖 analyzeWindow 中 "解析 KnowledgeCard 失败" 分支。
+func TestGroq_AnalyzeWindowParseError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "not json", 200, nil
+	}
+	_, err := g.analyzeWindow([]Segment{{ID: "s1", Start: 0, End: 5, Text: "x"}})
+	if err == nil {
+		t.Fatal("非 JSON 输出应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 KnowledgeCard 失败") {
+		t.Errorf("错误应含 '解析 KnowledgeCard 失败'，实际 %v", err)
+	}
+}
