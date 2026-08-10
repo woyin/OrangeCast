@@ -2591,3 +2591,17 @@ func TestLogin_DBError(t *testing.T) {
 		t.Errorf("应渲染登录错误，实际 %s", rec.Body.String())
 	}
 }
+
+// TestDownloadMarkdown_ParsePathError 验证直接调用 handler 且路径非法时 404。
+// 覆盖 handleDownloadMarkdown 中 parseSourcePath !ok 分支。
+func TestDownloadMarkdown_ParsePathError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "mdparse@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/sources/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handleDownloadMarkdown(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
