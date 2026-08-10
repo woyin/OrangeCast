@@ -1131,6 +1131,41 @@ func TestProgress_Page_Renders(t *testing.T) {
 	}
 }
 
+// TestProgress_Page_ActiveAndRecent 验证进度页渲染 active 与 recent 任务。
+// 覆盖 handleProgress 中 progress.Active != nil 与 recentJobs 非空分支。
+func TestProgress_Page_ActiveAndRecent(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "progact@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "激活集", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 一个 running（active）job
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	srv.store.MarkJobRunning(ctx, job.ID)
+	// 一个已完成（recent）job：用另一个 episode
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g2", Title: "已完成集", AudioURL: "https://a2.mp3"}})
+	eps2, _ := srv.store.ListEpisodes(ctx, p.ID)
+	job2, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, eps2[1].ID, models.JobTranscribe)
+	srv.store.MarkJobRunning(ctx, job2.ID)
+	srv.store.MarkJobSucceeded(ctx, job2.ID)
+
+	req := httptest.NewRequest(http.MethodGet, "/progress", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("进度页应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "激活集") {
+		t.Errorf("页面应含 active 集标题，实际 %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "已完成集") {
+		t.Errorf("页面应含 recent 集标题，实际 %s", rec.Body.String())
+	}
+}
+
 // TestKeyPointsSearch 验证 KeyPoint 搜索接口：空查询返回空、命中返回结果。
 func TestKeyPointsSearch(t *testing.T) {
 	srv := newTestServer(t)
