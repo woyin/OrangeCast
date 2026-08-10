@@ -1968,6 +1968,40 @@ func TestPodcastNew_POST_FetchError(t *testing.T) {
 	}
 }
 
+// TestPodcastNew_POST_MergeError 验证合并单集失败时返回 500。
+// 覆盖 handlePodcastNew 中 "保存单集失败" 错误分支（删除 episodes 表）。
+func TestPodcastNew_POST_MergeError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podnewmerge@example.com", "password123")
+	srv.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL, Title: "T"}, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}}, nil
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE episodes`); err != nil {
+		t.Fatalf("DROP TABLE episodes: %v", err)
+	}
+	rec := postForm(t, srv, cookie, "/podcasts/new", "feed_url=https://feed.example.com/pod.xml")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("MergeEpisodes 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPodcastDetail_NewPathForwards 验证 /podcasts/new 转发到 handlePodcastNew。
+// 覆盖 handlePodcastDetail 中 path == "new" 分支。
+func TestPodcastDetail_NewPathForwards(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podnewfwd@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/podcasts/new", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("/podcasts/new 应 200，实际 %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "订阅") && !strings.Contains(rec.Body.String(), "feed") {
+		t.Errorf("应渲染订阅表单，实际 %s", rec.Body.String())
+	}
+}
+
 // TestPodcastNew_POST_DuplicateFeed 验证重复订阅同一 feed 时渲染"可能已订阅"错误。
 func TestPodcastNew_POST_DuplicateFeed(t *testing.T) {
 	srv := newTestServer(t)
@@ -2157,5 +2191,92 @@ func TestCollectionItem_AddDBError(t *testing.T) {
 		"collection_id=c1&source_type=episode&source_id=ep1&segment_ids=seg-0001&source_title=t")
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("AddToCollection 失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestUploadNew_POST_CreateUploadError 验证 CreateUpload 失败时渲染错误页。
+// 覆盖 handleUploadNew 中 "保存失败" 错误分支（删除 uploads 表）。
+func TestUploadNew_POST_CreateUploadError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "upcerr@example.com", "password123")
+
+	// GET 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads/new", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	// 删除 uploads 表 → CreateUpload 失败
+	if _, err := srv.store.DB.Exec(`DROP TABLE uploads`); err != nil {
+		t.Fatalf("DROP TABLE uploads: %v", err)
+	}
+
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	mw.WriteField("_csrf", csrf)
+	fw, _ := mw.CreateFormFile("audio", "test.mp3")
+	fw.Write([]byte("fake-audio"))
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/uploads/new", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("CreateUpload 失败应渲染错误页 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "保存失败") {
+		t.Errorf("应显示保存失败错误，实际 %s", rec.Body.String())
+	}
+}
+
+// TestUploadNew_POST_SaveFileError 验证 saveUploadFile 失败时渲染错误页。
+// 覆盖 handleUploadNew 中 "存储音频失败" 错误分支（tempDir uploads 目录不可写）。
+func TestUploadNew_POST_SaveFileError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "upsf@example.com", "password123")
+
+	// GET 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/uploads/new", nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	// tempDir/uploads 被文件占用 → saveUploadFile 的 MkdirAll 失败
+	os.MkdirAll(srv.cfg.TempDir, 0o755)
+	if err := os.WriteFile(filepath.Join(srv.cfg.TempDir, "uploads"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	mw.WriteField("_csrf", csrf)
+	fw, _ := mw.CreateFormFile("audio", "test.mp3")
+	fw.Write([]byte("fake-audio"))
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/uploads/new", body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("saveUploadFile 失败应渲染错误页 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "存储音频失败") {
+		t.Errorf("应显示存储音频失败错误，实际 %s", rec.Body.String())
 	}
 }
