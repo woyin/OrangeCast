@@ -27,3 +27,12 @@ func TestSHA256MissingFile(t *testing.T) {
 		t.Fatal("missing file should return an error")
 	}
 }
+
+// TestSHA256DirectoryReadError 验证对目录计算哈希时 io.Copy 读取失败返回错误。
+// 覆盖 SHA256 中 io.Copy 失败分支（os.Open 成功打开目录，但读取报错）。
+func TestSHA256DirectoryReadError(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := SHA256(dir); err == nil {
+		t.Fatal("对目录计算哈希应报错")
+	}
+}
