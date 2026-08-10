@@ -263,3 +263,40 @@ func TestGetKpGraph_SameEpisodeNoEdge(t *testing.T) {
 		}
 	}
 }
+
+// TestGetKpGraph_ListKeyPointsError 验证 ListKeyPoints 失败时 GetKpGraph 报错。
+// 覆盖 GetKpGraph 中 ListKeyPoints err 分支（删除 keypoint_index 表）。
+func TestGetKpGraph_ListKeyPointsError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetKpGraph(ctx); err == nil {
+		t.Fatal("keypoint_index 表缺失时 GetKpGraph 应报错")
+	}
+}
+
+// TestGetKpGraph_CollectionScanError 验证 collection 成员 Scan 失败时报错。
+// 覆盖 GetKpGraph 中 ciRows.Scan 失败分支（collection_items 关联数据异常）。
+func TestGetKpGraph_CollectionScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	seedKpEpisode(t, s, "https://f1.xml", "g1", "ep1", "要点甲", "甲描述")
+	// 构造 ciRows.Scan 失败：创建 collection 并添加成员后，删除 keypoint_index 表
+	// 使 JOIN 结果异常（keypoint_id 列无法匹配）→ Scan 失败或查询失败
+	col, err := s.CreateCollection(ctx, "专题", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.AddToCollection(ctx, col.ID, models.SourceEpisode, "ep1", `["seg-0001"]`, 0, 5, "t", "")
+	// 删除 keypoint_index 表 → JOIN 查询失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetKpGraph(ctx); err == nil {
+		t.Fatal("keypoint_index 表缺失时 GetKpGraph 应报错")
+	}
+}
