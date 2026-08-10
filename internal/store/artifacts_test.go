@@ -168,6 +168,28 @@ func TestArtifacts_DBErrors(t *testing.T) {
 	}
 }
 
+// TestListArtifactVersions_ScanError 验证 artifact 行数据异常时 Scan 失败。
+// 覆盖 ListArtifactVersions 中 rows.Scan 失败分支（version 非整数）。
+func TestListArtifactVersions_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	// 先创建合法版本（job_id 外键满足），再把 version 改为字符串 → Scan 到 int 失败
+	if _, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript,
+		"groq", "m", "1", job.ID, `{"text":"x"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE artifact_versions SET version = 'bad' WHERE source_id = ?`, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListArtifactVersions(ctx, models.SourceEpisode, sourceID, KindTranscript); err == nil {
+		t.Fatal("version 非整数应导致 Scan 失败")
+	}
+}
+
 // TestCreateArtifactVersion_QueryError 验证查询最大版本失败时报错。
 // 覆盖 CreateArtifactVersion 中 QueryRow 失败分支（删除 artifact_versions 表）。
 func TestCreateArtifactVersion_QueryError(t *testing.T) {
