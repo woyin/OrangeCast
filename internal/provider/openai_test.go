@@ -528,3 +528,50 @@ func TestOpenAI_Paraphrase_ParseError(t *testing.T) {
 		t.Errorf("错误应含 '解析 openai 复述讲解响应'，实际 %v", err)
 	}
 }
+
+// TestOpenAI_StudyChat_DoResponsesError 验证 StudyChatAnswer 的 doResponses 失败时报错。
+// 覆盖 StudyChatAnswer 中 doResponses err → return nil, err 分支。
+func TestOpenAI_StudyChat_DoResponsesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "error", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 500 应报错")
+	}
+}
+
+// TestOpenAI_StudyChat_ResponseUnmarshalError 验证响应体非法 JSON 时报错。
+// 覆盖 StudyChatAnswer 中 json.Unmarshal(data) 失败 → "解析 openai 学习对话响应" 分支。
+func TestOpenAI_StudyChat_ResponseUnmarshalError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`不是 JSON`))
+	}))
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	_, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("非 JSON 响应应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 openai 学习对话响应") {
+		t.Errorf("错误应含 '解析 openai 学习对话响应'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_StudyChat_InvalidReferenceIDs 验证返回的参考片段全部无效时范围外反馈。
+// 覆盖 StudyChatAnswer 中 validIDs 为空 → 范围外反馈分支。
+func TestOpenAI_StudyChat_InvalidReferenceIDs(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"answer":"回答","referenceSegmentIds":["seg-9999"]}`) // 无效 ID
+	defer srv.Close()
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	res, err := o.StudyChatAnswer("通胀是啥", nil, []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err != nil {
+		t.Fatalf("StudyChatAnswer: %v", err)
+	}
+	if res.Answer != nil || res.ScopeFeedback == "" {
+		t.Errorf("参考片段无效应返回范围外反馈，实际 %+v", res)
+	}
+}
