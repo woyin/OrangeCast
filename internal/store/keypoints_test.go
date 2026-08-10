@@ -256,3 +256,33 @@ func TestIndexKeyPoints_SkipsInvalid(t *testing.T) {
 		t.Errorf("应索引有效要点，实际 %q", kps[0].Content)
 	}
 }
+
+// TestListKeyPoints_CountError 验证 COUNT 查询失败时报错。
+// 覆盖 ListKeyPoints 中 COUNT 查询失败分支（删除 keypoint_index 表）。
+func TestListKeyPoints_CountError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListKeyPoints(ctx, 1, 10); err == nil {
+		t.Fatal("keypoint_index 表缺失时 ListKeyPoints 应报错")
+	}
+}
+
+// TestListKeyPoints_QueryError 验证分页查询失败时报错。
+// 覆盖 ListKeyPoints 中 SELECT 查询失败分支（重建缺列的表使 COUNT 成功但 SELECT 失败）。
+func TestListKeyPoints_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	// 重建只有 id 列的表 → COUNT 成功，但 SELECT 缺列失败
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE keypoint_index (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListKeyPoints(ctx, 1, 10); err == nil {
+		t.Fatal("SELECT 缺列应报错")
+	}
+}
