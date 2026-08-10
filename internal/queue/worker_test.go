@@ -1287,3 +1287,30 @@ func TestRun_PeriodicError(t *testing.T) {
 		t.Fatal("Run 取消后应退出")
 	}
 }
+
+// TestHeartbeatLoop_HeartbeatError 验证心跳失败时仅记 log、不 panic。
+// 覆盖 heartbeatLoop 中 HeartbeatJob err → log 分支（删除 jobs 表后等待心跳周期）。
+func TestHeartbeatLoop_HeartbeatError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short mode 跳过长时心跳测试")
+	}
+	s, w := newTestWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	// 删除 jobs 表 → HeartbeatJob 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		w.heartbeatLoop(ctx, "job-1")
+		close(done)
+	}()
+	// 等待一个心跳周期（heartbeatEvery=20s）让失败分支执行
+	select {
+	case <-done:
+		t.Fatal("heartbeatLoop 不应提前退出")
+	case <-time.After(heartbeatEvery + 5*time.Second):
+	}
+	cancel()
+	<-done
+}
