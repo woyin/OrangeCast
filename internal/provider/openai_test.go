@@ -103,6 +103,37 @@ func TestOpenAI_Transcribe_NetworkError(t *testing.T) {
 	}
 }
 
+// TestOpenAI_Transcribe_OpenFileError 验证源文件不存在时报错。
+// 覆盖 Transcribe 中 os.Open 失败分支。
+func TestOpenAI_Transcribe_OpenFileError(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	if _, err := o.Transcribe(filepath.Join(t.TempDir(), "missing.mp3")); err == nil {
+		t.Fatal("文件不存在应报错")
+	}
+}
+
+// TestOpenAI_Transcribe_ParseError 验证转录响应 JSON 解析失败时报错。
+// 覆盖 Transcribe 中 "解析 openai 转录响应" 分支。
+func TestOpenAI_Transcribe_ParseError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not json`))
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp3")
+	os.WriteFile(path, []byte("audio"), 0o644)
+	_, err := o.Transcribe(path)
+	if err == nil {
+		t.Fatal("非 JSON 响应应报错")
+	}
+	if !strings.Contains(err.Error(), "解析 openai 转录响应") {
+		t.Errorf("错误应含 '解析 openai 转录响应'，实际 %v", err)
+	}
+}
+
 // TestOpenAI_DoResponses_NetworkError 验证 doResponses 网络错误时报错。
 // 覆盖 doResponses 中 "openai %s 请求" 分支（经 Answer 触发）。
 func TestOpenAI_DoResponses_NetworkError(t *testing.T) {
