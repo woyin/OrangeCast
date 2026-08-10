@@ -823,3 +823,35 @@ func TestRestore_CorruptTarNextError(t *testing.T) {
 		t.Fatal("损坏 tar 头应报错")
 	}
 }
+
+// TestRestore_EvidenceMkdirAllFails 验证证据解包时目录创建失败返回错误。
+// 覆盖 Restore 中证据解包 os.MkdirAll 失败分支（证据路径父目录被文件占用）。
+func TestRestore_EvidenceMkdirAllFails(t *testing.T) {
+	// 构造含证据的合法备份包
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[{"rel_path":"ep-1.mp3","sha256":"` + sha256Hex("data") + `","size_bytes":4}]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Mode: 0o644, Size: int64(len("data"))}
+	tw.WriteHeader(eh)
+	tw.Write([]byte("data"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 用 TMPDIR 指向文件占用路径使解包临时目录不可写
+	blocker := filepath.Join(t.TempDir(), "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	t.Setenv("TMPDIR", blocker)
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("解包临时目录不可写应报错")
+	}
+}
