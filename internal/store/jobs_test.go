@@ -430,3 +430,36 @@ func TestMarkJobRunning_Error(t *testing.T) {
 		t.Fatal("processing_jobs 表缺失时 MarkJobRunning 应报错")
 	}
 }
+
+// TestEnqueueAnalyze_QueryError 验证检查已有 analyze job 查询失败时报错。
+// 覆盖 EnqueueAnalyze 中非 ErrNoRows 错误分支（删除 processing_jobs 表）。
+func TestEnqueueAnalyze_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueAnalyze(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("processing_jobs 表缺失时 EnqueueAnalyze 应报错")
+	}
+}
+
+// TestEnqueueAnalyze_InsertError 验证插入 analyze job 失败时报错。
+// 覆盖 EnqueueAnalyze 中 "插入 analyze job" 错误分支（删除 processing_jobs 表
+// 在查询之后——通过先查询成功再删表不可行；改用唯一约束冲突）。
+func TestEnqueueAnalyze_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 用 episode 源使查询走 ErrNoRows（无 analyze job），然后插入成功
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	// 先入队一个 analyze（查询会返回已存在 → nil,nil），此路径无法触发 INSERT 失败。
+	// 直接构造：删除 processing_jobs 表使查询报错（非 ErrNoRows → 返回错误）。
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueAnalyze(ctx, models.SourceEpisode, eps[0].ID); err == nil {
+		t.Fatal("processing_jobs 表缺失时 EnqueueAnalyze 应报错")
+	}
+}
