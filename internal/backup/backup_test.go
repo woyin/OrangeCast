@@ -632,3 +632,24 @@ func TestCreate_DBSnapshotFails(t *testing.T) {
 		t.Fatal("数据库已关闭时 Create 应报错")
 	}
 }
+
+// TestRestore_CorruptTarEntry 验证 tar 条目损坏时 Restore 报错。
+// 覆盖 Restore 中 tr.Next() 返回非 EOF 错误分支（截断的 tar 数据）。
+func TestRestore_CorruptTarEntry(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	// 写入一个声明了大小的头部，但内容被截断 → tar.Reader.Next/Read 报错
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: 1000}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte("short"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("截断的 tar 条目应报错")
+	}
+}
