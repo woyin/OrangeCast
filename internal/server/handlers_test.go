@@ -2084,6 +2084,20 @@ func TestPodcastDetail_NewPathForwards(t *testing.T) {
 	}
 }
 
+// TestPodcastDetail_NewPathDirect 验证直接调用 handlePodcastDetail 且路径为 new 时转发。
+// 覆盖 handlePodcastDetail 中 path == "new" 分支（绕过路由直接调用）。
+func TestPodcastDetail_NewPathDirect(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podnewdir@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/podcasts/new", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handlePodcastDetail(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("new 转发应 200，实际 %d", rec.Code)
+	}
+}
+
 // TestPodcastNew_POST_DuplicateFeed 验证重复订阅同一 feed 时渲染"可能已订阅"错误。
 func TestPodcastNew_POST_DuplicateFeed(t *testing.T) {
 	srv := newTestServer(t)
