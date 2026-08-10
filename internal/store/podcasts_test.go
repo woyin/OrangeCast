@@ -218,3 +218,45 @@ func TestListPodcasts_ScanError(t *testing.T) {
 		t.Fatal("podcasts 表缺列时 ListPodcasts 应报错")
 	}
 }
+
+// TestMergeEpisodes_Empty 验证空 episode 列表直接返回 0。
+// 覆盖 MergeEpisodes 中 len(eps)==0 分支。
+func TestMergeEpisodes_Empty(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	n, err := s.MergeEpisodes(ctx, p.ID, nil)
+	if err != nil {
+		t.Fatalf("MergeEpisodes(nil): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("空列表应返回 0，实际 %d", n)
+	}
+}
+
+// TestMergeEpisodes_InsertError 验证插入 episode 失败时报错。
+// 覆盖 MergeEpisodes 中 "插入 episode" 分支（删除 episodes 表）。
+func TestMergeEpisodes_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}}); err == nil {
+		t.Fatal("episodes 表缺失时 MergeEpisodes 应报错")
+	}
+}
+
+// TestListEpisodes_QueryError 验证分页查询失败时报错。
+// 覆盖 ListEpisodes 中查询失败分支（删除 episodes 表）。
+func TestListEpisodes_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListEpisodes(ctx, "p1"); err == nil {
+		t.Fatal("episodes 表缺失时 ListEpisodes 应报错")
+	}
+}
