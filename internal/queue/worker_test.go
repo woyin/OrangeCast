@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1246,5 +1247,43 @@ func TestResumePurges_MarkDoneError(t *testing.T) {
 	}
 	if err := w.ResumePurges(ctx); err == nil {
 		t.Fatal("purges 表缺失时 ResumePurges 应报错")
+	}
+}
+
+// TestProcessJob_BundleForError 验证 bundleFor 失败时 processJob 返回错误。
+// 覆盖 processJob 中 bundleFor err != nil 分支。
+func TestProcessJob_BundleForError(t *testing.T) {
+	_, w := newTestWorker(t)
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return nil, errors.New("bundle 解析失败")
+	}
+	job := &models.ProcessingJob{JobType: models.JobTranscribe}
+	if err := w.processJob(context.Background(), job); err == nil {
+		t.Fatal("bundleFor 失败应报错")
+	}
+}
+
+// TestRun_PeriodicError 验证 Run 周期处理错误时仅记 log、不 panic。
+// 覆盖 Run 中 ProcessOne err → log 分支（删除 jobs 表）。
+func TestRun_PeriodicError(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	// 删除 jobs 表 → ProcessOne 领取失败 → log
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
+		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	}
+	w.poll = 5 * time.Millisecond
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+	// 等待至少一个周期
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run 取消后应退出")
 	}
 }
