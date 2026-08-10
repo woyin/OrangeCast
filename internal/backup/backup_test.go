@@ -856,6 +856,105 @@ func TestRestore_EvidenceMkdirAllFails(t *testing.T) {
 	}
 }
 
+// TestRestore_EvidenceMkdirCollision 验证证据路径被文件占用时解包 MkdirAll 失败。
+// 覆盖 Restore 中证据解包 os.MkdirAll 错误分支（前一个证据是文件，后一个以其为父目录）。
+func TestRestore_EvidenceMkdirCollision(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	m := Manifest{
+		Format: ManifestFormat, Version: ManifestVersion,
+		DBFile: dbFileName, DBSHA256: sha256Hex("fake-db"),
+		Evidence: []EvidenceEntry{
+			{RelPath: "a", SHA256: sha256Hex("data-a"), SizeBytes: 6},
+			{RelPath: "a/b", SHA256: sha256Hex("data-b"), SizeBytes: 6},
+		},
+	}
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	eh1 := &tar.Header{Name: "evidence/a", Mode: 0o644, Size: int64(len("data-a"))}
+	tw.WriteHeader(eh1)
+	tw.Write([]byte("data-a"))
+	eh2 := &tar.Header{Name: "evidence/a/b", Mode: 0o644, Size: int64(len("data-b"))}
+	tw.WriteHeader(eh2)
+	tw.Write([]byte("data-b"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("证据路径冲突（文件作为父目录）应报错")
+	}
+}
+
+// TestRestore_EvidenceCopyTruncated 验证证据条目内容截断时 copyFromTar 报错。
+// 覆盖 Restore 中证据解包 io.Copy 错误分支（条目声明大小超过实际内容）。
+func TestRestore_EvidenceCopyTruncated(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	m := Manifest{
+		Format: ManifestFormat, Version: ManifestVersion,
+		DBFile: dbFileName, DBSHA256: sha256Hex("fake-db"),
+		Evidence: []EvidenceEntry{{RelPath: "ep-1.mp3", SHA256: "abc", SizeBytes: 1000}},
+	}
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	eh := &tar.Header{Name: "evidence/ep-1.mp3", Mode: 0o644, Size: 1000}
+	tw.WriteHeader(eh)
+	tw.Write([]byte("short"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("证据条目内容截断应报错")
+	}
+}
+
+// TestRestore_DBCopyTruncated 验证数据库条目内容截断时 copyFromTar 报错。
+// 覆盖 Restore 中 DB 解包 io.Copy 错误分支（条目声明大小超过实际内容）。
+func TestRestore_DBCopyTruncated(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	m := Manifest{
+		Format: ManifestFormat, Version: ManifestVersion,
+		DBFile: dbFileName, DBSHA256: "abc",
+		Evidence: []EvidenceEntry{},
+	}
+	manifestJSON, _ := json.Marshal(m)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifestJSON))}
+	tw.WriteHeader(mh)
+	tw.Write(manifestJSON)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: 1000}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("short"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("DB 条目内容截断应报错")
+	}
+}
+
 // TestCreate_MultipleEvidenceSort 验证多个证据文件时排序比较器执行。
 // 覆盖 Create 中 sort.Slice 比较器分支（多个证据触发 RelPath 比较）。
 func TestCreate_MultipleEvidenceSort(t *testing.T) {
