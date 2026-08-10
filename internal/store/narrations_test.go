@@ -84,3 +84,35 @@ func TestNarration_DeleteForSource(t *testing.T) {
 		t.Errorf("删除后应无 narration，实际 %d", len(all))
 	}
 }
+
+// TestNarrations_DBErrors 验证 narrations 系列查询在表缺失时返回错误。
+// 覆盖 GetCurrentNarration/ListCurrentNarrationsForSource 查询失败分支。
+func TestNarrations_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE narrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCurrentNarration(ctx, models.SourceEpisode, "ep1", "hl1"); err == nil {
+		t.Error("narrations 表缺失时 GetCurrentNarration 应报错")
+	}
+	if _, err := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Error("narrations 表缺失时 ListCurrentNarrationsForSource 应报错")
+	}
+}
+
+// TestListCurrentNarrations_ScanError 验证 narrations 行数据异常时 Scan 失败。
+// 覆盖 ListCurrentNarrationsForSource 中 rows.Scan 失败分支。
+func TestListCurrentNarrations_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 插入 version 非数字的记录 → Scan 到 int 失败
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO narrations (id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider)
+		 VALUES ('n1', 'episode', 'ep1', 'hl1', 'bad', 'v', 'm', 'r', 0, 0, 'k')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("version 非数字应导致 Scan 失败")
+	}
+}
