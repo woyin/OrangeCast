@@ -220,7 +220,7 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | server | 97% |
 | provider | 93% |
 | queue | 92% |
-| store | 91% |
+| store | 92% |
 | backup | 88% |
 
 新增公开函数应附带对应测试；修复 bug 应先加一个能复现该 bug 的测试（TDD）。
