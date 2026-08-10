@@ -48,3 +48,22 @@ func TestValidateHighlightSet_AssignsStableIDs(t *testing.T) {
 		t.Error("相同 Citation 集合刷新后 ID 应稳定不变")
 	}
 }
+
+// TestStableHighlightID_SkipsEmptyAndDuplicate 验证空字符串与重复 Citation 被忽略。
+// 覆盖 stableHighlightID 中 c == "" || seen[c] → continue 分支。
+func TestStableHighlightID_SkipsEmptyAndDuplicate(t *testing.T) {
+	id := stableHighlightID([]string{"", "seg-0001", "seg-0001"})
+	if len(id) != 12 {
+		t.Fatalf("去重后应生成 12 字符 ID，实际 %q", id)
+	}
+	// 与仅含 seg-0001 的集合一致（空串与重复不影响）
+	base := stableHighlightID([]string{"seg-0001"})
+	if id != base {
+		t.Errorf("空串与重复不应改变 ID：%q vs %q", id, base)
+	}
+	// 全部空/空白 → 仍生成确定性 ID（空集合哈希）
+	empty := stableHighlightID([]string{"", "  "})
+	if len(empty) != 12 {
+		t.Fatalf("空集合也应生成 ID，实际 %q", empty)
+	}
+}

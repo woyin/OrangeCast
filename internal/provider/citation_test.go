@@ -81,6 +81,28 @@ func TestValidateCard_EnglishVerbatim(t *testing.T) {
 	}
 }
 
+// TestValidateCard_SkipsEmptyOrInvalidQuotes 验证空金句与无效引用的金句被省略。
+// 覆盖 ValidateCard 中金句为空或 Citation 无效 → continue 分支。
+func TestValidateCard_SkipsEmptyOrInvalidQuotes(t *testing.T) {
+	card := &KnowledgeCard{
+		Title:     "T",
+		Summary:   CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Description: "d", Citations: []string{"seg-0001"}}},
+		Chapters:  []Chapter{{Title: "CH", Gist: "g", Citations: []string{"seg-0001"}}},
+		Quotes: []Quote{
+			{Text: "   ", Citations: []string{"seg-0001"}}, // 空白金句 → 省略
+			{Text: "x", Citations: []string{"seg-9999"}},   // 无效引用 → 省略
+		},
+	}
+	got, err := ValidateCard(card, testSegments())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Quotes) != 0 {
+		t.Fatalf("空/无效金句应省略，实际 %d", len(got.Quotes))
+	}
+}
+
 func TestResolveCitationRange(t *testing.T) {
 	start, end, ok := ResolveCitationRange("seg-0002", testSegments())
 	if !ok || start != 5 || end != 10 {
