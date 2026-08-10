@@ -300,3 +300,45 @@ func TestGetKpGraph_CollectionScanError(t *testing.T) {
 		t.Fatal("keypoint_index 表缺失时 GetKpGraph 应报错")
 	}
 }
+
+// TestGetKpGraph_SimilarEdgeDedup 验证跨 Episode 相似且同 Collection 时不去重相似边。
+// 覆盖 GetKpGraph 中 similar 边生成（alreadyLinked 检查的分支路径）。
+func TestGetKpGraph_SimilarEdgeDedup(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+
+	// 两个内容高度相似、跨 Episode 的 KeyPoint
+	s1 := seedKpEpisode(t, s, "https://f1.xml", "g1", "ep1", "主权财富基金改变全球投资", "长期投资者")
+	s2 := seedKpEpisode(t, s, "https://f2.xml", "g2", "ep2", "主权财富基金是长期投资者", "全球投资")
+
+	// 放入同一 Collection（产生 collection 边）
+	col, err := s.CreateCollection(ctx, "专题", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.AddToCollection(ctx, col.ID, models.SourceEpisode, s1, `["seg-0001"]`, 0, 5, "ep1", "")
+	s.AddToCollection(ctx, col.ID, models.SourceEpisode, s2, `["seg-0001"]`, 0, 5, "ep2", "")
+
+	gd, err := s.GetKpGraph(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasCollection := false
+	hasSimilar := false
+	for _, l := range gd.Links {
+		if l.Type == "collection" {
+			hasCollection = true
+		}
+		if l.Type == "similar" {
+			hasSimilar = true
+		}
+	}
+	if !hasCollection {
+		t.Error("同 Collection 应产生 collection 边")
+	}
+	// collection 边已连接这对 KeyPoint，similar 边应被去重（alreadyLinked 分支）
+	if hasSimilar {
+		t.Error("已有 collection 边时相似边应被去重")
+	}
+}
