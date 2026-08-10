@@ -415,3 +415,27 @@ func TestPostJSON_MarshalError(t *testing.T) {
 		t.Fatal("不可序列化 payload 应报错")
 	}
 }
+
+// TestUploadFileAsMultipart_CopyError 验证文件读取失败时报错。
+// 覆盖 uploadFileAsMultipart 中 io.Copy 失败分支（目录作为输入文件）。
+func TestUploadFileAsMultipart_CopyError(t *testing.T) {
+	dir := t.TempDir()
+	// 目录作为文件路径 → os.Open 成功（打开目录），io.Copy 读取失败
+	_, _, err := uploadFileAsMultipart(context.Background(), "http://example.com", "key", "file", dir, map[string]string{"model": "m"})
+	if err == nil {
+		t.Fatal("目录作为输入应读取失败报错")
+	}
+}
+
+// TestUploadFileAsMultipart_NewRequestError 验证构造请求失败时报错。
+// 覆盖 uploadFileAsMultipart 中 http.NewRequestWithContext 失败分支（非法 URL）。
+func TestUploadFileAsMultipart_NewRequestError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mp3")
+	os.WriteFile(path, []byte("audio"), 0o644)
+	// 非法 URL（含空格）→ NewRequestWithContext 失败
+	_, _, err := uploadFileAsMultipart(context.Background(), "://bad url", "key", "file", path, nil)
+	if err == nil {
+		t.Fatal("非法 URL 应报错")
+	}
+}
