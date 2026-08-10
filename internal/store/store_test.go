@@ -247,3 +247,22 @@ func TestOpen_MigrateFails(t *testing.T) {
 		t.Fatal("损坏的 schema_migrations 应导致迁移失败")
 	}
 }
+
+// TestOpen_AlreadyMigrated 验证已迁移库重新 Open 走 preMigrationSafety !pending 分支。
+// 覆盖 preMigrationSafety 中无待破坏性迁移时直接跳过。
+func TestOpen_AlreadyMigrated(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "migrated.db")
+	// 首次 Open 完成迁移
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	// 重新 Open（已迁移，version>=2 → 无 pending 破坏性迁移 → !pending 分支）
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("已迁移库重新 Open 应成功: %v", err)
+	}
+	s2.Close()
+}
