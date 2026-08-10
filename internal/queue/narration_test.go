@@ -211,3 +211,119 @@ func TestNextNarrationVersion(t *testing.T) {
 		t.Errorf("现有 version=1 应返回 2，实际 %d", v)
 	}
 }
+
+// TestDoNarration_NoHighlightVersion 验证无当前高光版本时报错。
+// 覆盖 doNarration 中 "读取当前高光版本失败" 分支。
+func TestDoNarration_NoHighlightVersion(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 不写入任何 highlight 版本 → GetCurrentVersion 报错
+
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: &fakeNarration{available: true}}
+
+	err := w.doNarration(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("无高光版本应报错")
+	}
+	if !strings.Contains(err.Error(), "读取当前高光版本失败") {
+		t.Errorf("错误应含 '读取当前高光版本失败'，实际 %v", err)
+	}
+}
+
+// TestDoNarration_CorruptHighlightPayload 验证高光载荷损坏时报错。
+// 覆盖 doNarration 中 "解析高光载荷失败" 分支。
+func TestDoNarration_CorruptHighlightPayload(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	// 写入一个 payload 非法 JSON 的 highlight 版本
+	jobRow, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobAnalyze)
+	v, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindHighlight,
+		"groq", "llama-3.3-70b-versatile", "1", jobRow.ID, "{not valid json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindHighlight, v); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: &fakeNarration{available: true}}
+
+	err = w.doNarration(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("损坏载荷应报错")
+	}
+	if !strings.Contains(err.Error(), "解析高光载荷失败") {
+		t.Errorf("错误应含 '解析高光载荷失败'，实际 %v", err)
+	}
+}
+
+// TestDoNarration_EmptyHighlights 验证高光集合为空时跳过合成。
+// 覆盖 doNarration 中 len(hs.Highlights)==0 提前返回分支。
+func TestDoNarration_EmptyHighlights(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, &provider.HighlightSet{Highlights: nil})
+
+	fn := &fakeNarration{available: true}
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: fn}
+
+	if err := w.doNarration(ctx, job, bundle); err != nil {
+		t.Fatalf("空高光集合应跳过、不报错，实际 %v", err)
+	}
+	if len(fn.written) != 0 {
+		t.Errorf("空高光集合不应合成，实际写盘 %d 个", len(fn.written))
+	}
+}
+
+// TestDoNarration_NilBundle 验证 bundle.Narration 为 nil 时优雅跳过。
+// 覆盖 doNarration 中 bundle.Narration == nil 判空分支。
+func TestDoNarration_NilBundle(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, &provider.HighlightSet{
+		Highlights: []provider.Highlight{{ID: "hl-a", Gist: "gist", Citations: []string{"seg-0001"}}},
+	})
+
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: nil} // nil Narration Provider
+
+	if err := w.doNarration(ctx, job, bundle); err != nil {
+		t.Fatalf("nil Narration Provider 应跳过、不报错，实际 %v", err)
+	}
+	all, _ := s.ListCurrentNarrationsForSource(ctx, models.SourceUpload, up.ID)
+	if len(all) != 0 {
+		t.Errorf("nil Provider 时 narrations 应为空，实际 %d", len(all))
+	}
+}
+
+// TestDoNarration_SkipsEmptyHighlightID 验证 highlight ID 或 Gist 为空时跳过。
+// 覆盖 doNarration 中 h.ID == "" || h.Gist == "" continue 分支。
+func TestDoNarration_SkipsEmptyHighlightID(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	hs := &provider.HighlightSet{Highlights: []provider.Highlight{
+		{ID: "", Gist: "no id", Citations: []string{"seg-0001"}}, // 空 ID 跳过
+		{ID: "hl-b", Gist: "", Citations: []string{"seg-0002"}},  // 空 Gist 跳过
+		{ID: "hl-c", Gist: "valid", Citations: []string{"seg-0003"}}, // 有效
+	}}
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, hs)
+
+	fn := &fakeNarration{available: true}
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: fn}
+
+	if err := w.doNarration(ctx, job, bundle); err != nil {
+		t.Fatalf("doNarration: %v", err)
+	}
+	if len(fn.written) != 1 {
+		t.Errorf("应只合成 1 段（空 ID/Gist 跳过），实际 %d", len(fn.written))
+	}
+}

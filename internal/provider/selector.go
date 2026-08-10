@@ -19,6 +19,8 @@ type Selector struct {
 	narration     NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
 }
 
+// NewSelector 构造一个 Selector，初始 key 来自环境变量；URL/baseURL 留空走各 Provider 默认。
+// 调用 ApplySettings / ApplySettingsFrom 在运行时用 SQLite settings 覆盖 key/URL。
 func NewSelector(groqAPIKey, openaiAPIKey string) *Selector {
 	return &Selector{groqAPIKey: groqAPIKey, openaiAPIKey: openaiAPIKey}
 }

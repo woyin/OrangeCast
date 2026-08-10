@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/safehttp"
@@ -41,6 +42,10 @@ type Worker struct {
 	bundleFor func(*models.ProcessingJob) (*provider.ProviderBundle, error)
 }
 
+// NewWorker 构造一个 worker。tempDir 存放下载数据与转码中间产物；evidenceDir 持久保存
+// 标准化 EvidenceAudio；narrationDir 保存 Highlight 的 TTS 解说音轨（独立于 evidence，不进备份）。
+// HTTP 客户端复用 SSRF 防护（safehttp）：逐跳重定向校验 + 私网拦截 + 体积上限。
+// bundleFor 默认读 SQLite settings 按任务类型选择 Provider/Model，读失败时降级到 Groq 默认。
 func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, narrationDir string) *Worker {
 	client := safehttp.NewClient(10, maxAudioSize, 15*time.Minute)
 	w := &Worker{
@@ -300,7 +305,7 @@ func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) 
 	// 已存在且哈希一致 → 直接复用（避免重复转码/下载，且保证幂等）
 	if ev, err := w.store.GetEvidenceAudio(ctx, job.SourceType, job.SourceID); err == nil && ev.Status == "ready" {
 		if fi, serr := os.Stat(path); serr == nil && fi.Size() > 0 {
-			if h, herr := fileSHA256(path); herr == nil && h == ev.SHA256 && fi.Size() <= maxTranscriptionUploadBytes {
+			if h, herr := filehash.SHA256(path); herr == nil && h == ev.SHA256 && fi.Size() <= maxTranscriptionUploadBytes {
 				return path, nil
 			}
 		}
@@ -328,7 +333,7 @@ func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) 
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("音频转码失败: %w", err)
 	}
-	sha, err := fileSHA256(tmpPath)
+	sha, err := filehash.SHA256(tmpPath)
 	if err != nil {
 		os.Remove(tmpPath)
 		return "", err

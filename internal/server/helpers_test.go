@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -256,5 +258,41 @@ func TestParseSegmentIDs(t *testing.T) {
 	// 空串 → nil
 	if got := parseSegmentIDs("   "); got != nil {
 		t.Errorf("空串应返回 nil，实际 %v", got)
+	}
+}
+
+// TestStaticFS 验证静态文件系统可读取已知静态资源。
+// 覆盖 StaticFS 正常返回路径（registerStaticRoutes 依赖）。
+func TestStaticFS(t *testing.T) {
+	f, err := StaticFS()
+	if err != nil {
+		t.Fatalf("StaticFS: %v", err)
+	}
+	// 列出根目录，至少应存在可服务的文件
+	entries, err := fs.ReadDir(f, ".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("静态文件系统应为非空")
+	}
+}
+
+// TestRender_AllPages 验证所有页面模板可被渲染（不 panic）。
+// 覆盖 NewTemplates 内每个页面 template set 的构建路径。
+func TestRender_AllPages(t *testing.T) {
+	tmpl, err := NewTemplates()
+	if err != nil {
+		t.Fatalf("NewTemplates: %v", err)
+	}
+	if len(tmpl.pages) == 0 {
+		t.Fatal("应至少加载一个页面模板")
+	}
+	// 各页面用最小 data 渲染（部分字段缺失由模板零值兜底）
+	for name := range tmpl.pages {
+		var buf bytes.Buffer
+		if err := tmpl.Render(&buf, name, map[string]any{}); err != nil {
+			t.Errorf("渲染 %s 失败: %v", name, err)
+		}
 	}
 }

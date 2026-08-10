@@ -16,8 +16,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -75,7 +74,7 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 	if err := store.ConsistencyBackup(ctx, s.DB, dbSnapshot); err != nil {
 		return m, fmt.Errorf("数据库快照: %w", err)
 	}
-	dbSHA, err := fileSHA256(dbSnapshot)
+	dbSHA, err := filehash.SHA256(dbSnapshot)
 	if err != nil {
 		return m, err
 	}
@@ -93,7 +92,7 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 		if err != nil {
 			return err
 		}
-		sha, err := fileSHA256(path)
+		sha, err := filehash.SHA256(path)
 		if err != nil {
 			return err
 		}
@@ -255,7 +254,7 @@ func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) 
 	}
 
 	// 校验 DB 哈希
-	gotSHA, err := fileSHA256(dbPath)
+	gotSHA, err := filehash.SHA256(dbPath)
 	if err != nil {
 		return m, err
 	}
@@ -268,7 +267,7 @@ func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) 
 		if !ok {
 			return m, fmt.Errorf("备份包缺少证据文件 %s", e.RelPath)
 		}
-		sha, err := fileSHA256(p)
+		sha, err := filehash.SHA256(p)
 		if err != nil {
 			return m, err
 		}
@@ -303,17 +302,4 @@ func copyFromTar(tr *tar.Reader, dest string) error {
 	defer f.Close()
 	_, err = io.Copy(f, tr)
 	return err
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

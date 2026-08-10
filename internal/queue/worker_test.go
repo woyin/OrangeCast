@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
@@ -250,7 +251,7 @@ func TestEvidenceAudio_OversizeExistingFileIsNotReused(t *testing.T) {
 	if err := os.Truncate(path, maxTranscriptionUploadBytes+1); err != nil {
 		t.Fatal(err)
 	}
-	sha, err := fileSHA256(path)
+	sha, err := filehash.SHA256(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +463,7 @@ func seedEvidence(t *testing.T, s *store.Store, w *Worker, sourceType models.Sou
 		t.Skipf("ffmpeg 生成证据失败: %v %s", err, out)
 	}
 	fi, _ := os.Stat(path)
-	sha, err := fileSHA256(path)
+	sha, err := filehash.SHA256(path)
 	if err != nil {
 		t.Fatal(err)
 	}

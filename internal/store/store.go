@@ -13,7 +13,11 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-// Store 封装 SQLite 数据库句柄。
+// Store 封装 SQLite 数据库句柄与全部仓储方法。
+//
+// 该包是项目的持久层入口：迁移系统（migrate.go）、各领域仓储（podcasts/keypoints/
+// narrations/...）、FTS5 全文索引、备份一致性快照都集中在此。所有方法都基于单个
+// *sql.DB（Open 设置 MaxOpenConns=1 以匹配 SQLite 单写者模型）。
 type Store struct {
 	DB *sql.DB
 }

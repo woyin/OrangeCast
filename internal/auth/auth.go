@@ -7,8 +7,13 @@ import (
 	"github.com/alexedwards/argon2id"
 )
 
+// Package auth 提供 Owner 认证与会话管理：argon2id 密码哈希、cookie session、
+// CSRF 防护、登录限流与可信代理下的 Secure Cookie 判定。
+// 配套的 middleware.go 实现 RequireAuth（未登录 401/303）与 CSRFProtect 中间件。
 var (
+	// ErrInvalidEmail 邮箱格式非法。
 	ErrInvalidEmail     = errors.New("invalid email")
+	// ErrPasswordTooShort 密码长度不足 8 字符。
 	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
 )
 

@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"path/filepath"
 )
@@ -60,7 +61,7 @@ func NewTemplates() (*Templates, error) {
 }
 
 // Render 渲染指定页面：执行 layout 模板，content/title 块由页面文件提供。
-func (t *Templates) Render(w interface{ Write([]byte) (int, error) }, name string, data any) error {
+func (t *Templates) Render(w io.Writer, name string, data any) error {
 	tmpl, ok := t.pages[name]
 	if !ok {
 		return fmt.Errorf("未知模板: %s", name)

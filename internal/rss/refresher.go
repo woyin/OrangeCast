@@ -9,6 +9,9 @@ import (
 	"github.com/woyin/orangecast/internal/store"
 )
 
+// Package rss 实现 Podcast feed 抓取、解析（gofeed）与 30 分钟周期刷新调度。
+// feed.go 提供 FetchFeed（复用 safehttp SSRF 防护客户端）与 parseFeed；
+// refresher.go 用 robfig/cron 定时拉取新 Episode 并 MergeEpisodes 入库。
 // Refresher 定时刷新所有播客 feed 的调度器。
 type Refresher struct {
 	cron      *cron.Cron

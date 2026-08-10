@@ -5,12 +5,8 @@ package queue
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -67,18 +63,9 @@ func transcodeAudio(in, out string, bitrateKbps int) error {
 	}
 	return nil
 }
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
+
+// guessAudioExt 根据音频 URL 后缀推断扩展名，未知类型回退到 .mp3。
+// 用于 downloadAudio 把临时下载文件命名得正确，便于 ffmpeg 识别封装格式。
 func guessAudioExt(url string) string {
 	low := strings.ToLower(url)
 	for _, e := range []string{".mp3", ".m4a", ".wav", ".aac", ".ogg"} {

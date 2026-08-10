@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -223,4 +224,43 @@ func newOpenAITestServer(t *testing.T, outputText string) *httptest.Server {
 func mustJSON(raw string) string {
 	b, _ := json.Marshal(raw)
 	return string(b)
+}
+
+// TestOpenAI_GenerateHighlights_EmptySegments 验证空 Segment 列表直接报错（不经 HTTP）。
+// 覆盖 GenerateHighlights 中 "无 Segment 可供生成高光" 提前返回分支。
+func TestOpenAI_GenerateHighlights_EmptySegments(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	_, err := o.GenerateHighlights(nil)
+	if err == nil {
+		t.Fatal("空 Segment 列表应报错")
+	}
+	if !strings.Contains(err.Error(), "无 Segment") {
+		t.Errorf("错误应含 '无 Segment'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_Paraphrase_NoReference 验证无参考片段时直接报错（不经 HTTP）。
+// 覆盖 Paraphrase 中 "复述讲解至少需要一个参考片段" 提前返回分支。
+func TestOpenAI_Paraphrase_NoReference(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	_, err := o.Paraphrase("问题", nil)
+	if err == nil {
+		t.Fatal("无参考片段应报错")
+	}
+	if !strings.Contains(err.Error(), "至少需要一个参考片段") {
+		t.Errorf("错误应含 '至少需要一个参考片段'，实际 %v", err)
+	}
+}
+
+// TestOpenAI_Answer_NoSegments 验证无可用片段时 Answer 返回拒答（不经 HTTP）。
+// 覆盖 Answer 中 "暂无转录稿可用于回答。" 提前返回分支。
+func TestOpenAI_Answer_NoSegments(t *testing.T) {
+	o := NewOpenAIProvider("key")
+	res, err := o.Answer("任意问题", nil)
+	if err != nil {
+		t.Fatalf("无片段不应返回 error，实际 %v", err)
+	}
+	if !strings.Contains(res.Answer, "暂无转录稿") {
+		t.Errorf("应返回拒答文本，实际 %q", res.Answer)
+	}
 }

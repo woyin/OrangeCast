@@ -6,14 +6,23 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/store"
 	_ "modernc.org/sqlite"
 )
+
+// sha256Hex 返回字符串内容的 sha256 十六进制值（用于构造测试 manifest）。
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
 
 // buildFixture 构造一个真实数据目录：Owner、episode、转录/卡片版本、evidence 文件。
 func buildFixture(t *testing.T, dataDir string) *store.Store {
@@ -336,20 +345,20 @@ func TestRestore_EvidenceHashMismatch(t *testing.T) {
 	}
 }
 
-// TestFileSHA256 验证文件哈希计算（确定性）。
-func TestFileSHA256(t *testing.T) {
+// TestSHA256 验证文件哈希计算（确定性）。
+func TestSHA256(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f.bin")
 	content := "hello backup"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := fileSHA256(path)
+	got, err := filehash.SHA256(path)
 	if err != nil {
-		t.Fatalf("fileSHA256: %v", err)
+		t.Fatalf("filehash.SHA256: %v", err)
 	}
 	// 首次与再次读取应一致
-	got2, _ := fileSHA256(path)
+	got2, _ := filehash.SHA256(path)
 	if got != got2 {
 		t.Errorf("哈希应确定: %s vs %s", got, got2)
 	}
@@ -358,9 +367,9 @@ func TestFileSHA256(t *testing.T) {
 	}
 }
 
-// TestFileSHA256_NotFound 验证文件不存在时返回错误。
-func TestFileSHA256_NotFound(t *testing.T) {
-	if _, err := fileSHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
+// TestSHA256_MissingFile 验证文件不存在时返回错误。
+func TestSHA256_MissingFile(t *testing.T) {
+	if _, err := filehash.SHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
 		t.Fatal("文件不存在应报错")
 	}
 }
@@ -389,7 +398,7 @@ func TestRestore_InvalidGzip(t *testing.T) {
 func TestCreate_UnreadableEvidence(t *testing.T) {
 	srcDir := t.TempDir()
 	srcStore := buildFixture(t, srcDir)
-	// 追加一个不可读的证据文件 → filepath.Walk 中 fileSHA256 打开失败
+	// 追加一个不可读的证据文件 → filepath.Walk 中 filehash.SHA256 打开失败
 	evDir := filepath.Join(srcDir, "evidence")
 	bad := filepath.Join(evDir, "unreadable.mp3")
 	if err := os.WriteFile(bad, []byte("secret"), 0o000); err != nil {
@@ -398,5 +407,106 @@ func TestCreate_UnreadableEvidence(t *testing.T) {
 	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
 	if _, err := Create(context.Background(), srcStore, evDir, backupFile); err == nil {
 		t.Fatal("存在不可读证据文件时 Create 应报错")
+	}
+}
+
+// TestCreate_TempDirFail 验证临时目录创建失败时 Create 报错。
+// 覆盖 Create 中 os.MkdirTemp 失败分支。
+func TestCreate_TempDirFail(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	// 将 TMPDIR 指向一个被文件占用的路径 → MkdirTemp 失败
+	blocker := filepath.Join(t.TempDir(), "blockfile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", blocker)
+	if _, err := Create(context.Background(), srcStore, filepath.Join(srcDir, "evidence"), filepath.Join(t.TempDir(), "b.tar.gz")); err == nil {
+		t.Fatal("临时目录创建失败应导致 Create 报错")
+	}
+}
+
+// TestRestore_BadManifestJSON 验证 manifest JSON 损坏时 Restore 报错。
+// 覆盖 Restore 中 "解析 manifest" 错误分支。
+func TestRestore_BadManifestJSON(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 为非法 JSON
+	bad := []byte("{not valid json")
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(bad))}
+	tw.WriteHeader(mh)
+	tw.Write(bad)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("manifest JSON 损坏应报错")
+	}
+}
+
+// TestRestore_UnknownEntry 验证备份包含未识别条目时被安全跳过。
+// 覆盖 Restore 中 for 循环无匹配分支（未识别条目静默跳过）。
+func TestRestore_UnknownEntry(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// 写一个有效 manifest + db
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	// 写一个未识别条目（既非 manifest/db，也非 evidence/）→ 应被跳过
+	uh := &tar.Header{Name: "random/junk.txt", Mode: 0o644, Size: int64(5)}
+	tw.WriteHeader(uh)
+	tw.Write([]byte("junk!"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err != nil {
+		t.Fatalf("未识别条目应被跳过、恢复成功，实际 %v", err)
+	}
+}
+
+// TestRestore_NilDBSHA 验证 manifest 缺 DB 哈希字段时哈希校验失败。
+// 覆盖 Restore 中 DB 哈希不匹配分支。
+func TestRestore_NilDBSHA(t *testing.T) {
+	dir := t.TempDir()
+	dbFile := filepath.Join(dir, "cloudwisepod.db")
+	os.WriteFile(dbFile, []byte("fake-db"), 0o644)
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 声明空 DBSHA256 → 必然不匹配
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"","evidence":[]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("空 DBSHA256 应导致哈希校验失败")
 	}
 }

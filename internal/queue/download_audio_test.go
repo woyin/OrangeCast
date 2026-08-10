@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
@@ -162,24 +163,24 @@ func TestFetchRawAudio_EpisodeGetError(t *testing.T) {
 	}
 }
 
-// TestQueueFileSHA256_NotFound 验证 fileSHA256 对不存在的文件报错。
-func TestQueueFileSHA256_NotFound(t *testing.T) {
-	if _, err := fileSHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
+// TestSHA256_MissingFile 验证共享文件哈希模块对不存在的文件报错。
+func TestSHA256_MissingFile(t *testing.T) {
+	if _, err := filehash.SHA256(filepath.Join(t.TempDir(), "nope.bin")); err == nil {
 		t.Fatal("文件不存在应报错")
 	}
 }
 
-// TestQueueFileSHA256_Deterministic 验证 fileSHA256 确定性计算。
-func TestQueueFileSHA256_Deterministic(t *testing.T) {
+// TestSHA256_Deterministic 验证共享文件哈希模块的确定性计算。
+func TestSHA256_Deterministic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f.bin")
 	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h1, err := fileSHA256(path)
+	h1, err := filehash.SHA256(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h2, _ := fileSHA256(path)
+	h2, _ := filehash.SHA256(path)
 	if h1 != h2 {
 		t.Errorf("哈希应确定: %s vs %s", h1, h2)
 	}

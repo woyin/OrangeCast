@@ -182,3 +182,135 @@ func TestValidateCard_ChaptersMissing(t *testing.T) {
 		t.Errorf("应返回 ErrNoValidCitations，实际 %T", err)
 	}
 }
+
+// TestQuoteVerbatim_EdgeCases 验证金句逐字校验的边界分支。
+// 覆盖 quoteVerbatim 中空引号返回 false 与未知引用跳过分支。
+func TestQuoteVerbatim_EdgeCases(t *testing.T) {
+	segs := testSegments()
+	idx := segmentIndex(segs)
+	// 空引号（含纯空白）→ false
+	if quoteVerbatim("   ", []string{"seg-0001"}, idx) {
+		t.Error("纯空白引号应返回 false")
+	}
+	// 引用不存在的 Segment → continue 后无匹配 → false
+	if quoteVerbatim("主权财富基金正在改变全球投资格局", []string{"seg-9999"}, idx) {
+		t.Error("引用不存在的 Segment 应返回 false")
+	}
+	// 空引文 + 已知引用 → false（q 为空）
+	if quoteVerbatim("", []string{"seg-0001"}, idx) {
+		t.Error("空引文应返回 false")
+	}
+}
+
+// TestNormalize 验证规范化空白逻辑（去首尾、压缩连续空白）。
+func TestNormalize(t *testing.T) {
+	if got := normalize("  hello   world  "); got != "hello world" {
+		t.Errorf("应压缩空白，实际 %q", got)
+	}
+	if got := normalize(""); got != "" {
+		t.Errorf("空串应规范化为空，实际 %q", got)
+	}
+	// 含制表符/换行 → 统一为单空格
+	if got := normalize("a\tb\nc"); got != "a b c" {
+		t.Errorf("应把制表符/换行压为空格，实际 %q", got)
+	}
+}
+
+// TestSegmentIndex 验证 segmentIndex 建立 Segment.ID → Segment 查找表。
+func TestSegmentIndex(t *testing.T) {
+	idx := segmentIndex(testSegments())
+	if _, ok := idx["seg-0001"]; !ok {
+		t.Error("seg-0001 应在索引中")
+	}
+	if _, ok := idx["seg-9999"]; ok {
+		t.Error("seg-9999 不应在索引中")
+	}
+	if len(idx) != 3 {
+		t.Errorf("索引应含 3 个 Segment，实际 %d", len(idx))
+	}
+}
+
+// TestValidCitations 验证去重保序与未知 ID 过滤。
+func TestValidCitations(t *testing.T) {
+	segs := segmentIndex(testSegments())
+	// 含重复与未知 → 去重保序过滤
+	got := validCitations([]string{"seg-0002", "seg-9999", "seg-0002", "seg-0001"}, segs)
+	want := []string{"seg-0002", "seg-0001"}
+	if len(got) != len(want) {
+		t.Fatalf("应保留 2 个，实际 %d: %v", len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 个应为 %q，实际 %q", i, want[i], got[i])
+		}
+	}
+	// 空输入 → 空
+	if got := validCitations(nil, segs); len(got) != 0 {
+		t.Errorf("空输入应返回空，实际 %v", got)
+	}
+	// 含前后空白的 ID 应被 TrimSpace 后匹配
+	if got := validCitations([]string{"  seg-0001  "}, segs); len(got) != 1 || got[0] != "seg-0001" {
+		t.Errorf("应 TrimSpace 后匹配，实际 %v", got)
+	}
+}
+
+// TestValidateCard_KeyPointsMissing 验证 keypoints 全部缺少有效 Citation 时直接拒绝。
+// 覆盖 ValidateCard 中 "keyPoints 全部缺少有效 Citation" 分支。
+func TestValidateCard_KeyPointsMissing(t *testing.T) {
+	card := &KnowledgeCard{
+		Title:     "T",
+		Summary:   CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Citations: []string{"seg-9999"}}}, // 全部无效
+		Chapters:  []Chapter{{Title: "CH", Citations: []string{"seg-0001"}}},
+	}
+	_, err := ValidateCard(card, testSegments())
+	if err == nil {
+		t.Fatal("keypoints 全部缺少有效 Citation 应报错")
+	}
+	if _, ok := err.(*ErrNoValidCitations); !ok {
+		t.Errorf("应返回 ErrNoValidCitations，实际 %T", err)
+	}
+}
+
+// TestValidateCard_EmptyTitle 验证所有内容有效但 title 为空时拒绝。
+// 覆盖 ValidateCard 中 "title 为空" 分支。
+func TestValidateCard_EmptyTitle(t *testing.T) {
+	card := &KnowledgeCard{
+		Title:     "   ", // 规范化后为空
+		Summary:   CitedText{Text: "S", Citations: []string{"seg-0001"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}},
+		Chapters:  []Chapter{{Title: "CH", Citations: []string{"seg-0001"}}},
+	}
+	_, err := ValidateCard(card, testSegments())
+	if err == nil {
+		t.Fatal("title 为空应报错")
+	}
+	if _, ok := err.(*ErrNoValidCitations); !ok {
+		t.Errorf("应返回 ErrNoValidCitations，实际 %T", err)
+	}
+}
+
+// TestValidateCard_SummaryMissing 验证 summary 缺失或无有效 Citation 时拒绝。
+// 覆盖 ValidateCard 中 "summary 必须包含有效 Citation" 分支。
+func TestValidateCard_SummaryMissing(t *testing.T) {
+	// summary 文本为空
+	card1 := &KnowledgeCard{
+		Title:     "T",
+		Summary:   CitedText{Text: "", Citations: []string{"seg-0001"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}},
+		Chapters:  []Chapter{{Title: "CH", Citations: []string{"seg-0001"}}},
+	}
+	if _, err := ValidateCard(card1, testSegments()); err == nil {
+		t.Fatal("summary 文本为空应报错")
+	}
+	// summary 无有效 Citation
+	card2 := &KnowledgeCard{
+		Title:     "T",
+		Summary:   CitedText{Text: "S", Citations: []string{"seg-9999"}},
+		KeyPoints: []KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}},
+		Chapters:  []Chapter{{Title: "CH", Citations: []string{"seg-0001"}}},
+	}
+	if _, err := ValidateCard(card2, testSegments()); err == nil {
+		t.Fatal("summary 无有效 Citation 应报错")
+	}
+}

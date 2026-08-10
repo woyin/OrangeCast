@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -378,5 +379,129 @@ func TestAppliedVersion_NoMigrationTable(t *testing.T) {
 	}
 	if v != 0 {
 		t.Errorf("无迁移表应返回 0，实际 %d", v)
+	}
+}
+
+// TestAppliedVersion_WithMigrations 验证已迁移库返回正确版本。
+// 覆盖 AppliedVersion 中存在 schema_migrations 表时读 MAX(version) 路径。
+func TestAppliedVersion_WithMigrations(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := Migrate(ctx, s.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	v, err := AppliedVersion(ctx, s.DB)
+	if err != nil {
+		t.Fatalf("AppliedVersion: %v", err)
+	}
+	if v < 2 {
+		t.Errorf("已迁移库应返回 version>=2，实际 %d", v)
+	}
+}
+
+// TestLoadMigrations 验证迁移加载与排序、版本连续校验。
+// 覆盖 loadMigrations 正常路径（含排序、连续性校验）。
+func TestLoadMigrations(t *testing.T) {
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
+	}
+	if len(ms) == 0 {
+		t.Fatal("应加载至少一条迁移")
+	}
+	// 验证按 version 升序排列
+	for i := 1; i < len(ms); i++ {
+		if ms[i].version <= ms[i-1].version {
+			t.Errorf("迁移应升序，[%d]=%d <= [%d]=%d", i, ms[i].version, i-1, ms[i-1].version)
+		}
+	}
+	// 验证版本号从 1 连续
+	for i, m := range ms {
+		if m.version != i+1 {
+			t.Fatalf("迁移版本号应从 1 连续，第 %d 个 version=%d", i, m.version)
+		}
+	}
+	// 每条迁移的 up 不应为空
+	for _, m := range ms {
+		if strings.TrimSpace(m.up) == "" {
+			t.Errorf("迁移 %s 的 up 不应为空", m.name)
+		}
+	}
+}
+
+// TestMigrationTableExists 验证 migrationTableExists 判定。
+// 覆盖 migrationTableExists 两种返回路径。
+func TestMigrationTableExists(t *testing.T) {
+	ctx := context.Background()
+	// 全新库（无 schema_migrations）→ false
+	raw := openRaw(t, filepath.Join(t.TempDir(), "raw.db"))
+	exists, err := migrationTableExists(ctx, raw)
+	if err != nil {
+		t.Fatalf("migrationTableExists: %v", err)
+	}
+	if exists {
+		t.Error("全新库应无 schema_migrations 表")
+	}
+	// 迁移后 → true
+	s := newTestStore(t)
+	if _, err := Migrate(ctx, s.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	exists, err = migrationTableExists(ctx, s.DB)
+	if err != nil {
+		t.Fatalf("migrationTableExists: %v", err)
+	}
+	if !exists {
+		t.Error("已迁移库应有 schema_migrations 表")
+	}
+}
+
+// TestUsersTableExists 验证 usersTableExists 判定。
+// 覆盖 usersTableExists 两种返回路径。
+func TestUsersTableExists(t *testing.T) {
+	ctx := context.Background()
+	// 全新原始库（无任何表）→ false
+	raw := openRaw(t, filepath.Join(t.TempDir(), "raw.db"))
+	exists, err := usersTableExists(ctx, raw)
+	if err != nil {
+		t.Fatalf("usersTableExists: %v", err)
+	}
+	if exists {
+		t.Error("全新库应无 users 表")
+	}
+	// 迁移后 → true（迁移会创建 users 表）
+	s := newTestStore(t)
+	if _, err := Migrate(ctx, s.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	exists, err = usersTableExists(ctx, s.DB)
+	if err != nil {
+		t.Fatalf("usersTableExists: %v", err)
+	}
+	if !exists {
+		t.Error("已迁移库应有 users 表")
+	}
+}
+
+// TestApplyOne_ExecError 验证单条迁移 SQL 执行失败时事务回滚。
+// 覆盖 applyOne 中 tx.ExecContext 错误分支与 defer tx.Rollback。
+func TestApplyOne_ExecError(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := Migrate(ctx, s.DB); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// 构造一条必然失败的迁移：SQL 语法错误
+	bad := migration{version: 9999, name: "0099_bad", up: "THIS IS NOT VALID SQL"}
+	if err := applyOne(ctx, s.DB, bad); err == nil {
+		t.Fatal("非法 SQL 的迁移应报错")
+	}
+	// 失败的版本不应被记录
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=9999`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("失败迁移的版本不应被记录到 schema_migrations")
 	}
 }

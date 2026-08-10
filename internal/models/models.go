@@ -58,6 +58,8 @@ type Podcast struct {
 	CreatedAt     string
 }
 
+// Episode 来自 RSS feed 的单集。可被选入队转为 Source；AudioURL 是外部链接，
+// 真正持久化的是其 EvidenceAudio。ProcessingStatus 反映处理管线的阶段。
 type Episode struct {
 	ID               string
 	PodcastID        string
@@ -71,6 +73,8 @@ type Episode struct {
 	CreatedAt        string
 }
 
+// Upload 用户主动上传的音频文件，与 Episode 同构但来源不同。
+// 原始文件先落 tempDir/uploads/<id>，转码为标准化 EvidenceAudio 后删除（ADR-0005）。
 type Upload struct {
 	ID               string
 	OriginalFilename string
@@ -81,6 +85,8 @@ type Upload struct {
 	CreatedAt        string
 }
 
+// Transcript 原始转录文本与其分段 JSON 的快照（已被 ArtifactVersion 替代为持久形态，
+// 仅保留给仍按扁平表读取的旧路径）。新代码应优先使用 ArtifactVersion。
 type Transcript struct {
 	ID           string
 	SourceType   SourceType
@@ -91,6 +97,7 @@ type Transcript struct {
 	CreatedAt    string
 }
 
+// Analysis 分析结果快照（已被 ArtifactVersion 替代为持久形态）。
 type Analysis struct {
 	ID          string
 	SourceType  SourceType
@@ -111,11 +118,13 @@ type EvidenceAudio struct {
 	Format     string
 	SizeBytes  int64
 	SHA256     string
-	Status     string // ready | missing
+	Status     string // ready | missing；missing 表示元数据已写但文件缺失（恢复/迁移用）
 	CreatedAt  string
 	UpdatedAt  string
 }
 
+// ProcessingJob 可恢复任务队列的单条任务（ADR-0006）：SQLite 持久化、租约 + 心跳，
+// 进程重启后未完成的 running 任务会被重新认领。JobType 决定处理管线（转录/分析）。
 type ProcessingJob struct {
 	ID           string
 	SourceType   SourceType
