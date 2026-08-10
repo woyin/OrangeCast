@@ -181,6 +181,16 @@ func TestSpanFromSegments(t *testing.T) {
 	if start != 0 || end != 25 {
 		t.Errorf("span 应为 0-25，实际 %.1f-%.1f", start, end)
 	}
+	// 全部引用无效 → 0,0（覆盖 len(starts)==0 分支）
+	start, end = spanFromSegments([]string{"missing1", "missing2"}, segs)
+	if start != 0 || end != 0 {
+		t.Errorf("全部无效引用应 0,0，实际 %.1f-%.1f", start, end)
+	}
+	// 空引用 → 0,0（覆盖 len(citations)==0 分支）
+	start, end = spanFromSegments(nil, segs)
+	if start != 0 || end != 0 {
+		t.Errorf("空引用应 0,0，实际 %.1f-%.1f", start, end)
+	}
 }
 
 func TestValidCitations(t *testing.T) {
