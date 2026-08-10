@@ -174,7 +174,7 @@ git diff --check
 
 ## 测试约定
 
-仓库积累了 515+ 测试函数，覆盖各包 81–100%（详见 README）。新增/修改代码应沿用以下约定，保证测试一致且易维护：
+仓库积累了 620+ 测试函数，覆盖各包 88–100%（详见 README）。新增/修改代码应沿用以下约定，保证测试一致且易维护：
 
 ### 1. 纯函数直接单测
 
@@ -209,19 +209,19 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 
 | 包 | 覆盖率 |
 |---|---|
+| auth | 100% |
+| config | 100% |
 | evalset | 100% |
-| markdown | 98% |
-| config | 97% |
-| rss | 93% |
-| safehttp | 92% |
-| server | 92% |
-| provider | 92% |
-| auth | 92% |
-| cmd | 90% |
-| queue | 87% |
-| filehash | 88% |
-| store | 86% |
-| backup | 81% |
+| filehash | 100% |
+| markdown | 100% |
+| rss | 100% |
+| cmd | 98% |
+| safehttp | 97% |
+| server | 96% |
+| provider | 93% |
+| queue | 91% |
+| store | 88% |
+| backup | 88% |
 
 新增公开函数应附带对应测试；修复 bug 应先加一个能复现该 bug 的测试（TDD）。
 
