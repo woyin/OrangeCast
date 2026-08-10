@@ -1495,3 +1495,32 @@ func TestEnsureEvidence_RenameFails(t *testing.T) {
 		t.Fatal("证据路径为目录时 Rename 应报错")
 	}
 }
+
+// TestEnsureEvidence_UpsertFails 验证证据记录写入失败时报错。
+// 覆盖 ensureEvidence 中 UpsertEvidenceAudio 失败分支（删除 evidence_audio 表）。
+func TestEnsureEvidence_UpsertFails(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg 不可用")
+	}
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2", "-f", "wav", rawPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg 无法生成音频: %v %s", err, out)
+	}
+	// 删除 evidence_audio 表 → UpsertEvidenceAudio 失败（转码+落盘成功后）
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE evidence_audio`); err != nil {
+		t.Fatalf("DROP TABLE evidence_audio: %v", err)
+	}
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("evidence_audio 表缺失时 ensureEvidence 应报错")
+	}
+}
