@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -579,5 +580,29 @@ func TestGroq_CheckReference_CompleteError(t *testing.T) {
 	_, err := g.CheckReference("问题", "回答", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
 	if err == nil {
 		t.Fatal("complete 失败应报错")
+	}
+}
+
+// TestGroq_ChatComplete_SchemaMode 验证 chatComplete 的 schema 模式分支。
+// 覆盖 chatComplete 中 jsonMode == "schema" 分支（直接调用私有方法）。
+func TestGroq_ChatComplete_SchemaMode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 验证请求带 response_format json_schema
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "json_schema") {
+			t.Errorf("schema 模式应带 json_schema response_format，实际 %s", string(body))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	content, _, err := g.chatComplete([]map[string]string{{"role": "user", "content": "hi"}}, "schema")
+	if err != nil {
+		t.Fatalf("chatComplete(schema): %v", err)
+	}
+	if content != "ok" {
+		t.Errorf("content 应为 ok，实际 %q", content)
 	}
 }
