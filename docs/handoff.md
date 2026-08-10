@@ -174,7 +174,7 @@ git diff --check
 
 ## 测试约定
 
-仓库积累了 733+ 测试函数，覆盖各包 88–100%（详见 README）。新增/修改代码应沿用以下约定，保证测试一致且易维护：
+仓库积累了 801+ 测试函数，覆盖各包 89–100%（详见 README）。新增/修改代码应沿用以下约定，保证测试一致且易维护：
 
 ### 1. 纯函数直接单测
 
@@ -186,12 +186,21 @@ git diff --check
 - HTTP：用 `httptest.NewServer` + `WithBaseURL(srv.URL)` 把 Groq/OpenAI 的请求重定向到本地测试服务器，可精确控制返回体与状态码。
 - ffmpeg/ffprobe：`seedEvidence` 用 `exec.LookPath("ffmpeg")` 检测，不可用时 `t.Skip`，保证 CI 无 ffmpeg 也能跑。
 
-### 3. DB 错误分支用「删表法」
+### 3. DB 错误分支用「删表法」与「触发器法」
 
 handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写入失败（见 `TestStudyChat_CreateSessionDBError`、`TestCollection_ListDBError`、`TestProcess_EnqueueFails`）。注意：
 
 - handler 测试要先 `claimOwnerAndLogin` 获得合法 cookie（认证与 CSRF 中间件在前）。
 - 选择性删表时要确保前置步骤能通过（例如先 `CreateStudySession` 再删 `study_sessions`，使 `ListStudyMessages` 读 `study_messages` 成功而 `AppendStudyMessage` 的 `UPDATE study_sessions` 失败）。
+
+当删表法会使前置步骤（同表查询）也失败、无法隔离到目标分支时，改用 **触发器法**：`CREATE TRIGGER ... BEFORE INSERT/UPDATE/DELETE ... SELECT RAISE(ABORT,'no')` 精确中止某类语句（可按 `WHEN NEW.xxx='...'` 限定），让前置查询先成功。典型案例：
+
+- `TestDoTranscribe_EnqueueAnalyzeFails`：触发器只中止 `job_type='analyze'` 的 INSERT，隔离到 doTranscribe 第 4 步。
+- `TestDoAnalyze_CreateCardVersionFails`：触发器按 `NEW.kind='knowledge_card'` 限定，隔离卡片版本创建。
+- `TestResumePurges_MarkDoneError`：触发器中止 `UPDATE purges`（`ListPendingPurges` 需先成功）。
+- `TestDoNarration_WriteDBFailure_Continues`：触发器中止 `narrations` INSERT，验证写库失败跳过该段不阻塞。
+- `TestStudyChat_PersistAssistantAnswerError`：触发器只中止 `role='assistant'` 的 INSERT，隔离到 assistant 持久化步骤。
+- `TestCreateParaphrase_PruneError`：先插满 4 条使淘汰 DELETE 实际删行，触发器再中止 DELETE。
 
 ### 4. 文件系统边界
 
@@ -216,11 +225,11 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | markdown | 100% |
 | rss | 100% |
 | cmd | 98% |
-| safehttp | 95% |
-| server | 98% |
+| safehttp | 97% |
+| server | 99% |
 | provider | 99% |
-| queue | 96% |
-| store | 94% |
+| queue | 99% |
+| store | 98% |
 | backup | 90% |
 
 新增公开函数应附带对应测试；修复 bug 应先加一个能复现该 bug 的测试（TDD）。
