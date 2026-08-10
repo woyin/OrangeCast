@@ -855,3 +855,30 @@ func TestRestore_EvidenceMkdirAllFails(t *testing.T) {
 		t.Fatal("解包临时目录不可写应报错")
 	}
 }
+
+// TestCreate_MultipleEvidenceSort 验证多个证据文件时排序比较器执行。
+// 覆盖 Create 中 sort.Slice 比较器分支（多个证据触发 RelPath 比较）。
+func TestCreate_MultipleEvidenceSort(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	evDir := filepath.Join(srcDir, "evidence")
+	// 追加多个证据文件（乱序命名 → 排序比较器执行）
+	os.WriteFile(filepath.Join(evDir, "z-audio.mp3"), []byte("zzz"), 0o644)
+	os.WriteFile(filepath.Join(evDir, "a-audio.mp3"), []byte("aaa"), 0o644)
+	os.WriteFile(filepath.Join(evDir, "m-audio.mp3"), []byte("mmm"), 0o644)
+
+	backupFile := filepath.Join(t.TempDir(), "b.tar.gz")
+	m, err := Create(context.Background(), srcStore, evDir, backupFile)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(m.Evidence) != 4 {
+		t.Fatalf("应打包 4 个证据，实际 %d", len(m.Evidence))
+	}
+	// 验证按 RelPath 排序
+	for i := 1; i < len(m.Evidence); i++ {
+		if m.Evidence[i-1].RelPath > m.Evidence[i].RelPath {
+			t.Errorf("证据应按 RelPath 排序: %v", m.Evidence)
+		}
+	}
+}
