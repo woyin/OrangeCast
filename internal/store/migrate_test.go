@@ -521,3 +521,18 @@ func TestUsersHelpers_DBErrors(t *testing.T) {
 		t.Error("关闭 DB 时 CountUsers 应报错")
 	}
 }
+
+// TestMigrateHelpers_DBErrors 验证迁移辅助函数在关闭 DB 时返回错误。
+// 覆盖 AppliedVersion/Migrate 查询错误分支。
+func TestMigrateHelpers_DBErrors(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if _, err := AppliedVersion(ctx, db); err == nil {
+		t.Error("关闭 DB 时 AppliedVersion 应报错")
+	}
+	if _, err := Migrate(ctx, db); err == nil {
+		t.Error("关闭 DB 时 Migrate 应报错")
+	}
+}
