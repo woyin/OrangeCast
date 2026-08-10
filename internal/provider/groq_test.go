@@ -92,6 +92,63 @@ func TestGroq_Analyze(t *testing.T) {
 	}
 }
 
+// TestGroq_ChatComplete_SchemaModeHTTP 验证 Analyze 走真实 HTTP（schema 模式）。
+// 覆盖 chatComplete 中 jsonMode == "schema" 分支。
+func TestGroq_ChatComplete_SchemaModeHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("路径应为 /chat/completions，实际 %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"通胀\",\"summary\":{\"text\":\"概览\",\"citations\":[\"seg-0001\"]},\"keyPoints\":[{\"content\":\"要点\",\"citations\":[\"seg-0001\"]}],\"chapters\":[],\"quotes\":[]}"}}]}`))
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	card, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if card.Title != "通胀" {
+		t.Errorf("卡片标题错误: %q", card.Title)
+	}
+}
+
+// TestGroq_ChatComplete_HTTPError 验证 chatComplete HTTP 非 200 时报错。
+// 覆盖 chatComplete 中 code != 200 分支（经 Analyze 触发）。
+func TestGroq_ChatComplete_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	_, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("HTTP 400 应报错")
+	}
+	if !strings.Contains(err.Error(), "groq chat 失败 HTTP 400") {
+		t.Errorf("错误应含 'groq chat 失败 HTTP 400'，实际 %v", err)
+	}
+}
+
+// TestGroq_ChatComplete_ParseError 验证 chatComplete JSON 解析失败时报错。
+// 覆盖 chatComplete 中 json.Unmarshal 失败分支。
+func TestGroq_ChatComplete_ParseError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"..."}}]`)) // 正常 choices
+	}))
+	defer srv.Close()
+
+	g := NewGroqProvider("key").WithBaseURL(srv.URL)
+	_, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	// Analyze 的 analyzeWindow 在 parseJSONLoose 失败时报错
+	if err == nil {
+		t.Fatal("无效卡片 JSON 应报错")
+	}
+}
+
 // TestGroq_GenerateHighlights 验证高光生成解析 HighlightSet。
 func TestGroq_GenerateHighlights(t *testing.T) {
 	g := NewGroqProvider("key")
