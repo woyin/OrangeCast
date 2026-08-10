@@ -2362,3 +2362,45 @@ func TestUploadNew_POST_SaveFileError(t *testing.T) {
 		t.Errorf("应显示存储音频失败错误，实际 %s", rec.Body.String())
 	}
 }
+
+// TestProcessBatch_EnqueueErrorSkips 验证 EnqueueJob 报错时计入 skipped 并继续。
+// 覆盖 handleProcessBatch 中 EnqueueJob err != nil → skipped++ 分支。
+func TestProcessBatch_EnqueueErrorSkips(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "batcherr@example.com", "password123")
+	ctx := context.Background()
+
+	p, _ := srv.store.CreatePodcast(ctx, "https://feed.xml", "Pod", "", "")
+	// 删除 episodes 表 → EnqueueJob 的 UPDATE episodes 失败 → skipped
+	if _, err := srv.store.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatalf("DROP TABLE episodes: %v", err)
+	}
+
+	// GET 拿 CSRF
+	req0 := httptest.NewRequest(http.MethodGet, "/podcasts/"+p.ID, nil)
+	req0.AddCookie(cookie)
+	rec0 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec0, req0)
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+
+	body := "_csrf=" + csrf + "&source_type=episode&podcast_id=" + p.ID + "&source_id=ep-1&source_id=ep-2"
+	req := httptest.NewRequest(http.MethodPost, "/api/process-batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("应重定向，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "skipped=2") {
+		t.Errorf("EnqueueJob 失败应计入 skipped=2，实际 %s", loc)
+	}
+}
