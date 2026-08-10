@@ -381,6 +381,82 @@ func TestStudyChat_ReuseSession(t *testing.T) {
 	}
 }
 
+// TestStudyChat_HistoryLoaded 验证复用会话且已有历史消息时历史被加载。
+// 覆盖 handleStudyChat 中 historyRows 非空 → append history 分支。
+func TestStudyChat_HistoryLoaded(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "schist2@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	// 预建会话并追加一条历史消息（使 ListStudyMessages 返回非空）
+	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "既有会话")
+	srv.store.AppendStudyMessage(ctx, sess.ID, "user", "之前的问题", nil, false)
+	srv.store.AppendStudyMessage(ctx, sess.ID, "assistant", "之前的回答", []string{"seg-0001"}, false)
+
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "新回答", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{result: provider.ReferenceCheckResult{Related: true, Reason: "扎根"}})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=新问题")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "新回答") {
+		t.Errorf("应返回新回答，实际 %s", rec.Body.String())
+	}
+}
+
+// TestStudyChat_CheckErrorSuppressed 验证 ReferenceCheck 校验本身失败时保守不呈现。
+// 覆盖 handleStudyChat 中 CheckReference err != nil 分支（记录被抑制消息）。
+func TestStudyChat_CheckErrorSuppressed(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sccheckerr@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedTranscript(t, srv, sourceID)
+
+	srv.bundleFor = fakeBundleFor(nil, nil,
+		&fakeStudyChat{result: &provider.StudyChatResult{Answer: &provider.StudyChatMessage{
+			Role: "assistant", Content: "回答", ReferenceSegmentIDs: []string{"seg-0001"},
+		}}},
+		&fakeRefChecker{err: errors.New("校验服务不可用")})
+
+	rec := postForm(t, srv, cookie, "/api/study-chat",
+		"source_type=episode&source_id="+sourceID+"&question=通胀")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("校验失败应 200（保守不呈现），实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "check_error") {
+		t.Errorf("应标注 check_error，实际 %s", rec.Body.String())
+	}
+	// 被抑制的消息应记录（suppressed=true）
+	sessions, _ := srv.store.ListStudySessions(ctx, models.SourceEpisode, sourceID)
+	if len(sessions) != 1 {
+		t.Fatalf("应创建 1 个会话，实际 %d", len(sessions))
+	}
+	msgs, _ := srv.store.ListStudyMessages(ctx, sessions[0].ID, true)
+	var suppressed bool
+	for _, m := range msgs {
+		if m.Suppressed {
+			suppressed = true
+		}
+	}
+	if !suppressed {
+		t.Error("校验失败的回答应以 suppressed 标记记录")
+	}
+}
+
 // TestStudyChat_GenerationError 验证生成失败时返回 500。
 func TestStudyChat_GenerationError(t *testing.T) {
 	srv := newTestServer(t)
