@@ -219,7 +219,7 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | safehttp | 95% |
 | server | 97% |
 | provider | 93% |
-| queue | 92% |
+| queue | 93% |
 | store | 93% |
 | backup | 88% |
 

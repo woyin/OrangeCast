@@ -1365,3 +1365,53 @@ func TestDoAnalyze_IndexKeyPointsFails(t *testing.T) {
 		t.Fatalf("IndexKeyPoints 失败不应阻塞 doAnalyze，实际 %v", err)
 	}
 }
+
+// TestDoAnalyze_EpisodeSource 验证 doAnalyze 用 episode 源时获取 episode 标题。
+// 覆盖 doAnalyze 中 GetEpisodeByID 成功分支（sourceTitle = ep.Title）。
+func TestDoAnalyze_EpisodeSource(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceEpisode, sourceID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}
+	if err := w.doAnalyze(ctx, job, bundle); err != nil {
+		t.Fatalf("doAnalyze(episode): %v", err)
+	}
+	// 验证卡片版本已创建（episode 路径走通）
+	if _, err := s.GetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindKnowledgeCard); err != nil {
+		t.Errorf("episode 源分析应创建卡片版本: %v", err)
+	}
+}
+
+// TestDoHighlight_CreateVersionFails 验证高光版本创建失败时报错。
+// 覆盖 doHighlight 中 "创建高光版本" 分支（删除 artifact_versions 表）。
+func TestDoHighlight_CreateVersionFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	// 删除 artifact_versions 表 → CreateArtifactVersion 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE artifact_versions`); err != nil {
+		t.Fatalf("DROP TABLE artifact_versions: %v", err)
+	}
+	bundle := &provider.ProviderBundle{Highlight: &fakeHighlightOK{}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}
+	err := w.doHighlight(ctx, job, bundle, segs)
+	if err == nil {
+		t.Fatal("artifact_versions 表缺失时 doHighlight 应报错")
+	}
+	if !strings.Contains(err.Error(), "创建高光版本") {
+		t.Errorf("错误应含 '创建高光版本'，实际 %v", err)
+	}
+}
