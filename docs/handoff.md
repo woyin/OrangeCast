@@ -218,7 +218,7 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | cmd | 98% |
 | safehttp | 95% |
 | server | 97% |
-| provider | 97% |
+| provider | 98% |
 | queue | 93% |
 | store | 93% |
 | backup | 88% |
