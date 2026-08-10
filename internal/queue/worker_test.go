@@ -282,6 +282,31 @@ func TestEvidenceAudio_OversizeExistingFileIsNotReused(t *testing.T) {
 	}
 }
 
+// TestEnsureEvidence_InvalidAudioDuration 验证原始音频无法读取时长时报错。
+// 覆盖 ensureEvidence 中 "读取音频时长" 错误分支（原始文件不是有效音频）。
+func TestEnsureEvidence_InvalidAudioDuration(t *testing.T) {
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe 不可用")
+	}
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "bad.bin", "application/octet-stream", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 原始文件是无效的二进制内容（非音频）→ ffprobe 读取时长失败
+	os.MkdirAll(filepath.Join(w.tempDir, "uploads"), 0o755)
+	rawPath := filepath.Join(w.tempDir, "uploads", up.ID)
+	if err := os.WriteFile(rawPath, []byte("this is not audio data at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &models.ProcessingJob{SourceType: models.SourceUpload, SourceID: up.ID, JobType: models.JobTranscribe}
+	if _, err := w.ensureEvidence(ctx, job); err == nil {
+		t.Fatal("无效音频应因时长读取失败而报错")
+	}
+}
+
 func TestEvidenceBitrateKbps_StaysWithinGroqUploadBudget(t *testing.T) {
 	tests := []struct {
 		name     string
