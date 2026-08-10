@@ -149,3 +149,44 @@ func TestStudyMessages_AppendAndSuppress(t *testing.T) {
 		t.Errorf("删除会话后消息应级联删除，实际 %d", len(after))
 	}
 }
+
+// TestStudySessions_DBErrors 验证 study_sessions 系列查询在表缺失时返回错误。
+// 覆盖 ListStudySessions/GetStudyMessage/ListStudyMessages 查询失败分支。
+func TestStudySessions_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE study_messages`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetStudyMessage(ctx, "m1"); err == nil {
+		t.Error("study_messages 表缺失时 GetStudyMessage 应报错")
+	}
+	if _, err := s.ListStudyMessages(ctx, "s1", false); err == nil {
+		t.Error("study_messages 表缺失时 ListStudyMessages 应报错")
+	}
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE study_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListStudySessions(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Error("study_sessions 表缺失时 ListStudySessions 应报错")
+	}
+}
+
+// TestListStudyMessages_ScanError 验证 study_messages 行数据异常时 Scan 失败。
+// 覆盖 ListStudyMessages 中 rows.Scan 失败分支（suppressed 非整数）。
+func TestListStudyMessages_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess, err := s.CreateStudySession(ctx, models.SourceEpisode, "ep1", "会话")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO study_messages (id, session_id, role, content, suppressed)
+		 VALUES ('m1', ?, 'user', '内容', 'bad')`, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListStudyMessages(ctx, sess.ID, true); err == nil {
+		t.Fatal("suppressed 非整数应导致 Scan 失败")
+	}
+}
