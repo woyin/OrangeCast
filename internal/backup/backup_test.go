@@ -669,3 +669,53 @@ func TestCreate_BrokenSymlinkEvidence(t *testing.T) {
 		t.Fatal("含损坏符号链接的证据目录 Create 应报错")
 	}
 }
+
+// TestRestore_MkdirAllTargetFails 验证目标数据目录不可创建时 Restore 报错。
+// 覆盖 Restore 中 os.MkdirAll(targetDataDir) 失败分支。
+func TestRestore_MkdirAllTargetFails(t *testing.T) {
+	// 构造合法备份包
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	manifest := []byte(`{"format":"cloudwisepod-backup","version":1,"db_file":"cloudwisepod.db","db_sha256":"` + sha256Hex("fake-db") + `","evidence":[]}`)
+	mh := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: int64(len(manifest))}
+	tw.WriteHeader(mh)
+	tw.Write(manifest)
+	dh := &tar.Header{Name: "cloudwisepod.db", Mode: 0o644, Size: int64(len("fake-db"))}
+	tw.WriteHeader(dh)
+	tw.Write([]byte("fake-db"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	// 目标数据目录的父路径被文件占用 → MkdirAll 失败
+	blocker := filepath.Join(t.TempDir(), "block")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	targetDir := filepath.Join(blocker, "data")
+	if _, err := Restore(context.Background(), backupFile, targetDir, false); err == nil {
+		t.Fatal("目标目录不可创建应报错")
+	}
+}
+
+// TestRestore_ManifestReadError 验证 manifest 读取失败时报错。
+// 覆盖 Restore 中 io.ReadAll(tr) 失败分支（声明大尺寸但内容截断）。
+func TestRestore_ManifestReadError(t *testing.T) {
+	dir := t.TempDir()
+	backupFile := filepath.Join(dir, "b.tar.gz")
+	f, _ := os.Create(backupFile)
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// manifest 声明 1000 字节但只写少量 → io.ReadAll 在截断处报错
+	hdr := &tar.Header{Name: "manifest.json", Mode: 0o644, Size: 1000}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte("short"))
+	tw.Close()
+	gz.Close()
+	f.Close()
+
+	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+		t.Fatal("manifest 截断应报错")
+	}
+}
