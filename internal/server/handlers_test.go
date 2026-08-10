@@ -220,6 +220,17 @@ func TestSourceDetail_NotFound(t *testing.T) {
 	}
 }
 
+// TestSourceDetail_UploadNotFound 验证不存在的 upload source 返回 404。
+// 覆盖 handleSourceDetail 中 upload 分支 GetUploadByID 失败 → 404。
+func TestSourceDetail_UploadNotFound(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "sdun@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/upload/nonexistent")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("不存在的 upload source 应 404，实际 %d", rec.Code)
+	}
+}
+
 // TestSourceDetail_RendersEpisode 验证 episode source 详情页渲染标题与音频。
 func TestSourceDetail_RendersEpisode(t *testing.T) {
 	srv := newTestServer(t)
