@@ -175,3 +175,36 @@ func TestSelector_WithNarration_AttachesToBundles(t *testing.T) {
 		t.Error("未注入 WithNarration 时 Narration 应为 nil")
 	}
 }
+
+// TestSelector_ApplySettings_OpenAIURL 验证 ApplySettings 覆盖 OpenAI URL。
+// 覆盖 ApplySettings 中 openaiURL 非空分支。
+func TestSelector_ApplySettings_OpenAIURL(t *testing.T) {
+	sel := NewSelector("", "openai-key")
+	sel.ApplySettings("", "", "", "https://custom.openai.com/v1")
+	bundle, err := sel.Bundle("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oa := bundle.Analysis.(*OpenAIProvider)
+	if oa.baseURL != "https://custom.openai.com/v1" {
+		t.Errorf("OpenAI baseURL 应被覆盖，实际 %s", oa.baseURL)
+	}
+}
+
+// TestSelector_ApplySettingsFrom_OpenAIURL 验证 ApplySettingsFrom 覆盖 OpenAI URL。
+// 覆盖 ApplySettingsFrom 中 OpenAIBaseURL 非空分支。
+func TestSelector_ApplySettingsFrom_OpenAIURL(t *testing.T) {
+	sel := NewSelector("", "openai-key")
+	ourl := "https://custom.openai.com/v1"
+	okey := "from-settings-openai"
+	st := &models.Settings{OpenAIAPIKey: &okey, OpenAIBaseURL: &ourl}
+	sel.ApplySettingsFrom(st)
+	bundle, err := sel.Bundle("openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oa := bundle.Analysis.(*OpenAIProvider)
+	if oa.baseURL != "https://custom.openai.com/v1" {
+		t.Errorf("OpenAI baseURL 应覆盖，实际 %q", oa.baseURL)
+	}
+}
