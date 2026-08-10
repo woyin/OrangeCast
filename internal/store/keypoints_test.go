@@ -357,3 +357,164 @@ func TestIndexKeyPoints_DeleteIndexError(t *testing.T) {
 		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
 	}
 }
+
+// TestIndexKeyPoints_BeginTxError 验证事务开启失败时报错。
+// 覆盖 IndexKeyPoints 中 db.BeginTx 错误分支（关闭 DB）。
+func TestIndexKeyPoints_BeginTxError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	s.Close()
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("关闭 DB 时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_DeleteIndexOnlyError 验证删除 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 DELETE keypoint_index 错误分支（仅删 index 表，search 保留）。
+func TestIndexKeyPoints_DeleteIndexOnlyError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_SearchInsertError 验证写入 FTS 索引失败时报错。
+// 覆盖 IndexKeyPoints 中 keypoint_search INSERT 错误分支（search 表缺失）。
+func TestIndexKeyPoints_SearchInsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("keypoint_search 表缺失时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestSearchKeyPoints_QueryErrorAfterCount 验证分页查询失败时报错。
+// 覆盖 SearchKeyPoints 中 SELECT 查询错误分支（重建缺列的表使 COUNT 成功但 SELECT 失败）。
+func TestSearchKeyPoints_QueryErrorAfterCount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE keypoint_search (keypoint_id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SearchKeyPoints(ctx, "wealth", 1, 10); err == nil {
+		t.Fatal("SELECT 缺列应报错")
+	}
+}
+
+// TestListKeyPoints_ScanError 验证 KeyPoint 行数据异常时 Scan 失败。
+// 覆盖 scanKeyPointRows 中 rows.Scan 失败分支（card_version 非整数）。
+func TestListKeyPoints_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE keypoint_index SET card_version='bad' WHERE source_id=?`, eps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListKeyPoints(ctx, 1, 10); err == nil {
+		t.Fatal("card_version 非整数应导致 Scan 失败")
+	}
+}
+
+// TestIndexKeyPoints_DeleteIndexViewError 验证删除 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 DELETE keypoint_index 错误分支（重建为视图使 DELETE 失败）。
+func TestIndexKeyPoints_DeleteIndexViewError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE VIEW keypoint_index AS SELECT 1 AS id`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("keypoint_index 为视图时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_DeleteIndexTriggerError 验证删除 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 DELETE keypoint_index 错误分支（触发器中止，需有行可删）。
+func TestIndexKeyPoints_DeleteIndexTriggerError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, created_at)
+		 VALUES ('kp1','episode','ep1','t','c','d','["s"]','citation',0,1,1,datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_kpdel BEFORE DELETE ON keypoint_index BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("keypoint_index DELETE 被中止时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_InsertIndexError 验证写入 keypoint_index 失败时报错。
+// 覆盖 IndexKeyPoints 中 "写入 keypoint_index" 错误分支（CHECK 约束拒绝负时间）。
+func TestIndexKeyPoints_InsertIndexError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE keypoint_index (id TEXT, source_type TEXT, source_id TEXT, source_title TEXT, content TEXT, description TEXT, citations_json TEXT, relation_kind TEXT, time_start REAL CHECK(time_start >= 0), time_end REAL, card_version INTEGER, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: -1, End: 0, Text: "x"}}); err == nil {
+		t.Fatal("负 time_start 违反 CHECK 约束应报错")
+	}
+}
+
+// TestIndexKeyPoints_InsertSearchError2 验证写入 FTS 索引失败时报错。
+// 覆盖 IndexKeyPoints 中 keypoint_search INSERT 错误分支（重建缺列的表）。
+func TestIndexKeyPoints_InsertSearchError2(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE keypoint_search (keypoint_id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+		t.Fatal("keypoint_search 缺列时 IndexKeyPoints 应报错")
+	}
+}
+
+// TestSearchKeyPoints_JoinError 验证全文搜索 JOIN 查询失败时报错。
+// 覆盖 SearchKeyPoints 中 SELECT 查询错误分支（keypoint_index 缺失使 JOIN 失败）。
+func TestSearchKeyPoints_JoinError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SearchKeyPoints(ctx, "wealth", 1, 10); err == nil {
+		t.Fatal("keypoint_index 缺失时 SearchKeyPoints 应报错")
+	}
+}

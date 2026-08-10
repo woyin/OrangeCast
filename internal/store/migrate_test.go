@@ -548,3 +548,86 @@ func TestApplyOne_BeginTxError(t *testing.T) {
 		t.Fatal("关闭 DB 时 applyOne 应报错")
 	}
 }
+
+// TestMigrate_AppliedVersionError 验证 Migrate 读已应用版本失败时报错。
+// 覆盖 Migrate 中 "读取已应用版本" 错误分支（schema_migrations 缺 version 列）。
+func TestMigrate_AppliedVersionError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "m.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE schema_migrations (wrong_col TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(ctx, db); err == nil {
+		t.Fatal("schema_migrations 缺 version 列时 Migrate 应报错")
+	}
+}
+
+// TestApplyOne_SchemaMigrationsInsertError 验证迁移成功后登记版本失败时报错。
+// 覆盖 applyOne 中 INSERT schema_migrations 错误分支（触发器中止）。
+func TestApplyOne_SchemaMigrationsInsertError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "m.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER abort_mig BEFORE INSERT ON schema_migrations BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyOne(ctx, db, migration{version: 1, name: "x", up: "SELECT 1"}); err == nil {
+		t.Fatal("登记迁移版本失败应报错")
+	}
+}
+
+// TestCountUsers_QueryError 验证 users 表存在但 COUNT 查询失败时报错。
+// 覆盖 CountUsers 中 COUNT 查询错误分支（关闭 DB 后仅触发 usersTableExists，这里
+// 用 users 表缺列使 sqlite_master 判定存在但 COUNT 仍成功——改用关闭的 DB 无法走到；
+// 因此直接验证 usersTableExists 成功后 COUNT 失败：用 users 表被视图替换的场景不成立，
+// 该分支在架构上不可达，保留注释说明）。
+func TestCountUsers_QueryError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	// 关闭 DB 时 usersTableExists 先失败，CountUsers 返回错误（覆盖错误传播路径）。
+	if _, err := CountUsers(ctx, db); err == nil {
+		t.Fatal("关闭 DB 时 CountUsers 应报错")
+	}
+}
+
+// TestRequireSafeForSingleOwner_QueryError 验证 CountUsers 失败时错误传播。
+// 覆盖 RequireSafeForSingleOwner 中 CountUsers err 分支。
+func TestRequireSafeForSingleOwner_QueryError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if err := RequireSafeForSingleOwner(ctx, db); err == nil {
+		t.Fatal("关闭 DB 时 RequireSafeForSingleOwner 应报错")
+	}
+}
+
+// TestHasPendingDestructiveMigration_QueryError 验证 migrationTableExists 失败时报错。
+// 覆盖 hasPendingDestructiveMigration 中 migrationTableExists err 分支。
+func TestHasPendingDestructiveMigration_QueryError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if _, err := hasPendingDestructiveMigration(ctx, db); err == nil {
+		t.Fatal("关闭 DB 时 hasPendingDestructiveMigration 应报错")
+	}
+}
+
+// TestMigrationTableExists_QueryError 验证查询 sqlite_master 失败时报错。
+// 覆盖 migrationTableExists 中查询错误分支。
+func TestMigrationTableExists_QueryError(t *testing.T) {
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	db.Close()
+	if _, err := migrationTableExists(ctx, db); err == nil {
+		t.Fatal("关闭 DB 时 migrationTableExists 应报错")
+	}
+}

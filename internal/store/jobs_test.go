@@ -606,3 +606,107 @@ func TestMarkJobSucceeded_Error(t *testing.T) {
 		t.Fatal("processing_jobs 表缺失时 MarkJobSucceeded 应报错")
 	}
 }
+
+// TestEnqueueAnalyze_InsertError2 验证插入 analyze job 失败时报错。
+// 覆盖 EnqueueAnalyze 中 "插入 analyze job" 错误分支（INSERT 被触发器中止）。
+func TestEnqueueAnalyze_InsertError2(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_ajob BEFORE INSERT ON processing_jobs BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueAnalyze(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("processing_jobs INSERT 被中止时 EnqueueAnalyze 应报错")
+	}
+}
+
+// TestIndexSearch_SegmentInsertError 验证分段写入失败时报错。
+// 覆盖 IndexSearch 中每个 Segment 的 INSERT 错误分支（重建 UNIQUE(segment_id) 冲突）。
+func TestIndexSearch_SegmentInsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE search_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE search_index (source_type TEXT, source_id TEXT, segment_id TEXT, start REAL, end REAL, title TEXT, body TEXT, UNIQUE(segment_id))`); err != nil {
+		t.Fatal(err)
+	}
+	// 预置一条其他 source 的分段行（不影响先删后插的 DELETE），使 segment_id 冲突
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO search_index (source_type, source_id, segment_id, start, end, title, body) VALUES ('episode','other','s1',0,1,'t','x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.IndexSearch(ctx, models.SourceEpisode, "ep1", "T", "S", []provider.Segment{{ID: "s1", Start: 0, End: 1, Text: "x"}}); err == nil {
+		t.Fatal("分段 INSERT 冲突应报错")
+	}
+}
+
+// TestSearchSource_ScanError 验证搜索结果行数据异常时 Scan 失败。
+// 覆盖 SearchSource 中 rows.Scan 失败分支（start 非数字）。
+func TestSearchSource_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO search_index (source_type, source_id, segment_id, start, end, title, body)
+		 VALUES ('episode', 'ep1', 's1', 'bad', 0, 't', 'hello')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SearchSource(ctx, "hello"); err == nil {
+		t.Fatal("start 非数字应导致 Scan 失败")
+	}
+}
+
+// TestListRecentCompleted_ScanError 验证已完成任务行数据异常时 Scan 失败。
+// 覆盖 ListRecentCompleted 中 rows.Scan 失败分支（attempt_count 非整数）。
+func TestListRecentCompleted_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, attempt_count)
+		 VALUES ('j1','episode','ep1','transcribe','succeeded','bad')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListRecentCompleted(ctx, 5); err == nil {
+		t.Fatal("attempt_count 非整数应导致 Scan 失败")
+	}
+}
+
+// TestClaimNextJob_UpdateError 验证原子 claim 的 UPDATE 失败时报错。
+// 覆盖 ClaimNextJob 中 UPDATE 错误分支（触发器中止）。
+func TestClaimNextJob_UpdateError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForJob(t, s)
+	if _, err := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_claim BEFORE UPDATE ON processing_jobs BEGIN SELECT RAISE(ABORT,'no claim'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextJob(ctx, "60 seconds"); err == nil {
+		t.Fatal("claim UPDATE 被中止应报错")
+	}
+}
+
+// TestClaimNextJob_NoRowsAffected 验证 claim UPDATE 影响 0 行时返回 nil。
+// 覆盖 ClaimNextJob 中 n==0 → return nil 分支（触发器 IGNORE 使 UPDATE 不生效）。
+func TestClaimNextJob_NoRowsAffected(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForJob(t, s)
+	if _, err := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER ignore_claim BEFORE UPDATE ON processing_jobs WHEN NEW.status='running' BEGIN SELECT RAISE(IGNORE); END`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimNextJob(ctx, "60 seconds")
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("UPDATE 影响 0 行时应返回 nil，实际 %+v", claimed)
+	}
+}

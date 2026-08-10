@@ -190,3 +190,80 @@ func TestListStudyMessages_ScanError(t *testing.T) {
 		t.Fatal("suppressed 非整数应导致 Scan 失败")
 	}
 }
+
+// TestGetStudyMessage_NotFound 验证不存在的消息返回 ErrNotFound。
+// 覆盖 GetStudyMessage 中 sql.ErrNoRows 分支。
+func TestGetStudyMessage_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetStudyMessage(ctx, "nonexistent"); err != ErrNotFound {
+		t.Fatalf("不存在的消息应 ErrNotFound，实际 %v", err)
+	}
+}
+
+// TestGetStudyMessage_ScanError 验证消息行数据异常时 Scan 失败。
+// 覆盖 GetStudyMessage 中 rows.Scan 失败分支（suppressed 非整数）。
+func TestGetStudyMessage_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess, err := s.CreateStudySession(ctx, models.SourceEpisode, "ep1", "会话")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO study_messages (id, session_id, role, content, suppressed)
+		 VALUES ('m1', ?, 'user', '内容', 'bad')`, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetStudyMessage(ctx, "m1"); err == nil {
+		t.Fatal("suppressed 非整数应导致 Scan 失败")
+	}
+}
+
+// TestListStudySessions_ScanError 验证会话行数据异常时 Scan 失败。
+// 覆盖 ListStudySessions 中 rows.Scan 失败分支（created_at 为 NULL）。
+func TestListStudySessions_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE study_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE study_sessions (id TEXT NOT NULL, source_type TEXT NOT NULL, source_id TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT, updated_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO study_sessions (id, source_type, source_id, title, created_at, updated_at) VALUES ('s1','episode','ep1','t',NULL,NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListStudySessions(ctx, models.SourceEpisode, "ep1"); err == nil {
+		t.Fatal("created_at 为 NULL 应导致 Scan 失败")
+	}
+}
+
+// TestAppendStudyMessage_AssistantInsertError 验证 assistant 消息写入失败时报错。
+// 覆盖 AppendStudyMessage 中 assistant 分支 INSERT 错误（study_messages 表缺失）。
+func TestAppendStudyMessage_AssistantInsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess, _ := s.CreateStudySession(ctx, models.SourceEpisode, "ep1", "t")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE study_messages`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendStudyMessage(ctx, sess.ID, "assistant", "a", []string{"seg-1"}, false); err == nil {
+		t.Fatal("study_messages 表缺失时 assistant 消息应报错")
+	}
+}
+
+// TestAppendStudyMessage_UpdateSessionError 验证追加后更新会话时间失败时报错。
+// 覆盖 AppendStudyMessage 中 UPDATE study_sessions 错误分支（触发器中止）。
+func TestAppendStudyMessage_UpdateSessionError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess, _ := s.CreateStudySession(ctx, models.SourceEpisode, "ep1", "t")
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_upd BEFORE UPDATE ON study_sessions BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendStudyMessage(ctx, sess.ID, "user", "q", nil, false); err == nil {
+		t.Fatal("study_sessions UPDATE 被中止时追加消息应报错")
+	}
+}

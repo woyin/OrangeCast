@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -114,5 +115,81 @@ func TestListCurrentNarrations_ScanError(t *testing.T) {
 	}
 	if _, err := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, "ep1"); err == nil {
 		t.Fatal("version 非数字应导致 Scan 失败")
+	}
+}
+
+// TestCreateNarration_DBErrors 验证 CreateNarration 事务各阶段失败时报错。
+// 覆盖 CreateNarration 中 BeginTx（关闭 DB）与 INSERT（表缺失）错误分支。
+func TestCreateNarration_DBErrors(t *testing.T) {
+	// BeginTx 失败：关闭 DB
+	dir := t.TempDir()
+	db := openRaw(t, filepath.Join(dir, "closed.db"))
+	ctx := context.Background()
+	st := &Store{DB: db}
+	db.Close()
+	if _, err := st.CreateNarration(ctx, models.SourceEpisode, "e", "h", "v", "m", "r", 1, 1, "k"); err == nil {
+		t.Error("关闭 DB 时 CreateNarration 应报错")
+	}
+
+	// INSERT 失败：表缺失
+	s := newTestStore(t)
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE narrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateNarration(ctx, models.SourceEpisode, "e", "h", "v", "m", "r", 1, 1, "k"); err == nil {
+		t.Error("narrations 表缺失时 CreateNarration 应报错")
+	}
+}
+
+// TestCreateNarration_InsertError 验证版本插入失败时报错。
+// 覆盖 CreateNarration 中 "写入 narration" 错误分支（INSERT 被触发器中止，查询先行成功）。
+func TestCreateNarration_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_nar BEFORE INSERT ON narrations BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateNarration(ctx, models.SourceEpisode, "e", "h", "v", "m", "r", 1, 1, "k"); err == nil {
+		t.Fatal("narrations INSERT 被中止时 CreateNarration 应报错")
+	}
+}
+
+// TestGetCurrentNarration_ScanError 验证 narration 行数据异常时 Scan 失败。
+// 覆盖 GetCurrentNarration 中 rows.Scan 失败分支（version 非整数）。
+func TestGetCurrentNarration_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO narrations (id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider)
+		 VALUES ('n1','episode','ep1','h1','bad','v','m','r',0,0,'k')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCurrentNarration(ctx, models.SourceEpisode, "ep1", "h1"); err == nil {
+		t.Fatal("version 非数字应导致 Scan 失败")
+	}
+}
+
+// TestGetCurrentNarration_ScanError2 验证 narration 行数据异常时 Scan 失败。
+// 覆盖 GetCurrentNarration 中 rows.Scan 失败分支（version 非整数，直接插入坏数据）。
+func TestGetCurrentNarration_ScanError2(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO narrations (id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider)
+		 VALUES ('n1','episode','ep1','h1','bad','v','m','r',0,0,'k')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCurrentNarration(ctx, models.SourceEpisode, "ep1", "h1"); err == nil {
+		t.Fatal("version 非数字应导致 Scan 失败")
+	}
+}
+
+// TestGetCurrentNarration_NotFound 验证不存在的 Narration 返回 ErrNotFound。
+// 覆盖 GetCurrentNarration 中 sql.ErrNoRows 分支。
+func TestGetCurrentNarration_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.GetCurrentNarration(ctx, models.SourceEpisode, "ep1", "h1"); err != ErrNotFound {
+		t.Fatalf("不存在的 Narration 应 ErrNotFound，实际 %v", err)
 	}
 }

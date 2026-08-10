@@ -285,3 +285,23 @@ func TestListCollections_ScanError(t *testing.T) {
 		t.Fatal("collection_items 表缺失时 ListCollections 应报错")
 	}
 }
+
+// TestListCollections_ScanError2 验证集合行数据异常时 Scan 失败。
+// 覆盖 ListCollections 中 rows.Scan 失败分支（created_at 为 NULL）。
+func TestListCollections_ScanError2(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE collections`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE collections (id TEXT NOT NULL, title TEXT NOT NULL, description TEXT, created_at TEXT, updated_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO collections (id, title, created_at, updated_at) VALUES ('c1','t',NULL,NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListCollections(ctx); err == nil {
+		t.Fatal("created_at 为 NULL 应导致 Scan 失败")
+	}
+}

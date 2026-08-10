@@ -34,3 +34,30 @@ func TestUsers_DBErrors(t *testing.T) {
 		t.Error("users 表缺失时 GetUserByID 应报错")
 	}
 }
+
+// TestGetSettings_InsertError 验证默认设置创建失败时报错。
+// 覆盖 GetSettings 中 "创建默认设置" 错误分支（INSERT 被触发器中止）。
+func TestGetSettings_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM settings`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_settings BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetSettings(ctx); err == nil {
+		t.Fatal("settings INSERT 被中止时 GetSettings 应报错")
+	}
+}
+
+// TestGetSettings_QueryError 验证查询失败时报错。
+// 覆盖 GetSettings 中非 ErrNoRows 查询错误分支（关闭 DB）。
+func TestGetSettings_QueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	s.Close()
+	if _, err := s.GetSettings(ctx); err == nil {
+		t.Fatal("关闭 DB 时 GetSettings 应报错")
+	}
+}

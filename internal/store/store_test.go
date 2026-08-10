@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -265,4 +266,50 @@ func TestOpen_AlreadyMigrated(t *testing.T) {
 		t.Fatalf("已迁移库重新 Open 应成功: %v", err)
 	}
 	s2.Close()
+}
+
+// TestOpen_SchemaMigrationsIsView 验证 Open 在 schema_migrations 被视图占用时迁移失败。
+// 覆盖 Open 中 "执行迁移" 错误分支（CREATE TABLE IF NOT EXISTS 无法修改视图）。
+func TestOpen_SchemaMigrationsIsView(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "view.db")
+	db := openRaw(t, path)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE VIEW schema_migrations AS SELECT 1 AS version`); err != nil {
+		t.Fatalf("创建视图: %v", err)
+	}
+	db.Close()
+	if _, err := Open(path); err == nil {
+		t.Fatal("schema_migrations 为视图时 Open 应迁移失败")
+	}
+}
+
+// TestPreMigrationSafety_BackupFailureWarns 验证破坏性迁移前备份失败只告警不阻断。
+// 覆盖 preMigrationSafety 中 ConsistencyBackup 失败 → warn 分支（备份路径被目录占用）。
+func TestPreMigrationSafety_BackupFailureWarns(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "src.db")
+	db := openRaw(t, dbPath)
+	if _, err := Migrate(ctx, db); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// 回退版本记录到 1，制造"待破坏性迁移"状态
+	if _, err := db.ExecContext(ctx, `DELETE FROM schema_migrations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users (id, email, password_hash) VALUES ('u1','a@b.com','x')`); err != nil {
+		t.Fatal(err)
+	}
+	// 备份目标路径被目录占用 → VACUUM INTO 失败 → 应只告警并继续
+	bakPath := dbPath + ".pre-single-owner.bak"
+	if err := os.MkdirAll(bakPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := preMigrationSafety(ctx, db, dbPath); err != nil {
+		t.Fatalf("备份失败应只告警不阻断，实际报错 %v", err)
+	}
 }

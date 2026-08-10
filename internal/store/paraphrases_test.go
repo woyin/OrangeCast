@@ -157,3 +157,23 @@ func TestListParaphrases_ScanError(t *testing.T) {
 		t.Fatal("time_start 非数字应导致 Scan 失败")
 	}
 }
+
+// TestCreateParaphrase_PruneError 验证同锚点淘汰旧记录失败时报错。
+// 覆盖 CreateParaphrase 中 "淘汰旧 Paraphrase" 错误分支（DELETE 被触发器中止）。
+func TestCreateParaphrase_PruneError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	// 先插入 4 条使下一次写入触发淘汰（DELETE 实际删除行）
+	for i := 0; i < 4; i++ {
+		if _, err := s.CreateParaphrase(ctx, models.SourceEpisode, "ep1", "q", "b", "p", "m", []string{"seg-0001"}, segs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_prune BEFORE DELETE ON paraphrases BEGIN SELECT RAISE(ABORT,'no delete'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateParaphrase(ctx, models.SourceEpisode, "ep1", "q", "b", "p", "m", []string{"seg-0001"}, segs); err == nil {
+		t.Fatal("淘汰 DELETE 被中止时 CreateParaphrase 应报错")
+	}
+}

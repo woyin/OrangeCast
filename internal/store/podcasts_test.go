@@ -314,3 +314,144 @@ func TestListEpisodesPaginated_QueryError(t *testing.T) {
 		t.Fatal("SELECT 缺列应报错")
 	}
 }
+
+// TestGetEpisodeByID_ScanError 验证 episode 行数据异常时 Scan 失败。
+// 覆盖 GetEpisodeByID 中 Scan 失败分支（duration_seconds 非整数）。
+func TestGetEpisodeByID_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE episodes SET duration_seconds='bad' WHERE id=?`, eps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetEpisodeByID(ctx, eps[0].ID); err == nil {
+		t.Fatal("duration_seconds 非整数应导致 Scan 失败")
+	}
+}
+
+// TestListEpisodes_ScanError 验证 episode 行数据异常时 Scan 失败。
+// 覆盖 ListEpisodes 中 rows.Scan 失败分支（duration_seconds 非整数）。
+func TestListEpisodes_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE episodes SET duration_seconds='bad' WHERE id=?`, eps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListEpisodes(ctx, p.ID); err == nil {
+		t.Fatal("duration_seconds 非整数应导致 Scan 失败")
+	}
+}
+
+// TestListUploads_ScanError 验证 upload 行数据异常时 Scan 失败。
+// 覆盖 ListUploads 中 rows.Scan 失败分支（size_bytes 非整数）。
+func TestListUploads_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	up, _ := s.CreateUpload(ctx, "a.mp3", "audio/mpeg", 10)
+	if _, err := s.DB.ExecContext(ctx, `UPDATE uploads SET size_bytes='bad' WHERE id=?`, up.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListUploads(ctx); err == nil {
+		t.Fatal("size_bytes 非整数应导致 Scan 失败")
+	}
+}
+
+// TestListPodcastsForRefresh_ScanError 验证刷新列表行数据异常时 Scan 失败。
+// 覆盖 ListPodcastsForRefresh 中 rows.Scan 失败分支（created_at 为 NULL）。
+func TestListPodcastsForRefresh_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE podcasts (id TEXT, feed_url TEXT, title TEXT, description TEXT, image_url TEXT, last_fetched_at TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO podcasts (id, feed_url, title, created_at) VALUES ('p1','f','t',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPodcastsForRefresh(ctx, 10); err == nil {
+		t.Fatal("created_at 为 NULL 应导致 Scan 失败")
+	}
+}
+
+// TestMergeEpisodes_ChangesQueryError 验证 changes() 查询失败时报错。
+// 覆盖 MergeEpisodes 中 changes() 查询错误分支（episodes 表缺失）。
+func TestMergeEpisodes_ChangesQueryError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}}); err == nil {
+		t.Fatal("episodes 表缺失时 MergeEpisodes 应报错")
+	}
+}
+
+// TestListPodcasts_ScanError2 验证 podcasts 行数据异常时 Scan 失败。
+// 覆盖 ListPodcasts 中 rows.Scan 失败分支（created_at 为 NULL）。
+func TestListPodcasts_ScanError2(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE podcasts (id TEXT, feed_url TEXT, title TEXT, description TEXT, image_url TEXT, last_fetched_at TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO podcasts (id, feed_url, title, created_at) VALUES ('p1','f','t',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPodcasts(ctx); err == nil {
+		t.Fatal("created_at 为 NULL 应导致 Scan 失败")
+	}
+}
+
+// TestListEpisodesPaginated_ScanError 验证分页单集行数据异常时 Scan 失败。
+// 覆盖 ListEpisodesPaginated 中 rows.Scan 失败分支（duration_seconds 非整数）。
+func TestListEpisodesPaginated_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE episodes (id TEXT, podcast_id TEXT, guid TEXT, title TEXT, description TEXT, audio_url TEXT, duration_seconds TEXT, published_at TEXT, processing_status TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO episodes (id, podcast_id, guid, title, description, audio_url, duration_seconds, processing_status, created_at)
+		 VALUES ('e1','p1','g1','t','d','a','bad','unprocessed','2026-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListEpisodesPaginated(ctx, "p1", 1, 10); err == nil {
+		t.Fatal("duration_seconds 非整数应导致 Scan 失败")
+	}
+}
+
+// TestListEpisodesPaginated_SelectError 验证分页 SELECT 查询失败时报错。
+// 覆盖 ListEpisodesPaginated 中 SELECT 查询错误分支（重建缺列的表使 COUNT 成功但 SELECT 失败）。
+func TestListEpisodesPaginated_SelectError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE episodes (id TEXT, podcast_id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ListEpisodesPaginated(ctx, "p1", 1, 10); err == nil {
+		t.Fatal("SELECT 缺列应报错")
+	}
+}

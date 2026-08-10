@@ -342,3 +342,27 @@ func TestGetKpGraph_SimilarEdgeDedup(t *testing.T) {
 		t.Error("已有 collection 边时相似边应被去重")
 	}
 }
+
+// TestGetKpGraph_SameSourcePairNoSimilarEdge 验证同一 Source 的两个 KeyPoint 不产生相似边。
+// 覆盖 GetKpGraph 中 kps[i].SourceID == kps[j].SourceID → continue 分支（两行并存时）。
+func TestGetKpGraph_SameSourcePairNoSimilarEdge(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	mustSeedUser(t, s)
+	s1 := seedKpEpisode(t, s, "https://f1.xml", "g1", "ep1", "主权财富基金改变全球投资", "长期投资者")
+	// 直接插入同 source 的第二条 KeyPoint（内容与第一条高度相似，若跨 source 会产生 similar 边）
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, created_at)
+		 VALUES ('kp2', 'episode', ?, 'ep1', '主权财富基金是长期投资者', '全球投资', '["seg-0002"]', 'citation', 5, 10, 1, datetime('now'))`, s1); err != nil {
+		t.Fatal(err)
+	}
+	gd, err := s.GetKpGraph(ctx)
+	if err != nil {
+		t.Fatalf("GetKpGraph: %v", err)
+	}
+	for _, l := range gd.Links {
+		if l.Type == "similar" {
+			t.Errorf("同一 Source 的 KeyPoint 不应产生 similar 边，实际 %+v", l)
+		}
+	}
+}

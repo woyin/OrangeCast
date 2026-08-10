@@ -206,3 +206,20 @@ func TestCreateArtifactVersion_QueryError(t *testing.T) {
 		t.Fatal("artifact_versions 表缺失时 CreateArtifactVersion 应报错")
 	}
 }
+
+// TestCreateArtifactVersion_InsertError 验证版本插入失败时报错。
+// 覆盖 CreateArtifactVersion 中 "创建产物版本" 错误分支（INSERT 被触发器中止）。
+func TestCreateArtifactVersion_InsertError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	sourceID := seedEpisodeForArtifact(t, s)
+	job, _ := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_av BEFORE INSERT ON artifact_versions BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, KindTranscript,
+		"groq", "m", "1", job.ID, `{"text":"x"}`); err == nil {
+		t.Fatal("artifact_versions INSERT 被中止时应报错")
+	}
+}
