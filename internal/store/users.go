@@ -10,6 +10,7 @@ import (
 	"github.com/woyin/orangecast/internal/models"
 )
 
+// ErrNotFound 表示查询的记录不存在（各仓储统一的 Not Found 错误）。
 var ErrNotFound = errors.New("not found")
 
 // ErrOwnerExists 表示实例已被认领，不能再创建第二个 Owner（ADR-0003）。

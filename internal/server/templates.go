@@ -25,6 +25,8 @@ type Templates struct {
 	pages map[string]*template.Template
 }
 
+// NewTemplates 加载全部页面模板（layout + 每页 content 块）。
+// 模板来自 embed FS（templates/*.html），编译失败时返回错误。
 func NewTemplates() (*Templates, error) {
 	layoutData, err := templateFS.ReadFile("templates/layout.html")
 	if err != nil {

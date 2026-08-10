@@ -156,6 +156,8 @@ type Collection struct {
 	ItemCount   int // 聚合字段
 }
 
+// CollectionItem 一个 Collection 的成员（跨 Source 的 Citation 关联）。
+// ItemCount 是聚合字段，仅在 ListCollections 中填充。
 type CollectionItem struct {
 	CollectionID string
 	SourceType   models.SourceType

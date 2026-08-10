@@ -22,6 +22,8 @@ type GeneratedBlock struct {
 	References []string // Reference 指向的 Segment ID（时间范围由程序解析）
 }
 
+// Input 渲染 KnowledgeNote Markdown 所需的全部输入。
+// Card 必须已通过 ValidateCard（含有效 Citation）；Segments 来自当前转录版本。
 type Input struct {
 	Card            *provider.KnowledgeCard // 已验证（含有效 Citation）
 	Segments        []provider.Segment      // 当前转录版本段（解析 Citation/Reference 时间范围）

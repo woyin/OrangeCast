@@ -29,6 +29,8 @@ const (
 	openaiAnalysisModel   = "gpt-4.1-mini"
 )
 
+// NewOpenAIProvider 构造 OpenAI Provider（兜底实现，与 Groq 对偶）。
+// apiKey 必填；baseURL 默认为 api.openai.com，可用 WithBaseURL 覆盖（测试/兼容 API）。
 func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 	return &OpenAIProvider{apiKey: apiKey}
 }

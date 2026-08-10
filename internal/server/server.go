@@ -25,6 +25,8 @@ type Server struct {
 	loginLimiter *auth.RateLimiter
 }
 
+// New 装配 Server 全部依赖：模板、登录限流、默认 bundleFor/fetchFeed。
+// bundleFor 默认走 selector；测试可注入 srv.bundleFor 提供 fake provider。
 func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rss.Refresher, selector *provider.Selector) (*Server, error) {
 	tmpl, err := NewTemplates()
 	if err != nil {

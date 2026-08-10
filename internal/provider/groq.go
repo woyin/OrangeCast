@@ -30,6 +30,9 @@ type GroqProvider struct {
 	sleepFn        func(time.Duration)
 }
 
+// NewGroqProvider 构造 Groq Provider（默认零成本主力）。
+// apiKey 必填；baseURL 默认为 api.groq.com，可用 WithBaseURL 覆盖。
+// 测试可通过注入 chatCompleteFn/sleepFn 隔离网络与时间。
 func NewGroqProvider(apiKey string) *GroqProvider {
 	return &GroqProvider{apiKey: apiKey}
 }
