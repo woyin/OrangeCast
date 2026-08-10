@@ -227,6 +227,33 @@ func TestDoWithRetry_Exhaustion(t *testing.T) {
 	}
 }
 
+// TestDoWithRetry_RetryAfterCapsBackoff 验证 Retry-After 超过 maxBackoff 时被钳制。
+// 覆盖 doWithRetry 中 backoff > maxBackoff → backoff = maxBackoff 分支。
+func TestDoWithRetry_RetryAfterCapsBackoff(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		// 第一次返回超大 Retry-After（>maxBackoff=16s）
+		if calls == 1 {
+			w.Header().Set("Retry-After", "999")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	resp, err := doWithRetry(context.Background(), req)
+	if err != nil {
+		t.Fatalf("重试后应成功: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("重试后应 200，实际 %d", resp.StatusCode)
+	}
+}
+
 // TestPostJSON 验证 postJSON 发送 JSON 请求并携带 Authorization 头。
 func TestPostJSON(t *testing.T) {
 	var gotAuth string
