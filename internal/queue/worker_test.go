@@ -1189,3 +1189,26 @@ func TestProcessOne_ClaimFails(t *testing.T) {
 		t.Fatal("jobs 表缺失时 ProcessOne 应报错")
 	}
 }
+
+// TestDoTranscribe_CreateVersionFails 验证转录版本创建失败时 doTranscribe 报错。
+// 覆盖 doTranscribe 中 "创建转录版本" 错误分支（删除 artifact_versions 表）。
+func TestDoTranscribe_CreateVersionFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedEvidence(t, s, w, models.SourceUpload, up.ID) // 已就绪证据，跳过转码
+	job, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	// 删除 artifact_versions 表 → CreateArtifactVersion 失败
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE artifact_versions`); err != nil {
+		t.Fatalf("DROP TABLE artifact_versions: %v", err)
+	}
+
+	bundle := &provider.ProviderBundle{Transcription: &fakeTranscriber{}}
+	err := w.doTranscribe(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("artifact_versions 表缺失时 doTranscribe 应报错")
+	}
+	if !strings.Contains(err.Error(), "创建转录版本") {
+		t.Errorf("错误应含 '创建转录版本'，实际 %v", err)
+	}
+}
