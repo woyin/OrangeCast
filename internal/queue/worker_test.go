@@ -1524,3 +1524,36 @@ func TestEnsureEvidence_UpsertFails(t *testing.T) {
 		t.Fatal("evidence_audio 表缺失时 ensureEvidence 应报错")
 	}
 }
+
+// TestDoAnalyze_NarrationFailureNonBlocking 验证 Narration 失败不阻塞 doAnalyze。
+// 覆盖 doAnalyze 中 doNarration err → log（不阻塞）分支。
+func TestDoAnalyze_NarrationFailureNonBlocking(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+	// 删除 narrations 表 → doNarration 的 ListCurrentNarrationsForSource 失败（不阻塞 doAnalyze）
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE narrations`); err != nil {
+		t.Fatalf("DROP TABLE narrations: %v", err)
+	}
+	bundle := &provider.ProviderBundle{
+		Analysis:  &fakeAnalyzer{},
+		Highlight: &fakeHighlightOK{},
+		Narration: &fakeNarration{available: true},
+	}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err != nil {
+		t.Fatalf("doNarration 失败不应阻塞 doAnalyze，实际 %v", err)
+	}
+}
