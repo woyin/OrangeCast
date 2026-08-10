@@ -885,3 +885,20 @@ func TestStudyChat_CreateSessionDBError(t *testing.T) {
 		t.Errorf("应提示创建学习会话失败，实际 %s", rec.Body.String())
 	}
 }
+
+// TestParaphraseHandler_MissingTranscript 验证无转录稿时 Paraphrase 返回 404。
+// 覆盖 handleParaphrase 中 loadTranscriptJSON !ok → return 分支。
+func TestParaphraseHandler_MissingTranscript(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "phmt@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	// 不 seedTranscript → 无转录稿
+	rec := postForm(t, srv, cookie, "/api/paraphrase",
+		"source_type=episode&source_id="+eps[0].ID+"&segment_ids=[\"seg-0001\"]&question=解释一下")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("无转录稿应 404，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
