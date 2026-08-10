@@ -182,3 +182,39 @@ func TestListEpisodesPaginated_InvalidParams(t *testing.T) {
 		t.Fatalf("负数 page/perPage 应归一化不报错: %v", err)
 	}
 }
+
+// TestPodcasts_DBErrors 验证 podcasts 系列查询在表缺失时返回错误。
+// 覆盖 GetPodcastByID/ListPodcasts/ListPodcastsForRefresh 查询失败分支。
+func TestPodcasts_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetPodcastByID(ctx, "p1"); err == nil {
+		t.Error("podcasts 表缺失时 GetPodcastByID 应报错")
+	}
+	if _, err := s.ListPodcasts(ctx); err == nil {
+		t.Error("podcasts 表缺失时 ListPodcasts 应报错")
+	}
+	if _, err := s.ListPodcastsForRefresh(ctx, 10); err == nil {
+		t.Error("podcasts 表缺失时 ListPodcastsForRefresh 应报错")
+	}
+}
+
+// TestListPodcasts_ScanError 验证 podcasts 行数据异常时 Scan 失败。
+// 覆盖 ListPodcasts 中 rows.Scan 失败分支。
+func TestListPodcasts_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	// 重建缺列的表使 SELECT 查询失败（COUNT 等不适用，直接用缺列验证 Scan/Query）
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE podcasts (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPodcasts(ctx); err == nil {
+		t.Fatal("podcasts 表缺列时 ListPodcasts 应报错")
+	}
+}
