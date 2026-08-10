@@ -372,3 +372,27 @@ func TestDoNarration_MkdirError(t *testing.T) {
 		t.Errorf("错误应含 '创建 narrations 目录'，实际 %v", err)
 	}
 }
+
+// TestDoNarration_WriteDBFailure_Continues 验证写库失败只跳过该段不阻塞。
+// 覆盖 doNarration 中 CreateNarration err → log + continue 分支（触发器中止 INSERT，
+// ListCurrentNarrationsForSource 先成功，隔离写库失败）。
+func TestDoNarration_WriteDBFailure_Continues(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, &provider.HighlightSet{
+		Highlights: []provider.Highlight{{ID: "hl-a", Gist: "gist", Citations: []string{"seg-0001"}}},
+	})
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_nar BEFORE INSERT ON narrations BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	fn := &fakeNarration{available: true}
+	job := &models.ProcessingJob{ID: "j1", SourceType: models.SourceUpload, SourceID: up.ID}
+	bundle := &provider.ProviderBundle{Narration: fn}
+	if err := w.doNarration(ctx, job, bundle); err != nil {
+		t.Fatalf("doNarration 写库失败应跳过不阻塞，实际 %v", err)
+	}
+	if len(fn.written) != 1 {
+		t.Errorf("音频应已合成（写库失败不阻塞），实际写盘 %d", len(fn.written))
+	}
+}

@@ -1233,7 +1233,7 @@ func TestResumePurges_DeleteSourceRowsError(t *testing.T) {
 }
 
 // TestResumePurges_MarkDoneError 验证 MarkPurgeDone 失败时 ResumePurges 报错。
-// 覆盖 ResumePurges 中 MarkPurgeDone 错误分支（删除 purges 表）。
+// 覆盖 ResumePurges 中 MarkPurgeDone 错误分支（触发器中止 UPDATE purges）。
 func TestResumePurges_MarkDoneError(t *testing.T) {
 	s, w := newTestWorker(t)
 	ctx := context.Background()
@@ -1241,12 +1241,12 @@ func TestResumePurges_MarkDoneError(t *testing.T) {
 	if err := s.CreatePurgeIntent(ctx, models.SourceEpisode, sourceID); err != nil {
 		t.Fatal(err)
 	}
-	// 删除 purges 表 → MarkPurgeDone 失败
-	if _, err := s.DB.ExecContext(ctx, `DROP TABLE purges`); err != nil {
-		t.Fatalf("DROP TABLE purges: %v", err)
+	// 触发器中止 UPDATE purges → MarkPurgeDone 失败（ListPendingPurges 需先成功）
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_purge_upd BEFORE UPDATE ON purges BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatalf("CREATE TRIGGER: %v", err)
 	}
 	if err := w.ResumePurges(ctx); err == nil {
-		t.Fatal("purges 表缺失时 ResumePurges 应报错")
+		t.Fatal("MarkPurgeDone 被中止时 ResumePurges 应报错")
 	}
 }
 
@@ -1334,6 +1334,68 @@ func TestDoTranscribe_SetCurrentVersionFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "设置当前转录版本") {
 		t.Errorf("错误应含 '设置当前转录版本'，实际 %v", err)
+	}
+}
+
+// TestDoAnalyze_CreateCardVersionFails 验证知识卡片版本创建失败时报错。
+// 覆盖 doAnalyze 中 "创建卡片版本" 错误分支（触发器只中止 knowledge_card 插入）。
+func TestDoAnalyze_CreateCardVersionFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_av BEFORE INSERT ON artifact_versions WHEN NEW.kind='knowledge_card' BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("knowledge_card 插入被中止时 doAnalyze 应报错")
+	}
+	if !strings.Contains(err.Error(), "创建卡片版本") {
+		t.Errorf("错误应含 '创建卡片版本'，实际 %v", err)
+	}
+}
+
+// TestDoAnalyze_SetCardVersionFails 验证知识卡片当前版本设置失败时报错。
+// 覆盖 doAnalyze 中 "设置当前卡片版本" 错误分支（触发器中止 UPDATE uploads）。
+func TestDoAnalyze_SetCardVersionFails(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	job, _ := s.EnqueueAnalyze(ctx, models.SourceUpload, up.ID)
+	tp, _ := json.Marshal(provider.TranscriptPayload{
+		Language: "en", Text: "hello world",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "hello world"}},
+	})
+	tv, err := s.CreateArtifactVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, "fake", "m", "1", job.ID, string(tp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindTranscript, tv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_upd BEFORE UPDATE ON uploads BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}
+	err = w.doAnalyze(ctx, job, bundle)
+	if err == nil {
+		t.Fatal("uploads UPDATE 被中止时 doAnalyze 应报错")
+	}
+	if !strings.Contains(err.Error(), "设置当前卡片版本") {
+		t.Errorf("错误应含 '设置当前卡片版本'，实际 %v", err)
 	}
 }
 
@@ -1586,19 +1648,20 @@ func TestEnsureEvidence_SHA256Fails(t *testing.T) {
 }
 
 // TestDoTranscribe_EnqueueAnalyzeFails 验证入队分析任务失败时报错。
-// 覆盖 doTranscribe 中 EnqueueAnalyze err 分支（删除 processing_jobs 表）。
+// 覆盖 doTranscribe 中 EnqueueAnalyze err 分支（触发器只中止 analyze job 插入，
+// 使 EnqueueAnalyze 查询成功但插入失败，隔离到 doTranscribe 第 4 步）。
 func TestDoTranscribe_EnqueueAnalyzeFails(t *testing.T) {
 	s, w := newTestWorker(t)
 	ctx := context.Background()
 	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
 	seedEvidence(t, s, w, models.SourceUpload, up.ID)
 	job, _ := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
-	// 删除 processing_jobs 表 → EnqueueAnalyze 查询失败
-	if _, err := s.DB.ExecContext(ctx, `DROP TABLE processing_jobs`); err != nil {
-		t.Fatalf("DROP TABLE processing_jobs: %v", err)
+	// 触发器中止 analyze job 的 INSERT → EnqueueAnalyze 插入失败
+	if _, err := s.DB.ExecContext(ctx, `CREATE TRIGGER abort_pj BEFORE INSERT ON processing_jobs WHEN NEW.job_type='analyze' BEGIN SELECT RAISE(ABORT,'no'); END`); err != nil {
+		t.Fatalf("CREATE TRIGGER: %v", err)
 	}
 	bundle := &provider.ProviderBundle{Transcription: &fakeTranscriber{}}
 	if err := w.doTranscribe(ctx, job, bundle); err == nil {
-		t.Fatal("processing_jobs 表缺失时 doTranscribe 应报错")
+		t.Fatal("EnqueueAnalyze 插入被中止时 doTranscribe 应报错")
 	}
 }

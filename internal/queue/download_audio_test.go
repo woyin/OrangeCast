@@ -205,3 +205,55 @@ func newTestStoreForDownload(t *testing.T) *store.Store {
 	t.Cleanup(func() { s.Close() })
 	return s
 }
+
+// errRoundTripper 返回固定错误的 RoundTripper，用于触发 downloadAudio 的 client.Do 失败。
+type errRoundTripper struct{}
+
+func (*errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, os.ErrClosed
+}
+
+// TestDownloadAudio_ClientDoError 验证 HTTP 请求失败时报错。
+// 覆盖 downloadAudio 中 client.Do 错误分支（自定义 RoundTripper 恒失败）。
+func TestDownloadAudio_ClientDoError(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWorkerWithClient(&http.Client{Transport: &errRoundTripper{}}, dir)
+	if _, err := w.downloadAudio(context.Background(), "http://127.0.0.1:1/a.mp3"); err == nil {
+		t.Fatal("client.Do 失败应报错")
+	}
+}
+
+// TestFetchRawAudio_EpisodeSuccess_CleanupRemovesFile 验证 episode 源下载成功后
+// 返回的清理函数删除临时文件。
+// 覆盖 fetchRawAudio 中 episode 成功分支的 cleanup 闭包（os.Remove(path)）。
+func TestFetchRawAudio_EpisodeSuccess_CleanupRemovesFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("fake-audio"))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	w := NewWorker(s, provider.NewSelector("g", "o"), filepath.Join(dir, "tmp"), filepath.Join(dir, "evidence"), filepath.Join(dir, "nar"))
+	w.client = &http.Client{}
+	os.MkdirAll(filepath.Join(dir, "tmp"), 0o755)
+	ctx := context.Background()
+	p, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: srv.URL + "/a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	job := &models.ProcessingJob{SourceType: models.SourceEpisode, SourceID: eps[0].ID}
+	path, cleanup, err := w.fetchRawAudio(ctx, job)
+	if err != nil {
+		t.Fatalf("fetchRawAudio: %v", err)
+	}
+	if path == "" {
+		t.Fatal("应返回下载路径")
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("cleanup 应删除临时文件，实际 err=%v", err)
+	}
+}
