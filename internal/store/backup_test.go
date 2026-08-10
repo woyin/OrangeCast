@@ -121,3 +121,47 @@ func TestConsistencyBackup_InvalidDest(t *testing.T) {
 		t.Fatal("非法目标应报错")
 	}
 }
+
+// TestConsistencyBackup_VacuumIntoFails 验证 VACUUM INTO 写入失败目标时报错并清理。
+// 目标路径指向一个已存在的目录 → VACUUM INTO 无法写入 → 报错。
+// 覆盖 ConsistencyBackup 中 "VACUUM INTO 备份失败" 分支。
+func TestConsistencyBackup_VacuumIntoFails(t *testing.T) {
+	dir := t.TempDir()
+	src, err := sql.Open("sqlite", filepath.Join(dir, "src.db")+"?_pragma=foreign_keys(on)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { src.Close() })
+	ctx := context.Background()
+	if _, err := Migrate(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	// 目标本身是一个已存在的文件 → VACUUM INTO 不能覆盖非空文件 → 报错
+	existing := filepath.Join(dir, "existing.db")
+	os.WriteFile(existing, []byte("not a db"), 0o644)
+	if err := ConsistencyBackup(ctx, src, existing); err == nil {
+		t.Fatal("VACUUM INTO 到已存在文件应报错")
+	}
+}
+
+// TestConsistencyBackup_MkdirFails 验证目标父目录创建失败时报错。
+// 覆盖 ConsistencyBackup 中 "创建备份目录" 分支（用文件占用父目录）。
+func TestConsistencyBackup_MkdirFails(t *testing.T) {
+	dir := t.TempDir()
+	src, err := sql.Open("sqlite", filepath.Join(dir, "src.db")+"?_pragma=foreign_keys(on)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { src.Close() })
+	ctx := context.Background()
+	if _, err := Migrate(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+	// 父目录被文件占用 → MkdirAll 失败
+	blocker := filepath.Join(dir, "blockdir")
+	os.WriteFile(blocker, []byte("x"), 0o644)
+	badDst := filepath.Join(blocker, "sub", "backup.db")
+	if err := ConsistencyBackup(ctx, src, badDst); err == nil {
+		t.Fatal("父目录不可创建应报错")
+	}
+}

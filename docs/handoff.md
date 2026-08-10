@@ -172,6 +172,59 @@ git diff --check
 - Backup：在全新目录恢复并运行读取/播放验证。
 - Security：CSRF、登录限流、代理头和 SSRF 重定向测试。
 
+## 测试约定
+
+仓库积累了 515+ 测试函数，覆盖各包 81–100%（详见 README）。新增/修改代码应沿用以下约定，保证测试一致且易维护：
+
+### 1. 纯函数直接单测
+
+无副作用的函数（`ValidateCard`、`tokenizeKp`、`jaccard`、`formatSeconds`、`parseCommand`、`guessAudioExt` 等）直接构造输入断言输出，不依赖任何外部状态。
+
+### 2. 外部依赖用 fake / 注入点隔离
+
+- Provider：在 `internal/queue` 与 `internal/server` 各自定义 `fakeTranscriber`/`fakeAnalyzer`/`fakeHighlight`/`fakeQA` 等，通过 `w.bundleFor` 或 `srv.bundleFor` 注入，避免真实网络调用。
+- HTTP：用 `httptest.NewServer` + `WithBaseURL(srv.URL)` 把 Groq/OpenAI 的请求重定向到本地测试服务器，可精确控制返回体与状态码。
+- ffmpeg/ffprobe：`seedEvidence` 用 `exec.LookPath("ffmpeg")` 检测，不可用时 `t.Skip`，保证 CI 无 ffmpeg 也能跑。
+
+### 3. DB 错误分支用「删表法」
+
+handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写入失败（见 `TestStudyChat_CreateSessionDBError`、`TestCollection_ListDBError`、`TestProcess_EnqueueFails`）。注意：
+
+- handler 测试要先 `claimOwnerAndLogin` 获得合法 cookie（认证与 CSRF 中间件在前）。
+- 选择性删表时要确保前置步骤能通过（例如先 `CreateStudySession` 再删 `study_sessions`，使 `ListStudyMessages` 读 `study_messages` 成功而 `AppendStudyMessage` 的 `UPDATE study_sessions` 失败）。
+
+### 4. 文件系统边界
+
+- 一致性快照、备份/恢复用 `t.TempDir()` 隔离，绝不写工作目录。
+- 文件不可读/目录被文件占用等失败用 `os.WriteFile(blocker, ...)` 占位制造。
+
+### 5. 并发与时间
+
+- worker 心跳与 `Run` 循环用 `context.WithCancel` 控制生命周期，`w.poll` 缩短到 10ms 加速测试。
+- `sleepFn`、`heartbeatEvery` 等可注入的时间旋钮用短值覆盖。
+
+### 覆盖率门槛
+
+各包当前基线（`go test -cover ./...`）：
+
+| 包 | 覆盖率 |
+|---|---|
+| evalset | 100% |
+| markdown | 98% |
+| config | 97% |
+| rss | 93% |
+| safehttp | 92% |
+| server | 92% |
+| provider | 92% |
+| auth | 92% |
+| cmd | 90% |
+| queue | 87% |
+| filehash | 88% |
+| store | 86% |
+| backup | 81% |
+
+新增公开函数应附带对应测试；修复 bug 应先加一个能复现该 bug 的测试（TDD）。
+
 ## 下一版本 Definition of Done
 
 下一版本只有在 [`product-goal.md`](product-goal.md#下一版本黄金旅程) 的完整旅程通过后才算完成。特别注意：
