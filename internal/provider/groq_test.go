@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -240,6 +241,45 @@ func TestGroq_AnswerParseFallback(t *testing.T) {
 	}
 	if res.Answer != "这不是 JSON 内容" {
 		t.Errorf("解析失败应退化为原文，实际 %q", res.Answer)
+	}
+}
+
+// TestGroq_AnswerCompleteError 验证 Answer 的 complete 失败时报错。
+// 覆盖 Answer 中 complete err → return nil, err 分支。
+func TestGroq_AnswerCompleteError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "", 0, errors.New("complete 失败")
+	}
+	_, err := g.Answer("通胀是什么", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("complete 失败应报错")
+	}
+}
+
+// TestGroq_GenerateHighlightsCompleteError 验证 GenerateHighlights 的 complete 失败时报错。
+// 覆盖 GenerateHighlights 中 complete err → return nil, err 分支。
+func TestGroq_GenerateHighlightsCompleteError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "", 0, errors.New("complete 失败")
+	}
+	_, err := g.GenerateHighlights([]Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("complete 失败应报错")
+	}
+}
+
+// TestGroq_ParaphraseCompleteError 验证 Paraphrase 的 complete 失败时报错。
+// 覆盖 Paraphrase 中 complete err → return nil, err 分支。
+func TestGroq_ParaphraseCompleteError(t *testing.T) {
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		return "", 0, errors.New("complete 失败")
+	}
+	_, err := g.Paraphrase("解释", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	if err == nil {
+		t.Fatal("complete 失败应报错")
 	}
 }
 
