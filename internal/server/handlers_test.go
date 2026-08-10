@@ -2472,3 +2472,45 @@ func TestProcessBatch_ParseFormError(t *testing.T) {
 		t.Errorf("应提示表单解析失败，实际 %s", rec.Body.String())
 	}
 }
+
+// TestVersions_ParsePathError 验证直接调用 handleVersions 且路径非法时返回 404。
+// 覆盖 handleVersions 中 parseSourcePath !ok 分支（绕过路由直接调用）。
+func TestVersions_ParsePathError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "verparse@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/sources/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handleVersions(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestRevertVersion_ParsePathError 验证直接调用 handleRevertVersion 且路径非法时返回 404。
+// 覆盖 handleRevertVersion 中 parseSourcePath !ok 分支。
+func TestRevertVersion_ParsePathError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "rvparse@example.com", "password123")
+	req := httptest.NewRequest(http.MethodPost, "/sources/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handleRevertVersion(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
+
+// TestDJ_ParsePathError 验证直接调用 handleDJ 且路径非法时返回 404。
+// 覆盖 handleDJ 中 parseSourcePath !ok 分支。
+func TestDJ_ParsePathError(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djparse@example.com", "password123")
+	req := httptest.NewRequest(http.MethodGet, "/sources/", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.handleDJ(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("非法路径应 404，实际 %d", rec.Code)
+	}
+}
