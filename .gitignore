@@ -49,3 +49,6 @@ go.work.sum
 .claude/
 skills-lock.json
 internal/server/*_hl-a_1.wav
+
+# pi-subagents 运行时产物（mission/handoff/worktree-diff）
+/.pi-subagents/
