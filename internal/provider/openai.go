@@ -35,6 +35,7 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 	return &OpenAIProvider{apiKey: apiKey}
 }
 
+// Name 返回 Provider 标识（"openai"）。
 func (o *OpenAIProvider) Name() string { return "openai" }
 
 // WithBaseURL 返回指向自定义 base URL 的新实例（测试/兼容 API 用）。
@@ -72,6 +73,7 @@ func (o *OpenAIProvider) doResponses(payload map[string]any, label string) ([]by
 	return data, nil
 }
 
+// Transcribe 用 OpenAI 语音识别，将音频转为带时间戳的转录片段。
 func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -168,6 +170,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 	return card, nil
 }
 
+// Answer 检索相关 Segment 并基于证据回答查证型问题。
 func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult, error) {
 	chunks := Retrieve(BuildChunks(segments, 8), question, 5)
 	if len(chunks) == 0 {

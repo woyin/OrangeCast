@@ -32,7 +32,9 @@ func (sel *Selector) WithNarration(np NarrationProvider) *Selector {
 }
 
 // HasGroq 返回 Groq key 是否就绪。
-func (sel *Selector) HasGroq() bool   { return sel.groqAPIKey != "" }
+func (sel *Selector) HasGroq() bool { return sel.groqAPIKey != "" }
+
+// HasOpenAI 返回 OpenAI key 是否就绪。
 func (sel *Selector) HasOpenAI() bool { return sel.openaiAPIKey != "" }
 
 // ApplySettings 用 SQLite settings 覆盖默认 key/URL（启动时 + 保存时调）。

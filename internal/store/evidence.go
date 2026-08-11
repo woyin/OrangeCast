@@ -27,6 +27,7 @@ func (s *Store) UpsertEvidenceAudio(ctx context.Context, sourceType models.Sourc
 	return nil
 }
 
+// GetEvidenceAudio 按来源查询其标准化证据音频。
 func (s *Store) GetEvidenceAudio(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.EvidenceAudio, error) {
 	e := &models.EvidenceAudio{}
 	err := s.DB.QueryRowContext(ctx,

@@ -24,8 +24,8 @@ const highlightSystemPrompt = `你是一个播客高光片段编辑。基于用�
 只输出 JSON：{"highlights":[{"gist":"...","citations":["seg-0001","seg-0002",...]}]}
 不要输出任何其他文字或 markdown 代码块。`
 
-// GenerateHighlights 从全部 Segment 生成高光片段（ADR-0016）。
-// 这是独立的 AI 任务（与 KnowledgeCard 分析不同），需要喂入全部 Segment。
+// HighlightProvider 从全部 Segment 生成高光片段（ADR-0016）的能力接口。
+// 这是独立的 AI 任务（与 KnowledgeCard 分析不同），需要喂入全部 Segment；
 // 实现由各 Provider 提供（Groq/OpenAI）。
 type HighlightProvider interface {
 	GenerateHighlights(segments []Segment) (*HighlightSet, error)

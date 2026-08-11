@@ -9,39 +9,54 @@ package models
 type SourceType string
 
 const (
+	// SourceEpisode 来源类型：播客单集。
 	SourceEpisode SourceType = "episode"
-	SourceUpload  SourceType = "upload"
+	// SourceUpload 来源类型：手动上传。
+	SourceUpload SourceType = "upload"
 )
 
 // JobType 处理任务类型。
 type JobType string
 
 const (
+	// JobTranscribe 处理任务类型：转录。
 	JobTranscribe JobType = "transcribe"
-	JobAnalyze    JobType = "analyze"
+	// JobAnalyze 处理任务类型：分析生成知识卡片。
+	JobAnalyze JobType = "analyze"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
 type JobStatus string
 
 const (
-	StatusQueued    JobStatus = "queued"
-	StatusRunning   JobStatus = "running"
+	// StatusQueued 任务状态：排队中。
+	StatusQueued JobStatus = "queued"
+	// StatusRunning 任务状态：处理中。
+	StatusRunning JobStatus = "running"
+	// StatusSucceeded 任务状态：成功。
 	StatusSucceeded JobStatus = "succeeded"
-	StatusFailed    JobStatus = "failed"
+	// StatusFailed 任务状态：失败。
+	StatusFailed JobStatus = "failed"
 )
 
 // EpisodeProcessingStatus 单集处理状态：unprocessed → queued → transcribing → transcribed → analyzing → processed | failed
 type EpisodeProcessingStatus string
 
 const (
-	StatusUnprocessed  EpisodeProcessingStatus = "unprocessed"
-	StatusQueuedEp     EpisodeProcessingStatus = "queued"
+	// StatusUnprocessed 单集处理状态：未处理。
+	StatusUnprocessed EpisodeProcessingStatus = "unprocessed"
+	// StatusQueuedEp 单集处理状态：已入队。
+	StatusQueuedEp EpisodeProcessingStatus = "queued"
+	// StatusTranscribing 单集处理状态：转录中。
 	StatusTranscribing EpisodeProcessingStatus = "transcribing"
-	StatusTranscribed  EpisodeProcessingStatus = "transcribed"
-	StatusAnalyzing    EpisodeProcessingStatus = "analyzing"
-	StatusProcessed    EpisodeProcessingStatus = "processed"
-	StatusFailedEp     EpisodeProcessingStatus = "failed"
+	// StatusTranscribed 单集处理状态：已转录，待分析。
+	StatusTranscribed EpisodeProcessingStatus = "transcribed"
+	// StatusAnalyzing 单集处理状态：分析中。
+	StatusAnalyzing EpisodeProcessingStatus = "analyzing"
+	// StatusProcessed 单集处理状态：处理完成。
+	StatusProcessed EpisodeProcessingStatus = "processed"
+	// StatusFailedEp 单集处理状态：失败。
+	StatusFailedEp EpisodeProcessingStatus = "failed"
 )
 
 // User 单例 Owner 凭据。实例只能被认领一次（ADR-0003）。

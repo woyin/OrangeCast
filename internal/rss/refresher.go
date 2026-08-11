@@ -1,3 +1,6 @@
+// Package rss 实现 Podcast feed 抓取、解析（gofeed）与 30 分钟周期刷新调度。
+// feed.go 提供 FetchFeed（复用 safehttp SSRF 防护客户端）与 parseFeed；
+// refresher.go 用 robfig/cron 定时拉取新 Episode 并 MergeEpisodes 入库。
 package rss
 
 import (
@@ -9,9 +12,6 @@ import (
 	"github.com/woyin/orangecast/internal/store"
 )
 
-// Package rss 实现 Podcast feed 抓取、解析（gofeed）与 30 分钟周期刷新调度。
-// feed.go 提供 FetchFeed（复用 safehttp SSRF 防护客户端）与 parseFeed；
-// refresher.go 用 robfig/cron 定时拉取新 Episode 并 MergeEpisodes 入库。
 // Refresher 定时刷新所有播客 feed 的调度器。
 type Refresher struct {
 	cron      *cron.Cron
@@ -26,8 +26,11 @@ func NewRefresher(s *store.Store) *Refresher {
 	return r
 }
 
+// Start 启动定时刷新调度。
 func (r *Refresher) Start() { r.cron.Start() }
-func (r *Refresher) Stop()  { r.cron.Stop() }
+
+// Stop 停止定时刷新调度。
+func (r *Refresher) Stop() { r.cron.Stop() }
 
 // runScheduled cron 定时调用的入口：刷新失败仅记录日志，不中断调度。
 func (r *Refresher) runScheduled() {

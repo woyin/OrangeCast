@@ -170,6 +170,7 @@ type SearchHit struct {
 	Snippet    string
 }
 
+// GetJob 按 ID 查询单个处理任务。
 func (s *Store) GetJob(ctx context.Context, jobID string) (*models.ProcessingJob, error) {
 	j := &models.ProcessingJob{}
 	err := s.DB.QueryRowContext(ctx,

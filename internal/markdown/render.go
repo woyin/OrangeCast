@@ -12,7 +12,6 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
-// Input 渲染所需的全部数据。
 // GeneratedBlock 一个待下沉的 GeneratedDerivative 块（ADR-0018 R4）。
 // 由 Paraphrase 或 Owner 手选的 StudyChat 回答构成；下沉到 KnowledgeNote 时
 // 明确标注为 AI 讲解、非原文，并挂 Reference 链接（?ref=），与 Citation 块视觉区分。

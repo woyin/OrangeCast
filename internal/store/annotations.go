@@ -16,6 +16,8 @@ import (
 
 // ---- Annotation ----
 
+// Annotation 用户在某个 Citation 上附加的个人文字注解（ADR-0017）。
+// 锚定在 (source_type, source_id, segment_ids) 上，保证证据不变则标注不丢。
 type Annotation struct {
 	ID           string
 	SourceType   models.SourceType
@@ -29,6 +31,7 @@ type Annotation struct {
 	UpdatedAt    string
 }
 
+// UpsertAnnotation 新增或（按同一锚点）更新一条标注。
 func (s *Store) UpsertAnnotation(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, body string) (*Annotation, error) {
 	id := uuid.NewString()
 	_, err := s.DB.ExecContext(ctx,
@@ -42,6 +45,7 @@ func (s *Store) UpsertAnnotation(ctx context.Context, sourceType models.SourceTy
 	return s.GetAnnotation(ctx, sourceType, sourceID, segmentIDs)
 }
 
+// GetAnnotation 按锚点查询单条标注。
 func (s *Store) GetAnnotation(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string) (*Annotation, error) {
 	a := &Annotation{}
 	err := s.DB.QueryRowContext(ctx,
@@ -55,6 +59,7 @@ func (s *Store) GetAnnotation(ctx context.Context, sourceType models.SourceType,
 	return a, err
 }
 
+// ListAnnotations 返回全部标注（按更新时间倒序）。
 func (s *Store) ListAnnotations(ctx context.Context) ([]*Annotation, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, body, created_at, updated_at
@@ -74,6 +79,7 @@ func (s *Store) ListAnnotations(ctx context.Context) ([]*Annotation, error) {
 	return out, rows.Err()
 }
 
+// DeleteAnnotation 按锚点删除一条标注。
 func (s *Store) DeleteAnnotation(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`DELETE FROM annotations WHERE source_type=? AND source_id=? AND segment_ids=?`,
@@ -83,6 +89,8 @@ func (s *Store) DeleteAnnotation(ctx context.Context, sourceType models.SourceTy
 
 // ---- Pin ----
 
+// Pin 用户标记某个 Citation“值得记住”的轻量动作（ADR-0017）。
+// Pin 是 CloudWisePod 内标记，不等于沉淀到知识库的 KnowledgeNote。
 type Pin struct {
 	SourceType   models.SourceType
 	SourceID     string
@@ -95,6 +103,7 @@ type Pin struct {
 	CreatedAt    string
 }
 
+// TogglePin 切换某锚点的收藏状态（已收藏则取消，未收藏则添加），并返回新状态。
 func (s *Store) TogglePin(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, sourceTitle string) (bool, error) {
 	// 检查是否已 pin
 	var existing string
@@ -118,6 +127,7 @@ func (s *Store) TogglePin(ctx context.Context, sourceType models.SourceType, sou
 	return true, err
 }
 
+// ListPins 返回全部收藏（按创建时间倒序）。
 func (s *Store) ListPins(ctx context.Context) ([]*Pin, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note, created_at
@@ -137,6 +147,7 @@ func (s *Store) ListPins(ctx context.Context) ([]*Pin, error) {
 	return out, rows.Err()
 }
 
+// IsPinned 判断某锚点当前是否已收藏。
 func (s *Store) IsPinned(ctx context.Context, sourceType models.SourceType, sourceID, segmentIDs string) bool {
 	var n int
 	s.DB.QueryRowContext(ctx,
@@ -147,6 +158,8 @@ func (s *Store) IsPinned(ctx context.Context, sourceType models.SourceType, sour
 
 // ---- Collection ----
 
+// Collection 用户按自定义主题组织跨 Source 的 Citation 的组（ADR-0017）。
+// 按主题组织而非按 Source；ItemCount 是聚合字段，仅在 ListCollections 中填充。
 type Collection struct {
 	ID          string
 	Title       string
@@ -171,6 +184,7 @@ type CollectionItem struct {
 	AddedAt      string
 }
 
+// CreateCollection 创建新集合。
 func (s *Store) CreateCollection(ctx context.Context, title, description string) (*Collection, error) {
 	id := uuid.NewString()
 	_, err := s.DB.ExecContext(ctx,
@@ -182,6 +196,7 @@ func (s *Store) CreateCollection(ctx context.Context, title, description string)
 	return s.GetCollection(ctx, id)
 }
 
+// GetCollection 按 ID 查询单个集合。
 func (s *Store) GetCollection(ctx context.Context, id string) (*Collection, error) {
 	c := &Collection{}
 	err := s.DB.QueryRowContext(ctx,
@@ -193,6 +208,7 @@ func (s *Store) GetCollection(ctx context.Context, id string) (*Collection, erro
 	return c, err
 }
 
+// ListCollections 返回全部集合（含每个集合的成员数，按更新时间倒序）。
 func (s *Store) ListCollections(ctx context.Context) ([]*Collection, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT c.id, c.title, COALESCE(c.description,''), c.created_at, c.updated_at,
@@ -213,6 +229,7 @@ func (s *Store) ListCollections(ctx context.Context) ([]*Collection, error) {
 	return out, rows.Err()
 }
 
+// AddToCollection 把一个 Citation 关联加入集合（已存在则忽略）。
 func (s *Store) AddToCollection(ctx context.Context, collectionID string, sourceType models.SourceType, sourceID, segmentIDs string, timeStart, timeEnd float64, sourceTitle, note string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT OR IGNORE INTO collection_items (collection_id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note)
@@ -225,6 +242,7 @@ func (s *Store) AddToCollection(ctx context.Context, collectionID string, source
 	return err
 }
 
+// ListCollectionItems 返回某集合的全部成员（按加入时间倒序）。
 func (s *Store) ListCollectionItems(ctx context.Context, collectionID string) ([]*CollectionItem, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT collection_id, source_type, source_id, segment_ids, relation_kind, time_start, time_end, source_title, note, added_at
@@ -244,6 +262,7 @@ func (s *Store) ListCollectionItems(ctx context.Context, collectionID string) ([
 	return out, rows.Err()
 }
 
+// RemoveFromCollection 把某个 Citation 关联移出集合。
 func (s *Store) RemoveFromCollection(ctx context.Context, collectionID string, sourceType models.SourceType, sourceID, segmentIDs string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`DELETE FROM collection_items WHERE collection_id=? AND source_type=? AND source_id=? AND segment_ids=?`,
@@ -251,6 +270,7 @@ func (s *Store) RemoveFromCollection(ctx context.Context, collectionID string, s
 	return err
 }
 
+// DeleteCollection 删除整个集合。
 func (s *Store) DeleteCollection(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM collections WHERE id=?`, id)
 	return err

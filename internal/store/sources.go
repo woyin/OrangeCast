@@ -13,6 +13,7 @@ func (s *Store) UpdateEpisodeStatus(ctx context.Context, id string, status model
 	return err
 }
 
+// UpdateUploadStatus 更新手动上传单的处理状态。
 func (s *Store) UpdateUploadStatus(ctx context.Context, id string, status models.EpisodeProcessingStatus) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE uploads SET processing_status = ? WHERE id = ?`, string(status), id)

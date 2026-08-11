@@ -14,9 +14,12 @@ import (
 type ArtifactKind string
 
 const (
-	KindTranscript    ArtifactKind = "transcript"
+	// KindTranscript 产物类型：转录稿。
+	KindTranscript ArtifactKind = "transcript"
+	// KindKnowledgeCard 产物类型：知识卡片。
 	KindKnowledgeCard ArtifactKind = "knowledge_card"
-	KindHighlight     ArtifactKind = "highlight"
+	// KindHighlight 产物类型：高光片段。
+	KindHighlight ArtifactKind = "highlight"
 )
 
 // CreateArtifactVersion 创建不可变产物版本并返回版本号。

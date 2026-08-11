@@ -22,6 +22,7 @@ func (s *Store) CreatePodcast(ctx context.Context, feedURL, title, description, 
 	return s.GetPodcastByID(ctx, id)
 }
 
+// GetPodcastByID 按 ID 查询单个播客订阅。
 func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast, error) {
 	p := &models.Podcast{}
 	err := s.DB.QueryRowContext(ctx,
@@ -116,6 +117,7 @@ func (s *Store) MergeEpisodes(ctx context.Context, podcastID string, eps []model
 	return inserted, tx.Commit()
 }
 
+// ListEpisodes 返回某播客下的全部单集。
 func (s *Store) ListEpisodes(ctx context.Context, podcastID string) ([]*models.Episode, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, podcast_id, guid, title, COALESCE(description,''), audio_url, duration_seconds, published_at, processing_status, created_at
@@ -135,6 +137,7 @@ func (s *Store) ListEpisodes(ctx context.Context, podcastID string) ([]*models.E
 	return out, rows.Err()
 }
 
+// GetEpisodeByID 按 ID 查询单个播客单集。
 func (s *Store) GetEpisodeByID(ctx context.Context, id string) (*models.Episode, error) {
 	e := &models.Episode{}
 	err := s.DB.QueryRowContext(ctx,
@@ -166,6 +169,7 @@ func (s *Store) CreateUpload(ctx context.Context, filename, contentType string, 
 	return u, nil
 }
 
+// GetUploadByID 按 ID 查询单个手动上传。
 func (s *Store) GetUploadByID(ctx context.Context, id string) (*models.Upload, error) {
 	u := &models.Upload{}
 	err := s.DB.QueryRowContext(ctx,
@@ -181,6 +185,7 @@ func (s *Store) GetUploadByID(ctx context.Context, id string) (*models.Upload, e
 	return u, nil
 }
 
+// ListUploads 返回全部手动上传单。
 func (s *Store) ListUploads(ctx context.Context) ([]*models.Upload, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, original_filename, content_type, size_bytes, duration_seconds, processing_status, created_at

@@ -37,6 +37,7 @@ func NewGroqProvider(apiKey string) *GroqProvider {
 	return &GroqProvider{apiKey: apiKey}
 }
 
+// Name 返回 Provider 标识（"groq"）。
 func (g *GroqProvider) Name() string { return "groq" }
 
 // base 返回 API base URL（未覆盖时用默认 groqBaseURL）。
