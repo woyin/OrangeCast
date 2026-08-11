@@ -214,7 +214,7 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 
 ### 覆盖率门槛
 
-各包当前基线（`go test -cover ./...`）：
+各包当前基线由 `make cover` / `make cover-gate` 实测生成（运行 `make cover-gate` 即可断言全部门禁是否通过）：
 
 | 包 | 覆盖率 |
 |---|---|
@@ -230,9 +230,15 @@ handler/store 内部的 `return err` 分支用 `DROP TABLE xxx` 制造查询/写
 | provider | 99% |
 | queue | 99% |
 | store | 98% |
-| backup | 91% |
+| backup | 95% |
+
+门禁规则（`scripts/cover-gate.sh`）：每个有测试的包语句覆盖率必须 `>= 95%`，否则 CI/本地 `make cover-gate` 失败。豁免列表当前仅含 `internal/models`（纯类型/常量声明，无可执行语句，0% 是覆盖率测量假象）。`backup` 已通过注入最小测试缝（见 `internal/backup/backup.go` 顶部注释）将 tar/gzip 写入错误分支纳入测试，从 91% 提升至 95%。
 
 新增公开函数应附带对应测试；修复 bug 应先加一个能复现该 bug 的测试（TDD）。
+
+### 注释门槛
+
+导入 `revive` 并配置 `exported` 规则（`revive.toml`）：强制每个导出符号都有以其自身名称开头的 Godoc 注释（形如 `Name ...`）。`make lint` / CI `make lint` 遇到任何违规则即失败。
 
 ## 下一版本 Definition of Done
 

@@ -32,3 +32,14 @@ jobs:
 
       - name: go build
         run: go build ./cmd/cloudwisepod
+
+      - name: make cover-gate
+        run: |
+          go test -coverprofile=/dev/null ./... # 预热，使 -cover 命中缓存更快、输出稳定
+          make cover-gate
+
+      - name: make lint
+        run: |
+          go install github.com/mgechev/revive@latest
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          make lint

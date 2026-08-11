@@ -9,8 +9,10 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -953,6 +955,275 @@ func TestRestore_DBCopyTruncated(t *testing.T) {
 	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
 		t.Fatal("DB 条目内容截断应报错")
 	}
+}
+
+// TestCreate_EmptyEvidenceDir 验证空证据目录打包成功（零 evidence 条目）。
+func TestCreate_EmptyEvidenceDir(t *testing.T) {
+	dataDir := t.TempDir()
+	storeDir := filepath.Join(dataDir, "db")
+	os.MkdirAll(filepath.Join(storeDir, "evidence"), 0o755)
+	s, err := store.Open(filepath.Join(storeDir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	ctx := context.Background()
+	u, err := s.ClaimOwner(ctx, "owner@example.com", "$argon2id$fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = u
+
+	backupFile := filepath.Join(t.TempDir(), "empty.tar.gz")
+	m, err := Create(ctx, s, filepath.Join(storeDir, "evidence"), backupFile)
+	if err != nil {
+		t.Fatalf("空证据目录 Create: %v", err)
+	}
+	if len(m.Evidence) != 0 {
+		t.Fatalf("空证据目录应产生 0 个 evidence 条目，实际 %d", len(m.Evidence))
+	}
+	fi, err := os.Stat(backupFile)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("空 dir 备份包不应为空: %v", err)
+	}
+	f, err := os.Open(backupFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	var names []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("读 tar: %v", err)
+		}
+		names = append(names, hdr.Name)
+	}
+	if !slices.Contains(names, manifestFileName) || !slices.Contains(names, dbFileName) {
+		t.Fatalf("包应含 manifest 与 db，实际 %v", names)
+	}
+	for _, n := range names {
+		if strings.HasPrefix(n, evidenceDirPrefix) {
+			t.Fatalf("空证据目录包不应含 evidence 条目: %v", names)
+		}
+	}
+}
+
+// TestCreate_ArchiveContainsEvidence 验证成功路径产出可打开的 tar.gz，且含 manifest/db/证据条目。
+func TestCreate_ArchiveContainsEvidence(t *testing.T) {
+	srcDir := t.TempDir()
+	srcStore := buildFixture(t, srcDir)
+	backupFile := filepath.Join(t.TempDir(), "real.tar.gz")
+	m, err := Create(context.Background(), srcStore, filepath.Join(srcDir, "evidence"), backupFile)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(m.Evidence) != 1 {
+		t.Fatalf("应 1 个证据，实际 %d", len(m.Evidence))
+	}
+	f, err := os.Open(backupFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	var names []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("读 tar: %v", err)
+		}
+		names = append(names, hdr.Name)
+	}
+	wantPrefixes := []string{manifestFileName, dbFileName, evidenceDirPrefix}
+	for _, wp := range wantPrefixes {
+		found := false
+		for _, n := range names {
+			if strings.HasPrefix(n, wp) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("归档缺少 %q 前缀条目，实际 %v", wp, names)
+		}
+	}
+}
+
+// ---- 测试缝（test seam）注入：模拟归档写入失败分支 ----
+
+// failTarWriter 是一个 archiveTWriter 伪造实现，可让 WriteHeader/Write/Close 返回指定错误。
+type failTarWriter struct {
+	writeHeaderErr error
+	writeErr       error
+	closeErr       error
+}
+
+func (f *failTarWriter) WriteHeader(_ *tar.Header) error { return f.writeHeaderErr }
+func (f *failTarWriter) Write(p []byte) (int, error)    { return 0, f.writeErr }
+func (f *failTarWriter) Close() error                   { return f.closeErr }
+
+// failGzipWriter 是一个 *gzip.Writer 兼容的包装，用于让 gz.Close 失败。
+// 实际 Create 期望 *gzip.Writer；这里我们用新 gzip 写入一个会吞错误的底层 writer。
+
+// restoreArchiveSeam 保存并恢复三个测试缝工厂，保证测试不互相泄漏。
+func restoreArchiveSeam(t *testing.T) {
+	t.Helper()
+	origGz := newGzipWriter
+	origTw := newTarWriter
+	origOpen := openArchiveSrc
+	t.Cleanup(func() {
+		newGzipWriter = origGz
+		newTarWriter = origTw
+		openArchiveSrc = origOpen
+	})
+}
+
+// setupArchiveFixture 复用 buildFixture 并返回备份目标路径。
+func setupArchiveFixture(t *testing.T) (srcDir, backupFile string) {
+	srcDir = t.TempDir()
+	buildFixture(t, srcDir)
+	backupFile = filepath.Join(t.TempDir(), "b.tar.gz")
+	return
+}
+
+// TestCreate_TarWriterHeaderFails 覆盖 writeFile 中 tw.WriteHeader 失败分支（DB & evidence）。
+func TestCreate_TarWriterHeaderFails(t *testing.T) {
+	restoreArchiveSeam(t)
+	_, backupFile := setupArchiveFixture(t)
+
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	newTarWriter = func(_ io.Writer) archiveTWriter {
+		// manifest 的 WriteHeader 允许通过；仅后续（writeFile 的 DB/evidence）WriteHeader 失败
+		return &failAfterFirstWriter{}
+	}
+	srcDir := t.TempDir()
+	s := openMiniStore(t, srcDir)
+	if _, err := Create(context.Background(), s, filepath.Join(srcDir, "evidence"), backupFile); err == nil {
+		t.Fatal("tar WriteHeader 失败应让 Create 报错")
+	}
+}
+
+// failAfterFirstWriter 第一次 WriteHeader（manifest）成功，之后 WriteHeader 全部失败。
+type failAfterFirstWriter struct {
+	wrote bool
+}
+
+func (f *failAfterFirstWriter) WriteHeader(h *tar.Header) error {
+	if !f.wrote {
+		f.wrote = true
+		return nil
+	}
+	return io.ErrClosedPipe
+}
+func (f *failAfterFirstWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (f *failAfterFirstWriter) Close() error                { return nil }
+
+// TestCreate_TarWriterManifestHeaderFails 覆盖 manifest 写入 tw.WriteHeader 失败分支（第一次调用即失败）。
+func TestCreate_TarWriterManifestHeaderFails(t *testing.T) {
+	restoreArchiveSeam(t)
+	_, backupFile := setupArchiveFixture(t)
+
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	newTarWriter = func(_ io.Writer) archiveTWriter {
+		return &failTarWriter{writeHeaderErr: io.ErrUnexpectedEOF}
+	}
+	srcDir := t.TempDir()
+	s := openMiniStore(t, srcDir)
+	if _, err := Create(context.Background(), s, filepath.Join(srcDir, "evidence"), backupFile); err == nil {
+		t.Fatal("manifest WriteHeader 失败应让 Create 报错")
+	}
+}
+
+// TestCreate_TarWriterWriteFails 覆盖 manifest tw.Write 失败分支。
+func TestCreate_TarWriterWriteFails(t *testing.T) {
+	restoreArchiveSeam(t)
+	_, backupFile := setupArchiveFixture(t)
+
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	newTarWriter = func(_ io.Writer) archiveTWriter {
+		// WriteHeader 成功，Write 失败
+		return &failTarWriter{writeErr: io.ErrShortWrite}
+	}
+	srcDir := t.TempDir()
+	s := openMiniStore(t, srcDir)
+	if _, err := Create(context.Background(), s, filepath.Join(srcDir, "evidence"), backupFile); err == nil {
+		t.Fatal("manifest Write 失败应让 Create 报错")
+	}
+}
+
+// TestCreate_TarWriterCloseFails 覆盖 tw.Close 失败分支。
+func TestCreate_TarWriterCloseFails(t *testing.T) {
+	restoreArchiveSeam(t)
+	_, backupFile := setupArchiveFixture(t)
+
+	// 需要 tar 写入能真正跑完，仅 Close 失败：用一个透传 tar writer，但把 Close 包成报错
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	orig := newTarWriter
+	newTarWriter = func(w io.Writer) archiveTWriter {
+		tw := orig(w)
+		return &closeFailingTarWriter{archiveTWriter: tw}
+	}
+	srcDir := t.TempDir()
+	s := openMiniStore(t, srcDir)
+	if _, err := Create(context.Background(), s, filepath.Join(srcDir, "evidence"), backupFile); err == nil {
+		t.Fatal("tar Close 失败应让 Create 报错")
+	}
+}
+
+// closeFailingTarWriter 包装真 tar.Writer 并让 Close 返回错误。
+type closeFailingTarWriter struct {
+	archiveTWriter
+}
+
+func (c *closeFailingTarWriter) Close() error { return io.ErrClosedPipe }
+
+// TestCreate_OpenSourceFails 覆盖 writeFile 中 openArchiveSrc 打开失败分支。
+func TestCreate_OpenSourceFails(t *testing.T) {
+	restoreArchiveSeam(t)
+	_, backupFile := setupArchiveFixture(t)
+
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	// tar 写入正常，但打开源文件失败
+	newTarWriter = func(w io.Writer) archiveTWriter { return tar.NewWriter(w) }
+	openArchiveSrc = func(_ string) (io.ReadCloser, error) { return nil, os.ErrPermission }
+	srcDir := t.TempDir()
+	s := openMiniStore(t, srcDir)
+	if _, err := Create(context.Background(), s, filepath.Join(srcDir, "evidence"), backupFile); err == nil {
+		t.Fatal("源文件打开失败应让 Create 报错")
+	}
+}
+
+// openMiniStore 打开一个最小可用的 store（用于测试缝用例，不构造完整证据）。
+func openMiniStore(t *testing.T, dataDir string) *store.Store {
+	t.Helper()
+	os.MkdirAll(filepath.Join(dataDir, "evidence"), 0o755)
+	s, err := store.Open(filepath.Join(dataDir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.ClaimOwner(context.Background(), "owner@example.com", "$argon2id$fixture"); err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 // TestCreate_MultipleEvidenceSort 验证多个证据文件时排序比较器执行。

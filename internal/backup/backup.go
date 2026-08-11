@@ -29,6 +29,24 @@ import (
 	"github.com/woyin/orangecast/internal/store"
 )
 
+// archiveTWriter 描述 Create 写入归档所需的最小 tar 写入能力，便于测试注入伪造失败。
+type archiveTWriter interface {
+	WriteHeader(*tar.Header) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+// 以下工厂变量仅作为测试缝（test seam），通过替换实现来模拟归档写入失败分支。
+// 默认实现使用标准库，行为与重构前完全一致；生产代码不修改它们。
+var (
+	// newGzipWriter 创建 gzip 写入器。
+	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	// newTarWriter 创建 tar 写入器。
+	newTarWriter = func(w io.Writer) archiveTWriter { return tar.NewWriter(w) }
+	// openArchiveSrc 打开将被写入归档的源文件。
+	openArchiveSrc = func(p string) (io.ReadCloser, error) { return os.Open(p) }
+)
+
 // ManifestFormat 备份包格式标识与版本。
 const (
 	ManifestFormat    = "cloudwisepod-backup"
@@ -116,15 +134,15 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 		return m, err
 	}
 	defer f.Close()
-	gz := gzip.NewWriter(f)
-	tw := tar.NewWriter(gz)
+	gz := newGzipWriter(f)
+	tw := newTarWriter(gz)
 
 	writeFile := func(name, path string, size int64) error {
 		hdr := &tar.Header{Name: name, Mode: 0o644, Size: size, ModTime: time.Unix(0, 0)}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
-		src, err := os.Open(path)
+		src, err := openArchiveSrc(path)
 		if err != nil {
 			return err
 		}

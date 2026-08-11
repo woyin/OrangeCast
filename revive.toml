@@ -1,0 +1,10 @@
+# revive 配置：强制导出符号文档注释。
+#
+# exported —— 导出标识符必须有注释，且注释必须以符号名开头（形如 "Name ..."）。
+# 该规则内置了 comment-formatting 语义（前缀不匹配会报 "should be of the form 'Name ...'"），
+# 正是项目自治目标里"每个导出符号注释以符号名开头"的完整实现。revive 无独立
+# commentformatting 规则，故仅启用 exported 一项。其余规则保持默认关闭，避免在既
+# 有代码上引入大规模噪音。
+conf = "default"
+
+[rule.exported]
