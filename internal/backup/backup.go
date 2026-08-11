@@ -36,11 +36,17 @@ type archiveTWriter interface {
 	Close() error
 }
 
+// archiveGWriter 描述 Create 需要的 gzip 层能力（Write + Close），便于测试注入伪造 Close 失败。
+type archiveGWriter interface {
+	Write([]byte) (int, error)
+	Close() error
+}
+
 // 以下工厂变量仅作为测试缝（test seam），通过替换实现来模拟归档写入失败分支。
 // 默认实现使用标准库，行为与重构前完全一致；生产代码不修改它们。
 var (
 	// newGzipWriter 创建 gzip 写入器。
-	newGzipWriter = func(w io.Writer) *gzip.Writer { return gzip.NewWriter(w) }
+	newGzipWriter = func(w io.Writer) archiveGWriter { return gzip.NewWriter(w) }
 	// newTarWriter 创建 tar 写入器。
 	newTarWriter = func(w io.Writer) archiveTWriter { return tar.NewWriter(w) }
 	// openArchiveSrc 打开将被写入归档的源文件。
