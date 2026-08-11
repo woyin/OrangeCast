@@ -13,6 +13,8 @@ import (
 	"github.com/woyin/orangecast/internal/store"
 )
 
+// ===--- 证据问答 EvidenceQA（CitedDerivative）---===
+//
 // handleEvidenceQA 处理单 Source 证据问答（EvidenceQA，ADR-0018）。
 // EvidenceQA 属 CitedDerivative：回答必须挂 Citation、证据不足拒答（ADR-0008），
 // 与 Phase E 新增的 StudyChat（GeneratedDerivative，挂 Reference、不拒答）并存且不可混淆。
@@ -71,6 +73,8 @@ func evidenceQAResultToResponse(res *provider.QAResult) (int, map[string]any) {
 	}
 }
 
+// ===--- 复述讲解 Paraphrase（GeneratedDerivative）---===
+//
 // handleParaphrase 处理复述讲解（Paraphrase，GeneratedDerivative，ADR-0018 R2）。
 //
 // Owner 在阅读转录稿时对某段（或某区间）触发"重讲"。系统：
@@ -145,6 +149,8 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ===--- 学习对话 StudyChat（GeneratedDerivative）---===
+//
 // handleStudyChat 处理学习对话（StudyChat，GeneratedDerivative，ADR-0018 R3）。
 //
 // 两条硬约束防止 GeneratedDerivative 退化为通用幻觉聊天助手：
