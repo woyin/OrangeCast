@@ -24,6 +24,12 @@ jobs:
       - name: Download deps
         run: go mod download
 
+      - name: Install ffmpeg (测试依赖)
+        # queue 包的 ffmpeg/ffprobe 实测依赖：无则大量测试被 t.Skip 跳过，覆盖率不完整。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+        
       - name: go vet
         run: go vet ./...
 
