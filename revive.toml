@@ -8,3 +8,6 @@
 conf = "default"
 
 [rule.exported]
+arguments = ["disableStutteringCheck"]
+# disableStutteringCheck：关闭对"包名+类型名"拼接如 provider.ProviderBundle 的重复前缀告警。
+# 这类命名本身合法且已广泛使用，stutter 检查只是噪音；我们只保留"有注释且以符号名开头"的强制。
