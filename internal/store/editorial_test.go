@@ -126,6 +126,10 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if err != nil || mapRow.ID == "" {
 		t.Fatalf("create evidence map: row=%+v err=%v", mapRow, err)
 	}
+	maps, err := s.ListEvidenceMaps(ctx, first.ID)
+	if err != nil || len(maps) != 1 || maps[0].ID != mapRow.ID {
+		t.Fatalf("evidence maps should list exact revision mappings: maps=%+v err=%v", maps, err)
+	}
 	if ready, err := s.IsRevisionReadyForPublication(ctx, first.ID); err != nil || ready {
 		t.Fatalf("unreviewed revision must not be ready: ready=%v err=%v", ready, err)
 	}
@@ -190,6 +194,32 @@ func TestListArticleBriefsReturnsQueryError(t *testing.T) {
 	}
 	if _, err := s.ListArticleBriefs(context.Background(), "profile"); err == nil {
 		t.Fatal("missing article_briefs table should return query error")
+	}
+}
+
+func TestListEvidenceMapsReturnsQueryError(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListEvidenceMaps(context.Background(), "revision"); err == nil {
+		t.Fatal("missing evidence_maps table should return query error")
+	}
+}
+
+func TestListEvidenceMapsReturnsScanError(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`CREATE TABLE evidence_maps (id TEXT, revision_id TEXT, kind TEXT, excerpt TEXT, keypoint_ids_json TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO evidence_maps (revision_id, kind, excerpt, keypoint_ids_json) VALUES ('r', 'quoted', 'x', '[]')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListEvidenceMaps(context.Background(), "r"); err == nil {
+		t.Fatal("NULL id should return scan error")
 	}
 }
 

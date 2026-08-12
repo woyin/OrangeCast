@@ -468,6 +468,55 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if err := srv.store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_maps WHERE revision_id=?`, revisions[0].ID).Scan(&maps); err != nil || maps != 1 {
 		t.Fatalf("writer evidence map should persist: count=%d err=%v", maps, err)
 	}
+	if _, err := srv.store.CreateArticleReview(t.Context(), models.ArticleReview{RevisionID: revisions[0].ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package")
+	if packagePage.Code != http.StatusOK || !strings.Contains(packagePage.Body.String(), "单集") || !strings.Contains(packagePage.Body.String(), "可复制富文本") {
+		t.Fatalf("ready revision should render publication package: status=%d body=%s", packagePage.Code, packagePage.Body.String())
+	}
+	download := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package?format=markdown")
+	if download.Code != http.StatusOK || !strings.Contains(download.Body.String(), "## 来源") || !strings.Contains(download.Header().Get("Content-Type"), "text/markdown") {
+		t.Fatalf("package download should contain Markdown and sources: status=%d header=%q body=%s", download.Code, download.Header().Get("Content-Type"), download.Body.String())
+	}
+	blocked, err := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: drafts[0].ID, Title: "未审校", Markdown: "# 未审校", Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedPage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+blocked.ID+"/package")
+	if blockedPage.Code != http.StatusConflict {
+		t.Fatalf("unreviewed revision must not produce package: %d", blockedPage.Code)
+	}
+	if missing := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/missing/package"); missing.Code != http.StatusNotFound {
+		t.Fatalf("missing revision must not produce package: %d", missing.Code)
+	}
+	malformedReq := httptest.NewRequest(http.MethodGet, "/workbench/revisions//package", nil)
+	malformedRec := httptest.NewRecorder()
+	srv.handlePublicationPackage(malformedRec, malformedReq)
+	if malformedRec.Code != http.StatusNotFound {
+		t.Fatalf("malformed package path must be 404: %d", malformedRec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json='broken' WHERE revision_id=?`, revisions[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if invalidMap := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); invalidMap.Code != http.StatusInternalServerError {
+		t.Fatalf("invalid evidence map must block package: %d", invalidMap.Code)
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json=? WHERE revision_id=?`, "[\""+keyPoints[0].ID+"\"]", revisions[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DELETE FROM keypoint_index WHERE id=?`, keyPoints[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if missingSource := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); missingSource.Code != http.StatusInternalServerError {
+		t.Fatalf("missing evidence source must block package: %d", missingSource.Code)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
+		t.Fatal(err)
+	}
+	if missingMaps := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); missingMaps.Code != http.StatusInternalServerError {
+		t.Fatalf("missing evidence mappings must block package: %d", missingMaps.Code)
+	}
 }
 
 func TestWriterRejectsUnconfirmedMaterialsAndProviderFailures(t *testing.T) {

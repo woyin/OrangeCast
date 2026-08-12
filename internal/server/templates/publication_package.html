@@ -1,0 +1,15 @@
+{{define "title"}}{{.Revision.Title}} · 公众号内容包{{end}}
+{{define "content"}}
+<div class="page-head"><h1>公众号内容包</h1><a class="btn btn-secondary" href="/workbench/drafts/{{.Revision.DraftID}}">返回文章</a></div>
+<p class="meta">Revision v{{.Revision.Version}} 已通过证据审校。复制下方富文本，或下载 Markdown。</p>
+<p><a class="btn" href="/workbench/revisions/{{.Revision.ID}}/package?format=markdown">下载 Markdown</a></p>
+<section class="panel"><h2>可复制富文本</h2><div id="wechat-richtext" class="publication-richtext">{{.RichHTML}}</div><button class="btn" id="copy-richtext" type="button">复制富文本</button></section>
+<section class="panel" style="margin-top:1rem"><h2>实际使用来源</h2><ul>{{range .Sources}}<li>{{.}}</li>{{else}}<li>无外部来源</li>{{end}}</ul></section>
+<script>
+document.getElementById('copy-richtext').addEventListener('click', async function () {
+  const source = document.getElementById('wechat-richtext');
+  try { await navigator.clipboard.write([new ClipboardItem({'text/html': new Blob([source.innerHTML], {type:'text/html'}), 'text/plain': new Blob([source.innerText], {type:'text/plain'})})]); this.textContent = '已复制'; }
+  catch (_) { window.getSelection().selectAllChildren(source); this.textContent = '已选中，请复制'; }
+});
+</script>
+{{end}}

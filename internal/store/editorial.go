@@ -517,6 +517,25 @@ func (s *Store) CreateEvidenceMap(ctx context.Context, evidence models.EvidenceM
 	return &evidence, nil
 }
 
+// ListEvidenceMaps returns the persisted semantic evidence relationships for one exact revision.
+func (s *Store) ListEvidenceMaps(ctx context.Context, revisionID string) ([]*models.EvidenceMap, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, revision_id, kind, excerpt, keypoint_ids_json, created_at FROM evidence_maps WHERE revision_id=? ORDER BY created_at, id`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.EvidenceMap
+	for rows.Next() {
+		evidence := &models.EvidenceMap{}
+		if err := rows.Scan(&evidence.ID, &evidence.RevisionID, &evidence.Kind, &evidence.Excerpt, &evidence.KeyPointIDs, &evidence.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, evidence)
+	}
+	return out, rows.Err()
+}
+
 // CreateArticleReview records an independent evidence or style review for one exact revision.
 func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleReview) (*models.ArticleReview, error) {
 	review.ID = uuid.NewString()
