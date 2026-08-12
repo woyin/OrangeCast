@@ -40,6 +40,20 @@ func TestEnqueueJob_OptimisticClaim(t *testing.T) {
 	}
 }
 
+func TestIngestionJobPreservesAutomatedOriginForAnalyzeContinuation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sourceID := seedEpisodeForJob(t, s)
+	transcribe, err := s.EnqueueIngestionJob(ctx, models.SourceEpisode, sourceID, models.JobTranscribe)
+	if err != nil || transcribe == nil || !transcribe.Automated {
+		t.Fatalf("automated transcribe job should persist its origin: job=%+v err=%v", transcribe, err)
+	}
+	analyze, err := s.EnqueueAnalyzeForIngestion(ctx, models.SourceEpisode, sourceID, true)
+	if err != nil || analyze == nil || !analyze.Automated {
+		t.Fatalf("automated analyze job should preserve its origin: job=%+v err=%v", analyze, err)
+	}
+}
+
 func TestMarkJobRunning_PreventsDuplicate(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

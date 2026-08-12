@@ -208,7 +208,7 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 	_ = w.store.RecordUsage(ctx, "transcription", bundle.Transcription.Name(), "", 0, 0, 0)
 
 	// 4) 入队分析任务（已有进行中 analyze 则不重复创建）
-	if _, err := w.store.EnqueueAnalyze(ctx, job.SourceType, job.SourceID); err != nil {
+	if _, err := w.store.EnqueueAnalyzeForIngestion(ctx, job.SourceType, job.SourceID, job.Automated); err != nil {
 		return err
 	}
 	return nil
@@ -265,13 +265,14 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 
 	_ = w.store.RecordUsage(ctx, "analysis", bundle.Analysis.Name(), "", 0, 0, 0)
 
-	// 自动生成 Highlight（ADR-0016：接在分析之后，独立 AI 任务）
-	if err := w.doHighlight(ctx, job, bundle, payload.Segments); err != nil {
-		log.Printf("任务 %s 高光生成失败（不阻塞主流程）: %v", job.ID, err)
-	}
-	// 自动合成 Narration 解说音轨（ADR-0019：紧接 Highlight 后，按段合成，失败不阻塞）
-	if err := w.doNarration(ctx, job, bundle); err != nil {
-		log.Printf("任务 %s Narration 合成失败（不阻塞主流程）: %v", job.ID, err)
+	if !job.Automated {
+		// Owner 触发的处理才自动附带可选衍生产物；订阅自动采集止于 KeyPoint。
+		if err := w.doHighlight(ctx, job, bundle, payload.Segments); err != nil {
+			log.Printf("任务 %s 高光生成失败（不阻塞主流程）: %v", job.ID, err)
+		}
+		if err := w.doNarration(ctx, job, bundle); err != nil {
+			log.Printf("任务 %s Narration 合成失败（不阻塞主流程）: %v", job.ID, err)
+		}
 	}
 	return nil
 }

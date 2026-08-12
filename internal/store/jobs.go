@@ -14,6 +14,17 @@ import (
 // EnqueueJob 创建任务并标记 source 为 queued（乐观锁：仅 unprocessed/failed 可入队）。
 // 返回新 job；若 source 不可入队（已在处理中）返回 nil + nil（调用方视情况处理）。
 func (s *Store) EnqueueJob(ctx context.Context, sourceType models.SourceType, sourceID string, jobType models.JobType) (*models.ProcessingJob, error) {
+	return s.enqueueJob(ctx, sourceType, sourceID, jobType, false)
+}
+
+// EnqueueIngestionJob creates a task discovered by an enabled podcast ingestion policy.
+// The origin is preserved through its analyze continuation so automatic intake cannot
+// silently create optional derivative media.
+func (s *Store) EnqueueIngestionJob(ctx context.Context, sourceType models.SourceType, sourceID string, jobType models.JobType) (*models.ProcessingJob, error) {
+	return s.enqueueJob(ctx, sourceType, sourceID, jobType, true)
+}
+
+func (s *Store) enqueueJob(ctx context.Context, sourceType models.SourceType, sourceID string, jobType models.JobType, automated bool) (*models.ProcessingJob, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -39,12 +50,12 @@ func (s *Store) EnqueueJob(ctx context.Context, sourceType models.SourceType, so
 	job := &models.ProcessingJob{
 		ID:         uuid.NewString(),
 		SourceType: sourceType, SourceID: sourceID, JobType: jobType,
-		Status: models.StatusQueued,
+		Status: models.StatusQueued, Automated: automated,
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status)
-		 VALUES (?, ?, ?, ?, ?)`,
-		job.ID, string(job.SourceType), job.SourceID, string(job.JobType), string(job.Status))
+		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, is_automated)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		job.ID, string(job.SourceType), job.SourceID, string(job.JobType), string(job.Status), boolToInt(automated))
 	if err != nil {
 		return nil, fmt.Errorf("插入 job: %w", err)
 	}
@@ -83,6 +94,15 @@ func (s *Store) MarkJobFailed(ctx context.Context, jobID, errMsg string) error {
 // 与 EnqueueJob 不同：此处 source 已处于 transcribed 状态，不触发 source claim，
 // 仅创建 analyze job（若同 source 已有未完成 analyze 则不重复创建）。
 func (s *Store) EnqueueAnalyze(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.ProcessingJob, error) {
+	return s.enqueueAnalyze(ctx, sourceType, sourceID, false)
+}
+
+// EnqueueAnalyzeForIngestion continues a transcript job while preserving its intake origin.
+func (s *Store) EnqueueAnalyzeForIngestion(ctx context.Context, sourceType models.SourceType, sourceID string, automated bool) (*models.ProcessingJob, error) {
+	return s.enqueueAnalyze(ctx, sourceType, sourceID, automated)
+}
+
+func (s *Store) enqueueAnalyze(ctx context.Context, sourceType models.SourceType, sourceID string, automated bool) (*models.ProcessingJob, error) {
 	// 检查是否已有 queued/running 的 analyze job，避免重复
 	var existing string
 	err := s.DB.QueryRowContext(ctx,
@@ -97,12 +117,12 @@ func (s *Store) EnqueueAnalyze(ctx context.Context, sourceType models.SourceType
 	job := &models.ProcessingJob{
 		ID:         uuid.NewString(),
 		SourceType: sourceType, SourceID: sourceID, JobType: models.JobAnalyze,
-		Status: models.StatusQueued,
+		Status: models.StatusQueued, Automated: automated,
 	}
 	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status)
-		 VALUES (?, ?, ?, ?, ?)`,
-		job.ID, string(job.SourceType), job.SourceID, string(job.JobType), string(job.Status))
+		`INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, is_automated)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		job.ID, string(job.SourceType), job.SourceID, string(job.JobType), string(job.Status), boolToInt(automated))
 	if err != nil {
 		return nil, fmt.Errorf("插入 analyze job: %w", err)
 	}
@@ -174,9 +194,9 @@ type SearchHit struct {
 func (s *Store) GetJob(ctx context.Context, jobID string) (*models.ProcessingJob, error) {
 	j := &models.ProcessingJob{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, is_automated, created_at, updated_at
 		 FROM processing_jobs WHERE id = ?`, jobID).
-		Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt)
+		Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.Automated, &j.CreatedAt, &j.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -259,7 +279,7 @@ func (s *Store) HeartbeatJob(ctx context.Context, jobID, leaseDuration string) e
 // ListQueuedOrRunning 列出全部未完成任务（用于测试与诊断）。
 func (s *Store) ListQueuedOrRunning(ctx context.Context) ([]*models.ProcessingJob, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, is_automated, created_at, updated_at
 		 FROM processing_jobs WHERE status IN ('queued','running') ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -268,7 +288,7 @@ func (s *Store) ListQueuedOrRunning(ctx context.Context) ([]*models.ProcessingJo
 	var out []*models.ProcessingJob
 	for rows.Next() {
 		j := &models.ProcessingJob{}
-		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.Automated, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
@@ -285,7 +305,7 @@ type ProcessingProgress struct {
 // GetProcessingProgress 返回当前处理进度。
 func (s *Store) GetProcessingProgress(ctx context.Context) (*ProcessingProgress, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at, COALESCE(current_step,'')
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, is_automated, created_at, updated_at, COALESCE(current_step,'')
 		 FROM processing_jobs WHERE status IN ('running','queued') ORDER BY
 		   CASE WHEN status='running' THEN 0 ELSE 1 END, created_at`)
 	if err != nil {
@@ -296,7 +316,7 @@ func (s *Store) GetProcessingProgress(ctx context.Context) (*ProcessingProgress,
 	for rows.Next() {
 		j := &models.ProcessingJob{}
 		var step string
-		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt, &step); err != nil {
+		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.Automated, &j.CreatedAt, &j.UpdatedAt, &step); err != nil {
 			return nil, err
 		}
 		if j.Status == models.StatusRunning && p.Active == nil {
@@ -342,7 +362,7 @@ func (s *Store) ListRecentCompleted(ctx context.Context, limit int) ([]*models.P
 		limit = 5
 	}
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, created_at, updated_at
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, is_automated, created_at, updated_at
 		 FROM processing_jobs WHERE status IN ('succeeded','failed') ORDER BY updated_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -351,7 +371,7 @@ func (s *Store) ListRecentCompleted(ctx context.Context, limit int) ([]*models.P
 	var out []*models.ProcessingJob
 	for rows.Next() {
 		j := &models.ProcessingJob{}
-		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		if err := rows.Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.Automated, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, j)

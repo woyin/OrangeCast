@@ -47,8 +47,8 @@ func TestConsistencyBackup_RoundTrip(t *testing.T) {
 	if err := dst.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatalf("备份库读 schema_migrations: %v", err)
 	}
-	if v != 19 {
-		t.Errorf("备份库应包含迁移记录 version=19，实际 %d", v)
+	if v != 20 {
+		t.Errorf("备份库应包含迁移记录 version=20，实际 %d", v)
 	}
 	// 业务数据计数一致
 	srcCounts := countAll(t, src)

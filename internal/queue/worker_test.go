@@ -640,6 +640,37 @@ func TestPipeline_TranscribeThenAnalyze(t *testing.T) {
 	}
 }
 
+func TestPipeline_AutomatedIngestionStopsAfterKeyPoints(t *testing.T) {
+	s, w := newTestWorker(t)
+	injectFakeProviders(t, w, nil, nil)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "automatic.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	job, err := s.EnqueueIngestionJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe)
+	if err != nil || job == nil || !job.Automated {
+		t.Fatalf("automated ingestion job should persist its origin: job=%+v err=%v", job, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("ProcessOne transcribe: %v", err)
+	}
+	pending, err := s.ListQueuedOrRunning(ctx)
+	if err != nil || len(pending) != 1 || pending[0].JobType != models.JobAnalyze || !pending[0].Automated {
+		t.Fatalf("analyze continuation should preserve automated origin: jobs=%+v err=%v", pending, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("ProcessOne analyze: %v", err)
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindKnowledgeCard); err != nil {
+		t.Fatalf("automated ingestion should still create KeyPoint material: %v", err)
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindHighlight); err == nil {
+		t.Fatal("automated ingestion must not create Highlight derivatives")
+	}
+}
+
 // TestPipeline_TranscribeFailure 验证转录失败 → job failed + source failed。
 func TestPipeline_TranscribeFailure(t *testing.T) {
 	s, w := newTestWorker(t)

@@ -80,7 +80,7 @@ func TestRefreshAll_AutoIngestionRespectsPodcastPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs, err := s.ListQueuedOrRunning(ctx)
-	if err != nil || len(jobs) != 1 || jobs[0].JobType != models.JobTranscribe {
+	if err != nil || len(jobs) != 1 || jobs[0].JobType != models.JobTranscribe || !jobs[0].Automated {
 		t.Fatalf("all_new should queue one transcription job: jobs=%+v err=%v", jobs, err)
 	}
 	// 再刷新同一 feed：没有新 Episode，也不能重复入队。

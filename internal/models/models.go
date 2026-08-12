@@ -168,8 +168,11 @@ type ProcessingJob struct {
 	LastError    *string
 	LeaseUntil   *string
 	HeartbeatAt  *string
-	CreatedAt    string
-	UpdatedAt    string
+	// Automated identifies a task created by a podcast ingestion policy rather than an Owner action.
+	// Its analysis may create KeyPoints but must not automatically create derivative media.
+	Automated bool
+	CreatedAt string
+	UpdatedAt string
 }
 
 // ArtifactVersion 不可变产物版本（ADR-0011）：Transcript 或 KnowledgeCard。

@@ -82,7 +82,7 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 			if _, existed := knownCandidates[episode.ID]; existed {
 				continue
 			}
-			if _, err := r.store.EnqueueJob(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe); err != nil {
+			if _, err := r.store.EnqueueIngestionJob(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe); err != nil {
 				return err
 			}
 		}
