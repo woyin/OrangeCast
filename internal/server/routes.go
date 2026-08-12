@@ -47,6 +47,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/themes/create", srv.handleThemeCreate)
 	mux.HandleFunc("/themes/status", srv.handleThemeStatus)
 	mux.HandleFunc("/themes/keypoints", srv.handleThemeKeyPoint)
+	mux.HandleFunc("/themes/scout", srv.handleScoutRun)
 	mux.HandleFunc("/workbench/profiles", srv.handleEditorialProfileCreate)
 	mux.HandleFunc("/workbench/sources", srv.handleEditorialSourceScope)
 	mux.HandleFunc("/workbench/proposals", srv.handleArticleProposalCreate)

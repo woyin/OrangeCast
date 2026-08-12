@@ -90,6 +90,7 @@ type QAProvider interface {
 // ArticleMaterial is one approved KeyPoint available to the Writer. It carries no model-only facts.
 type ArticleMaterial struct {
 	KeyPointID  string   `json:"keyPointId"`
+	SourceID    string   `json:"sourceId"`
 	SourceTitle string   `json:"sourceTitle"`
 	Content     string   `json:"content"`
 	Description string   `json:"description"`
@@ -128,12 +129,49 @@ type ArticleWriterProvider interface {
 	Name() string
 }
 
+// ScoutTheme is a confirmed editorial topic with only its scoped, usable evidence material.
+type ScoutTheme struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Materials   []ArticleMaterial `json:"materials"`
+}
+
+// ScoutRequest supplies a profile's confirmed themes to the topic-discovery role.
+type ScoutRequest struct {
+	Audience string       `json:"audience"`
+	Voice    string       `json:"voice"`
+	Themes   []ScoutTheme `json:"themes"`
+}
+
+// ScoutProposal is a candidate topic that remains proposed until the Owner accepts it.
+type ScoutProposal struct {
+	Kind                 string   `json:"kind"`
+	Title                string   `json:"title"`
+	Thesis               string   `json:"thesis"`
+	Audience             string   `json:"audience"`
+	Rationale            string   `json:"rationale"`
+	CandidateKeyPointIDs []string `json:"candidateKeyPointIds"`
+}
+
+// ScoutResult is deliberately separate from persisted ArticleProposal to validate generated material IDs first.
+type ScoutResult struct {
+	Proposals []ScoutProposal `json:"proposals"`
+}
+
+// ScoutProvider discovers candidate articles from confirmed cross-episode themes.
+type ScoutProvider interface {
+	Scout(request ScoutRequest) (*ScoutResult, error)
+	Name() string
+}
+
 // ProviderBundle 一个 provider 的全套实现。
 type ProviderBundle struct {
 	Transcription TranscriptionProvider
 	Analysis      AnalysisProvider
 	QA            QAProvider
 	Writer        ArticleWriterProvider
+	Scout         ScoutProvider
 	Highlight     HighlightProvider
 	Paraphrase    ParaphraseProvider
 	StudyChat     StudyChatProvider

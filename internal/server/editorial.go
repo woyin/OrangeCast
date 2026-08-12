@@ -159,7 +159,7 @@ func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfi
 		if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil || len(citations) == 0 {
 			return provider.ArticleWritingRequest{}, errors.New("存在无有效 Citation 的 KeyPoint")
 		}
-		request.Materials = append(request.Materials, provider.ArticleMaterial{KeyPointID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content, Description: keyPoint.Description, Citations: citations})
+		request.Materials = append(request.Materials, provider.ArticleMaterial{KeyPointID: keyPoint.ID, SourceID: keyPoint.SourceID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content, Description: keyPoint.Description, Citations: citations})
 	}
 	return request, nil
 }
