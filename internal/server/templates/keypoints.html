@@ -17,10 +17,16 @@
     <p class="meta">
       <a href="/sources/{{.SourceType}}/{{.SourceID}}?t={{.TimeStart}}">{{.SourceTitle}}</a>
       · {{formatTime .TimeStart}} – {{formatTime .TimeEnd}}
-      · {{.CreatedAt}}
+      · {{.CreatedAt}} · {{.Origin}}
     </p>
   </div>
   <div class="kp-actions" style="display:flex;gap:0.5rem;flex-shrink:0">
+    <select class="kp-status" data-kp-id="{{.ID}}" aria-label="内容生产状态">
+      <option value="inbox" {{if eq .ProductionStatus "inbox"}}selected{{end}}>Inbox</option>
+      <option value="shortlisted" {{if eq .ProductionStatus "shortlisted"}}selected{{end}}>Shortlisted</option>
+      <option value="used" {{if eq .ProductionStatus "used"}}selected{{end}}>Used</option>
+      <option value="dismissed" {{if eq .ProductionStatus "dismissed"}}selected{{end}}>Dismissed</option>
+    </select>
     <button class="btn btn-secondary kp-annotate" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">标注</button>
     <button class="btn btn-secondary kp-pin" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">收藏</button>
     <button class="btn btn-secondary kp-collect" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">加入集合</button>
@@ -137,6 +143,20 @@
       const resp = await fetch('/api/pin', { method: 'POST', body: fd });
       const data = await resp.json();
       btn.textContent = data.pinned ? '★ 已收藏' : '收藏';
+    });
+  });
+
+  document.querySelectorAll('.kp-status').forEach(select => {
+    select.addEventListener('change', async () => {
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      fd.append('keypoint_id', select.dataset.kpId);
+      fd.append('status', select.value);
+      const resp = await fetch('/api/keypoints/status', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        alert('更新素材状态失败');
+        location.reload();
+      }
     });
   });
 

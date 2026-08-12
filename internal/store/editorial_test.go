@@ -35,6 +35,10 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if err := s.GrantSourceScope(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
 		t.Fatal(err)
 	}
+	scopes, err := s.ListScopedSources(ctx, profile.ID)
+	if err != nil || len(scopes) != 1 || scopes[0].SourceID != episodes[0].ID {
+		t.Fatalf("scope should list explicit source: scopes=%+v err=%v", scopes, err)
+	}
 	inScope, err := s.IsSourceInScope(ctx, profile.ID, models.SourceEpisode, episodes[0].ID)
 	if err != nil || !inScope {
 		t.Fatalf("source should be explicitly in scope: inScope=%v err=%v", inScope, err)
@@ -197,6 +201,47 @@ func TestArchiveSourceIsReversible(t *testing.T) {
 	}
 }
 
+func TestSourcePolicyGuardsArchivedAndUnapprovedSources(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "owner@example.com")
+	podcast, _ := s.CreatePodcast(ctx, "https://feed.example.com/rss", "Tech Pod", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "episode-1", Title: "Episode", AudioURL: "https://cdn.example.com/ep.mp3"}})
+	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	profile, _ := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: "品牌"})
+	if err := s.GrantSourceScope(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveSource(ctx, models.SourceEpisode, episodes[0].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if usable, err := s.CanUseSourceForPublication(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil || usable {
+		t.Fatalf("archived source must not be usable: usable=%v err=%v", usable, err)
+	}
+	if err := s.ArchiveSource(ctx, models.SourceEpisode, episodes[0].ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSourceProductionPolicy(ctx, models.SourceEpisode, episodes[0].ID, "public", models.ModelDataApprovedProvidersOnly); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.CanSendSourceToExternalProvider(ctx, models.SourceEpisode, episodes[0].ID); err != nil || allowed {
+		t.Fatalf("approved-provider policy needs a later allowlist and must not default external: allowed=%v err=%v", allowed, err)
+	}
+	if err := s.SetSourceProductionPolicy(ctx, models.SourceType("invalid"), episodes[0].ID, "public", models.ModelDataExternalAllowed); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("invalid source type should be rejected: %v", err)
+	}
+	upload, err := s.CreateUpload(ctx, "private.mp3", "audio/mpeg", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSourceProductionPolicy(ctx, models.SourceUpload, upload.ID, "public", models.ModelDataExternalAllowed); err != nil {
+		t.Fatalf("upload policy should use uploads table: %v", err)
+	}
+	if allowed, err := s.CanSendSourceToExternalProvider(ctx, models.SourceUpload, upload.ID); err != nil || !allowed {
+		t.Fatalf("upload external policy should be readable: allowed=%v err=%v", allowed, err)
+	}
+}
+
 func TestEditorialStoreRejectsMissingObjectsAndInvalidTransitions(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -257,6 +302,9 @@ func TestEditorialStoreRejectsMissingObjectsAndInvalidTransitions(t *testing.T) 
 	if _, err := s.GetArticleBrief(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing brief should be ErrNotFound: %v", err)
 	}
+	if _, err := s.CreateArticleDraft(ctx, "missing", "draft"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing brief cannot create draft: %v", err)
+	}
 	if err := s.ConfirmArticleBrief(ctx, "missing"); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("missing brief confirmation should be rejected: %v", err)
 	}
@@ -300,5 +348,31 @@ func TestEditorialStoreRejectsMissingObjectsAndInvalidTransitions(t *testing.T) 
 	}
 	if err := s.RevokeSourceScope(ctx, profile.ID, models.SourceEpisode, "missing"); err != nil {
 		t.Fatalf("revoking an absent scope should be idempotent: %v", err)
+	}
+}
+
+func TestEditorialStoreQueryErrorsSurface(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name  string
+		table string
+		call  func(*Store) error
+	}{
+		{"profiles", "editorial_profiles", func(s *Store) error { _, err := s.ListEditorialProfiles(ctx); return err }},
+		{"proposals", "article_proposals", func(s *Store) error { _, err := s.ListArticleProposals(ctx, "profile"); return err }},
+		{"drafts", "article_drafts", func(s *Store) error { _, err := s.ListArticleDrafts(ctx, "profile"); return err }},
+		{"revisions", "article_revisions", func(s *Store) error { _, err := s.ListArticleRevisions(ctx, "draft"); return err }},
+		{"scopes", "editorial_source_scopes", func(s *Store) error { _, err := s.ListScopedSources(ctx, "profile"); return err }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := newTestStore(t)
+			if _, err := s.DB.ExecContext(ctx, `DROP TABLE `+test.table); err != nil {
+				t.Fatal(err)
+			}
+			if err := test.call(s); err == nil {
+				t.Fatalf("missing %s table should surface a query error", test.table)
+			}
+		})
 	}
 }

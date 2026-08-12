@@ -19,7 +19,20 @@
   <p><strong>读者：</strong>{{if .TargetAudience}}{{.TargetAudience}}{{else}}未设置{{end}}</p>
   <p><strong>语气：</strong>{{if .Voice}}{{.Voice}}{{else}}未设置{{end}}</p>
   <p><strong>来源署名：</strong>{{.SourceAttribution}}</p>
-  <p class="meta">SourceScope、素材 Inbox 与自动提案将在后续工作台阶段接入；当前已建立持久化与权限边界。</p>
+  <p class="meta">只有明确进入素材范围的 Source 才能进入这个品牌的后续选题与写作。</p>
+</section>
+
+<section class="panel" style="margin-top:1rem">
+  <h2>素材范围</h2>
+  <form method="post" action="/workbench/sources" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{.ID}}">
+    <label>类型 <select name="source_type"><option value="episode">Episode</option><option value="upload">Upload</option></select></label>
+    <label>Source ID <input name="source_id" required placeholder="从素材页复制 ID"></label>
+    <button class="btn" type="submit">授权素材</button>
+  </form>
+  {{range $.Scopes}}
+    <div class="list-item"><span>{{.SourceType}} · {{.SourceID}}</span><form method="post" action="/workbench/sources"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><input type="hidden" name="action" value="revoke"><button class="btn btn-secondary" type="submit">移除</button></form></div>
+  {{else}}<p class="empty">尚未授权任何素材。新 Source 默认不会自动进入所有品牌。</p>{{end}}
 </section>
 
 <div class="cards" style="margin-top:1rem">

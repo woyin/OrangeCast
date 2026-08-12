@@ -85,6 +85,132 @@ func TestIndexKeyPoints_ReindexReplaces(t *testing.T) {
 	}
 }
 
+func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "自动要点", Citations: []string{"seg-0001"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	automatic, _, err := s.ListKeyPoints(ctx, 1, 10)
+	if err != nil || len(automatic) != 1 {
+		t.Fatalf("first automatic keypoint: rows=%+v err=%v", automatic, err)
+	}
+	if err := s.SetKeyPointProductionStatus(ctx, automatic[0].ID, models.KeyPointShortlisted); err != nil {
+		t.Fatal(err)
+	}
+	manual, err := s.CreateManualKeyPoint(ctx, KeyPointRow{
+		SourceType: models.SourceEpisode, SourceID: episodes[0].ID, SourceTitle: "ep", Content: "人工补充", Description: "d",
+		CitationsJSON: `["seg-0001"]`, TimeStart: 0, TimeEnd: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 2, card, segs); err != nil {
+		t.Fatal(err)
+	}
+	rows, total, err := s.ListKeyPoints(ctx, 1, 10)
+	if err != nil || total != 2 || len(rows) != 2 {
+		t.Fatalf("manual and automatic keypoints should survive reindex: rows=%+v total=%d err=%v", rows, total, err)
+	}
+	gotAutomatic, err := s.GetKeyPoint(ctx, automatic[0].ID)
+	if err != nil || gotAutomatic.ProductionStatus != models.KeyPointInbox || gotAutomatic.Origin != models.KeyPointAutomatic {
+		t.Fatalf("matching automatic keypoint should keep ID but refresh status: kp=%+v err=%v", gotAutomatic, err)
+	}
+	gotManual, err := s.GetKeyPoint(ctx, manual.ID)
+	if err != nil || gotManual.Origin != models.KeyPointManual || gotManual.ProductionStatus != models.KeyPointInbox {
+		t.Fatalf("manual keypoint should remain independent: kp=%+v err=%v", gotManual, err)
+	}
+}
+
+func TestManualKeyPointValidationAndStatus(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	if _, err := s.CreateManualKeyPoint(ctx, KeyPointRow{SourceType: models.SourceEpisode, SourceID: episodes[0].ID, Content: "x", CitationsJSON: `[]`, TimeEnd: 1}); err == nil {
+		t.Fatal("manual keypoint without citation should fail")
+	}
+	if _, err := s.CreateManualKeyPoint(ctx, KeyPointRow{SourceType: models.SourceEpisode, SourceID: "missing", Content: "x", CitationsJSON: `["seg"]`, TimeEnd: 1}); err != ErrNotFound {
+		t.Fatalf("missing source should return ErrNotFound: %v", err)
+	}
+	manual, err := s.CreateManualKeyPoint(ctx, KeyPointRow{SourceType: models.SourceEpisode, SourceID: episodes[0].ID, SourceTitle: "ep", Content: "x", CitationsJSON: `["seg"]`, TimeEnd: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeyPointProductionStatus(ctx, manual.ID, models.KeyPointUsed); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetKeyPoint(ctx, manual.ID)
+	if err != nil || got.ProductionStatus != models.KeyPointUsed {
+		t.Fatalf("status should persist: kp=%+v err=%v", got, err)
+	}
+	if err := s.SetKeyPointProductionStatus(ctx, manual.ID, models.KeyPointProductionStatus("wrong")); err == nil {
+		t.Fatal("invalid status should fail")
+	}
+	if err := s.SetKeyPointProductionStatus(ctx, "missing", models.KeyPointInbox); err != ErrNotFound {
+		t.Fatalf("missing keypoint should return ErrNotFound: %v", err)
+	}
+	if _, err := s.GetKeyPoint(ctx, "missing"); err != ErrNotFound {
+		t.Fatalf("missing keypoint should be ErrNotFound: %v", err)
+	}
+}
+
+func TestManualKeyPointFTSFailureRollsBackAndIndexFailureReturns(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("manual FTS write rolls back index row", func(t *testing.T) {
+		s := newTestStore(t)
+		seedUser(t, s, "a@b.com")
+		podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+		s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+		episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+		if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_search`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateManualKeyPoint(ctx, KeyPointRow{SourceType: models.SourceEpisode, SourceID: episodes[0].ID, Content: "x", CitationsJSON: `["seg"]`, TimeEnd: 1}); err == nil {
+			t.Fatal("missing FTS table should fail manual creation")
+		}
+		var count int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM keypoint_index`).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("failed manual creation must not leave index row: count=%d err=%v", count, err)
+		}
+	})
+
+	t.Run("automatic reindex surfaces missing index", func(t *testing.T) {
+		s := newTestStore(t)
+		if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+			t.Fatal(err)
+		}
+		card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "x", Citations: []string{"seg"}}}}
+		if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "source", "title", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err == nil {
+			t.Fatal("missing index table should fail automatic reindex")
+		}
+	})
+}
+
+func TestKeyPointMutationQueryErrorsSurface(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE keypoint_index`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetKeyPoint(ctx, "keypoint"); err == nil {
+		t.Fatal("missing index table should surface GetKeyPoint query error")
+	}
+	if err := s.SetKeyPointProductionStatus(ctx, "keypoint", models.KeyPointInbox); err == nil {
+		t.Fatal("missing index table should surface status update error")
+	}
+}
+
 func TestSearchKeyPoints(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

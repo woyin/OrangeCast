@@ -9,6 +9,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 func (srv *Server) handleKeyPoints(w http.ResponseWriter, r *http.Request) {
@@ -41,24 +42,46 @@ func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	type result struct {
-		ID          string  `json:"id"`
-		SourceType  string  `json:"source_type"`
-		SourceID    string  `json:"source_id"`
-		SourceTitle string  `json:"source_title"`
-		Content     string  `json:"content"`
-		Description string  `json:"description"`
-		TimeStart   float64 `json:"time_start"`
-		TimeEnd     float64 `json:"time_end"`
+		ID               string  `json:"id"`
+		SourceType       string  `json:"source_type"`
+		SourceID         string  `json:"source_id"`
+		SourceTitle      string  `json:"source_title"`
+		Content          string  `json:"content"`
+		Description      string  `json:"description"`
+		ProductionStatus string  `json:"production_status"`
+		Origin           string  `json:"origin"`
+		TimeStart        float64 `json:"time_start"`
+		TimeEnd          float64 `json:"time_end"`
 	}
 	results := make([]result, 0, len(kps))
 	for _, kp := range kps {
 		results = append(results, result{
 			ID: kp.ID, SourceType: string(kp.SourceType), SourceID: kp.SourceID,
 			SourceTitle: kp.SourceTitle, Content: kp.Content, Description: kp.Description,
+			ProductionStatus: string(kp.ProductionStatus), Origin: string(kp.Origin),
 			TimeStart: kp.TimeStart, TimeEnd: kp.TimeEnd,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results, "total": total})
+}
+
+// handleKeyPointStatus moves one KeyPoint through the production Inbox.
+func (srv *Server) handleKeyPointStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("keypoint_id"))
+	status := models.KeyPointProductionStatus(strings.TrimSpace(r.FormValue("status")))
+	if err := srv.store.SetKeyPointProductionStatus(r.Context(), id, status); err != nil {
+		if err == store.ErrNotFound {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "关键要点不存在"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
 }
 func (srv *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	srv.tmpl.Render(w, "graph.html", map[string]any{

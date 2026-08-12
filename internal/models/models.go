@@ -347,3 +347,29 @@ type EditorialFeedback struct {
 	DetailsJSON        string
 	CreatedAt          string
 }
+
+// KeyPointOrigin identifies whether a KeyPoint was generated or curated by the Owner.
+type KeyPointOrigin string
+
+const (
+	// KeyPointAutomatic is generated from a KnowledgeCard.
+	KeyPointAutomatic KeyPointOrigin = "automatic"
+	// KeyPointManual is selected and written directly by the Owner.
+	KeyPointManual KeyPointOrigin = "manual"
+	// KeyPointEdited is an Owner-edited derivative of an automatic KeyPoint.
+	KeyPointEdited KeyPointOrigin = "edited"
+)
+
+// KeyPointProductionStatus tracks a reusable idea through the content-production inbox.
+type KeyPointProductionStatus string
+
+const (
+	// KeyPointInbox has not yet been curated for production.
+	KeyPointInbox KeyPointProductionStatus = "inbox"
+	// KeyPointShortlisted is suitable for a future proposal.
+	KeyPointShortlisted KeyPointProductionStatus = "shortlisted"
+	// KeyPointUsed has participated in an article workflow.
+	KeyPointUsed KeyPointProductionStatus = "used"
+	// KeyPointDismissed is intentionally excluded from content production.
+	KeyPointDismissed KeyPointProductionStatus = "dismissed"
+)

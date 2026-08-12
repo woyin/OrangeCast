@@ -147,6 +147,33 @@ func (s *Store) IsSourceInScope(ctx context.Context, profileID string, sourceTyp
 	return count > 0, err
 }
 
+// ListScopedSources returns the explicit SourceScope entries for an editorial profile.
+func (s *Store) ListScopedSources(ctx context.Context, profileID string) ([]SourceScopeEntry, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT source_type, source_id, created_at FROM editorial_source_scopes WHERE editorial_profile_id=? ORDER BY created_at DESC, source_id`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SourceScopeEntry
+	for rows.Next() {
+		entry := SourceScopeEntry{EditorialProfileID: profileID}
+		if err := rows.Scan(&entry.SourceType, &entry.SourceID, &entry.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, entry)
+	}
+	return out, rows.Err()
+}
+
+// SourceScopeEntry is one explicit source authorization for a profile.
+type SourceScopeEntry struct {
+	EditorialProfileID string
+	SourceType         models.SourceType
+	SourceID           string
+	CreatedAt          string
+}
+
 // SetSourceProductionPolicy updates the source's public-use and model-data restrictions.
 func (s *Store) SetSourceProductionPolicy(ctx context.Context, sourceType models.SourceType, sourceID, productionUse string, dataPolicy models.ModelDataPolicy) error {
 	if !validSourceType(sourceType) || !validProductionUse(productionUse) || !validModelDataPolicy(dataPolicy) {

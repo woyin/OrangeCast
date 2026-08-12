@@ -49,10 +49,38 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		data["Profile"] = profile
 		data["Proposals"] = proposals
 		data["Drafts"] = drafts
+		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载素材范围失败", http.StatusInternalServerError)
+			return
+		}
+		data["Scopes"] = scopes
 	}
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
 	}
+}
+
+// handleEditorialSourceScope grants or revokes an explicit source authorization.
+func (srv *Server) handleEditorialSourceScope(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
+	sourceID := strings.TrimSpace(r.FormValue("source_id"))
+	var err error
+	if r.FormValue("action") == "revoke" {
+		err = srv.store.RevokeSourceScope(r.Context(), profileID, sourceType, sourceID)
+	} else {
+		err = srv.store.GrantSourceScope(r.Context(), profileID, sourceType, sourceID)
+	}
+	if err != nil {
+		http.Error(w, "更新素材范围失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
 }
 
 // handleEditorialProfileCreate creates an Owner-controlled EditorialProfile.

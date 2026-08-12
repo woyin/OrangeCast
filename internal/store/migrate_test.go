@@ -31,7 +31,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}
 	if len(applied) != len(want) {
 		t.Fatalf("应应用 %v，实际 %v", want, applied)
 	}
@@ -42,8 +42,8 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	}
 	// schema_migrations 已登记到最新版本
 	v, _ := AppliedVersion(context.Background(), db)
-	if v != 16 {
-		t.Fatalf("AppliedVersion 应为 16，实际 %d", v)
+	if v != 17 {
+		t.Fatalf("AppliedVersion 应为 17，实际 %d", v)
 	}
 	// 关键表存在（含 schema_migrations）
 	for _, tb := range []string{"users", "podcasts", "episodes", "transcripts",
@@ -95,8 +95,8 @@ func TestMigrate_V01FixtureUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
-	if len(applied) != 16 {
-		t.Fatalf("应应用 16 条迁移，实际 %d", len(applied))
+	if len(applied) != 17 {
+		t.Fatalf("应应用 17 条迁移，实际 %d", len(applied))
 	}
 	after := countAll(t, db)
 
@@ -152,11 +152,11 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 16 {
-		t.Errorf("失败迁移不应登记版本；应保持 16，实际 %d", v)
+	if v != 17 {
+		t.Errorf("失败迁移不应登记版本；应保持 17，实际 %d", v)
 	}
 
-	// 可安全重试：再次正常 Migrate 应保持 version=16 且不报错（无新迁移）。
+	// 可安全重试：再次正常 Migrate 应保持 version=17 且不报错（无新迁移）。
 	applied, err := Migrate(context.Background(), db)
 	if err != nil {
 		t.Fatalf("重试 Migrate 报错: %v", err)
