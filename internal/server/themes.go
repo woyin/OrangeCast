@@ -69,7 +69,7 @@ func (srv *Server) handleScoutRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "读取 Scout 配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleScout))
 	if err != nil || bundle.Scout == nil {
 		http.Error(w, "Scout Provider 不可用", http.StatusBadRequest)
 		return

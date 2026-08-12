@@ -29,7 +29,7 @@
   </table>
 
   <h2>任务模型配置</h2>
-  <p class="hint">为每个任务选择 Provider 和 Model。Groq 是默认零成本；OpenAI 产生费用。</p>
+  <p class="hint">为每个任务选择 Provider 和 Model。编辑角色留空时会继承“分析（知识卡片）”配置；可单独选择更强的付费模型。</p>
   {{if not .HasOpenAI}}<p class="hint" style="color:#dc2626">⚠️ 未配置 OpenAI API key，选择 OpenAI 的任务会失败。</p>{{end}}
   <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
     <thead>
@@ -59,6 +59,26 @@
         <td style="padding:0.5rem">问答（Q&A）</td>
         <td style="padding:0.5rem"><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
         <td style="padding:0.5rem"><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="llama-3.3-70b-versatile"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem">Writer（文章写作）</td>
+        <td style="padding:0.5rem"><select name="writer_provider"><option value="" {{if eq .WriterProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .WriterProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .WriterProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="writer_model" value="{{.WriterModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem">Scout（跨集选题）</td>
+        <td style="padding:0.5rem"><select name="scout_provider"><option value="" {{if eq .ScoutProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .ScoutProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .ScoutProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="scout_model" value="{{.ScoutModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem">Evidence Reviewer（证据审校）</td>
+        <td style="padding:0.5rem"><select name="evidence_reviewer_provider"><option value="" {{if eq .EvidenceReviewerProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .EvidenceReviewerProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .EvidenceReviewerProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="evidence_reviewer_model" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem">Style Editor（风格审校）</td>
+        <td style="padding:0.5rem"><select name="style_editor_provider"><option value="" {{if eq .StyleEditorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .StyleEditorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .StyleEditorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="style_editor_model" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
       </tr>
     </tbody>
   </table>

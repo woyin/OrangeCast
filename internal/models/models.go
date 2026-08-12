@@ -203,18 +203,28 @@ type Purge struct {
 // Settings 实例级设置（单例，id=1）。ADR-0009 移除全局 active_provider：
 // Groq 是默认零成本 Provider；付费 Provider 仅按单次 ProcessingJob 尝试显式授权。
 type Settings struct {
-	TranscriptionModel    *string
-	AnalysisModel         *string
-	HighlightModel        *string
-	QAModel               *string
-	TranscriptionProvider *string
-	AnalysisProvider      *string
-	HighlightProvider     *string
-	QAProvider            *string
-	GroqAPIKey            *string
-	GroqBaseURL           *string
-	OpenAIAPIKey          *string
-	OpenAIBaseURL         *string
+	TranscriptionModel *string
+	AnalysisModel      *string
+	HighlightModel     *string
+	QAModel            *string
+	// Editorial role fields are optional overrides. A nil value inherits the
+	// general analysis setting, so existing deployments keep their behavior.
+	WriterModel              *string
+	ScoutModel               *string
+	EvidenceReviewerModel    *string
+	StyleEditorModel         *string
+	TranscriptionProvider    *string
+	AnalysisProvider         *string
+	HighlightProvider        *string
+	QAProvider               *string
+	WriterProvider           *string
+	ScoutProvider            *string
+	EvidenceReviewerProvider *string
+	StyleEditorProvider      *string
+	GroqAPIKey               *string
+	GroqBaseURL              *string
+	OpenAIAPIKey             *string
+	OpenAIBaseURL            *string
 }
 
 // RelationKind 显式区分一个 Segment 关联是 Citation 还是 Reference（ADR-0018 R1）。

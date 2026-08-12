@@ -139,7 +139,7 @@ func TestGetSettings_SingletonDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.TranscriptionModel != nil || st.AnalysisModel != nil || st.QAModel != nil {
+	if st.TranscriptionModel != nil || st.AnalysisModel != nil || st.QAModel != nil || st.WriterModel != nil || st.EvidenceReviewerProvider != nil {
 		t.Error("默认设置不应有自定义模型")
 	}
 }
@@ -149,7 +149,10 @@ func TestUpdateSettings(t *testing.T) {
 	ctx := context.Background()
 	tm := "whisper-large-v3"
 	tp := "groq"
-	st := &models.Settings{TranscriptionModel: &tm, TranscriptionProvider: &tp}
+	writerModel := "gpt-5"
+	writerProvider := "openai"
+	apiKey := "sk-test"
+	st := &models.Settings{TranscriptionModel: &tm, TranscriptionProvider: &tp, WriterModel: &writerModel, WriterProvider: &writerProvider, OpenAIAPIKey: &apiKey}
 	if err := s.UpdateSettings(ctx, st); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +162,12 @@ func TestUpdateSettings(t *testing.T) {
 	}
 	if got.TranscriptionProvider == nil || *got.TranscriptionProvider != tp {
 		t.Errorf("转录 Provider 应为 %s，实际 %v", tp, got.TranscriptionProvider)
+	}
+	if got.WriterModel == nil || *got.WriterModel != writerModel || got.WriterProvider == nil || *got.WriterProvider != writerProvider {
+		t.Errorf("Writer 覆盖应保存，实际 model=%v provider=%v", got.WriterModel, got.WriterProvider)
+	}
+	if got.OpenAIAPIKey == nil || *got.OpenAIAPIKey != apiKey {
+		t.Errorf("OpenAI key 应保存，实际 %v", got.OpenAIAPIKey)
 	}
 }
 

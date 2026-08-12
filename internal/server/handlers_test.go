@@ -1581,7 +1581,7 @@ func TestSettings_POST_SavesAndRedirects(t *testing.T) {
 	ctx := context.Background()
 
 	rec := postForm(t, srv, cookie, "/settings",
-		"transcription_model=whisper-large-v3&qa_provider=openai")
+		"transcription_model=whisper-large-v3&qa_provider=openai&writer_provider=openai&writer_model=gpt-5")
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("设置保存应 303 重定向，实际 %d", rec.Code)
 	}
@@ -1594,6 +1594,9 @@ func TestSettings_POST_SavesAndRedirects(t *testing.T) {
 	}
 	if st.QAProvider == nil || *st.QAProvider != "openai" {
 		t.Errorf("QA Provider 应保存，实际 %v", st.QAProvider)
+	}
+	if st.WriterProvider == nil || *st.WriterProvider != "openai" || st.WriterModel == nil || *st.WriterModel != "gpt-5" {
+		t.Errorf("Writer 覆盖应保存，实际 provider=%v model=%v", st.WriterProvider, st.WriterModel)
 	}
 }
 

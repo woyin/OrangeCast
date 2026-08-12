@@ -101,7 +101,7 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleWriter))
 	if err != nil || bundle.Writer == nil {
 		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
 		return
@@ -189,7 +189,7 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleWriter))
 	if err != nil || bundle.Writer == nil {
 		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
 		return
@@ -468,7 +468,7 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleEvidence))
 	if err != nil || bundle.EvidenceReviewer == nil {
 		http.Error(w, "EvidenceReviewer Provider 不可用", http.StatusBadRequest)
 		return
@@ -508,7 +508,7 @@ func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleStyle))
 	if err != nil || bundle.StyleEditor == nil {
 		http.Error(w, "StyleEditor Provider 不可用", http.StatusBadRequest)
 		return

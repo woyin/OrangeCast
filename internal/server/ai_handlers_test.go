@@ -681,6 +681,25 @@ func TestTaskConfigFrom(t *testing.T) {
 	}
 }
 
+func TestEditorialTaskConfig_OverridesAndFallsBack(t *testing.T) {
+	analysisProvider, analysisModel := "groq", "llama-3.3-70b-versatile"
+	writerProvider, writerModel := "openai", "gpt-5"
+	settings := &models.Settings{
+		AnalysisProvider: &analysisProvider, AnalysisModel: &analysisModel,
+		WriterProvider: &writerProvider, WriterModel: &writerModel,
+	}
+	if got := editorialTaskConfig(settings, editorialRoleWriter); got.Provider != writerProvider || got.Model != writerModel {
+		t.Fatalf("Writer 应使用独立覆盖，实际 %+v", got)
+	}
+	if got := editorialTaskConfig(settings, editorialRoleEvidence); got.Provider != analysisProvider || got.Model != analysisModel {
+		t.Fatalf("未配置的角色应回退分析配置，实际 %+v", got)
+	}
+	settings.WriterModel = nil
+	if got := editorialTaskConfig(settings, editorialRoleWriter); got.Provider != writerProvider || got.Model != analysisModel {
+		t.Fatalf("角色应支持仅覆盖 Provider，实际 %+v", got)
+	}
+}
+
 // TestLoadTranscriptJSON 验证 loadTranscriptJSON 的三种分支：
 // 正常解析、无转录稿（404）、载荷损坏（500）。
 func TestLoadTranscriptJSON(t *testing.T) {
