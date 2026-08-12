@@ -23,6 +23,20 @@
 </section>
 
 <section class="panel" style="margin-top:1rem">
+  <h2>个人生产看板</h2>
+  <p class="meta">状态由提案、Brief 和当前文章修订实时推导；不会额外制造可漂移的看板数据。</p>
+  <div class="cards" style="margin:0">
+    <div class="card"><h3>{{$.Board.ProposalPool}}</h3><p>提案池</p></div>
+    <div class="card"><h3>{{$.Board.BriefsPending}}</h3><p>待确认 Brief</p></div>
+    <div class="card"><h3>{{$.Board.ReadyToWrite}}</h3><p>可开始写作</p></div>
+    <div class="card"><h3>{{$.Board.Reviewing}}</h3><p>生成 / 审校中</p></div>
+    <div class="card"><h3>{{$.Board.Blocked}}</h3><p>证据阻断</p></div>
+    <div class="card"><h3>{{$.Board.Ready}}</h3><p>可发布</p></div>
+    <div class="card"><h3>{{$.Board.Archived}}</h3><p>已归档</p></div>
+  </div>
+</section>
+
+<section class="panel" style="margin-top:1rem">
   <h2>素材范围</h2>
   <form method="post" action="/workbench/sources" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
     <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{.ID}}">

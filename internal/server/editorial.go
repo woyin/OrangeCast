@@ -18,6 +18,19 @@ import (
 
 var errBudget = errors.New("invalid budget")
 
+// editorialBoard is a compact, mutually intelligible view of an Owner's
+// production queue. It deliberately derives state from immutable workflow
+// objects instead of creating another mutable board record.
+type editorialBoard struct {
+	ProposalPool  int
+	BriefsPending int
+	ReadyToWrite  int
+	Reviewing     int
+	Blocked       int
+	Ready         int
+	Archived      int
+}
+
 // handleWorkbench renders the initial personal editorial board.
 func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 	profiles, err := srv.store.ListEditorialProfiles(r.Context())
@@ -59,6 +72,7 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Briefs"] = briefs
+		data["Board"] = buildEditorialBoard(proposals, briefs, drafts)
 		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
 		if err != nil {
 			http.Error(w, "加载素材范围失败", http.StatusInternalServerError)
@@ -69,6 +83,40 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
 	}
+}
+
+func buildEditorialBoard(proposals []*models.ArticleProposal, briefs []*models.ArticleBrief, drafts []*models.ArticleDraft) editorialBoard {
+	board := editorialBoard{}
+	draftsByBrief := make(map[string]bool, len(drafts))
+	for _, proposal := range proposals {
+		if proposal.Status == "proposed" {
+			board.ProposalPool++
+		}
+	}
+	for _, draft := range drafts {
+		draftsByBrief[draft.BriefID] = true
+		switch draft.Status {
+		case "drafting", "reviewing":
+			board.Reviewing++
+		case "blocked":
+			board.Blocked++
+		case "ready":
+			board.Ready++
+		case "archived":
+			board.Archived++
+		}
+	}
+	for _, brief := range briefs {
+		switch brief.Status {
+		case "draft":
+			board.BriefsPending++
+		case "confirmed":
+			if !draftsByBrief[brief.ID] {
+				board.ReadyToWrite++
+			}
+		}
+	}
+	return board
 }
 
 // handleArticleWriterRun generates an initial immutable revision only from a confirmed Brief.

@@ -47,6 +47,10 @@ func TestWorkbenchCreatesAndRendersEditorialProfile(t *testing.T) {
 	if err != nil || len(profiles) != 1 || profiles[0].Name != "技术周刊" || profiles[0].MonthlyBudgetCents == nil || *profiles[0].MonthlyBudgetCents != 1200 {
 		t.Fatalf("profile must persist: profiles=%+v err=%v", profiles, err)
 	}
+	board := doWithCookie(srv, session, http.MethodGet, "/workbench?profile="+profiles[0].ID)
+	if board.Code != http.StatusOK || !strings.Contains(board.Body.String(), "个人生产看板") {
+		t.Fatalf("workbench should expose the editorial board: %d %s", board.Code, board.Body.String())
+	}
 }
 
 func TestEditorialProfileCreationRejectsInvalidBudget(t *testing.T) {
@@ -208,6 +212,17 @@ func TestOwnerRevisionInheritsOnlySurvivingEvidenceMaps(t *testing.T) {
 	maps, err = srv.store.ListEvidenceMaps(t.Context(), revisions[0].ID)
 	if err != nil || len(maps) != 0 {
 		t.Fatalf("changed expression must not inherit a stale map: maps=%+v err=%v", maps, err)
+	}
+}
+
+func TestBuildEditorialBoardDerivesWorkflowQueue(t *testing.T) {
+	board := buildEditorialBoard(
+		[]*models.ArticleProposal{{Status: "proposed"}, {Status: "accepted"}},
+		[]*models.ArticleBrief{{ID: "pending", Status: "draft"}, {ID: "write", Status: "confirmed"}, {ID: "has-draft", Status: "confirmed"}},
+		[]*models.ArticleDraft{{BriefID: "has-draft", Status: "reviewing"}, {Status: "blocked"}, {Status: "ready"}, {Status: "archived"}},
+	)
+	if board.ProposalPool != 1 || board.BriefsPending != 1 || board.ReadyToWrite != 1 || board.Reviewing != 1 || board.Blocked != 1 || board.Ready != 1 || board.Archived != 1 {
+		t.Fatalf("unexpected derived board: %+v", board)
 	}
 }
 
