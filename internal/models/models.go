@@ -214,3 +214,136 @@ const (
 	// RelationReference 仅表示参考的弱关系，不声称忠实。
 	RelationReference RelationKind = "reference"
 )
+
+// ModelDataPolicy 限制一个 Source 的内容可以发送给哪些 AI Provider。
+// 它独立于 EditorialProfile 的 SourceScope：前者约束数据流向，后者约束发布用途。
+type ModelDataPolicy string
+
+const (
+	// ModelDataExternalAllowed 允许发送到已配置的外部 Provider。
+	ModelDataExternalAllowed ModelDataPolicy = "external_allowed"
+	// ModelDataApprovedProvidersOnly 仅允许发送到 Owner 明确批准的 Provider。
+	ModelDataApprovedProvidersOnly ModelDataPolicy = "approved_providers_only"
+	// ModelDataLocalOnly 禁止将内容发送到外部 Provider。
+	ModelDataLocalOnly ModelDataPolicy = "local_only"
+)
+
+// EditorialProfile 一个内容品牌的长期编辑约束。
+type EditorialProfile struct {
+	ID                 string
+	Name               string
+	TargetAudience     string
+	Voice              string
+	StyleGuide         string
+	SourceAttribution  string
+	MonthlyBudgetCents *int64
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+// ArticleProposal 是 Scout 为某个 EditorialProfile 发现的候选选题。
+type ArticleProposal struct {
+	ID                 string
+	EditorialProfileID string
+	Kind               string // fresh | evergreen | follow_up
+	Status             string // proposed | accepted | parked | rejected | merged
+	Title              string
+	Thesis             string
+	Audience           string
+	Rationale          string
+	CandidateKeyPoints string // JSON array
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+// ArticleBrief 是 Owner 审核后才可进入写作的选材和结构契约。
+type ArticleBrief struct {
+	ID           string
+	ProposalID   string
+	Status       string // draft | confirmed | superseded
+	Thesis       string
+	Audience     string
+	Outline      string
+	MaterialPlan string // JSON
+	ConflictPlan string // JSON
+	Style        string
+	TargetLength *int
+	ConfirmedAt  *string
+	CreatedAt    string
+	UpdatedAt    string
+}
+
+// ArticleDraft 是持续编辑对象，当前版本由 CurrentRevisionID 指向。
+type ArticleDraft struct {
+	ID                 string
+	EditorialProfileID string
+	BriefID            string
+	Title              string
+	CurrentRevisionID  *string
+	Status             string // drafting | reviewing | ready | blocked | archived
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+// ArticleRevision 是一篇文章某时刻的不可变内容快照。
+type ArticleRevision struct {
+	ID            string
+	DraftID       string
+	Version       int
+	Title         string
+	Markdown      string
+	Origin        string // writer | evidence_reviewer | style_editor | owner | ai_edit
+	Provider      *string
+	Model         *string
+	PromptVersion *string
+	CostCents     *int64
+	CreatedAt     string
+}
+
+// EvidenceMapKind 表示文章表达和素材之间的语义关系。
+type EvidenceMapKind string
+
+const (
+	// EvidenceQuoted 逐字引语，必须精确匹配原文。
+	EvidenceQuoted EvidenceMapKind = "quoted"
+	// EvidenceParaphrased 忠实转述一个 KeyPoint。
+	EvidenceParaphrased EvidenceMapKind = "paraphrased"
+	// EvidenceSynthesized 基于多个 KeyPoint 的生成性综合。
+	EvidenceSynthesized EvidenceMapKind = "synthesized"
+	// EvidenceRhetorical 不含事实主张的修辞内容。
+	EvidenceRhetorical EvidenceMapKind = "rhetorical"
+)
+
+// EvidenceMap 将一个 ArticleRevision 中的表达与其 KeyPoint 依据关联。
+type EvidenceMap struct {
+	ID          string
+	RevisionID  string
+	Kind        EvidenceMapKind
+	Excerpt     string
+	KeyPointIDs string // JSON array
+	CreatedAt   string
+}
+
+// ArticleReview 是某个 Revision 的独立审校结果。
+type ArticleReview struct {
+	ID         string
+	RevisionID string
+	Kind       string // evidence | style
+	Status     string // passed | failed | advisory
+	IssuesJSON string
+	Provider   *string
+	Model      *string
+	CreatedAt  string
+}
+
+// EditorialFeedback 是 Owner 对内容生产对象的显式编辑判断。
+type EditorialFeedback struct {
+	ID                 string
+	EditorialProfileID string
+	EntityType         string
+	EntityID           string
+	Action             string
+	Reason             string
+	DetailsJSON        string
+	CreatedAt          string
+}

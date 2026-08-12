@@ -1,0 +1,60 @@
+{{define "title"}}内容工作台 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>内容工作台</h1>
+<p class="meta">从可核验的播客素材出发，建立品牌、审阅选题，并维护文章修订历史。</p>
+
+<div class="cards" style="margin:1rem 0">
+  {{range .Profiles}}
+  <a class="card" href="/workbench?profile={{.ID}}">
+    <h3>{{.Name}}</h3>
+    <p>{{if .TargetAudience}}{{.TargetAudience}}{{else}}尚未填写目标读者{{end}}</p>
+  </a>
+  {{end}}
+  <a class="card" href="#new-profile"><h3>+ 新建编辑画像</h3><p>为一个内容品牌定义边界、风格和预算</p></a>
+</div>
+
+{{with .Profile}}
+<section class="panel">
+  <h2>{{.Name}}</h2>
+  <p><strong>读者：</strong>{{if .TargetAudience}}{{.TargetAudience}}{{else}}未设置{{end}}</p>
+  <p><strong>语气：</strong>{{if .Voice}}{{.Voice}}{{else}}未设置{{end}}</p>
+  <p><strong>来源署名：</strong>{{.SourceAttribution}}</p>
+  <p class="meta">SourceScope、素材 Inbox 与自动提案将在后续工作台阶段接入；当前已建立持久化与权限边界。</p>
+</section>
+
+<div class="cards" style="margin-top:1rem">
+  <section class="card">
+    <h2>选题提案</h2>
+    {{range $.Proposals}}
+      <div class="list-item"><h3>{{.Title}}</h3><p>{{.Thesis}}</p><p class="meta">{{.Kind}} · {{.Status}}</p></div>
+    {{else}}
+      <p class="empty">尚无提案。Scout 接入后会在这里展示 Fresh 与 Evergreen 选题。</p>
+    {{end}}
+  </section>
+  <section class="card">
+    <h2>文章修订</h2>
+    {{range $.Drafts}}
+      <div class="list-item"><h3>{{.Title}}</h3><p class="meta">{{.Status}} · {{.UpdatedAt}}</p></div>
+    {{else}}
+      <p class="empty">尚无文章草稿。确认 ArticleBrief 后会产生不可变修订历史。</p>
+    {{end}}
+  </section>
+</div>
+{{end}}
+
+<section id="new-profile" class="panel" style="margin-top:1.5rem">
+  <h2>新建编辑画像</h2>
+  <form method="post" action="/workbench/profiles">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>名称 <input name="name" required placeholder="例如：技术周刊"></label>
+    <label>目标读者 <input name="target_audience" placeholder="例如：关注 AI 工具的开发者"></label>
+    <label>语气 <input name="voice" placeholder="例如：清晰、克制、有观点"></label>
+    <label>风格说明 <textarea name="style_guide" rows="3" placeholder="固定结构、禁用表达、参考风格…"></textarea></label>
+    <label>来源署名
+      <select name="source_attribution"><option value="light">轻量</option><option value="standard" selected>标准</option><option value="strict">严格</option></select>
+    </label>
+    <label>月度预算（分） <input type="number" min="0" name="monthly_budget_cents" placeholder="可留空"></label>
+    <button class="btn" type="submit">创建编辑画像</button>
+  </form>
+</section>
+{{end}}

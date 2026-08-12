@@ -1,118 +1,156 @@
 # CloudWisePod 实施路线
 
-基线：`main` / `v0.1.0` Go 实现  
-目标：完成 [`product-goal.md`](product-goal.md) 中的下一版本黄金旅程
+基线：现有 Go 单 Owner、自托管证据与学习平台（旧 Phase 0–7 已完成）
+目标：完成 [`product-goal.md`](product-goal.md) 定义的内容生产工作台，架构决策见 [ADR-0021](adr/0021-evidence-grounded-content-workbench.md)
 
 ## 执行原则
 
-- 每个阶段结束时，Go 应用必须可构建、可启动、可从上一版本数据升级。
-- 先建立迁移与恢复能力，再改变 schema 或删除旧路径。
-- 先保证证据不丢，再优化 AI 内容质量和界面体验。
-- 新能力按领域词汇命名；不要重新引入 User、Tenant、全局 Provider 或可变分析结果。
-- 不同时维护 Go 与 TypeScript 两套实现。
+- 每个阶段结束时应用必须可构建、可启动、可从上一版本数据安全升级。
+- 先建立数据关系、版本和恢复能力，再开放自动付费任务或批量生成。
+- Embedding/RAG 只负责候选召回，证据必须落到 KeyPoint、Citation 与 PrimarySource。
+- AI 与人工修改一律产生不可变 ArticleRevision；硬性审校结果只属于确切 Revision。
+- SourceScope、ModelDataPolicy 和预算在任务入队前校验，不能依赖 Prompt 约束。
+- 新功能维持 ADR-0020 的测试与 lint 门禁；涉及迁移、任务恢复、备份和文件生命周期时使用真实 SQLite 与临时目录集成测试。
+- 现有学习功能不删除，但除非直接服务素材研究，不阻塞内容生产里程碑。
 
-## Phase 0：建立单一代码与文档真相
+## 已完成基线
 
-> **状态：已完成（2026-08-01）。** 旧 TypeScript/Cloudflare 实现与 Node/Wrangler 构建路径已删除；Go module 统一为 `github.com/woyin/orangecast`；CI 仅运行 Go 门禁，Docker 发布工作流保留多架构。详见交付报告。下一项工作从 Phase 1 开始。
+旧路线 Phase 0–7 已完成：Go 单实现、可升级 SQLite、单 Owner 与公网安全、持久 EvidenceAudio、SQLite durable jobs、不可变 Transcript/KnowledgeCard、稳定 Segment/Citation、分段 FTS、Markdown KnowledgeNote、备份恢复和严格单 Source EvidenceQA。真实一小时播客黄金旅程已于 2026-08-02 验证。
 
-目标：让仓库只表达 Go、自托管、单 Owner 方向。
+这组能力成为新工作台的证据底座，不再是最终产品闭环。
 
-- 删除受 Git 跟踪的旧 `app/`、`tests/`、`package*.json`、`tsconfig.json`、`vite.config.ts`、`wrangler.toml` 和 Cloudflare 部署文件。
-- 删除或归档仅服务旧实现的构建产物与依赖说明；历史仍由 Git 保存。
-- 修正模块、镜像与产品命名差异，例如 `github.com/breestealth/wisepod`、CloudWisePod、OrangeCast 三套名称。
-- CI 增加 `go test ./...`、`go vet ./...` 和 Go 二进制构建；发布工作流继续验证 `amd64`、`arm64` 镜像。
+## V1：播客到公众号
 
-退出条件：干净 checkout 不需要 Node/npm/Wrangler；唯一有效的测试、构建和部署路径都是 Go。
+### Phase 8：内容生产迁移与权限底座
 
-## Phase 1：建立可升级的数据库迁移基础 ✅
+目标：在不破坏现有 Source 和 ArtifactVersion 的前提下，引入内容生产的稳定身份、权限和版本边界。
 
-目标：在修改 v0.1 schema 前，保证已有数据可检查、备份和迁移。
+- 为 EditorialProfile、SourceScope、ModelDataPolicy、ArticleProposal、ArticleBrief、ArticleDraft、ArticleRevision、EvidenceMap、审校结果与 EditorialFeedback 建立迁移。
+- ArticleRevision 不复用通用 ArtifactVersion：前者是持续编辑历史，后者是 ProcessingJob 产物历史。
+- Source 增加生产用途与 Archive 状态；实现使用关系检查和证据失效标记。
+- 更新 Purge：Draft 使用时显示影响，删除后相关 Revision 标记证据失效；PublishedArticle 的保护在 V1.2 随发布记录落地。
+- 扩展备份 manifest，覆盖新表、Revision、EvidenceMap、审校结果与后续选定资产。
 
-- 用有序、可记录版本的迁移替代仅执行 `CREATE IF NOT EXISTS` 的启动方式。
-- 增加 `schema_migrations` 或等价机制，每个迁移在事务中执行并可重复检测。
-- 第一次破坏性迁移前生成 SQLite 一致性备份，并验证失败时原库不被部分修改。
-- 迁移前检查现有 `users` 数量：0 个保持未认领，1 个升级为 Owner；超过 1 个时停止并要求显式选择，不能猜测或静默合并。
-- 为 `v0.1.0 → 下一版本` 编写真实数据库 fixture 的迁移测试。
+退出条件：现有数据库无损升级；新对象可创建、版本化、备份和恢复；权限或证据失效不能被静默忽略。
 
-退出条件：v0.1 fixture 可自动升级且数据计数、关联关系和登录凭据保持一致；迁移失败可安全重试。
+### Phase 9：自动摄取与 KeyPoint 素材 Inbox
 
-## Phase 2：收敛为唯一 Owner 并建立公网安全基线 ✅
+目标：让内容工作台持续获得可整理、可追溯的播客素材。
 
-目标：让访问模型和内容模型真实表达单 Owner。
+- Podcast 支持 Manual、AllNew、Filtered IngestionPolicy，以及 Podcast 级和全局预算。
+- 自动流程只入队 EvidenceAudio、Transcript、KnowledgeCard 和 KeyPoint；失败进入可见队列。
+- 将 keypoint_index 从只读展示投影演进为具有稳定生产身份的素材层，同时保留 ArtifactVersion 真理来源与派生关系。
+- 增加 Inbox、Shortlisted、Used、Dismissed 状态、批量操作和按 Episode/Podcast/时间/状态筛选。
+- 支持从 Transcript Segment 手工创建 KeyPoint、从自动 KeyPoint 派生人工编辑版，以及 PrimarySource 变化后的证据重映射/待修复状态。
+- 显示 KeyPoint 参与过的 Proposal、Brief 和 Draft；PublishedArticle 关系在 V1.2 补齐。
 
-- 将首次注册改为实例认领；Owner 存在后关闭注册路由和界面。
-- 保留单例 Owner 凭据与 Session，移除所有内容表、查询和接口中的 `user_id` / `UserID`。
-- 移除全局 `settings.active_provider`，为单次 ProcessingJob 尝试记录 Provider 授权。
-- 为所有改变状态的请求增加 CSRF 防护，为登录增加限流。
-- 通过显式公开 URL 与可信代理配置设置 Secure Cookie；不信任任意 `X-Forwarded-*`。
-- 让 RSS 与 Episode 音频下载复用同一安全 HTTP Client：解析地址校验、逐跳重定向校验、响应体上限和超时。
+退出条件：新 Episode 可按策略自动形成 KeyPoint；Owner 能在统一 Inbox 完成筛选和人工补充，重新分析不会覆盖人工成果。
 
-退出条件：第二个 Owner 无法创建；跨站写请求失败；恶意重定向不能访问私网；未授权付费调用不能发生。
+### Phase 10：Embedding、Theme 与 Scout
 
-## Phase 3：统一数据目录、证据音频与持久任务 ✅
+目标：从跨 Episode 素材中发现可写且不重复的选题。
 
-目标：重启或外链失效都不会破坏 Source 的证据链。
+- 为 KeyPoint 建立可重建的 Embedding 索引；Provider、模型、维度和索引版本可追踪。
+- 语义检索与关键词检索混合召回，只返回具有有效 Citation 且符合 SourceScope/ModelDataPolicy 的候选。
+- 实现 Theme 建议、Owner 确认/改名/合并/拆分/忽略及多对多 KeyPoint 关系。
+- Theme 页面展示来源分布、新增趋势、观点支持/补充/冲突、已用素材和内容空白。
+- Scout 按 EditorialProfile 生成 Fresh 与 Evergreen ArticleProposal，记录候选素材、目标读者、核心论点、写作价值，并对历史提案做重复检查；PublishedArticle 去重与 Follow-up 在 V1.2 补齐。
+- 建立角色路由基础：首选/备用 Provider、超时、重试、预算、实际费用与 Prompt 版本；提供经济/均衡/质量优先预设。
 
-- 引入单一 `DATA_DIR`，在其下明确划分数据库、EvidenceAudio、临时文件和备份。
-- Episode 与 Upload 均生成并持久保存标准化 EvidenceAudio；转录和播放器只使用该文件。
-- 原始输入在 EvidenceAudio 成功落盘并校验后才允许删除。
-- 将 goroutine-only 调度改为 SQLite 驱动 worker；启动时领取 queued 与过期 running 任务。
-- 明确定义 lease、心跳或 stale 判定，采用至少一次执行与幂等写入。
-- 为转录成功、分析失败、进程中断和重复领取编写恢复测试。
-- Purge 在数据库与文件系统之间采用可恢复的删除流程，避免只删一半。
+退出条件：Scout 能从多个 Episode 产生带真实来源、通过权限过滤且不与历史提案明显重复的候选选题。
 
-退出条件：在下载、转码、转录、分析任一阶段强制终止进程，重启后都能自动完成或进入明确 failed；不会产生重复产物。
+### Phase 11：Curator 与 ArticleBrief
 
-## Phase 4：不可变产物与 Evidence-first KnowledgeCard ✅
+目标：在生成全文前，用低成本、可审核的方式锁定选材与论证结构。
 
-目标：任何 AI 衍生内容都可核验、可比较、可回退。
+- Owner 可接受、暂存、拒绝或合并 Proposal，并记录结构化 EditorialFeedback。
+- Curator 生成 ArticleBrief：论点、读者、入选/淘汰 KeyPoint、各节素材、篇幅和风格。
+- 识别 KeyPoint 间的支持、补充和冲突；冲突必须由 Owner 选择并列、站队、缩小论点或淘汰，不能静默消失。
+- Brief 编辑产生历史，只有 Owner 显式确认后才授权单篇写作流水线与预算。
+- 执行前计算所有素材的 SourceScope 与 ModelDataPolicy，混合任务采用最严格策略。
 
-- Transcript 与 KnowledgeCard 从单 Source 唯一 upsert 改为不可变 ArtifactVersion。
-- 记录 Provider、模型、Prompt/Schema 版本、ProcessingJob 尝试和创建时间。
-- Source 显式指向当前 Transcript 与 KnowledgeCard 版本。
-- 为 Segment 分配稳定标识；分析模型只返回 Segment 标识，不返回自行估算的时间戳。
-- 摘要、关键要点、章节和金句全部携带 Citation；金句必须通过逐字匹配校验。
-- 校验失败时拒绝保存、重试或省略该项，不能降级为无证据内容。
-- 建立 5–10 个代表性中英文样本的 EvalSet，自动检查 schema、引用存在性、时间边界和逐字引用，并记录少量人工有用性评分。
+退出条件：Owner 能在不生成全文的情况下看清文章将写什么、用什么、舍弃什么，以及如何处理冲突。
 
-退出条件：任意 KnowledgeCard 项都能解析到实际 Segment；旧版本可查看和恢复；模型或 Prompt 变更有可比较评测结果。
+### Phase 12：多角色写作、EvidenceMap 与质量门禁
 
-## Phase 5：完成检索与 KnowledgeNote 沉淀闭环 ✅
+目标：产出可追溯、可审校、不可覆盖的文章版本。
 
-目标：达到五分钟判断价值并一键沉淀的核心体验。
+- Writer 按已确认 Brief 生成初稿及逐项 EvidenceMap，区分 Quoted、Paraphrased、Synthesized、Rhetorical；拒绝 ExternalFact。
+- EvidenceReviewer 独立检查素材支撑、直接引语、来源归因、Citation 有效性、冲突处理与“有出处不等于已事实验证”。
+- StyleEditor 独立检查 EditorialProfile、标题、结构、节奏、重复、篇幅和禁用表达。
+- Writer 根据两类审校意见修订；证据硬错误未解决时停留在待处理，不能无限自动重试掩盖问题。
+- AI 初稿、审校修订、Owner 手改和局部 AI 操作都创建 ArticleRevision；支持比较、选择当前版本与回退。
+- 修改后按 diff 增量重审；任何当前 Revision 的硬性审校失效都会阻止生成 PublicationPackage。
+- 建立写作 EvalSet：无依据事实、错误归因、虚假译引、歪曲反方、综合冒充原意、软风格偏差。
 
-- FTS 索引只覆盖 EvidenceArchive，不索引 Candidate。
-- 搜索结果返回实际命中的 Transcript Segment，而不是仅展示不可定位的摘要片段。
-- 点击搜索结果、Citation、章节或金句都跳到 EvidenceAudio 的确定时间点。
-- 实现确定性 Markdown renderer：frontmatter、摘要、要点、章节、金句、标签和 Citation 链接。
-- 实现单 Source 浏览器下载；不直接写 Vault，不做批量 zip、插件或双向同步。
-- 增加 Markdown golden test、特殊字符/frontmatter 测试和 Citation 链接集成测试。
+退出条件：无法把含硬证据错误的 Revision 标记为可交付；历史 Revision 可比较回退，审校与模型/Prompt/费用来历完整。
 
-退出条件：Owner 能从处理完成页在五分钟内判断内容价值，并下载一份所有关键内容都可回听核验的 Markdown。
+### Phase 13：编辑器、发布内容包与个人看板
 
-## Phase 6：备份、恢复与生产部署 ✅
+目标：把已审校文章可靠交付到微信公众号后台。
 
-目标：EvidenceArchive 可以迁移到全新实例并安全暴露在公网。
+- Markdown 作为正文规范格式，提供公众号兼容实时预览。
+- 支持局部精简、展开、换语气、改标题和检查依据；每次操作创建 Revision。
+- 证据与审校警告显示在旁栏，不污染正文。
+- PublicationPackage 输出公众号富文本、Markdown、纯文本、候选标题、摘要、推荐语和封面文案。
+- 对外来源按画像提供轻量/标准/严格密度；直接引语强制署名，文末列出实际 Source。
+- 提供提案池、待确认 Brief、生成中、待审核、可发布、已发布、搁置的个人看板；不做多人权限或自动发布。
+- 完成一键复制与文件导出；不接微信 API。
 
-- 提供备份命令，使用 SQLite backup API 或等价一致性快照，而不是运行中直接复制数据库文件。
-- 备份包包含 manifest、数据库、EvidenceAudio 和必要版本信息；不包含 API key 或 Session secret。
-- 提供恢复命令，校验版本、文件哈希和目标目录为空或已明确授权覆盖。
-- 增加全新临时目录中的备份→恢复端到端测试。
-- 更新 Dockerfile/Compose 为单一持久 volume，并提供 Caddy/Nginx 反向代理示例。
-- 发布前执行下一版本黄金旅程，包括处理中重启与跨实例恢复。
+退出条件：Owner 能完成 [`product-goal.md`](product-goal.md) 的 V1 黄金旅程，并把通过证据门禁的文章粘贴到微信公众号编辑器。
 
-退出条件：备份包能在另一台干净机器恢复并播放同一 Citation；生产 Cookie 与代理配置通过安全测试。
+### Phase 14：V1 恢复与发布验证
 
-## Phase 7：收紧次要 Q&A 能力 ✅
+目标：证明内容生产成果不会因升级、重启、Provider 故障或迁移而丢失。
 
-目标：保留有用探索能力，但不削弱 Evidence-first 契约。
+- 更新 backup/restore E2E，验证画像、KeyPoint 人工编辑、Theme 人工关系、Proposal、Brief、全部 Revision、EvidenceMap、审校和费用记录。
+- 验证恢复后不连接原 AI Provider 也能浏览、编辑、回退和导出历史文章。
+- 对自动摄取、提案扫描、写作与审校任务执行进程中断恢复和幂等测试。
+- 执行真实跨 Episode 播客到公众号黄金旅程，并人工检查证据映射和粘贴排版。
 
-- Q&A 仅检索当前 Source 的 Segment。
-- 只有模型实际引用的 Segment 才能成为 Citation；删除“无引用时附第一段”的兜底。
-- 证据不足、解析失败或引用非法时明确拒答。
-- Q&A 结果不自动进入 KnowledgeNote，也不阻塞主版本发布。
+退出条件：V1 数据可跨全新实例恢复；任务重试不重复扣费或创建歧义版本；真实文章完成发布前人工验收。
 
-退出条件：无法构造“有答案但引用与答案无关”的成功响应。
+## V1.1：多来源与视觉
+
+### Phase 15：Document 成为一等 Source
+
+- 接入网页 URL、PDF 与粘贴文本，保存不可变 EvidenceDocument 快照。
+- 为文档建立稳定位置的 Segment、Citation、KnowledgeCard、KeyPoint、全文搜索与版本历史。
+- 网页抓取复用 SSRF、重定向、体积、超时与内容类型安全策略。
+- 抽象音频/文档共享的 PrimarySource 与 Segment 行为，不强迫 Document 伪装成 Transcript。
+
+### Phase 16：Translation 与 Speaker 归因
+
+- 原语言 PrimarySource 永不被译文覆盖；Translation 按 Segment 对齐并独立版本化。
+- KeyPoint 使用画像目标语言但引用原文 Segment；译引显示原文/译文并标“译”。
+- 音频生成稳定 Speaker A/B 标识，允许建议实名映射和 Owner 确认。
+- 未确认 Speaker 禁止实名归因；EvidenceReviewer 增加翻译忠实度与实名归因检查。
+
+### Phase 17：视觉资产与编辑日历
+
+- ImageCreator 生成多个封面方案、正文示意图与配图位置建议，保留模型和 Prompt。
+- 不抓取网络图片；数据图只接受可追溯结构化数据。
+- Owner 选定资产进入不可再生备份，未采用候选可清理或重建。
+- 增加目标发布日期、优先级、画像节奏、个人编辑日历与内容缺口提示。
+
+## V1.2：发布反馈闭环
+
+### Phase 18：发布记录、表现与 Follow-up
+
+- PublishedArticle 绑定确切 ArticleRevision，记录渠道、时间和外部链接。
+- PublishedArticle 落地后启用 Source 默认 Purge 保护、KeyPoint 使用关系与提案重复检查；Owner 强制删除时只保留证据已删除的审计事实。
+- 首版手工录入阅读、点赞、在看、分享、收藏和关注增长等 PublicationPerformance。
+- 以长期模式而非单篇爆款分析主题、结构、篇幅和标题表现。
+- Scout 生成 Follow-up 提案，寻找新证据、反方观点和可延展分支。
+- 系统可根据 EditorialFeedback 与 PublicationPerformance 提议画像变更，但必须由 Owner 确认。
+
+## 后续候选
+
+- 其他音视频 Source，复用 EvidenceAudio/Transcript 流程。
+- 自主联网研究与独立 FactCheck；检索结果必须先保存为 Source 才能进入文章。
+- 微信公众号草稿箱 API 与发布指标自动同步，仍不自动群发。
+- 从已审校 ArticleRevision 派生短帖、视频脚本、邮件简报等跨渠道 PublicationPackage。
+- 数据规模证明 SQLite 向量方案不足后，再评估独立向量数据库；不提前引入运维负担。
 
 ## 每阶段通用验证
 
@@ -120,25 +158,9 @@
 go test ./...
 go vet ./...
 go build ./cmd/cloudwisepod
+make cover-gate
+make lint
 git diff --check
 ```
 
-涉及 schema、文件生命周期、任务恢复或备份的阶段必须额外使用真实临时目录和真实 SQLite 文件运行集成测试，不能只依赖 mock。
-
-## 已完成阶段说明（2026-08-01）
-
-Phase 0–7 已按序完成并通过每阶段验证（`go test ./...`、`go vet ./...`、`go build ./cmd/cloudwisepod`、`git diff --check`）。
-
-- **Phase 0**：删除 Cloudflare/TypeScript 实现与 Node/Wrangler 路径；Go module 统一为 `github.com/woyin/orangecast`；CI 只验证 Go。
-- **Phase 1**：`internal/store/migrate.go` 有序迁移（`schema_migrations`、事务内应用、失败可重试）；v0.1 fixture 升级测试；`ConsistencyBackup`（VACUUM INTO）。
-- **Phase 2**：`ClaimOwner` 原子认领；内容表/接口移除 `user_id`；移除全局 `active_provider`；CSRF double-submit；登录限流；`TRUSTED_PROXIES` + `PUBLIC_URL` Secure Cookie；`internal/safehttp` 共享 SSRF 防护客户端。
-- **Phase 3**：统一 `DATA_DIR`（DB/evidence/tmp/backups）；EvidenceAudio 持久化（转码 + SHA256 + 幂等复用）；SQLite 驱动 worker（租约 + 心跳 + 启动恢复 + 至少一次）；两阶段可恢复 Purge。
-- **Phase 4**：`artifact_versions` 不可变版本（transcript/knowledge_card + provider/model/prompt_version/job）；稳定 Segment ID；模型只返回 Segment ID；程序解析时间范围；金句逐字校验（无效项省略/拒绝）；`internal/evalset` 6 样本自动校验；`/sources/{type}/{id}/versions` 版本历史页（查看 + 一键回退）。
-- **Phase 5**：分段级 FTS（返回实际命中 Segment + 时间）；`?t=`/`#seg-` 深链；确定性 Markdown renderer（golden 测试）；单 Source 下载端点。
-- **Phase 6**：`cloudwisepod backup|restore` CLI（manifest + DB/证据 SHA256 + tar.gz、不含密钥、目标空或 `--force`）；全新目录恢复 E2E 测试；单一持久卷 Docker/Compose + Caddy/Nginx 示例。
-- **Phase 7**：Q&A 只使用模型实际引用的 Segment（删除首片段兜底）；无可靠引用明确拒答（422）；结果不进入 KnowledgeNote。
-
-### 发布前仍需人工验证
-
-- **黄金旅程已于 2026-08-02 通过**：真实 Groq 处理 Talk Python To Me #556（1:04:55），包含处理中关闭/重启恢复、分段搜索、Markdown 下载及备份到全新目录恢复播放。
-- EvalSet 人工有用性评分（`docs/evalset.md` 表格待填写）。
+涉及模型质量的阶段必须同时运行对应 EvalSet；涉及付费任务时必须验证预算、幂等和实际费用记录；涉及 SourceScope 或 ModelDataPolicy 时必须包含拒绝路径与故障切换测试。
