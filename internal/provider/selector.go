@@ -107,6 +107,23 @@ type TaskConfig struct {
 	Model    string // 空则用该 provider 的默认模型
 }
 
+// EffectiveTaskModel returns the exact model selected by a task configuration,
+// including provider defaults. Callers persist this value in audit records so
+// a blank setting never becomes an untraceable model choice.
+func EffectiveTaskModel(tc TaskConfig) string {
+	if tc.Model != "" {
+		return tc.Model
+	}
+	switch tc.Provider {
+	case "openai":
+		return openaiAnalysisModel
+	case "groq", "":
+		return groqAnalysisModel
+	default:
+		return ""
+	}
+}
+
 // BundleForTask 按 TaskConfig 返回配置好的 bundle（模型名注入）。
 func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 	bundle, err := sel.Bundle(tc.Provider)

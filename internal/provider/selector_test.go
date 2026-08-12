@@ -56,6 +56,22 @@ func TestSelector_BundleForTask_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestEffectiveTaskModel(t *testing.T) {
+	for _, tc := range []struct {
+		config TaskConfig
+		want   string
+	}{
+		{TaskConfig{Provider: "groq"}, groqAnalysisModel},
+		{TaskConfig{Provider: "openai"}, openaiAnalysisModel},
+		{TaskConfig{Provider: "groq", Model: "custom"}, "custom"},
+		{TaskConfig{Provider: "unknown"}, ""},
+	} {
+		if got := EffectiveTaskModel(tc.config); got != tc.want {
+			t.Errorf("EffectiveTaskModel(%+v) = %q, want %q", tc.config, got, tc.want)
+		}
+	}
+}
+
 func TestSelector_ApplySettings(t *testing.T) {
 	sel := NewSelector("", "")
 	if sel.HasGroq() {

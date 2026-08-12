@@ -102,7 +102,8 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleWriter))
+	taskConfig := editorialTaskConfig(settings, editorialRoleWriter)
+	bundle, err := srv.bundleFor(taskConfig)
 	if err != nil || bundle.Writer == nil {
 		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
 		return
@@ -118,12 +119,13 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		return
 	}
 	providerName := bundle.Writer.Name()
+	modelName := provider.EffectiveTaskModel(taskConfig)
 	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
 		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
 	}
-	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName}, evidenceMaps)
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName, Model: &modelName}, evidenceMaps)
 	if err != nil {
 		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
 		return
@@ -188,7 +190,8 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleWriter))
+	taskConfig := editorialTaskConfig(settings, editorialRoleWriter)
+	bundle, err := srv.bundleFor(taskConfig)
 	if err != nil || bundle.Writer == nil {
 		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
 		return
@@ -199,12 +202,13 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		return
 	}
 	providerName := bundle.Writer.Name()
+	modelName := provider.EffectiveTaskModel(taskConfig)
 	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
 		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
 	}
-	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName}, evidenceMaps)
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName, Model: &modelName}, evidenceMaps)
 	if err != nil {
 		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
 		return
@@ -507,7 +511,8 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleEvidence))
+	taskConfig := editorialTaskConfig(settings, editorialRoleEvidence)
+	bundle, err := srv.bundleFor(taskConfig)
 	if err != nil || bundle.EvidenceReviewer == nil {
 		http.Error(w, "EvidenceReviewer Provider 不可用", http.StatusBadRequest)
 		return
@@ -519,7 +524,8 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 	}
 	issues, _ := json.Marshal(result.Issues)
 	providerName := bundle.EvidenceReviewer.Name()
-	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "evidence", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName}); err != nil {
+	modelName := provider.EffectiveTaskModel(taskConfig)
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "evidence", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName}); err != nil {
 		http.Error(w, "保存证据审校失败", http.StatusInternalServerError)
 		return
 	}
@@ -547,7 +553,8 @@ func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
 		return
 	}
-	bundle, err := srv.bundleFor(editorialTaskConfig(settings, editorialRoleStyle))
+	taskConfig := editorialTaskConfig(settings, editorialRoleStyle)
+	bundle, err := srv.bundleFor(taskConfig)
 	if err != nil || bundle.StyleEditor == nil {
 		http.Error(w, "StyleEditor Provider 不可用", http.StatusBadRequest)
 		return
@@ -559,7 +566,8 @@ func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) 
 	}
 	issues, _ := json.Marshal(result.Issues)
 	providerName := bundle.StyleEditor.Name()
-	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "style", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName}); err != nil {
+	modelName := provider.EffectiveTaskModel(taskConfig)
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "style", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName}); err != nil {
 		http.Error(w, "保存风格审校失败", http.StatusInternalServerError)
 		return
 	}

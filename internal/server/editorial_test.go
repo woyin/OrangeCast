@@ -550,7 +550,7 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 		t.Fatalf("writer should create one draft: %+v", drafts)
 	}
 	revisions, _ := srv.store.ListArticleRevisions(t.Context(), drafts[0].ID)
-	if len(revisions) != 1 || revisions[0].Origin != "writer" || revisions[0].Provider == nil || *revisions[0].Provider != "fake-writer" {
+	if len(revisions) != 1 || revisions[0].Origin != "writer" || revisions[0].Provider == nil || *revisions[0].Provider != "fake-writer" || revisions[0].Model == nil || *revisions[0].Model != "llama-3.3-70b-versatile" {
 		t.Fatalf("writer revision metadata should persist: %+v", revisions)
 	}
 	var maps int
