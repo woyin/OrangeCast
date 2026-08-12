@@ -2,6 +2,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -65,6 +67,101 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
 	}
+}
+
+// handleArticleWriterRun generates an initial immutable revision only from a confirmed Brief.
+func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	brief, err := srv.store.GetArticleBrief(r.Context(), strings.TrimSpace(r.FormValue("brief_id")))
+	if err != nil || brief.Status != "confirmed" {
+		http.Error(w, "只有已确认的 Brief 才能生成文章", http.StatusBadRequest)
+		return
+	}
+	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
+	if err != nil {
+		http.Error(w, "读取选题失败", http.StatusInternalServerError)
+		return
+	}
+	profile, err := srv.store.GetEditorialProfile(r.Context(), proposal.EditorialProfileID)
+	if err != nil {
+		http.Error(w, "读取编辑画像失败", http.StatusInternalServerError)
+		return
+	}
+	request, err := srv.writerRequest(r, profile, brief, proposal)
+	if err != nil {
+		http.Error(w, "素材不满足写作条件："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings, err := srv.store.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
+		return
+	}
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	if err != nil || bundle.Writer == nil {
+		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
+		return
+	}
+	result, err := bundle.Writer.WriteArticle(request)
+	if err != nil {
+		http.Error(w, "生成文章失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	draft, err := srv.store.CreateArticleDraft(r.Context(), brief.ID, result.Title)
+	if err != nil {
+		http.Error(w, "创建文章草稿失败", http.StatusInternalServerError)
+		return
+	}
+	providerName := bundle.Writer.Name()
+	revision, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName})
+	if err != nil {
+		http.Error(w, "保存 Writer 修订失败", http.StatusInternalServerError)
+		return
+	}
+	for _, mapping := range result.EvidenceMaps {
+		ids, _ := json.Marshal(mapping.KeyPointIDs)
+		if _, err := srv.store.CreateEvidenceMap(r.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)}); err != nil {
+			http.Error(w, "保存证据映射失败", http.StatusInternalServerError)
+			return
+		}
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
+}
+
+func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfile, brief *models.ArticleBrief, proposal *models.ArticleProposal) (provider.ArticleWritingRequest, error) {
+	var keyPointIDs []string
+	if err := json.Unmarshal([]byte(brief.MaterialPlan), &keyPointIDs); err != nil || len(keyPointIDs) == 0 {
+		return provider.ArticleWritingRequest{}, errors.New("Brief 必须选择至少一个 KeyPoint")
+	}
+	request := provider.ArticleWritingRequest{Title: proposal.Title, Thesis: brief.Thesis, Audience: brief.Audience, Outline: brief.Outline, Style: brief.Style, TargetLength: brief.TargetLength, SourceAttribution: profile.SourceAttribution}
+	seen := map[string]bool{}
+	for _, id := range keyPointIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		keyPoint, err := srv.store.GetKeyPoint(r.Context(), id)
+		if err != nil {
+			return provider.ArticleWritingRequest{}, err
+		}
+		usable, err := srv.store.CanUseSourceForPublication(r.Context(), profile.ID, keyPoint.SourceType, keyPoint.SourceID)
+		if err != nil || !usable {
+			return provider.ArticleWritingRequest{}, errors.New("存在未授权或不可公开的素材")
+		}
+		external, err := srv.store.CanSendSourceToExternalProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID)
+		if err != nil || !external {
+			return provider.ArticleWritingRequest{}, errors.New("存在不允许发送给外部 Writer 的素材")
+		}
+		var citations []string
+		if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil || len(citations) == 0 {
+			return provider.ArticleWritingRequest{}, errors.New("存在无有效 Citation 的 KeyPoint")
+		}
+		request.Materials = append(request.Materials, provider.ArticleMaterial{KeyPointID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content, Description: keyPoint.Description, Citations: citations})
+	}
+	return request, nil
 }
 
 // handleArticleProposalCreate records an Owner-created candidate topic.

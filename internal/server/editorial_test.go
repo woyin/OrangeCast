@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -401,3 +402,239 @@ func TestDraftWorkflowHandlersRejectWrongMethodAndInvalidInput(t *testing.T) {
 		t.Fatalf("missing draft should be 404: %d", rec.Code)
 	}
 }
+
+func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "writer-flow@example.com", "password123")
+	podcast, err := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "效率也会带来审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "审查成本", CandidateKeyPoints: "[\"" + keyPoints[0].ID + "\"]"})
+	if err := srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "效率也会带来审查成本", Outline: "# 结构", MaterialPlan: "[\"" + keyPoints[0].ID + "\"]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ConfirmArticleBrief(t.Context(), brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	writer := &fakeArticleWriter{}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: writer}, nil
+	}
+	page := httptest.NewRequest(http.MethodGet, "/workbench?profile="+profile.ID, nil)
+	page.AddCookie(session)
+	pageRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(pageRec, page)
+	var csrf string
+	for _, cookie := range pageRec.Result().Cookies() {
+		if cookie.Name == "cwp_csrf" {
+			csrf = cookie.Value
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workbench/write", strings.NewReader("_csrf="+csrf+"&brief_id="+brief.ID))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || len(writer.requests) != 1 || len(writer.requests[0].Materials) != 1 {
+		t.Fatalf("writer should run with selected materials: code=%d requests=%+v", rec.Code, writer.requests)
+	}
+	drafts, _ := srv.store.ListArticleDrafts(t.Context(), profile.ID)
+	if len(drafts) != 1 {
+		t.Fatalf("writer should create one draft: %+v", drafts)
+	}
+	revisions, _ := srv.store.ListArticleRevisions(t.Context(), drafts[0].ID)
+	if len(revisions) != 1 || revisions[0].Origin != "writer" || revisions[0].Provider == nil || *revisions[0].Provider != "fake-writer" {
+		t.Fatalf("writer revision metadata should persist: %+v", revisions)
+	}
+	var maps int
+	if err := srv.store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_maps WHERE revision_id=?`, revisions[0].ID).Scan(&maps); err != nil || maps != 1 {
+		t.Fatalf("writer evidence map should persist: count=%d err=%v", maps, err)
+	}
+}
+
+func TestWriterRejectsUnconfirmedMaterialsAndProviderFailures(t *testing.T) {
+	srv := newTestServer(t)
+	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
+	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
+	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "有证据的观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[\"" + keyPoints[0].ID + "\"]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/workbench/write", nil),
+		httptest.NewRequest(http.MethodPost, "/workbench/write", nil),
+	} {
+		rec := httptest.NewRecorder()
+		srv.handleArticleWriterRun(rec, request)
+		if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusBadRequest {
+			t.Fatalf("writer should reject method or missing brief: %d", rec.Code)
+		}
+	}
+	unconfirmed, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "未确认", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/workbench/write", strings.NewReader("brief_id="+unconfirmed.ID))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	srv.handleArticleWriterRun(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unconfirmed brief should be rejected: %d", recorder.Code)
+	}
+	badBrief := *brief
+	badBrief.MaterialPlan = "not-json"
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, &badBrief, proposal); err == nil {
+		t.Fatal("writer must reject malformed material plan")
+	}
+	missingMaterial := *brief
+	missingMaterial.MaterialPlan = `["missing"]`
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, &missingMaterial, proposal); err == nil {
+		t.Fatal("writer must reject missing KeyPoint")
+	}
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, brief, proposal); err == nil {
+		t.Fatal("writer must reject a Source outside profile scope")
+	}
+	if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataLocalOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, brief, proposal); err == nil {
+		t.Fatal("writer must reject local-only material for external providers")
+	}
+	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataExternalAllowed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='[]' WHERE id=?`, keyPoints[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, brief, proposal); err == nil {
+		t.Fatal("writer must reject KeyPoint without Citation")
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='["seg-1"]' WHERE id=?`, keyPoints[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	post := httptest.NewRequest(http.MethodPost, "/workbench/write", strings.NewReader("brief_id="+brief.ID))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return nil, errors.New("provider unavailable")
+	}
+	rec := httptest.NewRecorder()
+	srv.handleArticleWriterRun(rec, post)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unavailable provider should be rejected: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: failingArticleWriter{}}, nil
+	}
+	rec = httptest.NewRecorder()
+	srv.handleArticleWriterRun(rec, post)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("writer failure should be reported: %d", rec.Code)
+	}
+	run := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/write", strings.NewReader("brief_id="+brief.ID))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recorder := httptest.NewRecorder()
+		srv.handleArticleWriterRun(recorder, req)
+		return recorder
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return &provider.ProviderBundle{}, nil }
+	if rec := run(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing Writer implementation should be rejected: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: &fakeArticleWriter{}}, nil
+	}
+	for _, tc := range []struct{ table, name string }{{"article_drafts", "block_draft"}, {"article_revisions", "block_revision"}, {"evidence_maps", "block_evidence"}} {
+		if _, err := srv.store.DB.Exec(`CREATE TRIGGER ` + tc.name + ` BEFORE INSERT ON ` + tc.table + ` BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if rec := run(); rec.Code != http.StatusInternalServerError {
+			t.Fatalf("%s persistence failure should be 500: %d", tc.table, rec.Code)
+		}
+		if _, err := srv.store.DB.Exec(`DROP TRIGGER ` + tc.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE settings`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := run(); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("settings read failure should be 500: %d", rec.Code)
+	}
+}
+
+func TestWriterSurfacesProfileLookupFailure(t *testing.T) {
+	srv := newTestServer(t)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+	if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE article_proposals SET editorial_profile_id='missing' WHERE id=?`, proposal.ID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workbench/write", strings.NewReader("brief_id="+brief.ID))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.handleArticleWriterRun(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("profile lookup failure should be 500: %d", rec.Code)
+	}
+}
+
+type fakeArticleWriter struct {
+	requests []provider.ArticleWritingRequest
+}
+
+func (f *fakeArticleWriter) WriteArticle(request provider.ArticleWritingRequest) (*provider.ArticleWritingResult, error) {
+	f.requests = append(f.requests, request)
+	return &provider.ArticleWritingResult{Title: "审查成本", Markdown: "# 审查成本\n效率也会带来审查成本。", EvidenceMaps: []provider.ArticleEvidence{{Kind: "paraphrased", Excerpt: "效率也会带来审查成本。", KeyPointIDs: []string{request.Materials[0].KeyPointID}}}}, nil
+}
+
+func (f *fakeArticleWriter) Name() string { return "fake-writer" }
+
+type failingArticleWriter struct{}
+
+func (failingArticleWriter) WriteArticle(provider.ArticleWritingRequest) (*provider.ArticleWritingResult, error) {
+	return nil, errors.New("writer failed")
+}
+
+func (failingArticleWriter) Name() string { return "failing-writer" }

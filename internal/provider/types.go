@@ -87,11 +87,53 @@ type QAProvider interface {
 	Name() string
 }
 
+// ArticleMaterial is one approved KeyPoint available to the Writer. It carries no model-only facts.
+type ArticleMaterial struct {
+	KeyPointID  string   `json:"keyPointId"`
+	SourceTitle string   `json:"sourceTitle"`
+	Content     string   `json:"content"`
+	Description string   `json:"description"`
+	Citations   []string `json:"citations"`
+}
+
+// ArticleWritingRequest is the confirmed Brief plus its explicitly selected evidence material.
+type ArticleWritingRequest struct {
+	Title             string            `json:"title"`
+	Thesis            string            `json:"thesis"`
+	Audience          string            `json:"audience"`
+	Outline           string            `json:"outline"`
+	Style             string            `json:"style"`
+	TargetLength      *int              `json:"targetLength,omitempty"`
+	SourceAttribution string            `json:"sourceAttribution"`
+	Materials         []ArticleMaterial `json:"materials"`
+}
+
+// ArticleEvidence maps one generated excerpt to approved KeyPoint IDs.
+type ArticleEvidence struct {
+	Kind        string   `json:"kind"`
+	Excerpt     string   `json:"excerpt"`
+	KeyPointIDs []string `json:"keyPointIds"`
+}
+
+// ArticleWritingResult contains a Markdown draft and its required semantic evidence map.
+type ArticleWritingResult struct {
+	Title        string            `json:"title"`
+	Markdown     string            `json:"markdown"`
+	EvidenceMaps []ArticleEvidence `json:"evidenceMaps"`
+}
+
+// ArticleWriterProvider creates one evidence-mapped article from an Owner-confirmed brief.
+type ArticleWriterProvider interface {
+	WriteArticle(request ArticleWritingRequest) (*ArticleWritingResult, error)
+	Name() string
+}
+
 // ProviderBundle 一个 provider 的全套实现。
 type ProviderBundle struct {
 	Transcription TranscriptionProvider
 	Analysis      AnalysisProvider
 	QA            QAProvider
+	Writer        ArticleWriterProvider
 	Highlight     HighlightProvider
 	Paraphrase    ParaphraseProvider
 	StudyChat     StudyChatProvider
