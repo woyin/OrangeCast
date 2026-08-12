@@ -13,6 +13,8 @@ import (
 	"github.com/woyin/orangecast/internal/models"
 )
 
+const maxDocumentContentBytes = 4 << 20
+
 // CreatePastedDocument snapshots Owner-provided text as an immutable EvidenceDocument.
 func (s *Store) CreatePastedDocument(ctx context.Context, title, content string) (*models.Document, error) {
 	return s.createDocument(ctx, title, "pasted", "", content)
@@ -25,7 +27,7 @@ func (s *Store) CreateWebDocument(ctx context.Context, title, sourceURL, content
 
 func (s *Store) createDocument(ctx context.Context, title, originKind, originURL, content string) (*models.Document, error) {
 	title, content = strings.TrimSpace(title), strings.TrimSpace(content)
-	if title == "" || content == "" {
+	if title == "" || content == "" || len(content) > maxDocumentContentBytes {
 		return nil, ErrInvalidEditorialState
 	}
 	sum := sha256.Sum256([]byte(content))
