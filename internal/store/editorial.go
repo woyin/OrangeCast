@@ -560,6 +560,26 @@ func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleRe
 	return &review, nil
 }
 
+// ListArticleReviews returns the audit trail for one immutable revision, newest first.
+func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*models.ArticleReview, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, revision_id, kind, status, issues_json, provider, model, created_at
+		 FROM article_reviews WHERE revision_id=? ORDER BY created_at DESC, id DESC`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.ArticleReview
+	for rows.Next() {
+		review := &models.ArticleReview{}
+		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, review)
+	}
+	return out, rows.Err()
+}
+
 // IsRevisionReadyForPublication applies the hard evidence gate to an exact revision.
 func (s *Store) IsRevisionReadyForPublication(ctx context.Context, revisionID string) (bool, error) {
 	var status string

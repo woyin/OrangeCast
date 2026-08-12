@@ -353,6 +353,20 @@ func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
 	if rec := post("/workbench/reviews", "revision_id="+revisions[0].ID+"&kind=evidence&status=passed&issues=%5B%5D"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("evidence review should be recorded: %d", rec.Code)
 	}
+	if rec := post("/workbench/reviews", "revision_id="+revisions[0].ID+"&kind=style&status=advisory&issues=%5B%22%E5%87%8F%E5%B0%91%E5%A5%97%E8%AF%9D%22%5D"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("style review should be recorded: %d", rec.Code)
+	}
+	detailRec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID)
+	if detailRec.Code != http.StatusOK || !strings.Contains(detailRec.Body.String(), "审校记录") || !strings.Contains(detailRec.Body.String(), "减少套话") {
+		t.Fatalf("draft should display review history: status=%d body=%q", detailRec.Code, detailRec.Body.String())
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE article_reviews SET issues_json='not-json' WHERE revision_id=? AND kind='style'`, revisions[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	detailRec = doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID)
+	if detailRec.Code != http.StatusOK || !strings.Contains(detailRec.Body.String(), "审校记录格式异常") {
+		t.Fatalf("draft should tolerate malformed historic issues: status=%d body=%q", detailRec.Code, detailRec.Body.String())
+	}
 	ready, err := srv.store.IsRevisionReadyForPublication(t.Context(), revisions[0].ID)
 	if err != nil || !ready {
 		t.Fatalf("passed evidence review should unlock revision: ready=%v err=%v", ready, err)
@@ -823,7 +837,10 @@ func TestEvidenceReviewerSurfacesLookupAndPersistenceFailures(t *testing.T) {
 	}
 
 	srv, revision = newRevision(t)
-	if _, err := srv.store.DB.Exec(`DROP TABLE article_drafts`); err != nil {
+	if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DELETE FROM article_drafts WHERE id=?`, revision.DraftID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := srv.evidenceReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
@@ -1034,5 +1051,29 @@ func TestStyleReviewRequestSurfacesRevisionLineageFailures(t *testing.T) {
 		if _, err := srv.styleReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
 			t.Fatalf("missing %s should fail", table)
 		}
+	}
+}
+
+func TestStyleEditorRejectsBrokenRevisionLineage(t *testing.T) {
+	srv := newTestServer(t)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+	draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+	revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+	if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DELETE FROM article_drafts WHERE id=?`, draft.ID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workbench/reviews/style", strings.NewReader("revision_id="+revision.ID))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.handleStyleReviewRun(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("broken lineage should be rejected: %d", rec.Code)
 	}
 }

@@ -14,6 +14,7 @@
     <form method="post" action="/workbench/reviews/evidence"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="revision_id" value="{{.ID}}"><button class="btn" type="submit">运行独立证据审校</button></form>
     <form method="post" action="/workbench/reviews/style"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="revision_id" value="{{.ID}}"><button class="btn btn-secondary" type="submit">运行独立风格审校</button></form>
     <form method="post" action="/workbench/reviews"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="revision_id" value="{{.ID}}"><label>审校类型 <select name="kind"><option value="evidence">证据</option><option value="style">风格</option></select></label><label>结果 <select name="status"><option value="passed">通过</option><option value="failed">阻断</option><option value="advisory">建议</option></select></label><label>问题（JSON）<input name="issues" value="[]"></label><button class="btn btn-secondary" type="submit">记录审校</button></form>
+    {{with index $.ReviewsByRevision .ID}}<div class="panel" style="margin-top:.75rem"><h4>审校记录</h4>{{range .}}<p class="meta">{{.Kind}} · {{.Status}} · {{.CreatedAt}}{{with .Provider}} · {{.}}{{end}}</p>{{with .Issues}}<ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}{{end}}</div>{{end}}
   </article>
 {{else}}<p class="empty">尚无修订。保存第一版后，才能进入审校。</p>{{end}}
 </section>

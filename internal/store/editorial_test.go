@@ -154,6 +154,10 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "evidence", Status: "passed"}); err != nil {
 		t.Fatal(err)
 	}
+	reviews, err := s.ListArticleReviews(ctx, second.ID)
+	if err != nil || len(reviews) != 2 || reviews[0].RevisionID != second.ID || reviews[1].RevisionID != second.ID {
+		t.Fatalf("reviews should be revision-scoped and newest first: reviews=%+v err=%v", reviews, err)
+	}
 	if ready, err := s.IsRevisionReadyForPublication(ctx, second.ID); err != nil || !ready {
 		t.Fatalf("passed evidence review should unlock publication: ready=%v err=%v", ready, err)
 	}
@@ -406,6 +410,15 @@ func TestEditorialStoreQueryErrorsSurface(t *testing.T) {
 		{"proposals", "article_proposals", func(s *Store) error { _, err := s.ListArticleProposals(ctx, "profile"); return err }},
 		{"drafts", "article_drafts", func(s *Store) error { _, err := s.ListArticleDrafts(ctx, "profile"); return err }},
 		{"revisions", "article_revisions", func(s *Store) error { _, err := s.ListArticleRevisions(ctx, "draft"); return err }},
+		{"reviews", "article_reviews", func(s *Store) error { _, err := s.ListArticleReviews(ctx, "revision"); return err }},
+		{"theme_create", "themes", func(s *Store) error {
+			profile, err := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: "profile"})
+			if err != nil {
+				return err
+			}
+			_, err = s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "主题"})
+			return err
+		}},
 		{"scopes", "editorial_source_scopes", func(s *Store) error { _, err := s.ListScopedSources(ctx, "profile"); return err }},
 	}
 	for _, test := range tests {

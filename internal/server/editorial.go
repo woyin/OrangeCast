@@ -277,10 +277,30 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	currentMarkdown := ""
+	reviewsByRevision := make(map[string][]articleReviewView, len(revisions))
 	if len(revisions) > 0 {
 		currentMarkdown = revisions[0].Markdown
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
+	for _, revision := range revisions {
+		reviews, err := srv.store.ListArticleReviews(r.Context(), revision.ID)
+		if err != nil {
+			http.Error(w, "加载审校记录失败", http.StatusInternalServerError)
+			return
+		}
+		for _, review := range reviews {
+			view := articleReviewView{ArticleReview: review}
+			if err := json.Unmarshal([]byte(review.IssuesJSON), &view.Issues); err != nil {
+				view.Issues = []string{"审校记录格式异常"}
+			}
+			reviewsByRevision[revision.ID] = append(reviewsByRevision[revision.ID], view)
+		}
+	}
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "ReviewsByRevision": reviewsByRevision, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
+}
+
+type articleReviewView struct {
+	*models.ArticleReview
+	Issues []string
 }
 
 // handleArticleRevisionCreate appends an immutable Owner revision; it never overwrites text.
