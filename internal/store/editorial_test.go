@@ -183,7 +183,7 @@ func TestEditorialScopeAndPolicyRejectInvalidInput(t *testing.T) {
 	if _, err := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: ""}); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("empty profile name should be rejected: %v", err)
 	}
-	if err := s.GrantSourceScope(ctx, "profile", models.SourceType("document"), "source"); !errors.Is(err, ErrInvalidEditorialState) {
+	if err := s.GrantSourceScope(ctx, "profile", models.SourceType("unknown"), "source"); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("unknown source type should be rejected: %v", err)
 	}
 	if _, err := s.CreateEvidenceMap(ctx, models.EvidenceMap{RevisionID: "revision", Kind: models.EvidenceSynthesized, KeyPointIDs: `[]`}); !errors.Is(err, ErrInvalidEditorialState) {

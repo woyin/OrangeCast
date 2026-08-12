@@ -639,9 +639,12 @@ func validAttribution(value string) bool {
 	return value == "light" || value == "standard" || value == "strict"
 }
 func validSourceType(value models.SourceType) bool {
-	return value == models.SourceEpisode || value == models.SourceUpload
+	return value == models.SourceEpisode || value == models.SourceUpload || value == models.SourceDocument
 }
 func sourceTable(value models.SourceType) string {
+	if value == models.SourceDocument {
+		return "documents"
+	}
 	if value == models.SourceUpload {
 		return "uploads"
 	}

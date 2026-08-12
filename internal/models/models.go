@@ -13,6 +13,8 @@ const (
 	SourceEpisode SourceType = "episode"
 	// SourceUpload 来源类型：手动上传。
 	SourceUpload SourceType = "upload"
+	// SourceDocument 来源类型：不可变文本证据文档。
+	SourceDocument SourceType = "document"
 )
 
 // JobType 处理任务类型。
@@ -77,6 +79,15 @@ type Podcast struct {
 	LastFetchedAt   *string
 	CreatedAt       string
 	IngestionPolicy string
+}
+
+// Document is a text PrimarySource whose content is its EvidenceDocument snapshot.
+type Document struct {
+	ID, Title, OriginKind, OriginURL, Content, ContentSHA256 string
+	ProductionUse                                            string
+	ModelDataPolicy                                          ModelDataPolicy
+	ArchivedAt                                               *string
+	CreatedAt, UpdatedAt                                     string
 }
 
 // IngestionPolicy decides how newly discovered Podcast episodes enter processing.
