@@ -1,0 +1,2 @@
+{{define "title"}}文档素材 · CloudWisePod{{end}}
+{{define "content"}}<div class="page-head"><h1>文档素材</h1><a class="btn" href="/documents/new">粘贴新文档</a></div><p class="meta">每一条是不可变 EvidenceDocument 快照；网页 URL 与 PDF 将在此基础上接入。</p>{{range .Documents}}<div class="list-item"><a href="/documents/{{.ID}}"><h3>{{.Title}}</h3><p class="meta">{{.OriginKind}} · {{.CreatedAt}} · SHA-256 {{.ContentSHA256}}</p></a></div>{{else}}<p class="empty">暂无文档素材。</p>{{end}}{{end}}
