@@ -73,6 +73,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/uploads/new", srv.handleUploadNew)
 	mux.HandleFunc("/documents", srv.handleDocuments)
 	mux.HandleFunc("/documents/new", srv.handleDocumentNew)
+	mux.HandleFunc("/documents/keypoints", srv.handleDocumentKeyPoint)
 	mux.HandleFunc("/documents/", srv.handleDocumentDetail)
 	mux.HandleFunc("/sources/", srv.handleSourceDetail) // /sources/{type}/{id}[/dj|/download|/versions]
 	mux.HandleFunc("/search", srv.handleSearch)

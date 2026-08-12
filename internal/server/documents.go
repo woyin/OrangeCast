@@ -1,10 +1,12 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -46,5 +48,37 @@ func (srv *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "加载文档失败", http.StatusInternalServerError)
 		return
 	}
-	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc)})
+	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "CSRF": auth.CSRFValue(r)})
+}
+
+// handleDocumentKeyPoint creates a curator-owned KeyPoint anchored to one exact paragraph.
+func (srv *Server) handleDocumentKeyPoint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	doc, err := srv.store.GetDocument(r.Context(), strings.TrimSpace(r.FormValue("document_id")))
+	if err != nil {
+		http.Error(w, "读取文档失败", http.StatusBadRequest)
+		return
+	}
+	segmentID := strings.TrimSpace(r.FormValue("segment_id"))
+	position := 0
+	for _, segment := range store.DocumentSegments(doc) {
+		if segment.ID == segmentID {
+			position = segment.Position
+			break
+		}
+	}
+	if position == 0 {
+		http.Error(w, "段落引用无效", http.StatusBadRequest)
+		return
+	}
+	citations, _ := json.Marshal([]string{segmentID})
+	_, err = srv.store.CreateManualKeyPoint(r.Context(), store.KeyPointRow{SourceType: models.SourceDocument, SourceID: doc.ID, SourceTitle: doc.Title, Content: r.FormValue("content"), Description: r.FormValue("description"), CitationsJSON: string(citations), TimeStart: float64(position), TimeEnd: float64(position) + .5})
+	if err != nil {
+		http.Error(w, "创建 KeyPoint 失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/documents/"+doc.ID, http.StatusSeeOther)
 }
