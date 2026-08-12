@@ -49,6 +49,12 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		data["Profile"] = profile
 		data["Proposals"] = proposals
 		data["Drafts"] = drafts
+		briefs, err := srv.store.ListArticleBriefs(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载写作简报失败", http.StatusInternalServerError)
+			return
+		}
+		data["Briefs"] = briefs
 		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
 		if err != nil {
 			http.Error(w, "加载素材范围失败", http.StatusInternalServerError)
@@ -59,6 +65,86 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
 	}
+}
+
+// handleArticleProposalCreate records an Owner-created candidate topic.
+func (srv *Server) handleArticleProposalCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	proposal, err := srv.store.CreateArticleProposal(r.Context(), models.ArticleProposal{
+		EditorialProfileID: profileID,
+		Kind:               strings.TrimSpace(r.FormValue("kind")),
+		Title:              strings.TrimSpace(r.FormValue("title")),
+		Thesis:             strings.TrimSpace(r.FormValue("thesis")),
+		Audience:           strings.TrimSpace(r.FormValue("audience")),
+		Rationale:          strings.TrimSpace(r.FormValue("rationale")),
+		CandidateKeyPoints: strings.TrimSpace(r.FormValue("candidate_keypoints")),
+	})
+	if err != nil {
+		http.Error(w, "创建选题失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+proposal.EditorialProfileID, http.StatusSeeOther)
+}
+
+// handleArticleProposalStatus records the Owner's explicit proposal decision.
+func (srv *Server) handleArticleProposalStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	if err := srv.store.SetArticleProposalStatus(r.Context(), strings.TrimSpace(r.FormValue("proposal_id")), strings.TrimSpace(r.FormValue("status"))); err != nil {
+		http.Error(w, "更新选题失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
+}
+
+// handleArticleBriefCreate records a reviewable material and structure contract.
+func (srv *Server) handleArticleBriefCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	targetLength, err := optionalTargetLength(r.FormValue("target_length"))
+	if err != nil {
+		http.Error(w, "目标字数必须是正整数", http.StatusBadRequest)
+		return
+	}
+	brief, err := srv.store.CreateArticleBrief(r.Context(), models.ArticleBrief{
+		ProposalID:   strings.TrimSpace(r.FormValue("proposal_id")),
+		Thesis:       strings.TrimSpace(r.FormValue("thesis")),
+		Audience:     strings.TrimSpace(r.FormValue("audience")),
+		Outline:      strings.TrimSpace(r.FormValue("outline")),
+		MaterialPlan: strings.TrimSpace(r.FormValue("material_plan")),
+		ConflictPlan: strings.TrimSpace(r.FormValue("conflict_plan")),
+		Style:        strings.TrimSpace(r.FormValue("style")),
+		TargetLength: targetLength,
+	})
+	if err != nil {
+		http.Error(w, "创建写作简报失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+profileID+"&brief="+brief.ID, http.StatusSeeOther)
+}
+
+// handleArticleBriefConfirm is the explicit authorization point for later writer jobs.
+func (srv *Server) handleArticleBriefConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	if err := srv.store.ConfirmArticleBrief(r.Context(), strings.TrimSpace(r.FormValue("brief_id"))); err != nil {
+		http.Error(w, "确认写作简报失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
 }
 
 // handleEditorialSourceScope grants or revokes an explicit source authorization.
@@ -117,6 +203,18 @@ func optionalBudget(raw string) (*int64, error) {
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value < 0 {
+		return nil, errBudget
+	}
+	return &value, nil
+}
+
+func optionalTargetLength(raw string) (*int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
 		return nil, errBudget
 	}
 	return &value, nil

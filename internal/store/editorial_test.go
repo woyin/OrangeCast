@@ -92,6 +92,10 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	briefs, err := s.ListArticleBriefs(ctx, profile.ID)
+	if err != nil || len(briefs) != 1 || briefs[0].ID != brief.ID {
+		t.Fatalf("briefs should list created brief: briefs=%+v err=%v", briefs, err)
+	}
 	if _, err := s.CreateArticleDraft(ctx, brief.ID, "草稿"); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("draft must require confirmed brief, got %v", err)
 	}
@@ -176,6 +180,16 @@ func TestEditorialScopeAndPolicyRejectInvalidInput(t *testing.T) {
 	}
 	if _, err := s.CreateEvidenceMap(ctx, models.EvidenceMap{RevisionID: "revision", Kind: models.EvidenceSynthesized, KeyPointIDs: `[]`}); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("synthesized expression without evidence should be rejected: %v", err)
+	}
+}
+
+func TestListArticleBriefsReturnsQueryError(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.DB.Exec(`DROP TABLE article_briefs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListArticleBriefs(context.Background(), "profile"); err == nil {
+		t.Fatal("missing article_briefs table should return query error")
 	}
 }
 

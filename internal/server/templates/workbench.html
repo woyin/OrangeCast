@@ -39,10 +39,27 @@
   <section class="card">
     <h2>选题提案</h2>
     {{range $.Proposals}}
-      <div class="list-item"><h3>{{.Title}}</h3><p>{{.Thesis}}</p><p class="meta">{{.Kind}} · {{.Status}}</p></div>
+      <div class="list-item"><div style="flex:1"><h3>{{.Title}}</h3><p>{{.Thesis}}</p><p class="meta">{{.Kind}} · {{.Status}}</p></div>
+      {{if eq .Status "proposed"}}<form method="post" action="/workbench/proposals/status"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="proposal_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受并写 Brief</button></form>{{end}}
+      </div>
+      {{if eq .Status "accepted"}}
+      <form method="post" action="/workbench/briefs" class="panel" style="margin:.5rem 0 1rem"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="proposal_id" value="{{.ID}}">
+        <label>核心论点 <input name="thesis" value="{{.Thesis}}" required></label><label>目标读者 <input name="audience" value="{{.Audience}}"></label><label>文章结构 <textarea name="outline" rows="3" required># 标题
+## 开场
+## 正文
+## 结语</textarea></label><label>入选材料（KeyPoint ID JSON）<textarea name="material_plan" rows="2" required>[]</textarea></label><label>冲突处理（JSON）<textarea name="conflict_plan" rows="2" required>[]</textarea></label><label>风格 <input name="style" value="{{$.Profile.Voice}}"></label><label>目标字数 <input type="number" min="1" name="target_length" placeholder="例如 1800"></label><button class="btn" type="submit">创建可审核 Brief</button>
+      </form>
+      {{end}}
     {{else}}
-      <p class="empty">尚无提案。Scout 接入后会在这里展示 Fresh 与 Evergreen 选题。</p>
+      <p class="empty">尚无提案。你可以先手动提出选题；Scout 接入后会持续补充 Fresh 与 Evergreen 候选。</p>
     {{end}}
+    <form method="post" action="/workbench/proposals" class="panel" style="margin-top:1rem"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>选题类型 <select name="kind"><option value="fresh">Fresh</option><option value="evergreen">Evergreen</option><option value="follow_up">Follow-up</option></select></label><label>标题 <input name="title" required></label><label>核心论点 <textarea name="thesis" rows="2"></textarea></label><label>目标读者 <input name="audience" value="{{$.Profile.TargetAudience}}"></label><label>为什么值得写 <textarea name="rationale" rows="2"></textarea></label><label>候选材料（KeyPoint ID JSON）<textarea name="candidate_keypoints" rows="2">[]</textarea></label><button class="btn" type="submit">加入提案池</button></form>
+  </section>
+  <section class="card">
+    <h2>待确认 Brief</h2>
+    {{range $.Briefs}}
+      <div class="list-item"><div style="flex:1"><h3>{{.Thesis}}</h3><p class="meta">{{.Status}} · {{if .TargetLength}}{{.TargetLength}} 字{{else}}未设篇幅{{end}}</p></div>{{if eq .Status "draft"}}<form method="post" action="/workbench/briefs/confirm"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="brief_id" value="{{.ID}}"><button class="btn" type="submit">确认并授权写作</button></form>{{end}}</div>
+    {{else}}<p class="empty">接受提案后，在这里检查素材和结构，再明确授权写作。</p>{{end}}
   </section>
   <section class="card">
     <h2>文章修订</h2>

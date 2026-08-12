@@ -272,6 +272,27 @@ func (s *Store) ListArticleProposals(ctx context.Context, profileID string) ([]*
 	return out, rows.Err()
 }
 
+// ListArticleBriefs returns briefs belonging to proposals for one editorial profile.
+func (s *Store) ListArticleBriefs(ctx context.Context, profileID string) ([]*models.ArticleBrief, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT b.id, b.proposal_id, b.status, b.thesis, b.audience, b.outline_markdown, b.material_plan_json, b.conflict_plan_json, b.style, b.target_length, b.confirmed_at, b.created_at, b.updated_at
+		 FROM article_briefs b JOIN article_proposals p ON p.id=b.proposal_id
+		 WHERE p.editorial_profile_id=? ORDER BY b.updated_at DESC, b.id DESC`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.ArticleBrief
+	for rows.Next() {
+		brief := &models.ArticleBrief{}
+		if err := rows.Scan(&brief.ID, &brief.ProposalID, &brief.Status, &brief.Thesis, &brief.Audience, &brief.Outline, &brief.MaterialPlan, &brief.ConflictPlan, &brief.Style, &brief.TargetLength, &brief.ConfirmedAt, &brief.CreatedAt, &brief.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, brief)
+	}
+	return out, rows.Err()
+}
+
 // SetArticleProposalStatus records an explicit Owner decision about a proposal.
 func (s *Store) SetArticleProposalStatus(ctx context.Context, proposalID, status string) error {
 	if !validProposalStatus(status) {
