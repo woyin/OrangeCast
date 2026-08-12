@@ -49,6 +49,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/progress", srv.handleProgressAPI)
 	mux.HandleFunc("/podcasts", srv.handlePodcasts)
 	mux.HandleFunc("/podcasts/new", srv.handlePodcastNew)
+	mux.HandleFunc("/api/podcasts/ingestion-policy", srv.handlePodcastIngestionPolicy)
 	mux.HandleFunc("/podcasts/", srv.handlePodcastDetail)
 	mux.HandleFunc("/uploads", srv.handleUploads)
 	mux.HandleFunc("/uploads/new", srv.handleUploadNew)

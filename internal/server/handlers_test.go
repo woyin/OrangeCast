@@ -998,6 +998,51 @@ func TestPodcastDetail_Renders(t *testing.T) {
 	}
 }
 
+func TestPodcastIngestionPolicy_UpdatesPolicy(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podpolicy@example.com", "password123")
+	podcast, err := srv.store.CreatePodcast(context.Background(), "https://feed.example.com/pod.xml", "测试播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/podcasts/"+podcast.ID, nil)
+	get.AddCookie(cookie)
+	getRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(getRec, get)
+	var csrf string
+	for _, c := range getRec.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	if csrf == "" {
+		t.Fatal("detail page should issue a CSRF token")
+	}
+	body := "_csrf=" + csrf + "&podcast_id=" + podcast.ID + "&ingestion_policy=all_new"
+	req := httptest.NewRequest(http.MethodPost, "/api/podcasts/ingestion-policy", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/podcasts/"+podcast.ID {
+		t.Fatalf("policy update should return to podcast: code=%d location=%q", rec.Code, rec.Header().Get("Location"))
+	}
+	updated, err := srv.store.GetPodcastByID(context.Background(), podcast.ID)
+	if err != nil || updated.IngestionPolicy != string(models.IngestionAllNew) {
+		t.Fatalf("policy should persist: podcast=%+v err=%v", updated, err)
+	}
+}
+
+func TestPodcastIngestionPolicy_RejectsNonPost(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "podpolicy-method@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/api/podcasts/ingestion-policy")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET should be rejected: %d", rec.Code)
+	}
+}
+
 // TestPodcastDetail_NotFound 验证不存在的播客返回 404。
 func TestPodcastDetail_NotFound(t *testing.T) {
 	srv := newTestServer(t)

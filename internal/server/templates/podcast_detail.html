@@ -3,6 +3,23 @@
 <div class="page-head"><h1>{{.Podcast.Title}}</h1></div>
 <p>{{.Podcast.Description}}</p>
 
+<section class="card">
+  <h2>自动摄取</h2>
+  <p class="meta">只影响此后 RSS 刷新时新发现的单集；不会自动处理历史待处理内容。</p>
+  <form method="post" action="/api/podcasts/ingestion-policy" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="podcast_id" value="{{.Podcast.ID}}">
+    <label>新 Episode 的处理方式
+      <select name="ingestion_policy">
+        <option value="manual" {{if eq .Podcast.IngestionPolicy "manual"}}selected{{end}}>手动选择（推荐）</option>
+        <option value="all_new" {{if eq .Podcast.IngestionPolicy "all_new"}}selected{{end}}>自动转录全部新集</option>
+        <option value="filtered" {{if eq .Podcast.IngestionPolicy "filtered"}}selected{{end}} disabled>按规则筛选（即将支持）</option>
+      </select>
+    </label>
+    <button type="submit" class="btn">保存策略</button>
+  </form>
+</section>
+
 {{if .BatchDone}}
 <div class="status-bar {{if eq .BatchSkipped "0"}}processing{{else}}failed{{end}}">
   <strong>批量入队完成</strong>：已入队 {{.BatchEnqueued}} 集，跳过 {{.BatchSkipped}} 集。

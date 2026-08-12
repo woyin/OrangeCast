@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
+	"github.com/woyin/orangecast/internal/models"
 )
 
 func (srv *Server) handlePodcasts(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +68,21 @@ func (srv *Server) handlePodcastDetail(w http.ResponseWriter, r *http.Request) {
 		"Page": page, "TotalPages": totalPages(total, perPage), "Total": total,
 		"PrevPage": page - 1, "NextPage": page + 1,
 	})
+}
+
+// handlePodcastIngestionPolicy updates the Owner-selected automatic ingestion policy.
+func (srv *Server) handlePodcastIngestionPolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	podcastID := strings.TrimSpace(r.FormValue("podcast_id"))
+	policy := models.IngestionPolicy(strings.TrimSpace(r.FormValue("ingestion_policy")))
+	if err := srv.store.SetPodcastIngestionPolicy(r.Context(), podcastID, policy); err != nil {
+		http.Error(w, "更新自动摄取策略失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/podcasts/"+podcastID, http.StatusSeeOther)
 }
 func (srv *Server) handleUploads(w http.ResponseWriter, r *http.Request) {
 	us, _ := srv.store.ListUploads(r.Context())
