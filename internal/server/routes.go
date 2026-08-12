@@ -62,6 +62,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/workbench/reviews/evidence", srv.handleEvidenceReviewRun)
 	mux.HandleFunc("/workbench/reviews/style", srv.handleStyleReviewRun)
 	mux.HandleFunc("/workbench/write", srv.handleArticleWriterRun)
+	mux.HandleFunc("/workbench/revise", srv.handleArticleRevisionWriterRun)
 	mux.HandleFunc("/progress", srv.handleProgress)
 	mux.HandleFunc("/api/progress", srv.handleProgressAPI)
 	mux.HandleFunc("/podcasts", srv.handlePodcasts)

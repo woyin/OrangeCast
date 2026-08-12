@@ -107,6 +107,8 @@ type ArticleWritingRequest struct {
 	TargetLength      *int              `json:"targetLength,omitempty"`
 	SourceAttribution string            `json:"sourceAttribution"`
 	Materials         []ArticleMaterial `json:"materials"`
+	ExistingMarkdown  string            `json:"existingMarkdown,omitempty"`
+	RevisionFeedback  []string          `json:"revisionFeedback,omitempty"`
 }
 
 // ArticleEvidence maps one generated excerpt to approved KeyPoint IDs.

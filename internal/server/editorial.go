@@ -132,6 +132,89 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
 }
 
+// handleArticleRevisionWriterRun turns review findings into a new immutable AI edit.
+func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	revision, err := srv.store.GetArticleRevision(r.Context(), strings.TrimSpace(r.FormValue("revision_id")))
+	if err != nil {
+		http.Error(w, "读取文章修订失败", http.StatusBadRequest)
+		return
+	}
+	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
+	if err != nil {
+		http.Error(w, "读取草稿失败", http.StatusBadRequest)
+		return
+	}
+	brief, err := srv.store.GetArticleBrief(r.Context(), draft.BriefID)
+	if err != nil {
+		http.Error(w, "读取 Brief 失败", http.StatusBadRequest)
+		return
+	}
+	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
+	if err != nil {
+		http.Error(w, "读取选题失败", http.StatusBadRequest)
+		return
+	}
+	profile, err := srv.store.GetEditorialProfile(r.Context(), proposal.EditorialProfileID)
+	if err != nil {
+		http.Error(w, "读取编辑画像失败", http.StatusBadRequest)
+		return
+	}
+	request, err := srv.writerRequest(r, profile, brief, proposal)
+	if err != nil {
+		http.Error(w, "素材不满足写作条件："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	reviews, err := srv.store.ListArticleReviews(r.Context(), revision.ID)
+	if err != nil {
+		http.Error(w, "读取审校记录失败", http.StatusInternalServerError)
+		return
+	}
+	for _, review := range reviews {
+		var issues []string
+		if json.Unmarshal([]byte(review.IssuesJSON), &issues) == nil {
+			request.RevisionFeedback = append(request.RevisionFeedback, issues...)
+		}
+	}
+	if len(request.RevisionFeedback) == 0 {
+		http.Error(w, "该修订没有可供处理的审校反馈", http.StatusBadRequest)
+		return
+	}
+	request.Title, request.ExistingMarkdown = revision.Title, revision.Markdown
+	settings, err := srv.store.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
+		return
+	}
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	if err != nil || bundle.Writer == nil {
+		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
+		return
+	}
+	result, err := bundle.Writer.WriteArticle(request)
+	if err != nil {
+		http.Error(w, "生成新修订失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	providerName := bundle.Writer.Name()
+	next, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName})
+	if err != nil {
+		http.Error(w, "保存 Writer 修订失败", http.StatusInternalServerError)
+		return
+	}
+	for _, mapping := range result.EvidenceMaps {
+		ids, _ := json.Marshal(mapping.KeyPointIDs)
+		if _, err := srv.store.CreateEvidenceMap(r.Context(), models.EvidenceMap{RevisionID: next.ID, Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)}); err != nil {
+			http.Error(w, "保存证据映射失败", http.StatusInternalServerError)
+			return
+		}
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
+}
+
 func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfile, brief *models.ArticleBrief, proposal *models.ArticleProposal) (provider.ArticleWritingRequest, error) {
 	var keyPointIDs []string
 	if err := json.Unmarshal([]byte(brief.MaterialPlan), &keyPointIDs); err != nil || len(keyPointIDs) == 0 {

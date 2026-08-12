@@ -497,6 +497,26 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if err := srv.store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_maps WHERE revision_id=?`, revisions[0].ID).Scan(&maps); err != nil || maps != 1 {
 		t.Fatalf("writer evidence map should persist: count=%d err=%v", maps, err)
 	}
+	callRevise := func(id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/revise", strings.NewReader("_csrf="+csrf+"&revision_id="+id))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	methodRec := httptest.NewRecorder()
+	srv.handleArticleRevisionWriterRun(methodRec, httptest.NewRequest(http.MethodGet, "/workbench/revise", nil))
+	if methodRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET should reject: %d", methodRec.Code)
+	}
+	if rec := callRevise("missing"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing revision should reject: %d", rec.Code)
+	}
+	if rec := callRevise(revisions[0].ID); rec.Code != http.StatusBadRequest {
+		t.Fatalf("revision without feedback should reject: %d", rec.Code)
+	}
 	reviewer := &fakeEvidenceReviewer{status: "passed"}
 	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return &provider.ProviderBundle{EvidenceReviewer: reviewer}, nil
@@ -523,11 +543,60 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if styleRec.Code != http.StatusSeeOther || len(styleEditor.requests) != 1 || styleEditor.requests[0].TargetAudience != "" {
 		t.Fatalf("style review should receive exact revision/profile constraints: code=%d requests=%+v", styleRec.Code, styleEditor.requests)
 	}
-	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package")
+	firstRevisionID := revisions[0].ID
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: writer}, nil
+	}
+	reviseRec := callRevise(revisions[0].ID)
+	if reviseRec.Code != http.StatusSeeOther || len(writer.requests) != 2 || writer.requests[1].ExistingMarkdown == "" || len(writer.requests[1].RevisionFeedback) != 1 {
+		t.Fatalf("reviewed revision should create an AI edit request: code=%d request=%+v", reviseRec.Code, writer.requests)
+	}
+	revisions, _ = srv.store.ListArticleRevisions(t.Context(), drafts[0].ID)
+	if len(revisions) != 2 || revisions[0].Origin != "ai_edit" {
+		t.Fatalf("Writer revision should be immutable ai_edit: %+v", revisions)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: failingArticleWriter{}}, nil
+	}
+	if rec := callRevise(firstRevisionID); rec.Code != http.StatusBadRequest {
+		t.Fatalf("failing Writer should reject: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return &provider.ProviderBundle{}, nil }
+	if rec := callRevise(firstRevisionID); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing Writer should reject: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Writer: writer}, nil
+	}
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER abort_edit_map BEFORE INSERT ON evidence_maps BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := callRevise(firstRevisionID); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("map persistence should fail: %d", rec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TRIGGER abort_edit_map`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER abort_edit_revision BEFORE INSERT ON article_revisions BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := callRevise(firstRevisionID); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("revision persistence should fail: %d", rec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TRIGGER abort_edit_revision`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE settings`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := callRevise(firstRevisionID); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("settings lookup should fail: %d", rec.Code)
+	}
+	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package")
 	if packagePage.Code != http.StatusOK || !strings.Contains(packagePage.Body.String(), "单集") || !strings.Contains(packagePage.Body.String(), "可复制富文本") {
 		t.Fatalf("ready revision should render publication package: status=%d body=%s", packagePage.Code, packagePage.Body.String())
 	}
-	download := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package?format=markdown")
+	download := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package?format=markdown")
 	if download.Code != http.StatusOK || !strings.Contains(download.Body.String(), "## 来源") || !strings.Contains(download.Header().Get("Content-Type"), "text/markdown") {
 		t.Fatalf("package download should contain Markdown and sources: status=%d header=%q body=%s", download.Code, download.Header().Get("Content-Type"), download.Body.String())
 	}
@@ -548,25 +617,25 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if malformedRec.Code != http.StatusNotFound {
 		t.Fatalf("malformed package path must be 404: %d", malformedRec.Code)
 	}
-	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json='broken' WHERE revision_id=?`, revisions[0].ID); err != nil {
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json='broken' WHERE revision_id=?`, firstRevisionID); err != nil {
 		t.Fatal(err)
 	}
-	if invalidMap := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); invalidMap.Code != http.StatusInternalServerError {
+	if invalidMap := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); invalidMap.Code != http.StatusInternalServerError {
 		t.Fatalf("invalid evidence map must block package: %d", invalidMap.Code)
 	}
-	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json=? WHERE revision_id=?`, "[\""+keyPoints[0].ID+"\"]", revisions[0].ID); err != nil {
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json=? WHERE revision_id=?`, "[\""+keyPoints[0].ID+"\"]", firstRevisionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := srv.store.DB.Exec(`DELETE FROM keypoint_index WHERE id=?`, keyPoints[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if missingSource := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); missingSource.Code != http.StatusInternalServerError {
+	if missingSource := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); missingSource.Code != http.StatusInternalServerError {
 		t.Fatalf("missing evidence source must block package: %d", missingSource.Code)
 	}
 	if _, err := srv.store.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
 		t.Fatal(err)
 	}
-	if missingMaps := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package"); missingMaps.Code != http.StatusInternalServerError {
+	if missingMaps := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); missingMaps.Code != http.StatusInternalServerError {
 		t.Fatalf("missing evidence mappings must block package: %d", missingMaps.Code)
 	}
 }
@@ -1090,5 +1159,36 @@ func TestStyleEditorRejectsBrokenRevisionLineage(t *testing.T) {
 	srv.handleStyleReviewRun(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("broken lineage should be rejected: %d", rec.Code)
+	}
+}
+
+func TestRevisionWriterRejectsBrokenLineage(t *testing.T) {
+	newRevision := func(t *testing.T) (*Server, *models.ArticleRevision) {
+		t.Helper()
+		srv := newTestServer(t)
+		profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+		proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+		srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+		brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+		srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+		draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+		revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+		return srv, revision
+	}
+	for _, table := range []string{"article_drafts", "article_briefs", "article_proposals", "editorial_profiles"} {
+		srv, revision := newRevision(t)
+		if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.store.DB.Exec(`DELETE FROM ` + table + ` WHERE 1=1`); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/workbench/revise", strings.NewReader("revision_id="+revision.ID))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.handleArticleRevisionWriterRun(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("missing %s should reject: %d", table, rec.Code)
+		}
 	}
 }

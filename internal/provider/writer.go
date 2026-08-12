@@ -67,7 +67,14 @@ func articleWriterInput(request ArticleWritingRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "基于以下已确认 Brief 和仅允许的 KeyPoint 材料撰写文章：\n" + string(encoded), nil
+	prefix := "基于以下已确认 Brief 和仅允许的 KeyPoint 材料撰写文章：\n"
+	if strings.TrimSpace(request.ExistingMarkdown) != "" {
+		if len(request.RevisionFeedback) == 0 {
+			return "", fmt.Errorf("revision requires at least one review finding")
+		}
+		prefix = "基于以下原修订、审校反馈、已确认 Brief 和仅允许的 KeyPoint 材料生成新的完整修订。必须解决反馈，但不得使用未提供材料：\n"
+	}
+	return prefix + string(encoded), nil
 }
 
 func validateArticleWritingResult(result *ArticleWritingResult, materials []ArticleMaterial) (*ArticleWritingResult, error) {

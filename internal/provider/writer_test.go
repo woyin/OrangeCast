@@ -35,6 +35,15 @@ func TestArticleWriterRejectsEmptyOrUnapprovedEvidence(t *testing.T) {
 	if err == nil {
 		t.Fatal("writer must reject evidence map that cites an unselected KeyPoint")
 	}
+	request := ArticleWritingRequest{Thesis: "x", Outline: "# x", Materials: []ArticleMaterial{{KeyPointID: "kp-1"}}, ExistingMarkdown: "旧稿", RevisionFeedback: []string{"补充归因"}}
+	input, err := articleWriterInput(request)
+	if err != nil || !strings.Contains(input, "原修订") || !strings.Contains(input, "补充归因") {
+		t.Fatalf("revision input should include review feedback: input=%q err=%v", input, err)
+	}
+	request.RevisionFeedback = nil
+	if _, err := articleWriterInput(request); err == nil {
+		t.Fatal("revision input must require review feedback")
+	}
 }
 
 func TestGroqScoutValidatesCrossSourceKeyPointProposal(t *testing.T) {
