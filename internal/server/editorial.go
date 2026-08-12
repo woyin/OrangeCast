@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -323,6 +324,103 @@ func (srv *Server) handleArticleReviewCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
+// handleEvidenceReviewRun executes an independent evidence review for the current exact revision.
+func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	revision, err := srv.store.GetArticleRevision(r.Context(), strings.TrimSpace(r.FormValue("revision_id")))
+	if err != nil {
+		http.Error(w, "读取文章修订失败", http.StatusBadRequest)
+		return
+	}
+	request, err := srv.evidenceReviewRequest(r, revision)
+	if err != nil {
+		http.Error(w, "证据映射不满足审校条件："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	settings, err := srv.store.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
+		return
+	}
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	if err != nil || bundle.EvidenceReviewer == nil {
+		http.Error(w, "EvidenceReviewer Provider 不可用", http.StatusBadRequest)
+		return
+	}
+	result, err := bundle.EvidenceReviewer.ReviewEvidence(request)
+	if err != nil {
+		http.Error(w, "证据审校失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	issues, _ := json.Marshal(result.Issues)
+	providerName := bundle.EvidenceReviewer.Name()
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "evidence", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName}); err != nil {
+		http.Error(w, "保存证据审校失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
+func (srv *Server) evidenceReviewRequest(r *http.Request, revision *models.ArticleRevision) (provider.EvidenceReviewRequest, error) {
+	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
+	if err != nil {
+		return provider.EvidenceReviewRequest{}, err
+	}
+	brief, err := srv.store.GetArticleBrief(r.Context(), draft.BriefID)
+	if err != nil {
+		return provider.EvidenceReviewRequest{}, err
+	}
+	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
+	if err != nil {
+		return provider.EvidenceReviewRequest{}, err
+	}
+	maps, err := srv.store.ListEvidenceMaps(r.Context(), revision.ID)
+	if err != nil {
+		return provider.EvidenceReviewRequest{}, err
+	}
+	if len(maps) == 0 {
+		return provider.EvidenceReviewRequest{}, errors.New("Revision 没有 EvidenceMap")
+	}
+	request := provider.EvidenceReviewRequest{Title: revision.Title, Markdown: revision.Markdown}
+	for _, mapping := range maps {
+		if !strings.Contains(revision.Markdown, mapping.Excerpt) {
+			return provider.EvidenceReviewRequest{}, fmt.Errorf("EvidenceMap 摘录未出现在正文中")
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(mapping.KeyPointIDs), &ids); err != nil {
+			return provider.EvidenceReviewRequest{}, err
+		}
+		item := provider.EvidenceReviewItem{Kind: string(mapping.Kind), Excerpt: mapping.Excerpt}
+		for _, id := range ids {
+			keyPoint, err := srv.store.GetKeyPoint(r.Context(), id)
+			if err != nil {
+				return provider.EvidenceReviewRequest{}, err
+			}
+			usable, err := srv.store.CanUseSourceForPublication(r.Context(), proposal.EditorialProfileID, keyPoint.SourceType, keyPoint.SourceID)
+			if err != nil || !usable {
+				return provider.EvidenceReviewRequest{}, errors.New("EvidenceMap 包含未授权或不可公开素材")
+			}
+			external, err := srv.store.CanSendSourceToExternalProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID)
+			if err != nil || !external {
+				return provider.EvidenceReviewRequest{}, errors.New("EvidenceMap 包含不可发送给审校模型的素材")
+			}
+			var citations []string
+			if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil || len(citations) == 0 {
+				return provider.EvidenceReviewRequest{}, errors.New("EvidenceMap 包含无 Citation KeyPoint")
+			}
+			item.Materials = append(item.Materials, provider.ArticleMaterial{KeyPointID: keyPoint.ID, SourceID: keyPoint.SourceID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content, Description: keyPoint.Description, Citations: citations})
+		}
+		if mapping.Kind != models.EvidenceRhetorical && len(item.Materials) == 0 {
+			return provider.EvidenceReviewRequest{}, errors.New("事实表达缺少证据素材")
+		}
+		request.Items = append(request.Items, item)
+	}
+	return request, nil
 }
 
 // handleEditorialSourceScope grants or revokes an explicit source authorization.

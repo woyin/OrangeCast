@@ -165,18 +165,45 @@ type ScoutProvider interface {
 	Name() string
 }
 
+// EvidenceReviewItem is one semantic claim and its approved source material.
+type EvidenceReviewItem struct {
+	Kind      string            `json:"kind"`
+	Excerpt   string            `json:"excerpt"`
+	Materials []ArticleMaterial `json:"materials"`
+}
+
+// EvidenceReviewRequest is an exact revision with resolved evidence mappings.
+type EvidenceReviewRequest struct {
+	Title    string               `json:"title"`
+	Markdown string               `json:"markdown"`
+	Items    []EvidenceReviewItem `json:"items"`
+}
+
+// EvidenceReviewResult is an independent evidence-gate decision for one immutable revision.
+type EvidenceReviewResult struct {
+	Status string   `json:"status"`
+	Issues []string `json:"issues"`
+}
+
+// EvidenceReviewerProvider reviews mappings independently of Writer.
+type EvidenceReviewerProvider interface {
+	ReviewEvidence(request EvidenceReviewRequest) (*EvidenceReviewResult, error)
+	Name() string
+}
+
 // ProviderBundle 一个 provider 的全套实现。
 type ProviderBundle struct {
-	Transcription TranscriptionProvider
-	Analysis      AnalysisProvider
-	QA            QAProvider
-	Writer        ArticleWriterProvider
-	Scout         ScoutProvider
-	Highlight     HighlightProvider
-	Paraphrase    ParaphraseProvider
-	StudyChat     StudyChatProvider
-	RefChecker    ReferenceChecker
-	Narration     NarrationProvider
+	Transcription    TranscriptionProvider
+	Analysis         AnalysisProvider
+	QA               QAProvider
+	Writer           ArticleWriterProvider
+	Scout            ScoutProvider
+	EvidenceReviewer EvidenceReviewerProvider
+	Highlight        HighlightProvider
+	Paraphrase       ParaphraseProvider
+	StudyChat        StudyChatProvider
+	RefChecker       ReferenceChecker
+	Narration        NarrationProvider
 }
 
 // Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。

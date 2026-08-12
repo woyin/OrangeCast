@@ -120,3 +120,56 @@ func TestOpenAIScoutSurfacesResponsesFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestEvidenceReviewerRequiresMappedTextAndValidDecision(t *testing.T) {
+	if _, err := evidenceReviewInput(EvidenceReviewRequest{Markdown: "正文"}); err == nil {
+		t.Fatal("evidence reviewer requires mapped evidence")
+	}
+	for _, result := range []*EvidenceReviewResult{nil, {Status: "advisory"}, {Status: "passed", Issues: []string{"hard error"}}} {
+		if _, err := validateEvidenceReviewResult(result); err == nil {
+			t.Fatalf("invalid evidence decision should fail: %+v", result)
+		}
+	}
+	reviewer := NewGroqProvider("key")
+	reviewer.chatCompleteFn = func([]map[string]string, string) (string, int, error) {
+		return `{"status":"passed","issues":[]}`, 200, nil
+	}
+	result, err := reviewer.ReviewEvidence(EvidenceReviewRequest{Markdown: "正文", Items: []EvidenceReviewItem{{Kind: "paraphrased", Excerpt: "正文"}}})
+	if err != nil || result.Status != "passed" {
+		t.Fatalf("Groq evidence decision should validate: result=%+v err=%v", result, err)
+	}
+	request := EvidenceReviewRequest{Markdown: "正文", Items: []EvidenceReviewItem{{Kind: "paraphrased", Excerpt: "正文"}}}
+	for _, output := range []struct {
+		body string
+		err  error
+	}{{"not-json", nil}, {`{"status":"passed","issues":["错误"]}`, nil}, {"", fmt.Errorf("provider failed")}} {
+		candidate := NewGroqProvider("key")
+		candidate.chatCompleteFn = func([]map[string]string, string) (string, int, error) { return output.body, 200, output.err }
+		if _, err := candidate.ReviewEvidence(request); err == nil {
+			t.Fatalf("invalid Groq evidence output should fail: %+v", output)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output_text":"{\"status\":\"failed\",\"issues\":[\"unsupported claim\"]}"}`))
+	}))
+	result, err = NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewEvidence(request)
+	server.Close()
+	if err != nil || result.Status != "failed" || len(result.Issues) != 1 {
+		t.Fatalf("OpenAI evidence review should parse: result=%+v err=%v", result, err)
+	}
+	for _, response := range []struct {
+		status int
+		body   string
+	}{{http.StatusInternalServerError, "failure"}, {http.StatusOK, "not-json"}, {http.StatusOK, `{"output_text":"not-json"}`}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(response.status)
+			_, _ = w.Write([]byte(response.body))
+		}))
+		_, err := NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewEvidence(request)
+		server.Close()
+		if err == nil {
+			t.Fatalf("invalid OpenAI evidence output should fail: %+v", response)
+		}
+	}
+}

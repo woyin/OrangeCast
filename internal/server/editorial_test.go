@@ -468,8 +468,18 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if err := srv.store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_maps WHERE revision_id=?`, revisions[0].ID).Scan(&maps); err != nil || maps != 1 {
 		t.Fatalf("writer evidence map should persist: count=%d err=%v", maps, err)
 	}
-	if _, err := srv.store.CreateArticleReview(t.Context(), models.ArticleReview{RevisionID: revisions[0].ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]"}); err != nil {
-		t.Fatal(err)
+	reviewer := &fakeEvidenceReviewer{status: "passed"}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{EvidenceReviewer: reviewer}, nil
+	}
+	reviewReq := httptest.NewRequest(http.MethodPost, "/workbench/reviews/evidence", strings.NewReader("_csrf="+csrf+"&revision_id="+revisions[0].ID))
+	reviewReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reviewReq.AddCookie(session)
+	reviewReq.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	reviewRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(reviewRec, reviewReq)
+	if reviewRec.Code != http.StatusSeeOther || len(reviewer.requests) != 1 || len(reviewer.requests[0].Items) != 1 {
+		t.Fatalf("independent evidence review should run against mappings: code=%d requests=%+v", reviewRec.Code, reviewer.requests)
 	}
 	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package")
 	if packagePage.Code != http.StatusOK || !strings.Contains(packagePage.Body.String(), "单集") || !strings.Contains(packagePage.Body.String(), "可复制富文本") {
@@ -669,6 +679,180 @@ func TestWriterSurfacesProfileLookupFailure(t *testing.T) {
 	}
 }
 
+func TestEvidenceReviewerRejectsInvalidEvidenceAndProviderFailures(t *testing.T) {
+	srv := newTestServer(t)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+	draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+	revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+	call := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/reviews/evidence", strings.NewReader("revision_id="+revision.ID))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.handleEvidenceReviewRun(rec, req)
+		return rec
+	}
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("revision without EvidenceMap should be rejected: %d", rec.Code)
+	}
+	if _, err := srv.store.CreateEvidenceMap(t.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceRhetorical, Excerpt: "不存在", KeyPointIDs: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("EvidenceMap excerpt outside markdown should be rejected: %d", rec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET excerpt='正文' WHERE revision_id=?`, revision.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return nil, errors.New("unavailable") }
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unavailable reviewer should be rejected: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return &provider.ProviderBundle{}, nil }
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing reviewer should be rejected: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{EvidenceReviewer: failingEvidenceReviewer{}}, nil
+	}
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("reviewer failure should be rejected: %d", rec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE settings`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := call(); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("settings failure should be 500: %d", rec.Code)
+	}
+}
+
+func TestEvidenceReviewRequestEnforcesMappedSourcePolicy(t *testing.T) {
+	srv := newTestServer(t)
+	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
+	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
+	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}})
+	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+	draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+	revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+	srv.store.CreateEvidenceMap(t.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceParaphrased, Excerpt: "正文", KeyPointIDs: "[\"" + keyPoints[0].ID + "\"]"})
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	if _, err := srv.evidenceReviewRequest(request, revision); err == nil {
+		t.Fatal("review must reject unscoped evidence KeyPoint")
+	}
+	srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID)
+	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataLocalOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(request, revision); err == nil {
+		t.Fatal("review must reject local-only evidence KeyPoint")
+	}
+	srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataExternalAllowed)
+	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='[]' WHERE id=?`, keyPoints[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(request, revision); err == nil {
+		t.Fatal("review must reject keypoint without Citation")
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='["seg-1"]' WHERE id=?`, keyPoints[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := srv.evidenceReviewRequest(request, revision); err != nil || len(got.Items) != 1 || len(got.Items[0].Materials) != 1 {
+		t.Fatalf("eligible mapped evidence should become review request: request=%+v err=%v", got, err)
+	}
+}
+
+func TestEvidenceReviewerSurfacesLookupAndPersistenceFailures(t *testing.T) {
+	newRevision := func(t *testing.T) (*Server, *models.ArticleRevision) {
+		t.Helper()
+		srv := newTestServer(t)
+		profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+		proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+		srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+		brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+		srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+		draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+		revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+		srv.store.CreateEvidenceMap(t.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceRhetorical, Excerpt: "正文", KeyPointIDs: "[]"})
+		return srv, revision
+	}
+	srv, revision := newRevision(t)
+	methodRec := httptest.NewRecorder()
+	srv.handleEvidenceReviewRun(methodRec, httptest.NewRequest(http.MethodGet, "/workbench/reviews/evidence", nil))
+	if methodRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET should be rejected: %d", methodRec.Code)
+	}
+	missingRec := httptest.NewRecorder()
+	srv.handleEvidenceReviewRun(missingRec, httptest.NewRequest(http.MethodPost, "/workbench/reviews/evidence", strings.NewReader("revision_id=missing")))
+	if missingRec.Code != http.StatusBadRequest {
+		t.Fatalf("missing revision should be rejected: %d", missingRec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{EvidenceReviewer: &fakeEvidenceReviewer{status: "passed"}}, nil
+	}
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER abort_review BEFORE INSERT ON article_reviews BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/workbench/reviews/evidence", strings.NewReader("revision_id="+revision.ID))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.handleEvidenceReviewRun(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("review persistence failure should be 500: %d", rec.Code)
+	}
+
+	srv, revision = newRevision(t)
+	if _, err := srv.store.DB.Exec(`DROP TABLE article_drafts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+		t.Fatal("draft lookup failure should surface")
+	}
+	srv, revision = newRevision(t)
+	if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE article_proposals`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+		t.Fatal("proposal lookup failure should surface")
+	}
+	srv, revision = newRevision(t)
+	if _, err := srv.store.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+		t.Fatal("evidence map query failure should surface")
+	}
+	srv, revision = newRevision(t)
+	if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE article_briefs`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.evidenceReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+		t.Fatal("brief lookup failure should surface")
+	}
+}
+
+type failingEvidenceReviewer struct{}
+
+func (failingEvidenceReviewer) ReviewEvidence(provider.EvidenceReviewRequest) (*provider.EvidenceReviewResult, error) {
+	return nil, errors.New("reviewer failed")
+}
+
+func (failingEvidenceReviewer) Name() string { return "failing-reviewer" }
+
 type fakeArticleWriter struct {
 	requests []provider.ArticleWritingRequest
 }
@@ -687,3 +871,15 @@ func (failingArticleWriter) WriteArticle(provider.ArticleWritingRequest) (*provi
 }
 
 func (failingArticleWriter) Name() string { return "failing-writer" }
+
+type fakeEvidenceReviewer struct {
+	status   string
+	requests []provider.EvidenceReviewRequest
+}
+
+func (f *fakeEvidenceReviewer) ReviewEvidence(request provider.EvidenceReviewRequest) (*provider.EvidenceReviewResult, error) {
+	f.requests = append(f.requests, request)
+	return &provider.EvidenceReviewResult{Status: f.status}, nil
+}
+
+func (f *fakeEvidenceReviewer) Name() string { return "fake-evidence-reviewer" }
