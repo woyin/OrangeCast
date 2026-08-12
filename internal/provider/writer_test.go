@@ -173,3 +173,56 @@ func TestEvidenceReviewerRequiresMappedTextAndValidDecision(t *testing.T) {
 		}
 	}
 }
+
+func TestStyleEditorRequiresProfileConstrainedValidDecision(t *testing.T) {
+	if _, err := styleReviewInput(StyleReviewRequest{Title: "标题"}); err == nil {
+		t.Fatal("style review requires body")
+	}
+	for _, result := range []*StyleReviewResult{nil, {Status: "failed"}, {Status: "passed", Issues: []string{"建议"}}, {Status: "advisory"}} {
+		if _, err := validateStyleReviewResult(result); err == nil {
+			t.Fatalf("invalid style decision should fail: %+v", result)
+		}
+	}
+	request := StyleReviewRequest{Title: "标题", Markdown: "正文", Voice: "清晰"}
+	editor := NewGroqProvider("key")
+	editor.chatCompleteFn = func([]map[string]string, string) (string, int, error) {
+		return `{"status":"advisory","issues":["标题应具体"]}`, 200, nil
+	}
+	result, err := editor.ReviewStyle(request)
+	if err != nil || result.Status != "advisory" || len(result.Issues) != 1 {
+		t.Fatalf("Groq StyleEditor should parse: result=%+v err=%v", result, err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output_text":"{\"status\":\"passed\",\"issues\":[]}"}`))
+	}))
+	result, err = NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewStyle(request)
+	server.Close()
+	if err != nil || result.Status != "passed" {
+		t.Fatalf("OpenAI StyleEditor should parse: result=%+v err=%v", result, err)
+	}
+	for _, output := range []struct {
+		body string
+		err  error
+	}{{"not-json", nil}, {`{"status":"advisory","issues":[]}`, nil}, {"", fmt.Errorf("provider failed")}} {
+		candidate := NewGroqProvider("key")
+		candidate.chatCompleteFn = func([]map[string]string, string) (string, int, error) { return output.body, 200, output.err }
+		if _, err := candidate.ReviewStyle(request); err == nil {
+			t.Fatalf("invalid Groq style output should fail: %+v", output)
+		}
+	}
+	for _, response := range []struct {
+		status int
+		body   string
+	}{{http.StatusInternalServerError, "failure"}, {http.StatusOK, "not-json"}, {http.StatusOK, `{"output_text":"not-json"}`}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(response.status)
+			_, _ = w.Write([]byte(response.body))
+		}))
+		_, err := NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewStyle(request)
+		server.Close()
+		if err == nil {
+			t.Fatalf("invalid OpenAI style output should fail: %+v", response)
+		}
+	}
+}

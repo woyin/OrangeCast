@@ -366,6 +366,66 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
 }
 
+// handleStyleReviewRun records independent, non-blocking style advice for an exact revision.
+func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	revision, err := srv.store.GetArticleRevision(r.Context(), strings.TrimSpace(r.FormValue("revision_id")))
+	if err != nil {
+		http.Error(w, "读取文章修订失败", http.StatusBadRequest)
+		return
+	}
+	request, err := srv.styleReviewRequest(r, revision)
+	if err != nil {
+		http.Error(w, "读取编辑画像失败", http.StatusBadRequest)
+		return
+	}
+	settings, err := srv.store.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, "读取审校配置失败", http.StatusInternalServerError)
+		return
+	}
+	bundle, err := srv.bundleFor(provider.TaskConfig{Provider: ptrStr(settings.AnalysisProvider), Model: ptrStr(settings.AnalysisModel)})
+	if err != nil || bundle.StyleEditor == nil {
+		http.Error(w, "StyleEditor Provider 不可用", http.StatusBadRequest)
+		return
+	}
+	result, err := bundle.StyleEditor.ReviewStyle(request)
+	if err != nil {
+		http.Error(w, "风格审校失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	issues, _ := json.Marshal(result.Issues)
+	providerName := bundle.StyleEditor.Name()
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "style", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName}); err != nil {
+		http.Error(w, "保存风格审校失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
+func (srv *Server) styleReviewRequest(r *http.Request, revision *models.ArticleRevision) (provider.StyleReviewRequest, error) {
+	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
+	if err != nil {
+		return provider.StyleReviewRequest{}, err
+	}
+	brief, err := srv.store.GetArticleBrief(r.Context(), draft.BriefID)
+	if err != nil {
+		return provider.StyleReviewRequest{}, err
+	}
+	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
+	if err != nil {
+		return provider.StyleReviewRequest{}, err
+	}
+	profile, err := srv.store.GetEditorialProfile(r.Context(), proposal.EditorialProfileID)
+	if err != nil {
+		return provider.StyleReviewRequest{}, err
+	}
+	return provider.StyleReviewRequest{Title: revision.Title, Markdown: revision.Markdown, TargetAudience: profile.TargetAudience, Voice: profile.Voice, StyleGuide: profile.StyleGuide, TargetLength: brief.TargetLength}, nil
+}
+
 func (srv *Server) evidenceReviewRequest(r *http.Request, revision *models.ArticleRevision) (provider.EvidenceReviewRequest, error) {
 	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
 	if err != nil {

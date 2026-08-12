@@ -86,7 +86,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.openaiBaseURL != "" {
 			oa.baseURL = sel.openaiBaseURL
 		}
-		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Writer: oa, Scout: oa, EvidenceReviewer: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration}, nil
+		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Writer: oa, Scout: oa, EvidenceReviewer: oa, StyleEditor: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
@@ -95,7 +95,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.groqBaseURL != "" {
 			g.baseURL = sel.groqBaseURL
 		}
-		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Writer: g, Scout: g, EvidenceReviewer: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g, Narration: sel.narration}, nil
+		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Writer: g, Scout: g, EvidenceReviewer: g, StyleEditor: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g, Narration: sel.narration}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}
@@ -124,6 +124,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Writer = custom
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
+				bundle.StyleEditor = custom
 				bundle.Paraphrase = custom
 				bundle.StudyChat = custom
 				bundle.RefChecker = custom
@@ -137,6 +138,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Writer = custom
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
+				bundle.StyleEditor = custom
 				bundle.Paraphrase = custom
 				bundle.StudyChat = custom
 				bundle.RefChecker = custom

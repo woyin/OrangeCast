@@ -191,6 +191,28 @@ type EvidenceReviewerProvider interface {
 	Name() string
 }
 
+// StyleReviewRequest contains only profile constraints and an exact revision; it carries no evidence decision.
+type StyleReviewRequest struct {
+	Title          string `json:"title"`
+	Markdown       string `json:"markdown"`
+	TargetAudience string `json:"targetAudience"`
+	Voice          string `json:"voice"`
+	StyleGuide     string `json:"styleGuide"`
+	TargetLength   *int   `json:"targetLength,omitempty"`
+}
+
+// StyleReviewResult offers non-blocking style findings for one revision.
+type StyleReviewResult struct {
+	Status string   `json:"status"`
+	Issues []string `json:"issues"`
+}
+
+// StyleEditorProvider independently reviews style without making evidence assertions.
+type StyleEditorProvider interface {
+	ReviewStyle(request StyleReviewRequest) (*StyleReviewResult, error)
+	Name() string
+}
+
 // ProviderBundle 一个 provider 的全套实现。
 type ProviderBundle struct {
 	Transcription    TranscriptionProvider
@@ -199,6 +221,7 @@ type ProviderBundle struct {
 	Writer           ArticleWriterProvider
 	Scout            ScoutProvider
 	EvidenceReviewer EvidenceReviewerProvider
+	StyleEditor      StyleEditorProvider
 	Highlight        HighlightProvider
 	Paraphrase       ParaphraseProvider
 	StudyChat        StudyChatProvider

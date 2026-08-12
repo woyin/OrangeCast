@@ -481,6 +481,19 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if reviewRec.Code != http.StatusSeeOther || len(reviewer.requests) != 1 || len(reviewer.requests[0].Items) != 1 {
 		t.Fatalf("independent evidence review should run against mappings: code=%d requests=%+v", reviewRec.Code, reviewer.requests)
 	}
+	styleEditor := &fakeStyleEditor{status: "advisory", issues: []string{"标题可以更具体"}}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{StyleEditor: styleEditor}, nil
+	}
+	styleReq := httptest.NewRequest(http.MethodPost, "/workbench/reviews/style", strings.NewReader("_csrf="+csrf+"&revision_id="+revisions[0].ID))
+	styleReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	styleReq.AddCookie(session)
+	styleReq.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	styleRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(styleRec, styleReq)
+	if styleRec.Code != http.StatusSeeOther || len(styleEditor.requests) != 1 || styleEditor.requests[0].TargetAudience != "" {
+		t.Fatalf("style review should receive exact revision/profile constraints: code=%d requests=%+v", styleRec.Code, styleEditor.requests)
+	}
 	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+revisions[0].ID+"/package")
 	if packagePage.Code != http.StatusOK || !strings.Contains(packagePage.Body.String(), "单集") || !strings.Contains(packagePage.Body.String(), "可复制富文本") {
 		t.Fatalf("ready revision should render publication package: status=%d body=%s", packagePage.Code, packagePage.Body.String())
@@ -883,3 +896,143 @@ func (f *fakeEvidenceReviewer) ReviewEvidence(request provider.EvidenceReviewReq
 }
 
 func (f *fakeEvidenceReviewer) Name() string { return "fake-evidence-reviewer" }
+
+type fakeStyleEditor struct {
+	status   string
+	issues   []string
+	requests []provider.StyleReviewRequest
+}
+
+func (f *fakeStyleEditor) ReviewStyle(request provider.StyleReviewRequest) (*provider.StyleReviewResult, error) {
+	f.requests = append(f.requests, request)
+	return &provider.StyleReviewResult{Status: f.status, Issues: f.issues}, nil
+}
+
+func (f *fakeStyleEditor) Name() string { return "fake-style-editor" }
+
+type failingStyleEditor struct{}
+
+func (failingStyleEditor) ReviewStyle(provider.StyleReviewRequest) (*provider.StyleReviewResult, error) {
+	return nil, errors.New("style failed")
+}
+
+func (failingStyleEditor) Name() string { return "failing-style-editor" }
+
+func TestStyleEditorRejectsInvalidAndProviderFailures(t *testing.T) {
+	srv := newTestServer(t)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌", Voice: "清晰"})
+	proposal, _ := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted")
+	brief, _ := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	srv.store.ConfirmArticleBrief(t.Context(), brief.ID)
+	draft, _ := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+	revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+	call := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/reviews/style", strings.NewReader("revision_id="+revision.ID))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.handleStyleReviewRun(rec, req)
+		return rec
+	}
+	methodRec := httptest.NewRecorder()
+	srv.handleStyleReviewRun(methodRec, httptest.NewRequest(http.MethodGet, "/workbench/reviews/style", nil))
+	if methodRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET should reject: %d", methodRec.Code)
+	}
+	missingReq := httptest.NewRequest(http.MethodPost, "/workbench/reviews/style", strings.NewReader("revision_id=missing"))
+	missingReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	missingRec := httptest.NewRecorder()
+	srv.handleStyleReviewRun(missingRec, missingReq)
+	if missingRec.Code != http.StatusBadRequest {
+		t.Fatalf("missing revision should reject: %d", missingRec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return &provider.ProviderBundle{}, nil }
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing provider should reject: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) { return nil, errors.New("unavailable") }
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unavailable provider should reject: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{StyleEditor: failingStyleEditor{}}, nil
+	}
+	if rec := call(); rec.Code != http.StatusBadRequest {
+		t.Fatalf("failed editor should reject: %d", rec.Code)
+	}
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{StyleEditor: &fakeStyleEditor{status: "passed"}}, nil
+	}
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER abort_style BEFORE INSERT ON article_reviews BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := call(); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("style persistence failure should be 500: %d", rec.Code)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE settings`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := call(); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("settings failure should be 500: %d", rec.Code)
+	}
+}
+
+func TestStyleReviewRequestSurfacesRevisionLineageFailures(t *testing.T) {
+	newRevision := func(t *testing.T) (*Server, *models.ArticleRevision) {
+		t.Helper()
+		srv := newTestServer(t)
+		profile, err := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌", TargetAudience: "创作者", Voice: "清晰", StyleGuide: "短句"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proposal, err := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted"); err != nil {
+			t.Fatal(err)
+		}
+		targetLength := 1200
+		brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]", TargetLength: &targetLength})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.store.ConfirmArticleBrief(t.Context(), brief.ID); err != nil {
+			t.Fatal(err)
+		}
+		draft, err := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision, err := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv, revision
+	}
+
+	srv, revision := newRevision(t)
+	request, err := srv.styleReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision)
+	if err != nil || request.TargetAudience != "创作者" || request.Voice != "清晰" || request.StyleGuide != "短句" || request.TargetLength == nil || *request.TargetLength != 1200 {
+		t.Fatalf("unexpected style request: %#v, %v", request, err)
+	}
+	if _, err := srv.store.DB.Exec(`DROP TABLE article_drafts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.styleReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+		t.Fatal("missing draft should fail")
+	}
+
+	for _, table := range []string{"article_briefs", "article_proposals", "editorial_profiles"} {
+		srv, revision = newRevision(t)
+		if _, err := srv.store.DB.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.store.DB.Exec("DROP TABLE " + table); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.styleReviewRequest(httptest.NewRequest(http.MethodPost, "/", nil), revision); err == nil {
+			t.Fatalf("missing %s should fail", table)
+		}
+	}
+}
