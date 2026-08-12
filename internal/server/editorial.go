@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -117,17 +118,15 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		return
 	}
 	providerName := bundle.Writer.Name()
-	revision, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName})
-	if err != nil {
-		http.Error(w, "保存 Writer 修订失败", http.StatusInternalServerError)
-		return
-	}
+	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
-		if _, err := srv.store.CreateEvidenceMap(r.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)}); err != nil {
-			http.Error(w, "保存证据映射失败", http.StatusInternalServerError)
-			return
-		}
+		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
+	}
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName}, evidenceMaps)
+	if err != nil {
+		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
+		return
 	}
 	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
 }
@@ -200,17 +199,15 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		return
 	}
 	providerName := bundle.Writer.Name()
-	next, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName})
-	if err != nil {
-		http.Error(w, "保存 Writer 修订失败", http.StatusInternalServerError)
-		return
-	}
+	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
-		if _, err := srv.store.CreateEvidenceMap(r.Context(), models.EvidenceMap{RevisionID: next.ID, Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)}); err != nil {
-			http.Error(w, "保存证据映射失败", http.StatusInternalServerError)
-			return
-		}
+		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
+	}
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName}, evidenceMaps)
+	if err != nil {
+		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
+		return
 	}
 	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
 }
@@ -360,6 +357,7 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	currentMarkdown := ""
+	var currentRevision *models.ArticleRevision
 	reviewsByRevision := make(map[string][]articleReviewView, len(revisions))
 	byID := make(map[string]*models.ArticleRevision, len(revisions))
 	if len(revisions) > 0 {
@@ -367,6 +365,9 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 	}
 	for _, revision := range revisions {
 		byID[revision.ID] = revision
+		if draft.CurrentRevisionID != nil && revision.ID == *draft.CurrentRevisionID {
+			currentRevision = revision
+		}
 		reviews, err := srv.store.ListArticleReviews(r.Context(), revision.ID)
 		if err != nil {
 			http.Error(w, "加载审校记录失败", http.StatusInternalServerError)
@@ -390,7 +391,15 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 		}
 		comparison = &revisionComparison{From: from, To: to, Lines: lineDiff(from.Markdown, to.Markdown)}
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "HasComparableRevisions": len(revisions) > 1, "ReviewsByRevision": reviewsByRevision, "Comparison": comparison, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
+	currentReady := false
+	if currentRevision != nil {
+		currentReady, err = srv.store.IsRevisionReadyForPublication(r.Context(), currentRevision.ID)
+		if err != nil {
+			http.Error(w, "检查当前修订证据门禁失败", http.StatusInternalServerError)
+			return
+		}
+	}
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "HasComparableRevisions": len(revisions) > 1, "ReviewsByRevision": reviewsByRevision, "Comparison": comparison, "CurrentMarkdown": currentMarkdown, "CurrentRevision": currentRevision, "CurrentRichHTML": template.HTML(wechatRichText(currentMarkdown)), "CurrentReady": currentReady, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {

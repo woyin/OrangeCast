@@ -341,7 +341,7 @@ func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
 	}
 	draft := drafts[0]
 	if rec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID); rec.Code != http.StatusOK {
-		t.Fatalf("draft detail should render: %d", rec.Code)
+		t.Fatalf("empty draft detail should render: %d", rec.Code)
 	}
 	if rec := post("/workbench/revisions", "draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown=%23+%E7%AC%AC%E4%B8%80%E7%89%88"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("revision should be created: %d", rec.Code)
@@ -372,7 +372,7 @@ func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
 		t.Fatalf("style review should be recorded: %d", rec.Code)
 	}
 	detailRec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID)
-	if detailRec.Code != http.StatusOK || !strings.Contains(detailRec.Body.String(), "审校记录") || !strings.Contains(detailRec.Body.String(), "减少套话") {
+	if detailRec.Code != http.StatusOK || !strings.Contains(detailRec.Body.String(), "审校记录") || !strings.Contains(detailRec.Body.String(), "减少套话") || !strings.Contains(detailRec.Body.String(), "公众号预览") || !strings.Contains(detailRec.Body.String(), "打开公众号内容包") {
 		t.Fatalf("draft should display review history: status=%d body=%q", detailRec.Code, detailRec.Body.String())
 	}
 	if _, err := srv.store.DB.Exec(`UPDATE article_reviews SET issues_json='not-json' WHERE revision_id=? AND kind='style'`, revisions[0].ID); err != nil {
@@ -555,6 +555,21 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if len(revisions) != 2 || revisions[0].Origin != "ai_edit" {
 		t.Fatalf("Writer revision should be immutable ai_edit: %+v", revisions)
 	}
+	currentRevisionID := revisions[0].ID
+	// The generated edit is now current and needs its own evidence pass; an
+	// approval on the preceding snapshot must not unlock this replacement.
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{EvidenceReviewer: reviewer}, nil
+	}
+	currentReviewReq := httptest.NewRequest(http.MethodPost, "/workbench/reviews/evidence", strings.NewReader("_csrf="+csrf+"&revision_id="+currentRevisionID))
+	currentReviewReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	currentReviewReq.AddCookie(session)
+	currentReviewReq.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	currentReviewRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(currentReviewRec, currentReviewReq)
+	if currentReviewRec.Code != http.StatusSeeOther {
+		t.Fatalf("current AI edit should be independently reviewable: %d %s", currentReviewRec.Code, currentReviewRec.Body.String())
+	}
 	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return &provider.ProviderBundle{Writer: failingArticleWriter{}}, nil
 	}
@@ -592,21 +607,13 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if rec := callRevise(firstRevisionID); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("settings lookup should fail: %d", rec.Code)
 	}
-	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package")
+	packagePage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+currentRevisionID+"/package")
 	if packagePage.Code != http.StatusOK || !strings.Contains(packagePage.Body.String(), "单集") || !strings.Contains(packagePage.Body.String(), "可复制富文本") {
 		t.Fatalf("ready revision should render publication package: status=%d body=%s", packagePage.Code, packagePage.Body.String())
 	}
-	download := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package?format=markdown")
+	download := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+currentRevisionID+"/package?format=markdown")
 	if download.Code != http.StatusOK || !strings.Contains(download.Body.String(), "## 来源") || !strings.Contains(download.Header().Get("Content-Type"), "text/markdown") {
 		t.Fatalf("package download should contain Markdown and sources: status=%d header=%q body=%s", download.Code, download.Header().Get("Content-Type"), download.Body.String())
-	}
-	blocked, err := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: drafts[0].ID, Title: "未审校", Markdown: "# 未审校", Origin: "owner"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	blockedPage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+blocked.ID+"/package")
-	if blockedPage.Code != http.StatusConflict {
-		t.Fatalf("unreviewed revision must not produce package: %d", blockedPage.Code)
 	}
 	if missing := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/missing/package"); missing.Code != http.StatusNotFound {
 		t.Fatalf("missing revision must not produce package: %d", missing.Code)
@@ -617,26 +624,34 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	if malformedRec.Code != http.StatusNotFound {
 		t.Fatalf("malformed package path must be 404: %d", malformedRec.Code)
 	}
-	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json='broken' WHERE revision_id=?`, firstRevisionID); err != nil {
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json='broken' WHERE revision_id=?`, currentRevisionID); err != nil {
 		t.Fatal(err)
 	}
-	if invalidMap := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); invalidMap.Code != http.StatusInternalServerError {
+	if invalidMap := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+currentRevisionID+"/package"); invalidMap.Code != http.StatusInternalServerError {
 		t.Fatalf("invalid evidence map must block package: %d", invalidMap.Code)
 	}
-	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json=? WHERE revision_id=?`, "[\""+keyPoints[0].ID+"\"]", firstRevisionID); err != nil {
+	if _, err := srv.store.DB.Exec(`UPDATE evidence_maps SET keypoint_ids_json=? WHERE revision_id=?`, "[\""+keyPoints[0].ID+"\"]", currentRevisionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := srv.store.DB.Exec(`DELETE FROM keypoint_index WHERE id=?`, keyPoints[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if missingSource := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); missingSource.Code != http.StatusInternalServerError {
+	if missingSource := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+currentRevisionID+"/package"); missingSource.Code != http.StatusInternalServerError {
 		t.Fatalf("missing evidence source must block package: %d", missingSource.Code)
 	}
 	if _, err := srv.store.DB.Exec(`DROP TABLE evidence_maps`); err != nil {
 		t.Fatal(err)
 	}
-	if missingMaps := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+firstRevisionID+"/package"); missingMaps.Code != http.StatusInternalServerError {
+	if missingMaps := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+currentRevisionID+"/package"); missingMaps.Code != http.StatusInternalServerError {
 		t.Fatalf("missing evidence mappings must block package: %d", missingMaps.Code)
+	}
+	blocked, err := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: drafts[0].ID, Title: "未审校", Markdown: "# 未审校", Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockedPage := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+blocked.ID+"/package")
+	if blockedPage.Code != http.StatusConflict {
+		t.Fatalf("unreviewed revision must not produce package: %d", blockedPage.Code)
 	}
 }
 

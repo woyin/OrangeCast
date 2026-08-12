@@ -426,8 +426,22 @@ func (s *Store) ListArticleDrafts(ctx context.Context, profileID string) ([]*mod
 
 // CreateArticleRevision appends an immutable snapshot and makes it the draft's current revision.
 func (s *Store) CreateArticleRevision(ctx context.Context, revision models.ArticleRevision) (*models.ArticleRevision, error) {
+	return s.CreateArticleRevisionWithEvidenceMaps(ctx, revision, nil)
+}
+
+// CreateArticleRevisionWithEvidenceMaps atomically appends a revision and its
+// evidence relationships. Writer output is not a valid production snapshot
+// without its maps, so a map failure must not leave an unreviewable current
+// revision behind.
+func (s *Store) CreateArticleRevisionWithEvidenceMaps(ctx context.Context, revision models.ArticleRevision, evidenceMaps []models.EvidenceMap) (*models.ArticleRevision, error) {
 	if strings.TrimSpace(revision.DraftID) == "" || strings.TrimSpace(revision.Markdown) == "" || !validRevisionOrigin(revision.Origin) {
 		return nil, fmt.Errorf("%w: invalid article revision", ErrInvalidEditorialState)
+	}
+	for _, evidence := range evidenceMaps {
+		keyPointIDs := defaultString(evidence.KeyPointIDs, "[]")
+		if !validEvidenceMapKind(evidence.Kind) || !validJSON(keyPointIDs, "[]") || (evidence.Kind != models.EvidenceRhetorical && keyPointIDs == "[]") {
+			return nil, fmt.Errorf("%w: invalid evidence map", ErrInvalidEditorialState)
+		}
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -458,6 +472,16 @@ func (s *Store) CreateArticleRevision(ctx context.Context, revision models.Artic
 		`UPDATE article_drafts SET title=?, current_revision_id=?, status='reviewing', updated_at=datetime('now') WHERE id=?`,
 		revision.Title, revision.ID, revision.DraftID); err != nil {
 		return nil, err
+	}
+	for _, evidence := range evidenceMaps {
+		evidence.ID = uuid.NewString()
+		evidence.RevisionID = revision.ID
+		evidence.KeyPointIDs = defaultString(evidence.KeyPointIDs, "[]")
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO evidence_maps (id, revision_id, kind, excerpt, keypoint_ids_json) VALUES (?, ?, ?, ?, ?)`,
+			evidence.ID, evidence.RevisionID, string(evidence.Kind), evidence.Excerpt, evidence.KeyPointIDs); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

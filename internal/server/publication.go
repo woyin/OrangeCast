@@ -26,6 +26,18 @@ func (srv *Server) handlePublicationPackage(w http.ResponseWriter, r *http.Reque
 		http.NotFound(w, r)
 		return
 	}
+	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
+	if err != nil {
+		http.Error(w, "读取文章草稿失败", http.StatusInternalServerError)
+		return
+	}
+	// A passed historic snapshot remains auditable, but cannot be published
+	// after a newer revision becomes current. This prevents an old approval
+	// from bypassing the re-review requirement created by any edit.
+	if draft.CurrentRevisionID == nil || *draft.CurrentRevisionID != revision.ID {
+		http.Error(w, "只能为当前修订生成内容包；请先审校当前版本", http.StatusConflict)
+		return
+	}
 	ready, err := srv.store.IsRevisionReadyForPublication(r.Context(), id)
 	if err != nil {
 		http.Error(w, "检查证据门禁失败", http.StatusInternalServerError)
