@@ -350,6 +350,21 @@ func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
 	if err != nil || len(revisions) != 1 || revisions[0].Origin != "owner" {
 		t.Fatalf("owner revision should persist: revisions=%+v err=%v", revisions, err)
 	}
+	firstRevisionID := revisions[0].ID
+	if rec := post("/workbench/revisions", "draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown=%23+%E7%AC%AC%E4%BA%8C%E7%89%88"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("second revision should be created: %d", rec.Code)
+	}
+	revisions, err = srv.store.ListArticleRevisions(t.Context(), draft.ID)
+	if err != nil || len(revisions) != 2 {
+		t.Fatalf("two revisions should persist: revisions=%+v err=%v", revisions, err)
+	}
+	compareRec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID+"?compare_from="+firstRevisionID+"&compare_to="+revisions[0].ID)
+	if compareRec.Code != http.StatusOK || !strings.Contains(compareRec.Body.String(), "修订对比") || !strings.Contains(compareRec.Body.String(), "v1 → v2") {
+		t.Fatalf("draft should render a revision diff: status=%d body=%q", compareRec.Code, compareRec.Body.String())
+	}
+	if rec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID+"?compare_from="+firstRevisionID); rec.Code != http.StatusBadRequest {
+		t.Fatalf("incomplete comparison should reject: %d", rec.Code)
+	}
 	if rec := post("/workbench/reviews", "revision_id="+revisions[0].ID+"&kind=evidence&status=passed&issues=%5B%5D"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("evidence review should be recorded: %d", rec.Code)
 	}

@@ -278,10 +278,12 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 	}
 	currentMarkdown := ""
 	reviewsByRevision := make(map[string][]articleReviewView, len(revisions))
+	byID := make(map[string]*models.ArticleRevision, len(revisions))
 	if len(revisions) > 0 {
 		currentMarkdown = revisions[0].Markdown
 	}
 	for _, revision := range revisions {
+		byID[revision.ID] = revision
 		reviews, err := srv.store.ListArticleReviews(r.Context(), revision.ID)
 		if err != nil {
 			http.Error(w, "加载审校记录失败", http.StatusInternalServerError)
@@ -295,12 +297,28 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 			reviewsByRevision[revision.ID] = append(reviewsByRevision[revision.ID], view)
 		}
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "ReviewsByRevision": reviewsByRevision, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
+	var comparison *revisionComparison
+	fromID, toID := strings.TrimSpace(r.URL.Query().Get("compare_from")), strings.TrimSpace(r.URL.Query().Get("compare_to"))
+	if fromID != "" || toID != "" {
+		from, to := byID[fromID], byID[toID]
+		if fromID == "" || toID == "" || from == nil || to == nil || fromID == toID {
+			http.Error(w, "请选择同一文章的两个不同修订进行对比", http.StatusBadRequest)
+			return
+		}
+		comparison = &revisionComparison{From: from, To: to, Lines: lineDiff(from.Markdown, to.Markdown)}
+	}
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "HasComparableRevisions": len(revisions) > 1, "ReviewsByRevision": reviewsByRevision, "Comparison": comparison, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {
 	*models.ArticleReview
 	Issues []string
+}
+
+type revisionComparison struct {
+	From  *models.ArticleRevision
+	To    *models.ArticleRevision
+	Lines []revisionDiffLine
 }
 
 // handleArticleRevisionCreate appends an immutable Owner revision; it never overwrites text.

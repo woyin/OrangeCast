@@ -18,4 +18,7 @@
   </article>
 {{else}}<p class="empty">尚无修订。保存第一版后，才能进入审校。</p>{{end}}
 </section>
+
+{{if .HasComparableRevisions}}<section class="panel" style="margin-top:1rem"><h2>修订对比</h2><p class="meta">对比只读取不可变修订，不会改变当前稿件或审校状态。</p><form method="get" action="/workbench/drafts/{{.Draft.ID}}"><label>旧版本 <select name="compare_from" required>{{range .Revisions}}{{$revisionID := .ID}}<option value="{{.ID}}" {{with $.Comparison}}{{if eq $revisionID .From.ID}}selected{{end}}{{end}}>v{{.Version}}</option>{{end}}</select></label><label>新版本 <select name="compare_to" required>{{range .Revisions}}{{$revisionID := .ID}}<option value="{{.ID}}" {{with $.Comparison}}{{if eq $revisionID .To.ID}}selected{{end}}{{end}}>v{{.Version}}</option>{{end}}</select></label><button class="btn btn-secondary" type="submit">查看差异</button></form>{{with .Comparison}}<h3>v{{.From.Version}} → v{{.To.Version}}</h3><pre style="white-space:pre-wrap">{{range .Lines}}{{if eq .Kind "added"}}+ {{else if eq .Kind "removed"}}- {{else}}  {{end}}{{.Text}}
+{{end}}</pre>{{end}}</section>{{end}}
 {{end}}
