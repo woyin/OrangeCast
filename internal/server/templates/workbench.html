@@ -58,13 +58,13 @@
   <section class="card">
     <h2>待确认 Brief</h2>
     {{range $.Briefs}}
-      <div class="list-item"><div style="flex:1"><h3>{{.Thesis}}</h3><p class="meta">{{.Status}} · {{if .TargetLength}}{{.TargetLength}} 字{{else}}未设篇幅{{end}}</p></div>{{if eq .Status "draft"}}<form method="post" action="/workbench/briefs/confirm"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="brief_id" value="{{.ID}}"><button class="btn" type="submit">确认并授权写作</button></form>{{end}}</div>
+      <div class="list-item"><div style="flex:1"><h3>{{.Thesis}}</h3><p class="meta">{{.Status}} · {{if .TargetLength}}{{.TargetLength}} 字{{else}}未设篇幅{{end}}</p></div>{{if eq .Status "draft"}}<form method="post" action="/workbench/briefs/confirm"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="brief_id" value="{{.ID}}"><button class="btn" type="submit">确认并授权写作</button></form>{{end}}{{if eq .Status "confirmed"}}<form method="post" action="/workbench/drafts"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="brief_id" value="{{.ID}}"><input type="hidden" name="title" value="{{.Thesis}}"><button class="btn" type="submit">创建草稿</button></form>{{end}}</div>
     {{else}}<p class="empty">接受提案后，在这里检查素材和结构，再明确授权写作。</p>{{end}}
   </section>
   <section class="card">
     <h2>文章修订</h2>
     {{range $.Drafts}}
-      <div class="list-item"><h3>{{.Title}}</h3><p class="meta">{{.Status}} · {{.UpdatedAt}}</p></div>
+      <div class="list-item"><a href="/workbench/drafts/{{.ID}}"><h3>{{.Title}}</h3><p class="meta">{{.Status}} · {{.UpdatedAt}}</p></a></div>
     {{else}}
       <p class="empty">尚无文章草稿。确认 ArticleBrief 后会产生不可变修订历史。</p>
     {{end}}

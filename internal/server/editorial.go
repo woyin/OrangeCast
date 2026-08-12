@@ -147,6 +147,87 @@ func (srv *Server) handleArticleBriefConfirm(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
 }
 
+// handleArticleDraftCreate opens a durable draft only after the Owner confirmed its brief.
+func (srv *Server) handleArticleDraftCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	draft, err := srv.store.CreateArticleDraft(r.Context(), strings.TrimSpace(r.FormValue("brief_id")), strings.TrimSpace(r.FormValue("title")))
+	if err != nil {
+		http.Error(w, "创建文章草稿失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
+}
+
+// handleArticleDraftDetail renders revision history and Owner editing controls for one draft.
+func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/workbench/drafts/"))
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	draft, err := srv.store.GetArticleDraft(r.Context(), id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	revisions, err := srv.store.ListArticleRevisions(r.Context(), id)
+	if err != nil {
+		http.Error(w, "加载修订历史失败", http.StatusInternalServerError)
+		return
+	}
+	currentMarkdown := ""
+	if len(revisions) > 0 {
+		currentMarkdown = revisions[0].Markdown
+	}
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": draft, "Revisions": revisions, "CurrentMarkdown": currentMarkdown, "CSRF": auth.CSRFValue(r)})
+}
+
+// handleArticleRevisionCreate appends an immutable Owner revision; it never overwrites text.
+func (srv *Server) handleArticleRevisionCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	revision, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{
+		DraftID:  strings.TrimSpace(r.FormValue("draft_id")),
+		Title:    strings.TrimSpace(r.FormValue("title")),
+		Markdown: r.FormValue("markdown"),
+		Origin:   "owner",
+	})
+	if err != nil {
+		http.Error(w, "保存修订失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
+// handleArticleReviewCreate records an exact-revision review; evidence status drives the hard gate.
+func (srv *Server) handleArticleReviewCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	review, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{
+		RevisionID: strings.TrimSpace(r.FormValue("revision_id")),
+		Kind:       strings.TrimSpace(r.FormValue("kind")),
+		Status:     strings.TrimSpace(r.FormValue("status")),
+		IssuesJSON: strings.TrimSpace(r.FormValue("issues")),
+	})
+	if err != nil {
+		http.Error(w, "记录审校失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	revision, err := srv.store.GetArticleRevision(r.Context(), review.RevisionID)
+	if err != nil {
+		http.Error(w, "读取文章修订失败", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
 // handleEditorialSourceScope grants or revokes an explicit source authorization.
 func (srv *Server) handleEditorialSourceScope(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

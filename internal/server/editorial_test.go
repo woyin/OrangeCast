@@ -290,3 +290,114 @@ func TestEditorialWorkflowHandlersRejectWrongMethodAndInvalidInput(t *testing.T)
 		}
 	}
 }
+
+func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "draft-flow@example.com", "password123")
+	profile, err := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题", CandidateKeyPoints: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ConfirmArticleBrief(t.Context(), brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	page := httptest.NewRequest(http.MethodGet, "/workbench?profile="+profile.ID, nil)
+	page.AddCookie(session)
+	pageRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(pageRec, page)
+	var csrf string
+	for _, cookie := range pageRec.Result().Cookies() {
+		if cookie.Name == "cwp_csrf" {
+			csrf = cookie.Value
+		}
+	}
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("_csrf="+csrf+"&"+body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post("/workbench/drafts", "brief_id="+brief.ID+"&title=%E6%96%87%E7%AB%A0"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("draft should be created: %d", rec.Code)
+	}
+	drafts, err := srv.store.ListArticleDrafts(t.Context(), profile.ID)
+	if err != nil || len(drafts) != 1 {
+		t.Fatalf("draft should persist: drafts=%+v err=%v", drafts, err)
+	}
+	draft := drafts[0]
+	if rec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"+draft.ID); rec.Code != http.StatusOK {
+		t.Fatalf("draft detail should render: %d", rec.Code)
+	}
+	if rec := post("/workbench/revisions", "draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown=%23+%E7%AC%AC%E4%B8%80%E7%89%88"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("revision should be created: %d", rec.Code)
+	}
+	revisions, err := srv.store.ListArticleRevisions(t.Context(), draft.ID)
+	if err != nil || len(revisions) != 1 || revisions[0].Origin != "owner" {
+		t.Fatalf("owner revision should persist: revisions=%+v err=%v", revisions, err)
+	}
+	if rec := post("/workbench/reviews", "revision_id="+revisions[0].ID+"&kind=evidence&status=passed&issues=%5B%5D"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("evidence review should be recorded: %d", rec.Code)
+	}
+	ready, err := srv.store.IsRevisionReadyForPublication(t.Context(), revisions[0].ID)
+	if err != nil || !ready {
+		t.Fatalf("passed evidence review should unlock revision: ready=%v err=%v", ready, err)
+	}
+}
+
+func TestDraftWorkflowHandlersRejectWrongMethodAndInvalidInput(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "draft-errors@example.com", "password123")
+	for _, path := range []string{"/workbench/drafts", "/workbench/revisions", "/workbench/reviews"} {
+		if rec := doWithCookie(srv, session, http.MethodGet, path); rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s should reject GET: %d", path, rec.Code)
+		}
+	}
+	if rec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/"); rec.Code != http.StatusNotFound {
+		t.Fatalf("draft detail without an ID should be 404: %d", rec.Code)
+	}
+	page := httptest.NewRequest(http.MethodGet, "/workbench", nil)
+	page.AddCookie(session)
+	pageRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(pageRec, page)
+	var csrf string
+	for _, cookie := range pageRec.Result().Cookies() {
+		if cookie.Name == "cwp_csrf" {
+			csrf = cookie.Value
+		}
+	}
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("_csrf="+csrf+"&"+body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	for _, request := range []struct{ path, body string }{
+		{"/workbench/drafts", "brief_id=missing&title=x"},
+		{"/workbench/revisions", "draft_id=missing&title=x&markdown="},
+		{"/workbench/reviews", "revision_id=missing&kind=wrong&status=passed&issues=%5B%5D"},
+	} {
+		if rec := post(request.path, request.body); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s should reject invalid input: %d", request.path, rec.Code)
+		}
+	}
+	if rec := doWithCookie(srv, session, http.MethodGet, "/workbench/drafts/missing"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing draft should be 404: %d", rec.Code)
+	}
+}

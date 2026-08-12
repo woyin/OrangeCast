@@ -1,0 +1,18 @@
+{{define "title"}}{{.Draft.Title}} · 内容工作台{{end}}
+{{define "content"}}
+<div class="page-head"><h1>{{.Draft.Title}}</h1><a class="btn btn-secondary" href="/workbench">返回工作台</a></div>
+<p class="meta">状态：{{.Draft.Status}}。每次保存均会创建不可变修订；新修订需要重新通过证据审校。</p>
+
+<section class="panel">
+  <h2>新建 Owner 修订</h2>
+  <form method="post" action="/workbench/revisions"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="draft_id" value="{{.Draft.ID}}"><label>标题 <input name="title" value="{{.Draft.Title}}" required></label><label>Markdown 正文 <textarea name="markdown" rows="18" required>{{.CurrentMarkdown}}</textarea></label><button class="btn" type="submit">保存为新修订</button></form>
+</section>
+
+<section class="panel" style="margin-top:1rem"><h2>修订历史</h2>
+{{range .Revisions}}
+  <article class="list-item"><div style="flex:1"><h3>v{{.Version}} · {{.Title}}</h3><p class="meta">{{.Origin}} · {{.CreatedAt}}</p><pre style="white-space:pre-wrap">{{.Markdown}}</pre></div>
+    <form method="post" action="/workbench/reviews"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="revision_id" value="{{.ID}}"><label>审校类型 <select name="kind"><option value="evidence">证据</option><option value="style">风格</option></select></label><label>结果 <select name="status"><option value="passed">通过</option><option value="failed">阻断</option><option value="advisory">建议</option></select></label><label>问题（JSON）<input name="issues" value="[]"></label><button class="btn btn-secondary" type="submit">记录审校</button></form>
+  </article>
+{{else}}<p class="empty">尚无修订。保存第一版后，才能进入审校。</p>{{end}}
+</section>
+{{end}}
