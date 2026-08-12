@@ -67,6 +67,13 @@ func buildFixture(t *testing.T, dataDir string) *store.Store {
 	if err := s.UpsertEvidenceAudio(ctx, models.SourceEpisode, sourceID, "episode_"+sourceID+".mp3", "mp3", int64(len("fake-audio-bytes")), "abcdef"); err != nil {
 		t.Fatal(err)
 	}
+	profile, err := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: "播客内容品牌", TargetAudience: "创作者", Voice: "清晰"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "AI 工作流"}); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
@@ -111,6 +118,17 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	}
 	if email != "owner@example.com" {
 		t.Errorf("Owner email 应为 owner@example.com，实际 %s", email)
+	}
+	var migrationVersion int
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 20 {
+		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
+	}
+	var profileName, themeName string
+	if err := dstDB.QueryRow(`SELECT name FROM editorial_profiles`).Scan(&profileName); err != nil || profileName != "播客内容品牌" {
+		t.Fatalf("编辑画像应恢复: name=%q err=%v", profileName, err)
+	}
+	if err := dstDB.QueryRow(`SELECT name FROM themes`).Scan(&themeName); err != nil || themeName != "AI 工作流" {
+		t.Fatalf("跨集主题应恢复: name=%q err=%v", themeName, err)
 	}
 	// 转录版本保留
 	var cnt int
