@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -50,4 +51,17 @@ func (s *Store) ListDocuments(ctx context.Context) ([]*models.Document, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// DocumentSegments deterministically derives citation anchors from paragraph order.
+// Because Document content never mutates, ids remain stable for its whole lifetime.
+func DocumentSegments(doc *models.Document) []models.DocumentSegment {
+	parts := strings.Split(strings.ReplaceAll(doc.Content, "\r\n", "\n"), "\n\n")
+	out := make([]models.DocumentSegment, 0, len(parts))
+	for _, part := range parts {
+		if text := strings.TrimSpace(part); text != "" {
+			out = append(out, models.DocumentSegment{ID: doc.ID + "-p" + fmt.Sprintf("%04d", len(out)+1), Position: len(out) + 1, Text: text})
+		}
+	}
+	return out
 }

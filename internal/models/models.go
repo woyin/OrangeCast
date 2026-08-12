@@ -90,6 +90,13 @@ type Document struct {
 	CreatedAt, UpdatedAt                                     string
 }
 
+// DocumentSegment is a stable paragraph-position anchor inside an immutable EvidenceDocument.
+type DocumentSegment struct {
+	ID       string
+	Position int
+	Text     string
+}
+
 // IngestionPolicy decides how newly discovered Podcast episodes enter processing.
 type IngestionPolicy string
 

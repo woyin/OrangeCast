@@ -24,4 +24,8 @@ func TestCreatePastedDocumentIsImmutableEvidenceSnapshot(t *testing.T) {
 	if _, err := s.CreatePastedDocument(context.Background(), "", "x"); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("empty document must reject: %v", err)
 	}
+	segments := DocumentSegments(doc)
+	if len(segments) != 1 || segments[0].ID != doc.ID+"-p0001" || segments[0].Text != "原始证据内容" {
+		t.Fatalf("segments must be deterministic anchors: %+v", segments)
+	}
 }
