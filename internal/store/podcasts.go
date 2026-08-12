@@ -26,9 +26,9 @@ func (s *Store) CreatePodcast(ctx context.Context, feedURL, title, description, 
 func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast, error) {
 	p := &models.Podcast{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
 		 FROM podcasts WHERE id = ?`, id).
-		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt)
+		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -41,7 +41,7 @@ func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast,
 // ListPodcasts 列出全部订阅。
 func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
 		 FROM podcasts ORDER BY title`)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -65,10 +65,49 @@ func (s *Store) UpdatePodcastFetched(ctx context.Context, id string) error {
 	return err
 }
 
+// SetPodcastIngestionPolicy changes how newly discovered episodes enter processing.
+func (s *Store) SetPodcastIngestionPolicy(ctx context.Context, id string, policy models.IngestionPolicy) error {
+	if policy != models.IngestionManual && policy != models.IngestionAllNew && policy != models.IngestionFiltered {
+		return fmt.Errorf("invalid ingestion policy %q", policy)
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE podcasts SET ingestion_policy=? WHERE id=?`, string(policy), id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListUnprocessedEpisodes returns candidates that a policy may elect to queue.
+func (s *Store) ListUnprocessedEpisodes(ctx context.Context, podcastID string) ([]*models.Episode, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, podcast_id, guid, title, COALESCE(description,''), audio_url, duration_seconds, published_at, processing_status, created_at
+		 FROM episodes WHERE podcast_id=? AND processing_status='unprocessed' ORDER BY published_at DESC, created_at DESC`, podcastID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.Episode
+	for rows.Next() {
+		episode := &models.Episode{}
+		if err := rows.Scan(&episode.ID, &episode.PodcastID, &episode.GUID, &episode.Title, &episode.Description, &episode.AudioURL, &episode.DurationSeconds, &episode.PublishedAt, &episode.ProcessingStatus, &episode.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, episode)
+	}
+	return out, rows.Err()
+}
+
 // ListPodcastsForRefresh 按 last_fetched_at ASC 取一批用于 cron 刷新。
 func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
 		 FROM podcasts ORDER BY last_fetched_at IS NOT NULL, last_fetched_at ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -77,7 +116,7 @@ func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*model
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

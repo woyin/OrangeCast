@@ -248,6 +248,100 @@ func TestMergeEpisodes_InsertError(t *testing.T) {
 	}
 }
 
+func TestPodcastIngestionPolicyAndUnprocessedEpisodes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "a@b.com")
+	podcast, err := s.CreatePodcast(ctx, "https://feed.example.com/pod.xml", "Pod", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if podcast.IngestionPolicy != string(models.IngestionManual) {
+		t.Fatalf("new podcasts default to manual: %q", podcast.IngestionPolicy)
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, podcast.ID, models.IngestionAllNew); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetPodcastByID(ctx, podcast.ID)
+	if err != nil || got.IngestionPolicy != string(models.IngestionAllNew) {
+		t.Fatalf("policy should persist: podcast=%+v err=%v", got, err)
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, podcast.ID, models.IngestionPolicy("wrong")); err == nil {
+		t.Fatal("unknown ingestion policy should fail")
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, "missing", models.IngestionManual); err != ErrNotFound {
+		t.Fatalf("missing podcast should return ErrNotFound: %v", err)
+	}
+	if _, err := s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "one", Title: "one", AudioURL: "https://a.mp3"}, {GUID: "two", Title: "two", AudioURL: "https://b.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	unprocessed, err := s.ListUnprocessedEpisodes(ctx, podcast.ID)
+	if err != nil || len(unprocessed) != 2 {
+		t.Fatalf("new episodes should be candidates: episodes=%+v err=%v", unprocessed, err)
+	}
+	if err := s.UpdateEpisodeStatus(ctx, unprocessed[0].ID, models.StatusQueuedEp); err != nil {
+		t.Fatal(err)
+	}
+	unprocessed, err = s.ListUnprocessedEpisodes(ctx, podcast.ID)
+	if err != nil || len(unprocessed) != 1 {
+		t.Fatalf("queued episodes must leave candidate list: episodes=%+v err=%v", unprocessed, err)
+	}
+}
+
+func TestPodcastIngestionPolicyAndUnprocessedEpisodes_DBErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListUnprocessedEpisodes(ctx, "podcast-1"); err == nil {
+		t.Fatal("missing episodes table should make candidate query fail")
+	}
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, "podcast-1", models.IngestionManual); err == nil {
+		t.Fatal("missing podcasts table should make policy update fail")
+	}
+}
+
+func TestPodcastCandidateList_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE episodes`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE episodes (id TEXT, podcast_id TEXT, guid TEXT, title TEXT, description TEXT, audio_url TEXT, duration_seconds INTEGER, published_at TEXT, processing_status TEXT, created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO episodes (podcast_id, processing_status) VALUES ('podcast-1', 'unprocessed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListUnprocessedEpisodes(ctx, "podcast-1"); err == nil {
+		t.Fatal("NULL id should make episode candidate scan fail")
+	}
+}
+
+func TestPodcastLists_ScanError(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE podcasts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE podcasts (id TEXT, feed_url TEXT, title TEXT, description TEXT, image_url TEXT, last_fetched_at TEXT, created_at TEXT, ingestion_policy TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO podcasts (feed_url, title, ingestion_policy) VALUES ('https://feed.example.com/pod.xml', 'Pod', 'manual')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListPodcasts(ctx); err == nil {
+		t.Fatal("NULL id should make podcast list scan fail")
+	}
+	if _, err := s.ListPodcastsForRefresh(ctx, 1); err == nil {
+		t.Fatal("NULL id should make refresh list scan fail")
+	}
+}
+
 // TestListEpisodes_QueryError 验证分页查询失败时报错。
 // 覆盖 ListEpisodes 中查询失败分支（删除 episodes 表）。
 func TestListEpisodes_QueryError(t *testing.T) {

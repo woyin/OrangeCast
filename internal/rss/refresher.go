@@ -40,7 +40,7 @@ func (r *Refresher) runScheduled() {
 }
 
 // RefreshAll 按 last_fetched_at ASC 取一批（25 个）刷新。
-// 只插入新 episode，不自动触发 AI 处理（与原设计一致，手动处理）。
+// 新 Episode 是否自动入队由 Podcast 的 IngestionPolicy 决定；默认 manual 不产生 AI 调用。
 func (r *Refresher) RefreshAll(ctx context.Context) error {
 	podcasts, err := r.store.ListPodcastsForRefresh(ctx, 25)
 	if err != nil {
@@ -60,8 +60,32 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 	if err != nil {
 		return err
 	}
+	knownCandidates := make(map[string]struct{})
+	if p.IngestionPolicy == string(models.IngestionAllNew) {
+		candidates, err := r.store.ListUnprocessedEpisodes(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, episode := range candidates {
+			knownCandidates[episode.ID] = struct{}{}
+		}
+	}
 	if _, err := r.store.MergeEpisodes(ctx, p.ID, eps); err != nil {
 		return err
+	}
+	if p.IngestionPolicy == string(models.IngestionAllNew) {
+		candidates, err := r.store.ListUnprocessedEpisodes(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		for _, episode := range candidates {
+			if _, existed := knownCandidates[episode.ID]; existed {
+				continue
+			}
+			if _, err := r.store.EnqueueJob(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe); err != nil {
+				return err
+			}
+		}
 	}
 	return r.store.UpdatePodcastFetched(ctx, p.ID)
 }

@@ -69,14 +69,27 @@ type User struct {
 
 // Podcast 播客订阅。单 Owner 实例内所有内容天然属于实例，不携带 user_id（ADR-0007）。
 type Podcast struct {
-	ID            string
-	FeedURL       string
-	Title         string
-	Description   string
-	ImageURL      string
-	LastFetchedAt *string
-	CreatedAt     string
+	ID              string
+	FeedURL         string
+	Title           string
+	Description     string
+	ImageURL        string
+	LastFetchedAt   *string
+	CreatedAt       string
+	IngestionPolicy string
 }
+
+// IngestionPolicy decides how newly discovered Podcast episodes enter processing.
+type IngestionPolicy string
+
+const (
+	// IngestionManual only discovers candidates.
+	IngestionManual IngestionPolicy = "manual"
+	// IngestionAllNew automatically queues every newly discovered episode.
+	IngestionAllNew IngestionPolicy = "all_new"
+	// IngestionFiltered reserves automatic processing for a future explicit rule set.
+	IngestionFiltered IngestionPolicy = "filtered"
+)
 
 // Episode 来自 RSS feed 的单集。可被选入队转为 Source；AudioURL 是外部链接，
 // 真正持久化的是其 EvidenceAudio。ProcessingStatus 反映处理管线的阶段。

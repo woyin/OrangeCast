@@ -59,6 +59,44 @@ func TestRefreshAll(t *testing.T) {
 	}
 }
 
+func TestRefreshAll_AutoIngestionRespectsPodcastPolicy(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	p, err := s.CreatePodcast(ctx, "https://feed.example.com/pod.xml", "测试播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, p.ID, models.IngestionAllNew); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "historical", Title: "历史单集", AudioURL: "https://cdn.example.com/old.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRefresher(s)
+	r.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL}, []models.Episode{{GUID: "ep-1", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"}}, nil
+	}
+	if err := r.RefreshAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := s.ListQueuedOrRunning(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].JobType != models.JobTranscribe {
+		t.Fatalf("all_new should queue one transcription job: jobs=%+v err=%v", jobs, err)
+	}
+	// 再刷新同一 feed：没有新 Episode，也不能重复入队。
+	if err := r.RefreshAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ = s.ListQueuedOrRunning(ctx)
+	if len(jobs) != 1 {
+		t.Fatalf("repeat refresh should not duplicate jobs: %d", len(jobs))
+	}
+	old, err := s.ListUnprocessedEpisodes(ctx, p.ID)
+	if err != nil || len(old) != 1 || old[0].GUID != "historical" {
+		t.Fatalf("historical candidates must remain manual: episodes=%+v err=%v", old, err)
+	}
+}
+
 // TestRefreshAll_FetchErrorContinues 验证单个 feed 抓取失败不影响其余 feed（continue 语义）。
 func TestRefreshAll_FetchErrorContinues(t *testing.T) {
 	ctx := context.Background()
