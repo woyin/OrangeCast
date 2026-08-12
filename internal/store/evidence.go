@@ -100,6 +100,7 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
+		`DELETE FROM editorial_source_scopes WHERE source_type = ? AND source_id = ?`,
 		// artifact_versions.job_id 引用 processing_jobs，必须先删版本再删任务。
 		`DELETE FROM artifact_versions WHERE source_type = ? AND source_id = ?`,
 		`DELETE FROM transcripts WHERE source_type = ? AND source_id = ?`,
@@ -117,6 +118,8 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 		_, err = tx.ExecContext(ctx, `DELETE FROM episodes WHERE id = ?`, sourceID)
 	case models.SourceUpload:
 		_, err = tx.ExecContext(ctx, `DELETE FROM uploads WHERE id = ?`, sourceID)
+	case models.SourceDocument:
+		_, err = tx.ExecContext(ctx, `DELETE FROM documents WHERE id = ?`, sourceID)
 	default:
 		return fmt.Errorf("未知 source_type: %s", sourceType)
 	}

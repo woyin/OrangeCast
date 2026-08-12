@@ -31,4 +31,13 @@ func TestCreatePastedDocumentIsImmutableEvidenceSnapshot(t *testing.T) {
 	if len(segments) != 1 || segments[0].ID != doc.ID+"-p0001" || segments[0].Text != "原始证据内容" {
 		t.Fatalf("segments must be deterministic anchors: %+v", segments)
 	}
+	if got := s.SourceTitle(context.Background(), models.SourceDocument, doc.ID); got != doc.Title {
+		t.Fatalf("document title should be available to shared source views: %q", got)
+	}
+	if err := s.DeleteSourceRows(context.Background(), models.SourceDocument, doc.ID); err != nil {
+		t.Fatalf("document source should purge with shared cleanup: %v", err)
+	}
+	if _, err := s.GetDocument(context.Background(), doc.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("purged document must be gone: %v", err)
+	}
 }

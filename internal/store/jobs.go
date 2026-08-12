@@ -334,6 +334,10 @@ func (s *Store) SourceTitle(ctx context.Context, sourceType models.SourceType, s
 		if ep, err := s.GetEpisodeByID(ctx, sourceID); err == nil {
 			return ep.Title
 		}
+	} else if sourceType == models.SourceDocument {
+		if document, err := s.GetDocument(ctx, sourceID); err == nil {
+			return document.Title
+		}
 	} else {
 		if up, err := s.GetUploadByID(ctx, sourceID); err == nil {
 			return up.OriginalFilename
