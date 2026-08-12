@@ -419,17 +419,47 @@ func (srv *Server) handleArticleRevisionCreate(w http.ResponseWriter, r *http.Re
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	revision, err := srv.store.CreateArticleRevision(r.Context(), models.ArticleRevision{
-		DraftID:  strings.TrimSpace(r.FormValue("draft_id")),
-		Title:    strings.TrimSpace(r.FormValue("title")),
-		Markdown: r.FormValue("markdown"),
-		Origin:   "owner",
-	})
+	draftID, markdown := strings.TrimSpace(r.FormValue("draft_id")), r.FormValue("markdown")
+	inheritedMaps, err := srv.inheritedEvidenceMaps(r, draftID, markdown)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "保存修订失败：文章草稿不存在", http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "读取当前证据映射失败", http.StatusInternalServerError)
+		return
+	}
+	revision, err := srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{
+		DraftID: draftID, Title: strings.TrimSpace(r.FormValue("title")), Markdown: markdown, Origin: "owner",
+	}, inheritedMaps)
 	if err != nil {
 		http.Error(w, "保存修订失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
 	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
+}
+
+// inheritedEvidenceMaps retains only mappings whose exact supported expression
+// survives an Owner edit. Changed or removed expressions intentionally lose
+// their old mapping and must be reviewed with fresh evidence rather than being
+// silently blessed by a previous revision.
+func (srv *Server) inheritedEvidenceMaps(r *http.Request, draftID, markdown string) ([]models.EvidenceMap, error) {
+	draft, err := srv.store.GetArticleDraft(r.Context(), draftID)
+	if err != nil || draft.CurrentRevisionID == nil {
+		return nil, err
+	}
+	previousMaps, err := srv.store.ListEvidenceMaps(r.Context(), *draft.CurrentRevisionID)
+	if err != nil {
+		return nil, err
+	}
+	inherited := make([]models.EvidenceMap, 0, len(previousMaps))
+	for _, mapping := range previousMaps {
+		if strings.TrimSpace(mapping.Excerpt) == "" || !strings.Contains(markdown, mapping.Excerpt) {
+			continue
+		}
+		inherited = append(inherited, models.EvidenceMap{Kind: mapping.Kind, Excerpt: mapping.Excerpt, KeyPointIDs: mapping.KeyPointIDs})
+	}
+	return inherited, nil
 }
 
 // handleArticleReviewCreate records an exact-revision review; evidence status drives the hard gate.

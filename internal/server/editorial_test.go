@@ -151,6 +151,66 @@ func TestKeyPointStatusAPIRejectsWrongMethodAndInvalidState(t *testing.T) {
 	}
 }
 
+func TestOwnerRevisionInheritsOnlySurvivingEvidenceMaps(t *testing.T) {
+	srv := newTestServer(t)
+	profile, err := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateArticleProposal(t.Context(), models.ArticleProposal{EditorialProfileID: profile.ID, Title: "选题"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetArticleProposalStatus(t.Context(), proposal.ID, "accepted"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateArticleBrief(t.Context(), models.ArticleBrief{ProposalID: proposal.ID, Thesis: "论点", Outline: "# 结构", MaterialPlan: "[]", ConflictPlan: "[]"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ConfirmArticleBrief(t.Context(), brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := srv.store.CreateArticleDraft(t.Context(), brief.ID, "文章")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "保留句\n删除句", Origin: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.CreateEvidenceMap(t.Context(), models.EvidenceMap{RevisionID: previous.ID, Kind: models.EvidenceRhetorical, Excerpt: "保留句", KeyPointIDs: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+
+	create := func(markdown string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/revisions", strings.NewReader("draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown="+markdown))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.handleArticleRevisionCreate(rec, req)
+		return rec
+	}
+	if rec := create("%E4%BF%9D%E7%95%99%E5%8F%A5%0A%E6%96%B0%E5%86%85%E5%AE%B9"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("owner revision should save: %d %s", rec.Code, rec.Body.String())
+	}
+	revisions, err := srv.store.ListArticleRevisions(t.Context(), draft.ID)
+	if err != nil || len(revisions) != 2 {
+		t.Fatalf("expected inherited revision: revisions=%+v err=%v", revisions, err)
+	}
+	maps, err := srv.store.ListEvidenceMaps(t.Context(), revisions[0].ID)
+	if err != nil || len(maps) != 1 || maps[0].Excerpt != "保留句" {
+		t.Fatalf("only unchanged evidence should be inherited: maps=%+v err=%v", maps, err)
+	}
+	if rec := create("%E5%AE%8C%E5%85%A8%E6%94%B9%E5%86%99"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("second owner revision should save: %d %s", rec.Code, rec.Body.String())
+	}
+	revisions, _ = srv.store.ListArticleRevisions(t.Context(), draft.ID)
+	maps, err = srv.store.ListEvidenceMaps(t.Context(), revisions[0].ID)
+	if err != nil || len(maps) != 0 {
+		t.Fatalf("changed expression must not inherit a stale map: maps=%+v err=%v", maps, err)
+	}
+}
+
 func TestWorkbenchSourceScopeGrantAndRevoke(t *testing.T) {
 	srv := newTestServer(t)
 	session := claimOwnerAndLogin(t, srv, "scope@example.com", "password123")
