@@ -254,6 +254,25 @@ type EditorialProfile struct {
 	UpdatedAt          string
 }
 
+// Theme groups scoped KeyPoints across episodes into an editorially meaningful topic.
+type Theme struct {
+	ID                 string
+	EditorialProfileID string
+	Name               string
+	Description        string
+	Status             string // suggested | confirmed | ignored
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+// ThemeKeyPoint records the explicit relationship between a theme and one KeyPoint.
+type ThemeKeyPoint struct {
+	ThemeID      string
+	KeyPointID   string
+	Relationship string // supports | complements | conflicts
+	CreatedAt    string
+}
+
 // ArticleProposal 是 Scout 为某个 EditorialProfile 发现的候选选题。
 type ArticleProposal struct {
 	ID                 string
