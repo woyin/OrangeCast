@@ -47,6 +47,7 @@ func fetchWebDocument(ctx context.Context, rawURL string) (string, string, error
 func readableHTML(raw string) (string, string, error) {
 	z := html.NewTokenizer(strings.NewReader(raw))
 	title := ""
+	inTitle := false
 	var text []string
 	skip := 0
 	for {
@@ -59,12 +60,18 @@ func readableHTML(raw string) (string, string, error) {
 		}
 		tok := z.Token()
 		if tt == html.StartTagToken {
+			if tok.Data == "title" {
+				inTitle = true
+			}
 			if tok.Data == "script" || tok.Data == "style" {
 				skip++
 			}
 			continue
 		}
 		if tt == html.EndTagToken {
+			if tok.Data == "title" {
+				inTitle = false
+			}
 			if (tok.Data == "script" || tok.Data == "style") && skip > 0 {
 				skip--
 			}
@@ -73,6 +80,9 @@ func readableHTML(raw string) (string, string, error) {
 		if tt == html.TextToken && skip == 0 {
 			s := strings.TrimSpace(tok.Data)
 			if s != "" {
+				if inTitle && title == "" {
+					title = s
+				}
 				text = append(text, s)
 			}
 		}

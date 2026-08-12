@@ -39,12 +39,16 @@ func (srv *Server) handleDocumentImport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	url := strings.TrimSpace(r.FormValue("url"))
-	title, content, err := srv.fetchDocument(r.Context(), url)
+	fetchedTitle, content, err := srv.fetchDocument(r.Context(), url)
 	if err != nil {
 		srv.tmpl.Render(w, "documents.html", map[string]any{"Error": "抓取失败：" + err.Error(), "CSRF": auth.CSRFValue(r)})
 		return
 	}
-	if title = strings.TrimSpace(r.FormValue("title")); title == "" {
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" {
+		title = fetchedTitle
+	}
+	if title == "" {
 		title = url
 	}
 	doc, err := srv.store.CreateWebDocument(r.Context(), title, url, content)
