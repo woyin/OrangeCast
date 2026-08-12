@@ -15,13 +15,22 @@ import (
 
 // CreatePastedDocument snapshots Owner-provided text as an immutable EvidenceDocument.
 func (s *Store) CreatePastedDocument(ctx context.Context, title, content string) (*models.Document, error) {
+	return s.createDocument(ctx, title, "pasted", "", content)
+}
+
+// CreateWebDocument persists the fetched text, never a live webpage reference.
+func (s *Store) CreateWebDocument(ctx context.Context, title, sourceURL, content string) (*models.Document, error) {
+	return s.createDocument(ctx, title, "url", sourceURL, content)
+}
+
+func (s *Store) createDocument(ctx context.Context, title, originKind, originURL, content string) (*models.Document, error) {
 	title, content = strings.TrimSpace(title), strings.TrimSpace(content)
 	if title == "" || content == "" {
 		return nil, ErrInvalidEditorialState
 	}
 	sum := sha256.Sum256([]byte(content))
 	id := uuid.NewString()
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO documents (id,title,content,content_sha256) VALUES (?,?,?,?)`, id, title, content, hex.EncodeToString(sum[:])); err != nil {
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO documents (id,title,origin_kind,origin_url,content,content_sha256) VALUES (?,?,?,?,?,?)`, id, title, originKind, originURL, content, hex.EncodeToString(sum[:])); err != nil {
 		return nil, err
 	}
 	return s.GetDocument(ctx, id)

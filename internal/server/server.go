@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/woyin/orangecast/internal/auth"
@@ -14,15 +15,16 @@ import (
 
 // Server 装配所有依赖与路由。
 type Server struct {
-	cfg          *config.Config
-	store        *store.Store
-	worker       *queue.Worker
-	refresher    *rss.Refresher
-	selector     *provider.Selector
-	bundleFor    func(provider.TaskConfig) (*provider.ProviderBundle, error) // 可注入（测试用），默认走 selector
-	fetchFeed    func(string) (*models.Podcast, []models.Episode, error)     // 可注入（测试用），默认走 rss.FetchFeed
-	tmpl         *Templates
-	loginLimiter *auth.RateLimiter
+	cfg           *config.Config
+	store         *store.Store
+	worker        *queue.Worker
+	refresher     *rss.Refresher
+	selector      *provider.Selector
+	bundleFor     func(provider.TaskConfig) (*provider.ProviderBundle, error) // 可注入（测试用），默认走 selector
+	fetchFeed     func(string) (*models.Podcast, []models.Episode, error)     // 可注入（测试用），默认走 rss.FetchFeed
+	fetchDocument func(context.Context, string) (string, string, error)
+	tmpl          *Templates
+	loginLimiter  *auth.RateLimiter
 }
 
 // New 装配 Server 全部依赖：模板、登录限流、默认 bundleFor/fetchFeed。
@@ -40,5 +42,6 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 		return selector.BundleForTask(tc)
 	}
 	srv.fetchFeed = rss.FetchFeed
+	srv.fetchDocument = fetchWebDocument
 	return srv, nil
 }

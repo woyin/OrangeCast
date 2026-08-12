@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -46,5 +47,19 @@ func TestPastedDocumentWorkflow(t *testing.T) {
 	bad := postForm(t, srv, cookie, "/documents/new", "_csrf="+csrf+"&title=&content=")
 	if bad.Code != http.StatusOK || !strings.Contains(bad.Body.String(), "不能为空") {
 		t.Fatalf("invalid document should rerender: %d %s", bad.Code, bad.Body.String())
+	}
+}
+
+func TestDocumentImportSnapshotsFetchedText(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "url-doc@example.com", "password123")
+	srv.fetchDocument = func(context.Context, string) (string, string, error) { return "抓取标题", "网页原文", nil }
+	rec := postForm(t, srv, cookie, "/documents/import", "url=https%3A%2F%2Fexample.com%2Freport")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("URL import should redirect: %d %s", rec.Code, rec.Body.String())
+	}
+	docs, err := srv.store.ListDocuments(t.Context())
+	if err != nil || len(docs) != 1 || docs[0].OriginKind != "url" || docs[0].OriginURL != "https://example.com/report" || docs[0].Content != "网页原文" {
+		t.Fatalf("fetched page must become snapshot: %+v %v", docs, err)
 	}
 }

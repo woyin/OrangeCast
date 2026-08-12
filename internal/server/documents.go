@@ -17,7 +17,7 @@ func (srv *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "加载文档失败", http.StatusInternalServerError)
 		return
 	}
-	srv.tmpl.Render(w, "documents.html", map[string]any{"Documents": docs})
+	srv.tmpl.Render(w, "documents.html", map[string]any{"Documents": docs, "CSRF": auth.CSRFValue(r)})
 }
 
 func (srv *Server) handleDocumentNew(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +28,28 @@ func (srv *Server) handleDocumentNew(w http.ResponseWriter, r *http.Request) {
 	doc, err := srv.store.CreatePastedDocument(r.Context(), r.FormValue("title"), r.FormValue("content"))
 	if err != nil {
 		srv.tmpl.Render(w, "document_new.html", map[string]any{"Error": "标题和正文均不能为空", "CSRF": auth.CSRFValue(r)})
+		return
+	}
+	http.Redirect(w, r, "/documents/"+doc.ID, http.StatusSeeOther)
+}
+
+func (srv *Server) handleDocumentImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	url := strings.TrimSpace(r.FormValue("url"))
+	title, content, err := srv.fetchDocument(r.Context(), url)
+	if err != nil {
+		srv.tmpl.Render(w, "documents.html", map[string]any{"Error": "抓取失败：" + err.Error(), "CSRF": auth.CSRFValue(r)})
+		return
+	}
+	if title = strings.TrimSpace(r.FormValue("title")); title == "" {
+		title = url
+	}
+	doc, err := srv.store.CreateWebDocument(r.Context(), title, url, content)
+	if err != nil {
+		http.Error(w, "保存网页证据失败", http.StatusBadRequest)
 		return
 	}
 	http.Redirect(w, r, "/documents/"+doc.ID, http.StatusSeeOther)
