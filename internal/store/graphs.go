@@ -39,70 +39,67 @@ type KpGraphData struct {
 // 实线边 = 同一 Collection 的 KeyPoint 两两连接（Owner 组织的跨 Source 主题集）。
 // 虚线边 = 文本相似度建议（Jaccard 词重叠 ≥0.3，跨 Episode，且不重复已有实线）。
 // 用于 /graph 页面的力导向可视化。
-func (s *Store) GetKpGraph(ctx context.Context) (*KpGraphData, error) {
-	// 1) 全部 KeyPoint
-	kps, _, err := s.ListKeyPoints(ctx, 1, 500) // 上限 500 条
-	if err != nil {
-		return nil, err
-	}
-
-	// 2) Collection 成员映射：keypoint_id → collection_id
-	//    collection_items 按 (source_type, source_id, segment_ids) 关联 keypoint_index
-	ciRows, err := s.DB.QueryContext(ctx,
+func (s *Store) graphCollectionMap(ctx context.Context) (map[string]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
 		`SELECT ci.collection_id, ki.id
 		 FROM collection_items ci
 		 JOIN keypoint_index ki ON ki.source_type = ci.source_type
-		                             AND ki.source_id = ci.source_id
+			                             AND ki.source_id = ci.source_id
 		                             AND ki.citations_json = ci.segment_ids`)
 	if err != nil {
 		return nil, err
 	}
-	defer ciRows.Close()
-	kpToCol := map[string]string{}
-	for ciRows.Next() {
+	defer rows.Close()
+	collectionByKeyPoint := map[string]string{}
+	for rows.Next() {
 		var colID, kpID string
-		if err := ciRows.Scan(&colID, &kpID); err != nil {
+		if err := rows.Scan(&colID, &kpID); err != nil {
 			return nil, err
 		}
-		kpToCol[kpID] = colID
+		collectionByKeyPoint[kpID] = colID
 	}
-
-	// 3) Collections 列表
-	cols, err := s.ListCollections(ctx)
-	if err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	return collectionByKeyPoint, nil
+}
 
-	gd := &KpGraphData{Collections: cols}
-
-	// 4) 节点
+func graphNodes(kps []*KeyPointRow, collectionByKeyPoint map[string]string) []KpGraphNode {
+	nodes := make([]KpGraphNode, 0, len(kps))
 	for _, kp := range kps {
-		col := kpToCol[kp.ID]
-		gd.Nodes = append(gd.Nodes, KpGraphNode{
+		nodes = append(nodes, KpGraphNode{
 			ID: kp.ID, Content: kp.Content, SourceTitle: kp.SourceTitle,
 			SourceID: kp.SourceID, SourceType: string(kp.SourceType),
 			TimeStart: kp.TimeStart, TimeEnd: kp.TimeEnd,
-			Collection: col,
+			Collection: collectionByKeyPoint[kp.ID],
 		})
 	}
+	return nodes
+}
 
-	// 5) 实线边：同一 Collection 的 KeyPoint 两两连接
-	colMembers := map[string][]string{} // collection_id → []keypoint_id
+func graphCollectionLinks(kps []*KeyPointRow, collectionByKeyPoint map[string]string) ([]KpGraphLink, map[string]bool) {
+	collectionMembers := map[string][]string{}
 	for _, kp := range kps {
-		if c := kpToCol[kp.ID]; c != "" {
-			colMembers[c] = append(colMembers[c], kp.ID)
+		if collectionID := collectionByKeyPoint[kp.ID]; collectionID != "" {
+			collectionMembers[collectionID] = append(collectionMembers[collectionID], kp.ID)
 		}
 	}
-	for _, ids := range colMembers {
+	links := []KpGraphLink{}
+	edges := map[string]bool{}
+	for _, ids := range collectionMembers {
 		for i := 0; i < len(ids); i++ {
 			for j := i + 1; j < len(ids); j++ {
-				gd.Links = append(gd.Links, KpGraphLink{Source: ids[i], Target: ids[j], Type: "collection"})
+				links = append(links, KpGraphLink{Source: ids[i], Target: ids[j], Type: "collection"})
+				edges[graphEdgeKey(ids[i], ids[j])] = true
 			}
 		}
 	}
+	return links, edges
+}
 
-	// 6) 虚线边：文本相似度建议（词重叠 > 0.3，且不在同一 Episode）
+func graphSimilarLinks(kps []*KeyPointRow, existing map[string]bool) []KpGraphLink {
 	tokenized := make([]map[string]int, len(kps))
+	links := []KpGraphLink{}
 	for i, kp := range kps {
 		tokenized[i] = tokenizeKp(kp.Content + " " + kp.Description)
 	}
@@ -113,23 +110,40 @@ func (s *Store) GetKpGraph(ctx context.Context) (*KpGraphData, error) {
 			}
 			sim := jaccard(tokenized[i], tokenized[j])
 			if sim >= 0.3 {
-				// 避免和已有 collection 边重复
-				alreadyLinked := false
-				for _, l := range gd.Links {
-					if (l.Source == kps[i].ID && l.Target == kps[j].ID) ||
-						(l.Source == kps[j].ID && l.Target == kps[i].ID) {
-						alreadyLinked = true
-						break
-					}
+				key := graphEdgeKey(kps[i].ID, kps[j].ID)
+				if existing[key] {
+					continue
 				}
-				if !alreadyLinked {
-					gd.Links = append(gd.Links, KpGraphLink{Source: kps[i].ID, Target: kps[j].ID, Type: "similar"})
-				}
+				existing[key] = true
+				links = append(links, KpGraphLink{Source: kps[i].ID, Target: kps[j].ID, Type: "similar"})
 			}
 		}
 	}
+	return links
+}
 
-	return gd, nil
+func graphEdgeKey(source, target string) string {
+	if source > target {
+		source, target = target, source
+	}
+	return source + "\x00" + target
+}
+
+func (s *Store) GetKpGraph(ctx context.Context) (*KpGraphData, error) {
+	kps, _, err := s.ListKeyPoints(ctx, 1, 500)
+	if err != nil {
+		return nil, err
+	}
+	collectionByKeyPoint, err := s.graphCollectionMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	collections, err := s.ListCollections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	collectionLinks, edges := graphCollectionLinks(kps, collectionByKeyPoint)
+	return &KpGraphData{Nodes: graphNodes(kps, collectionByKeyPoint), Links: append(collectionLinks, graphSimilarLinks(kps, edges)...), Collections: collections}, nil
 }
 
 // tokenizeKp 简单分词（中英文混合：英文按空格，中文 bigram）。

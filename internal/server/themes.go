@@ -54,94 +54,10 @@ func (srv *Server) handleScoutRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
-	profile, err := srv.store.GetEditorialProfile(r.Context(), profileID)
+	created, err := srv.runScout(r, profileID)
 	if err != nil {
-		http.Error(w, "读取编辑画像失败", http.StatusBadRequest)
+		writeEditorialError(w, err)
 		return
-	}
-	settings, err := srv.store.GetSettings(r.Context())
-	if err != nil {
-		http.Error(w, "读取 Scout 配置失败", http.StatusInternalServerError)
-		return
-	}
-	taskConfig := editorialTaskConfig(settings, editorialRoleScout)
-	bundle, err := srv.bundleFor(taskConfig)
-	if err != nil || bundle.Scout == nil {
-		http.Error(w, "Scout Provider 不可用", http.StatusBadRequest)
-		return
-	}
-	request, err := srv.scoutRequest(r, profile, bundle.Scout.Name())
-	if err != nil {
-		http.Error(w, "主题不满足 Scout 条件："+err.Error(), http.StatusBadRequest)
-		return
-	}
-	providerName := bundle.Scout.Name()
-	modelName := provider.EffectiveTaskModel(taskConfig)
-	promptVersion := provider.ScoutPromptVersion
-	if err := srv.checkEditorialBudget(r.Context(), profile.ID, nil, providerName, modelName); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
-	}
-	result, err := bundle.Scout.Scout(r.Context(), request)
-	if err != nil {
-		primary := providerName + "/" + modelName
-		fallbackConfig, ok := srv.editorialFallbackConfig(r.Context(), editorialRoleScout)
-		fallbackBundle, fallbackErr := srv.bundleFor(fallbackConfig)
-		if !ok || fallbackErr != nil || fallbackBundle.Scout == nil {
-			http.Error(w, "Scout 生成失败："+err.Error(), http.StatusBadRequest)
-			return
-		}
-		providerName, modelName = fallbackBundle.Scout.Name(), provider.EffectiveTaskModel(fallbackConfig)
-		request, fallbackErr = srv.scoutRequest(r, profile, providerName)
-		if fallbackErr == nil {
-			fallbackErr = srv.checkEditorialBudget(r.Context(), profile.ID, nil, providerName, modelName)
-		}
-		if fallbackErr == nil {
-			result, fallbackErr = fallbackBundle.Scout.Scout(r.Context(), request)
-		}
-		if fallbackErr != nil {
-			http.Error(w, "Scout 首选与备用 Provider 均失败："+fallbackErr.Error(), http.StatusBadRequest)
-			return
-		}
-		result.Usage.FallbackFrom = primary
-	}
-	cost, err := srv.recordEditorialUsage(r.Context(), profile.ID, nil, "scout", "profile", profile.ID, providerName, modelName, promptVersion, result.Usage)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	existing, err := srv.store.ListArticleProposals(r.Context(), profileID)
-	if err != nil {
-		http.Error(w, "读取既有提案失败", http.StatusInternalServerError)
-		return
-	}
-	titles := map[string]bool{}
-	historicalTitles := make([]string, 0, len(existing))
-	for _, proposal := range existing {
-		normalized := normalizeEditorialTitle(proposal.Title)
-		titles[normalized] = true
-		historicalTitles = append(historicalTitles, normalized)
-	}
-	created := 0
-	firstCreated := true
-	for _, candidate := range result.Proposals {
-		key := normalizeEditorialTitle(candidate.Title)
-		if titles[key] || editorialTitleNearDuplicate(key, historicalTitles) {
-			continue
-		}
-		ids, _ := json.Marshal(candidate.CandidateKeyPointIDs)
-		proposalCost := (*int64)(nil)
-		if firstCreated {
-			proposalCost = cost
-			firstCreated = false
-		}
-		if _, err := srv.store.CreateArticleProposal(r.Context(), models.ArticleProposal{EditorialProfileID: profileID, Kind: candidate.Kind, Title: candidate.Title, Thesis: candidate.Thesis, Audience: candidate.Audience, Rationale: candidate.Rationale, CandidateKeyPoints: string(ids), Provider: &providerName, Model: &modelName, PromptVersion: &promptVersion, CostCents: proposalCost}); err != nil {
-			http.Error(w, "保存 Scout 提案失败", http.StatusInternalServerError)
-			return
-		}
-		titles[key] = true
-		historicalTitles = append(historicalTitles, key)
-		created++
 	}
 	http.Redirect(w, r, fmt.Sprintf("/themes?profile=%s&scouted=%d", profileID, created), http.StatusSeeOther)
 }

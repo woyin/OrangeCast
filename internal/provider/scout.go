@@ -73,39 +73,47 @@ func validateScoutResult(result *ScoutResult, request ScoutRequest) (*ScoutResul
 	if result == nil || len(result.Proposals) == 0 {
 		return nil, fmt.Errorf("Scout 必须返回至少一个提案")
 	}
-	allowed := map[string]bool{}
-	for _, theme := range request.Themes {
-		for _, material := range theme.Materials {
-			allowed[material.KeyPointID] = true
-		}
-	}
+	allowed, sourceByKeyPoint := scoutMaterialIndexes(request)
 	titles := map[string]bool{}
-	sourceByKeyPoint := map[string]string{}
-	for _, theme := range request.Themes {
-		for _, material := range theme.Materials {
-			sourceByKeyPoint[material.KeyPointID] = material.SourceID
-		}
-	}
 	for _, proposal := range result.Proposals {
 		key := strings.ToLower(strings.TrimSpace(proposal.Title))
 		if key == "" || titles[key] || !validScoutKind(proposal.Kind) || len(proposal.CandidateKeyPointIDs) == 0 {
 			return nil, fmt.Errorf("Scout 返回无效或重复提案")
 		}
+		if err := validateScoutProposalMaterials(proposal, allowed, sourceByKeyPoint); err != nil {
+			return nil, err
+		}
 		titles[key] = true
-		sources := map[string]bool{}
-		for _, id := range proposal.CandidateKeyPointIDs {
-			if !allowed[id] {
-				return nil, fmt.Errorf("Scout 引用了未授权 KeyPoint %q", id)
-			}
-			if sourceByKeyPoint[id] != "" {
-				sources[sourceByKeyPoint[id]] = true
-			}
-		}
-		if len(sources) < 2 {
-			return nil, fmt.Errorf("Scout 提案必须覆盖至少两个 Source")
-		}
 	}
 	return result, nil
+}
+
+func scoutMaterialIndexes(request ScoutRequest) (map[string]bool, map[string]string) {
+	allowed := map[string]bool{}
+	sourceByKeyPoint := map[string]string{}
+	for _, theme := range request.Themes {
+		for _, material := range theme.Materials {
+			allowed[material.KeyPointID] = true
+			sourceByKeyPoint[material.KeyPointID] = material.SourceID
+		}
+	}
+	return allowed, sourceByKeyPoint
+}
+
+func validateScoutProposalMaterials(proposal ScoutProposal, allowed map[string]bool, sourceByKeyPoint map[string]string) error {
+	sources := map[string]bool{}
+	for _, id := range proposal.CandidateKeyPointIDs {
+		if !allowed[id] {
+			return fmt.Errorf("Scout 引用了未授权 KeyPoint %q", id)
+		}
+		if sourceByKeyPoint[id] != "" {
+			sources[sourceByKeyPoint[id]] = true
+		}
+	}
+	if len(sources) < 2 {
+		return fmt.Errorf("Scout 提案必须覆盖至少两个 Source")
+	}
+	return nil
 }
 
 func validScoutKind(kind string) bool {

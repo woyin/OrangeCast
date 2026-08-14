@@ -40,117 +40,127 @@ func Render(in Input) (string, error) {
 		return "", fmt.Errorf("card 不能为空")
 	}
 	var b strings.Builder
-
-	// frontmatter（Obsidian 友好；特殊字符转义）
 	title := in.Title
 	if title == "" {
 		title = in.Card.Title
 	}
+	tags := writeFrontmatter(&b, in, title)
+	fmt.Fprintf(&b, "# %s\n\n", title)
+	writeSummary(&b, in)
+	writeKeyPoints(&b, in)
+	writeChapters(&b, in)
+	writeQuotes(&b, in)
+	writeTags(&b, tags)
+	writeGeneratedBlocks(&b, in)
+
+	return b.String(), nil
+}
+
+func writeFrontmatter(b *strings.Builder, in Input, title string) []string {
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "title: %s\n", frontmatterValue(title))
-	fmt.Fprintf(&b, "source_type: %s\n", frontmatterValue(in.SourceType))
-	fmt.Fprintf(&b, "source_id: %s\n", frontmatterValue(in.SourceID))
+	fmt.Fprintf(b, "title: %s\n", frontmatterValue(title))
+	fmt.Fprintf(b, "source_type: %s\n", frontmatterValue(in.SourceType))
+	fmt.Fprintf(b, "source_id: %s\n", frontmatterValue(in.SourceID))
 	if in.GeneratedAt != "" {
-		fmt.Fprintf(&b, "generated_at: %s\n", frontmatterValue(in.GeneratedAt))
+		fmt.Fprintf(b, "generated_at: %s\n", frontmatterValue(in.GeneratedAt))
 	}
 	tags := append([]string(nil), in.Card.Tags...)
 	sort.Strings(tags)
 	if len(tags) > 0 {
-		var quoted []string
-		for _, tg := range tags {
-			quoted = append(quoted, `"`+tg+`"`)
+		quoted := make([]string, 0, len(tags))
+		for _, tag := range tags {
+			quoted = append(quoted, `"`+tag+`"`)
 		}
-		fmt.Fprintf(&b, "tags: [%s]\n", strings.Join(quoted, ", "))
+		fmt.Fprintf(b, "tags: [%s]\n", strings.Join(quoted, ", "))
 	}
 	b.WriteString("---\n\n")
+	return tags
+}
 
-	fmt.Fprintf(&b, "# %s\n\n", title)
-
-	// 摘要
-	if strings.TrimSpace(in.Card.Summary.Text) != "" {
-		b.WriteString("## 摘要\n\n")
-		fmt.Fprintf(&b, "%s %s\n\n", in.Card.Summary.Text, citationLinks(in.SourceType, in.SourceID, in.BaseURL, in.Card.Summary.Citations, in.Segments))
+func writeSummary(b *strings.Builder, in Input) {
+	if strings.TrimSpace(in.Card.Summary.Text) == "" {
+		return
 	}
+	b.WriteString("## 摘要\n\n")
+	fmt.Fprintf(b, "%s %s\n\n", in.Card.Summary.Text, citationLinks(in.SourceType, in.SourceID, in.BaseURL, in.Card.Summary.Citations, in.Segments))
+}
 
-	// 关键要点
-	if len(in.Card.KeyPoints) > 0 {
-		b.WriteString("## 关键要点\n\n")
-		for _, kp := range in.Card.KeyPoints {
-			line := "- **" + kp.Content + "**"
-			if kp.Description != "" {
-				line += "：" + kp.Description
-			}
-			line += " " + citationLinks(in.SourceType, in.SourceID, in.BaseURL, kp.Citations, in.Segments)
-			b.WriteString(line + "\n")
+func writeKeyPoints(b *strings.Builder, in Input) {
+	if len(in.Card.KeyPoints) == 0 {
+		return
+	}
+	b.WriteString("## 关键要点\n\n")
+	for _, keyPoint := range in.Card.KeyPoints {
+		line := "- **" + keyPoint.Content + "**"
+		if keyPoint.Description != "" {
+			line += "：" + keyPoint.Description
+		}
+		line += " " + citationLinks(in.SourceType, in.SourceID, in.BaseURL, keyPoint.Citations, in.Segments)
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("\n")
+}
+
+func writeChapters(b *strings.Builder, in Input) {
+	if len(in.Card.Chapters) == 0 {
+		return
+	}
+	b.WriteString("## 章节\n\n")
+	for _, chapter := range in.Card.Chapters {
+		start, end, ok := provider.ResolveCitationSpan(chapter.Citations, in.Segments)
+		timeRange := ""
+		if ok {
+			timeRange = fmt.Sprintf("（%s – %s）", fmtTime(start), fmtTime(end))
+		}
+		fmt.Fprintf(b, "> [!quote] 原文 · %s%s\n", chapter.Title, timeRange)
+		if links := citationLinks(in.SourceType, in.SourceID, in.BaseURL, chapter.Citations, in.Segments); links != "" {
+			b.WriteString("> " + links + "\n")
+		}
+		b.WriteString("\n")
+		if chapter.Gist != "" {
+			b.WriteString(generatedCallout(chapter.Gist, referenceLinks(in.SourceType, in.SourceID, in.BaseURL, chapter.Citations, in.Segments)))
+		}
+	}
+}
+
+func writeQuotes(b *strings.Builder, in Input) {
+	if len(in.Card.Quotes) == 0 {
+		return
+	}
+	b.WriteString("## 金句\n\n")
+	for _, quote := range in.Card.Quotes {
+		fmt.Fprintf(b, "> [!quote] 原文\n> %s\n", quote.Text)
+		if links := citationLinks(in.SourceType, in.SourceID, in.BaseURL, quote.Citations, in.Segments); links != "" {
+			b.WriteString("> " + links + "\n")
 		}
 		b.WriteString("\n")
 	}
+}
 
-	// 章节（ADR-0018 信息分层）
-	// 章节区间本身是 CitedDerivative：标题 + 时间范围 + Citation 链接，标为原文。
-	// 章节上的 Gist 是 GeneratedDerivative：正名为 AI 讲解，独立成 callout 块置于章节区间之后，
-	// 挂 Reference（锚点文字"参考"，URL ?ref=），不再蹭章节的 Citation 链接。
-	if len(in.Card.Chapters) > 0 {
-		b.WriteString("## 章节\n\n")
-		for _, ch := range in.Card.Chapters {
-			start, end, ok := provider.ResolveCitationSpan(ch.Citations, in.Segments)
-			timeRange := ""
-			if ok {
-				timeRange = fmt.Sprintf("（%s – %s）", fmtTime(start), fmtTime(end))
-			}
-			// CitedDerivative：章节区间（原文依据）
-			fmt.Fprintf(&b, "> [!quote] 原文 · %s%s\n", ch.Title, timeRange)
-			cl := citationLinks(in.SourceType, in.SourceID, in.BaseURL, ch.Citations, in.Segments)
-			if cl != "" {
-				b.WriteString("> " + cl + "\n")
-			}
-			b.WriteString("\n")
-			// GeneratedDerivative：Gist（AI 讲解·非原文），正名后挂 Reference
-			if ch.Gist != "" {
-				b.WriteString(generatedCallout(ch.Gist, referenceLinks(in.SourceType, in.SourceID, in.BaseURL, ch.Citations, in.Segments)))
-			}
-		}
+func writeTags(b *strings.Builder, tags []string) {
+	if len(tags) == 0 {
+		return
 	}
-
-	// 金句（CitedDerivative，逐字可核验）
-	if len(in.Card.Quotes) > 0 {
-		b.WriteString("## 金句\n\n")
-		for _, q := range in.Card.Quotes {
-			fmt.Fprintf(&b, "> [!quote] 原文\n> %s\n", q.Text)
-			cl := citationLinks(in.SourceType, in.SourceID, in.BaseURL, q.Citations, in.Segments)
-			if cl != "" {
-				b.WriteString("> " + cl + "\n")
-			}
-			b.WriteString("\n")
-		}
+	b.WriteString("## 标签\n\n")
+	for _, tag := range tags {
+		fmt.Fprintf(b, "`%s` ", tag)
 	}
+	b.WriteString("\n")
+}
 
-	// 标签（正文展示）
-	if len(tags) > 0 {
-		b.WriteString("## 标签\n\n")
-		for _, tg := range tags {
-			fmt.Fprintf(&b, "`%s` ", tg)
-		}
-		b.WriteString("\n")
+func writeGeneratedBlocks(b *strings.Builder, in Input) {
+	if len(in.GeneratedBlocks) == 0 {
+		return
 	}
-
-	// GeneratedDerivative 下沉块（ADR-0018 R4）
-	// Owner 手选的 Paraphrase / StudyChat 回答；每块明确标注 AI 讲解·非原文，
-	// 挂 Reference 链接（?ref=），与上方 CitedDerivative 块（?t=）视觉与语义区分。
-	// 这是把 CloudWisePod 内部的 Cited/Generated 分级延伸到 PersonalKnowledgeBase 的最后一公里。
-	if len(in.GeneratedBlocks) > 0 {
-		b.WriteString("## AI 讲解（非原文）\n\n")
-		b.WriteString("> 以下内容由 AI 重新组织生成，**参考**自原音频片段，但**不是逐字原文**，不可当作原话核验。\n\n")
-		for _, blk := range in.GeneratedBlocks {
-			label := "AI 讲解·非原文"
-			if blk.Kind != "" {
-				label = "AI 讲解·非原文（" + blk.Kind + "）"
-			}
-			b.WriteString(generatedCalloutBody(blk.Body, label, referenceLinks(in.SourceType, in.SourceID, in.BaseURL, blk.References, in.Segments)))
+	b.WriteString("## AI 讲解（非原文）\n\n")
+	b.WriteString("> 以下内容由 AI 重新组织生成，**参考**自原音频片段，但**不是逐字原文**，不可当作原话核验。\n\n")
+	for _, block := range in.GeneratedBlocks {
+		label := "AI 讲解·非原文"
+		if block.Kind != "" {
+			label = "AI 讲解·非原文（" + block.Kind + "）"
 		}
+		b.WriteString(generatedCalloutBody(block.Body, label, referenceLinks(in.SourceType, in.SourceID, in.BaseURL, block.References, in.Segments)))
 	}
-
-	return b.String(), nil
 }
 
 // citationLinks 生成 Citation 链接列表（程序解析时间范围，ADR-0008）。

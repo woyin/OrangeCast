@@ -82,28 +82,7 @@ type Manifest struct {
 
 // Create 生成一致性备份包到 destFile（.tar.gz）。
 // 数据库用 ConsistencyBackup（VACUUM INTO 快照）；证据文件按哈希清单打包。
-func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (Manifest, error) {
-	var m Manifest
-	if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
-		return m, err
-	}
-
-	// 1) 一致性数据库快照 → 临时文件
-	tmp, err := os.MkdirTemp("", "cwp-backup-*")
-	if err != nil {
-		return m, err
-	}
-	defer os.RemoveAll(tmp)
-	dbSnapshot := filepath.Join(tmp, dbFileName)
-	if err := store.ConsistencyBackup(ctx, s.DB, dbSnapshot); err != nil {
-		return m, fmt.Errorf("数据库快照: %w", err)
-	}
-	dbSHA, err := filehash.SHA256(dbSnapshot)
-	if err != nil {
-		return m, err
-	}
-
-	// 2) 收集证据文件清单
+func collectEvidenceEntries(evidenceDir string) ([]EvidenceEntry, error) {
 	var entries []EvidenceEntry
 	if err := filepath.Walk(evidenceDir, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -123,21 +102,16 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 		entries = append(entries, EvidenceEntry{RelPath: filepath.ToSlash(rel), SHA256: sha, SizeBytes: fi.Size()})
 		return nil
 	}); err != nil {
-		return m, fmt.Errorf("扫描证据目录: %w", err)
+		return nil, fmt.Errorf("扫描证据目录: %w", err)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].RelPath < entries[j].RelPath })
+	return entries, nil
+}
 
-	m = Manifest{
-		Format: ManifestFormat, Version: ManifestVersion,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		DBFile:    dbFileName, DBSHA256: dbSHA,
-		Evidence: entries,
-	}
-
-	// 3) 打包 tar.gz：manifest + db + evidence
+func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manifest) error {
 	f, err := os.Create(destFile)
 	if err != nil {
-		return m, err
+		return err
 	}
 	defer f.Close()
 	gz := newGzipWriter(f)
@@ -157,165 +131,202 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 		return err
 	}
 
-	manifestJSON, _ := json.MarshalIndent(m, "", "  ")
-	{
-		hdr := &tar.Header{Name: manifestFileName, Mode: 0o644, Size: int64(len(manifestJSON)), ModTime: time.Unix(0, 0)}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return m, err
-		}
-		if _, err := tw.Write(manifestJSON); err != nil {
-			return m, err
-		}
+	manifestJSON, _ := json.MarshalIndent(manifest, "", "  ")
+	hdr := &tar.Header{Name: manifestFileName, Mode: 0o644, Size: int64(len(manifestJSON)), ModTime: time.Unix(0, 0)}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if _, err := tw.Write(manifestJSON); err != nil {
+		return err
 	}
 	dbFi, err := os.Stat(dbSnapshot)
 	if err != nil {
-		return m, err
+		return err
 	}
-	if err := writeFile(m.DBFile, dbSnapshot, dbFi.Size()); err != nil {
-		return m, err
+	if err := writeFile(manifest.DBFile, dbSnapshot, dbFi.Size()); err != nil {
+		return err
 	}
-	for _, e := range entries {
+	for _, e := range manifest.Evidence {
 		path := filepath.Join(evidenceDir, filepath.FromSlash(e.RelPath))
 		fi, err := os.Stat(path)
 		if err != nil {
-			return m, err
+			return err
 		}
 		if err := writeFile(evidenceDirPrefix+e.RelPath, path, fi.Size()); err != nil {
-			return m, err
+			return err
 		}
 	}
 	if err := tw.Close(); err != nil {
-		return m, err
+		return err
 	}
 	if err := gz.Close(); err != nil {
-		return m, err
+		return err
 	}
-	return m, nil
+	return nil
+}
+
+func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (Manifest, error) {
+	var manifest Manifest
+	if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
+		return manifest, err
+	}
+	tmp, err := os.MkdirTemp("", "cwp-backup-*")
+	if err != nil {
+		return manifest, err
+	}
+	defer os.RemoveAll(tmp)
+	dbSnapshot := filepath.Join(tmp, dbFileName)
+	if err := store.ConsistencyBackup(ctx, s.DB, dbSnapshot); err != nil {
+		return manifest, fmt.Errorf("数据库快照: %w", err)
+	}
+	dbSHA, err := filehash.SHA256(dbSnapshot)
+	if err != nil {
+		return manifest, err
+	}
+	entries, err := collectEvidenceEntries(evidenceDir)
+	if err != nil {
+		return manifest, err
+	}
+	manifest = Manifest{Format: ManifestFormat, Version: ManifestVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339), DBFile: dbFileName, DBSHA256: dbSHA, Evidence: entries}
+	if err := writeBackupArchive(destFile, dbSnapshot, evidenceDir, manifest); err != nil {
+		return manifest, err
+	}
+	return manifest, nil
 }
 
 // Restore 从备份包恢复到目标数据目录。
 // 安全要求：目标目录必须为空（不含 cloudwisepod.db），或 force=true 显式覆盖。
 // 恢复前校验 manifest 格式版本、DB 哈希与证据文件哈希。
+type extractedArchive struct {
+	manifestData      []byte
+	dbPath            string
+	extractedEvidence map[string]string
+}
+
+func extractArchive(tr *tar.Reader, tmp string) (extractedArchive, error) {
+	archive := extractedArchive{extractedEvidence: map[string]string{}}
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return archive, nil
+		}
+		if err != nil {
+			return archive, err
+		}
+		switch {
+		case header.Name == manifestFileName:
+			archive.manifestData, err = io.ReadAll(tr)
+		case header.Name == dbFileName:
+			archive.dbPath = filepath.Join(tmp, dbFileName)
+			if err == nil {
+				err = copyFromTar(tr, archive.dbPath)
+			}
+		case strings.HasPrefix(header.Name, evidenceDirPrefix):
+			rel := strings.TrimPrefix(header.Name, evidenceDirPrefix)
+			dest := filepath.Join(tmp, "evidence", filepath.FromSlash(rel))
+			if err == nil {
+				err = os.MkdirAll(filepath.Dir(dest), 0o755)
+			}
+			if err == nil {
+				err = copyFromTar(tr, dest)
+			}
+			archive.extractedEvidence[rel] = dest
+		}
+		if err != nil {
+			return archive, err
+		}
+	}
+}
+
+func validateExtractedArchive(archive extractedArchive) (Manifest, error) {
+	var manifest Manifest
+	if len(archive.manifestData) == 0 || archive.dbPath == "" {
+		return manifest, fmt.Errorf("备份包缺少 manifest 或数据库文件")
+	}
+	if err := json.Unmarshal(archive.manifestData, &manifest); err != nil {
+		return manifest, fmt.Errorf("解析 manifest: %w", err)
+	}
+	if manifest.Format != ManifestFormat || manifest.Version != ManifestVersion {
+		return manifest, fmt.Errorf("不支持的备份格式: %s v%d", manifest.Format, manifest.Version)
+	}
+	gotSHA, err := filehash.SHA256(archive.dbPath)
+	if err != nil {
+		return manifest, err
+	}
+	if gotSHA != manifest.DBSHA256 {
+		return manifest, fmt.Errorf("数据库哈希校验失败：备份 %s，实际 %s", manifest.DBSHA256, gotSHA)
+	}
+	for _, entry := range manifest.Evidence {
+		path, ok := archive.extractedEvidence[entry.RelPath]
+		if !ok {
+			return manifest, fmt.Errorf("备份包缺少证据文件 %s", entry.RelPath)
+		}
+		sha, err := filehash.SHA256(path)
+		if err != nil {
+			return manifest, err
+		}
+		if sha != entry.SHA256 {
+			return manifest, fmt.Errorf("证据文件 %s 哈希校验失败", entry.RelPath)
+		}
+	}
+	return manifest, nil
+}
+
+func installArchive(archive extractedArchive, manifest Manifest, targetDataDir string) error {
+	if err := os.Rename(archive.dbPath, filepath.Join(targetDataDir, dbFileName)); err != nil {
+		return err
+	}
+	evidenceDir := filepath.Join(targetDataDir, "evidence")
+	for _, entry := range manifest.Evidence {
+		src := archive.extractedEvidence[entry.RelPath]
+		dst := filepath.Join(evidenceDir, filepath.FromSlash(entry.RelPath))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) (Manifest, error) {
-	var m Manifest
+	var manifest Manifest
 	f, err := os.Open(backupPath)
 	if err != nil {
-		return m, err
+		return manifest, err
 	}
 	defer f.Close()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return m, fmt.Errorf("打开备份包: %w", err)
+		return manifest, fmt.Errorf("打开备份包: %w", err)
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
-
-	// 目标检查
-	targetDB := filepath.Join(targetDataDir, dbFileName)
 	if !force {
-		if _, err := os.Stat(targetDB); err == nil {
-			return m, fmt.Errorf("目标目录已存在 %s；使用 --force 显式覆盖", targetDB)
+		if _, err := os.Stat(filepath.Join(targetDataDir, dbFileName)); err == nil {
+			return manifest, fmt.Errorf("目标目录已存在 %s；使用 --force 显式覆盖", filepath.Join(targetDataDir, dbFileName))
 		}
 	}
 	if err := os.MkdirAll(targetDataDir, 0o755); err != nil {
-		return m, err
+		return manifest, err
 	}
-
-	// 解包到临时目录，先校验再落地（避免半成品污染目标）
 	tmp, err := os.MkdirTemp("", "cwp-restore-*")
 	if err != nil {
-		return m, err
+		return manifest, err
 	}
 	defer os.RemoveAll(tmp)
-
-	var manifestData []byte
-	dbPath := ""
-	extractedEvidence := map[string]string{} // rel_path → tmp path
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return m, err
-		}
-		if hdr.Name == manifestFileName {
-			manifestData, err = io.ReadAll(tr)
-			if err != nil {
-				return m, err
-			}
-			continue
-		}
-		if hdr.Name == dbFileName {
-			dbPath = filepath.Join(tmp, dbFileName)
-			if err := copyFromTar(tr, dbPath); err != nil {
-				return m, err
-			}
-			continue
-		}
-		if strings.HasPrefix(hdr.Name, evidenceDirPrefix) {
-			rel := strings.TrimPrefix(hdr.Name, evidenceDirPrefix)
-			dest := filepath.Join(tmp, "evidence", filepath.FromSlash(rel))
-			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-				return m, err
-			}
-			if err := copyFromTar(tr, dest); err != nil {
-				return m, err
-			}
-			extractedEvidence[rel] = dest
-			continue
-		}
-	}
-
-	if len(manifestData) == 0 || dbPath == "" {
-		return m, fmt.Errorf("备份包缺少 manifest 或数据库文件")
-	}
-	if err := json.Unmarshal(manifestData, &m); err != nil {
-		return m, fmt.Errorf("解析 manifest: %w", err)
-	}
-	if m.Format != ManifestFormat || m.Version != ManifestVersion {
-		return m, fmt.Errorf("不支持的备份格式: %s v%d", m.Format, m.Version)
-	}
-
-	// 校验 DB 哈希
-	gotSHA, err := filehash.SHA256(dbPath)
+	archive, err := extractArchive(tar.NewReader(gz), tmp)
 	if err != nil {
-		return m, err
+		return manifest, err
 	}
-	if gotSHA != m.DBSHA256 {
-		return m, fmt.Errorf("数据库哈希校验失败：备份 %s，实际 %s", m.DBSHA256, gotSHA)
+	manifest, err = validateExtractedArchive(archive)
+	if err != nil {
+		return manifest, err
 	}
-	// 校验证据哈希
-	for _, e := range m.Evidence {
-		p, ok := extractedEvidence[e.RelPath]
-		if !ok {
-			return m, fmt.Errorf("备份包缺少证据文件 %s", e.RelPath)
-		}
-		sha, err := filehash.SHA256(p)
-		if err != nil {
-			return m, err
-		}
-		if sha != e.SHA256 {
-			return m, fmt.Errorf("证据文件 %s 哈希校验失败", e.RelPath)
-		}
+	if err := installArchive(archive, manifest, targetDataDir); err != nil {
+		return manifest, err
 	}
-
-	// 全部校验通过后落地
-	if err := os.Rename(dbPath, targetDB); err != nil {
-		return m, err
-	}
-	evDir := filepath.Join(targetDataDir, "evidence")
-	for _, e := range m.Evidence {
-		src := extractedEvidence[e.RelPath]
-		dst := filepath.Join(evDir, filepath.FromSlash(e.RelPath))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return m, err
-		}
-		if err := os.Rename(src, dst); err != nil {
-			return m, err
-		}
-	}
-	return m, nil
+	return manifest, nil
 }
 
 func copyFromTar(tr *tar.Reader, dest string) error {

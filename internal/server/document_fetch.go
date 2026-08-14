@@ -49,10 +49,7 @@ func fetchWebDocument(ctx context.Context, rawURL string) (string, string, error
 
 func readableHTML(raw string) (string, string, error) {
 	z := html.NewTokenizer(strings.NewReader(raw))
-	title := ""
-	inTitle := false
-	var text []string
-	skip := 0
+	state := readableHTMLState{}
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -61,38 +58,49 @@ func readableHTML(raw string) (string, string, error) {
 			}
 			return "", "", z.Err()
 		}
-		tok := z.Token()
-		if tt == html.StartTagToken {
-			if tok.Data == "title" {
-				inTitle = true
-			}
-			if tok.Data == "script" || tok.Data == "style" {
-				skip++
-			}
-			continue
-		}
-		if tt == html.EndTagToken {
-			if tok.Data == "title" {
-				inTitle = false
-			}
-			if (tok.Data == "script" || tok.Data == "style") && skip > 0 {
-				skip--
-			}
-			continue
-		}
-		if tt == html.TextToken && skip == 0 {
-			s := strings.TrimSpace(tok.Data)
-			if s != "" {
-				if inTitle && title == "" {
-					title = s
-				}
-				text = append(text, s)
-			}
-		}
+		state.consume(tt, z.Token())
 	}
-	content := strings.TrimSpace(strings.Join(text, "\n\n"))
+	content := strings.TrimSpace(strings.Join(state.text, "\n\n"))
 	if content == "" {
 		return "", "", fmt.Errorf("网页没有可保存文本")
 	}
-	return title, content, nil
+	return state.title, content, nil
+}
+
+type readableHTMLState struct {
+	title   string
+	inTitle bool
+	skip    int
+	text    []string
+}
+
+func (s *readableHTMLState) consume(tokenType html.TokenType, token html.Token) {
+	switch tokenType {
+	case html.StartTagToken:
+		if token.Data == "title" {
+			s.inTitle = true
+		}
+		if token.Data == "script" || token.Data == "style" {
+			s.skip++
+		}
+	case html.EndTagToken:
+		if token.Data == "title" {
+			s.inTitle = false
+		}
+		if (token.Data == "script" || token.Data == "style") && s.skip > 0 {
+			s.skip--
+		}
+	case html.TextToken:
+		if s.skip > 0 {
+			return
+		}
+		text := strings.TrimSpace(token.Data)
+		if text == "" {
+			return
+		}
+		if s.inTitle && s.title == "" {
+			s.title = text
+		}
+		s.text = append(s.text, text)
+	}
 }

@@ -37,27 +37,19 @@ type KeyPointRow struct {
 // 每个 KeyPoint 的 Citation（Segment ID 列表）被解析为聚合时间范围（min start – max end），
 // 存入 keypoint_index 表 + keypoint_search FTS5 表。用于 /keypoints 全局视图。
 // 真理来源是 artifact_versions.payload；本表是索引投影（ADR-0017）。
-func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// 自动 KeyPoint 可以随 KnowledgeCard 重建；手工/编辑 KeyPoint 是 Owner 的成果，
-	// 必须保留。对相同引用和正文的自动 KeyPoint 尽量复用 ID，避免文章关系无故漂移。
+func loadAutomaticKeyPointIDs(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID string) (map[string]string, error) {
 	oldIDs := map[string]string{}
 	oldRows, err := tx.QueryContext(ctx,
 		`SELECT id, citations_json, content FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic'`,
 		string(sourceType), sourceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for oldRows.Next() {
 		var id, citationsJSON, content string
 		if err := oldRows.Scan(&id, &citationsJSON, &content); err != nil {
 			oldRows.Close()
-			return err
+			return nil, err
 		}
 		var citations []string
 		if err := json.Unmarshal([]byte(citationsJSON), &citations); err == nil {
@@ -66,13 +58,15 @@ func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType
 	}
 	if err := oldRows.Err(); err != nil {
 		oldRows.Close()
-		return err
+		return nil, err
 	}
 	if err := oldRows.Close(); err != nil {
-		return err
+		return nil, err
 	}
+	return oldIDs, nil
+}
 
-	// 先删旧自动索引 + FTS
+func clearAutomaticKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID string) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM keypoint_search WHERE keypoint_id IN (SELECT id FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic')`,
 		string(sourceType), sourceID); err != nil {
@@ -83,12 +77,14 @@ func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType
 		string(sourceType), sourceID); err != nil {
 		return err
 	}
+	return nil
+}
 
+func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment, oldIDs map[string]string) error {
 	segMap := make(map[string]provider.Segment, len(segments))
 	for _, seg := range segments {
 		segMap[seg.ID] = seg
 	}
-
 	for _, kp := range card.KeyPoints {
 		cites := validCitations(kp.Citations, segMap)
 		if len(cites) == 0 {
@@ -120,6 +116,25 @@ func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType
 		if err := indexLocalKeyPointEmbedding(ctx, tx, kpID, kp.Content+" "+kp.Description+" "+sourceTitle); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	oldIDs, err := loadAutomaticKeyPointIDs(ctx, tx, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	if err := clearAutomaticKeyPoints(ctx, tx, sourceType, sourceID); err != nil {
+		return err
+	}
+	if err := indexCardKeyPoints(ctx, tx, sourceType, sourceID, sourceTitle, cardVersion, card, segments, oldIDs); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -328,57 +343,68 @@ func (s *Store) GetKeyPoint(ctx context.Context, id string) (*KeyPointRow, error
 }
 
 // CreateManualKeyPoint adds an Owner-curated KeyPoint without replacing automatic analysis.
-func (s *Store) CreateManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) (*KeyPointRow, error) {
+func (s *Store) prepareManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) (KeyPointRow, error) {
 	keyPoint.Content = strings.TrimSpace(keyPoint.Content)
 	keyPoint.Description = strings.TrimSpace(keyPoint.Description)
 	if !validSourceType(keyPoint.SourceType) || keyPoint.SourceID == "" || keyPoint.Content == "" || keyPoint.TimeEnd <= keyPoint.TimeStart {
-		return nil, fmt.Errorf("%w: invalid manual keypoint", ErrInvalidEditorialState)
+		return KeyPointRow{}, fmt.Errorf("%w: invalid manual keypoint", ErrInvalidEditorialState)
 	}
 	var citationIDs []string
 	if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citationIDs); err != nil || len(citationIDs) == 0 {
-		return nil, fmt.Errorf("%w: manual keypoint needs citation segment IDs", ErrInvalidEditorialState)
+		return KeyPointRow{}, fmt.Errorf("%w: manual keypoint needs citation segment IDs", ErrInvalidEditorialState)
 	}
 	exists, err := s.sourceExists(ctx, keyPoint.SourceType, keyPoint.SourceID)
 	if err != nil {
-		return nil, err
+		return KeyPointRow{}, err
 	}
 	if !exists {
-		return nil, ErrNotFound
+		return KeyPointRow{}, ErrNotFound
 	}
 	valid, err := s.ValidateSourceCitations(ctx, keyPoint.SourceType, keyPoint.SourceID, citationIDs)
 	if err != nil {
-		return nil, err
+		return KeyPointRow{}, err
 	}
 	if !valid {
-		return nil, fmt.Errorf("%w: citation does not resolve inside source", ErrInvalidEditorialState)
+		return KeyPointRow{}, fmt.Errorf("%w: citation does not resolve inside source", ErrInvalidEditorialState)
 	}
 	keyPoint.ID = uuid.NewString()
 	if keyPoint.ProductionStatus == "" {
 		keyPoint.ProductionStatus = models.KeyPointInbox
 	}
 	if !validKeyPointProductionStatus(keyPoint.ProductionStatus) {
-		return nil, fmt.Errorf("%w: invalid keypoint production status", ErrInvalidEditorialState)
+		return KeyPointRow{}, fmt.Errorf("%w: invalid keypoint production status", ErrInvalidEditorialState)
 	}
 	if keyPoint.EvidenceStatus == "" {
 		keyPoint.EvidenceStatus = "valid"
+	}
+	return keyPoint, nil
+}
+
+func insertManualKeyPointTx(ctx context.Context, tx *sql.Tx, keyPoint KeyPointRow) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, datetime('now'))`,
+		keyPoint.ID, string(keyPoint.SourceType), keyPoint.SourceID, keyPoint.SourceTitle, keyPoint.Content, keyPoint.Description, keyPoint.CitationsJSON, string(models.RelationCitation), keyPoint.TimeStart, keyPoint.TimeEnd, string(models.KeyPointManual), string(keyPoint.ProductionStatus), keyPoint.ParentKeyPointID, keyPoint.EvidenceStatus); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO keypoint_search (keypoint_id, content, description, source_title) VALUES (?, ?, ?, ?)`, keyPoint.ID, keyPoint.Content, keyPoint.Description, keyPoint.SourceTitle); err != nil {
+		return err
+	}
+	return indexLocalKeyPointEmbedding(ctx, tx, keyPoint.ID, keyPoint.Content+" "+keyPoint.Description+" "+keyPoint.SourceTitle)
+}
+
+func (s *Store) CreateManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) (*KeyPointRow, error) {
+	keyPoint, err := s.prepareManualKeyPoint(ctx, keyPoint)
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, datetime('now'))`,
-		keyPoint.ID, string(keyPoint.SourceType), keyPoint.SourceID, keyPoint.SourceTitle, keyPoint.Content, keyPoint.Description, keyPoint.CitationsJSON, string(models.RelationCitation), keyPoint.TimeStart, keyPoint.TimeEnd, string(models.KeyPointManual), string(keyPoint.ProductionStatus), keyPoint.ParentKeyPointID, keyPoint.EvidenceStatus)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO keypoint_search (keypoint_id, content, description, source_title) VALUES (?, ?, ?, ?)`, keyPoint.ID, keyPoint.Content, keyPoint.Description, keyPoint.SourceTitle); err != nil {
-		return nil, err
-	}
-	if err := indexLocalKeyPointEmbedding(ctx, tx, keyPoint.ID, keyPoint.Content+" "+keyPoint.Description+" "+keyPoint.SourceTitle); err != nil {
+	if err := insertManualKeyPointTx(ctx, tx, keyPoint); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

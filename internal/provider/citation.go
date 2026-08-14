@@ -80,63 +80,69 @@ func ValidateCard(card *KnowledgeCard, segments []Segment) (*KnowledgeCard, erro
 		return nil, &ErrNoValidCitations{Detail: "卡片为空"}
 	}
 	segs := segmentIndex(segments)
-	cleaned := &KnowledgeCard{
-		Title:              strings.TrimSpace(card.Title),
-		Tags:               card.Tags,
-		SuggestedQuestions: card.SuggestedQuestions,
+	cleaned := &KnowledgeCard{Title: strings.TrimSpace(card.Title), Tags: card.Tags, SuggestedQuestions: card.SuggestedQuestions}
+	summary, err := validateCardSummary(card.Summary, segs)
+	if err != nil {
+		return nil, err
 	}
-
-	// Summary：必须至少有一条有效 Citation
-	summaryCites := validCitations(card.Summary.Citations, segs)
-	if strings.TrimSpace(card.Summary.Text) == "" || len(summaryCites) == 0 {
-		return nil, &ErrNoValidCitations{Detail: "summary 必须包含有效 Citation"}
-	}
-	cleaned.Summary = CitedText{Text: strings.TrimSpace(card.Summary.Text), Citations: summaryCites}
-
-	// KeyPoints：只保留带有效 Citation 的项
-	for _, kp := range card.KeyPoints {
-		cites := validCitations(kp.Citations, segs)
-		if strings.TrimSpace(kp.Content) == "" || len(cites) == 0 {
-			continue
-		}
-		cleaned.KeyPoints = append(cleaned.KeyPoints, KeyPoint{
-			Content: strings.TrimSpace(kp.Content), Description: strings.TrimSpace(kp.Description), Citations: cites,
-		})
-	}
+	cleaned.Summary = summary
+	cleaned.KeyPoints = cleanCardKeyPoints(card.KeyPoints, segs)
 	if len(cleaned.KeyPoints) == 0 {
 		return nil, &ErrNoValidCitations{Detail: "keyPoints 全部缺少有效 Citation"}
 	}
-
-	// Chapters：只保留带有效 Citation 的项
-	for _, ch := range card.Chapters {
-		cites := validCitations(ch.Citations, segs)
-		if strings.TrimSpace(ch.Title) == "" || len(cites) == 0 {
-			continue
-		}
-		cleaned.Chapters = append(cleaned.Chapters, Chapter{
-			Title: strings.TrimSpace(ch.Title), Gist: strings.TrimSpace(ch.Gist), Citations: cites,
-		})
-	}
+	cleaned.Chapters = cleanCardChapters(card.Chapters, segs)
 	if len(cleaned.Chapters) == 0 {
 		return nil, &ErrNoValidCitations{Detail: "chapters 全部缺少有效 Citation"}
 	}
-
-	// Quotes：金句逐字校验，失败的省略
-	for _, q := range card.Quotes {
-		cites := validCitations(q.Citations, segs)
-		if strings.TrimSpace(q.Text) == "" || len(cites) == 0 {
-			continue
-		}
-		if !quoteVerbatim(q.Text, cites, segs) {
-			continue // 非逐字：省略该项，不降级为无证据内容
-		}
-		cleaned.Quotes = append(cleaned.Quotes, Quote{Text: strings.TrimSpace(q.Text), Citations: cites})
-	}
-
+	cleaned.Quotes = cleanCardQuotes(card.Quotes, segs)
 	if cleaned.Title == "" {
 		return nil, &ErrNoValidCitations{Detail: "title 为空"}
 	}
 	return cleaned, nil
+}
+
+func validateCardSummary(summary CitedText, segs map[string]Segment) (CitedText, error) {
+	citations := validCitations(summary.Citations, segs)
+	if strings.TrimSpace(summary.Text) == "" || len(citations) == 0 {
+		return CitedText{}, &ErrNoValidCitations{Detail: "summary 必须包含有效 Citation"}
+	}
+	return CitedText{Text: strings.TrimSpace(summary.Text), Citations: citations}, nil
+}
+
+func cleanCardKeyPoints(keyPoints []KeyPoint, segs map[string]Segment) []KeyPoint {
+	cleaned := make([]KeyPoint, 0, len(keyPoints))
+	for _, keyPoint := range keyPoints {
+		citations := validCitations(keyPoint.Citations, segs)
+		if strings.TrimSpace(keyPoint.Content) == "" || len(citations) == 0 {
+			continue
+		}
+		cleaned = append(cleaned, KeyPoint{Content: strings.TrimSpace(keyPoint.Content), Description: strings.TrimSpace(keyPoint.Description), Citations: citations})
+	}
+	return cleaned
+}
+
+func cleanCardChapters(chapters []Chapter, segs map[string]Segment) []Chapter {
+	cleaned := make([]Chapter, 0, len(chapters))
+	for _, chapter := range chapters {
+		citations := validCitations(chapter.Citations, segs)
+		if strings.TrimSpace(chapter.Title) == "" || len(citations) == 0 {
+			continue
+		}
+		cleaned = append(cleaned, Chapter{Title: strings.TrimSpace(chapter.Title), Gist: strings.TrimSpace(chapter.Gist), Citations: citations})
+	}
+	return cleaned
+}
+
+func cleanCardQuotes(quotes []Quote, segs map[string]Segment) []Quote {
+	cleaned := make([]Quote, 0, len(quotes))
+	for _, quote := range quotes {
+		citations := validCitations(quote.Citations, segs)
+		if strings.TrimSpace(quote.Text) == "" || len(citations) == 0 || !quoteVerbatim(quote.Text, citations, segs) {
+			continue
+		}
+		cleaned = append(cleaned, Quote{Text: strings.TrimSpace(quote.Text), Citations: citations})
+	}
+	return cleaned
 }
 
 // ResolveCitationRange 把一条 Citation 解析为时间范围（程序计算，ADR-0008）。

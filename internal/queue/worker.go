@@ -308,25 +308,34 @@ func (w *Worker) HighlightName() string { return "groq" }
 func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) (string, error) {
 	rel := fmt.Sprintf("%s_%s.mp3", job.SourceType, job.SourceID)
 	path := filepath.Join(w.evidenceDir, rel)
-
-	// 已存在且哈希一致 → 直接复用（避免重复转码/下载，且保证幂等）
-	if ev, err := w.store.GetEvidenceAudio(ctx, job.SourceType, job.SourceID); err == nil && ev.Status == "ready" {
-		if fi, serr := os.Stat(path); serr == nil && fi.Size() > 0 {
-			if h, herr := filehash.SHA256(path); herr == nil && h == ev.SHA256 && fi.Size() <= maxTranscriptionUploadBytes {
-				return path, nil
-			}
-		}
+	if reusable, ok := w.reusableEvidencePath(ctx, job, path); ok {
+		return reusable, nil
 	}
-
-	// 获取原始音频：episode 临时下载；upload 读取已落盘的原始文件
 	rawPath, cleanup, err := w.fetchRawAudio(ctx, job)
 	if err != nil {
 		return "", err
 	}
 	defer cleanup()
+	return w.transcodeEvidence(ctx, job, rawPath, path, rel)
+}
 
-	// 转码到证据路径（原子写：临时文件 + rename，崩溃不留下半成品证据）。
-	// 为满足 Groq 单文件上传上限，码率按时长自适应，而非固定 64kbps。
+func (w *Worker) reusableEvidencePath(ctx context.Context, job *models.ProcessingJob, path string) (string, bool) {
+	ev, err := w.store.GetEvidenceAudio(ctx, job.SourceType, job.SourceID)
+	if err != nil || ev.Status != "ready" {
+		return "", false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() <= 0 || fi.Size() > maxTranscriptionUploadBytes {
+		return "", false
+	}
+	hash, err := filehash.SHA256(path)
+	if err != nil || hash != ev.SHA256 {
+		return "", false
+	}
+	return path, true
+}
+
+func (w *Worker) transcodeEvidence(ctx context.Context, job *models.ProcessingJob, rawPath, path, rel string) (string, error) {
 	tmpPath := path + ".part"
 	duration, err := audioDuration(rawPath)
 	if err != nil {
@@ -514,63 +523,66 @@ func ptrStr(p *string) string {
 //
 // 存储位置：w.narrationDir/{sourceType}_{sourceID}_{highlightID}_{version}.wav，独立于 evidence 目录。
 func (w *Worker) doNarration(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle) error {
-	// Provider 不可用 → 优雅跳过（ADR-0019 R1）。
 	if bundle.Narration == nil || !bundle.Narration.Available() {
 		log.Printf("任务 %s Narration Provider 不可用，跳过合成（不阻塞）", job.ID)
 		return nil
 	}
-
-	// 读当前 Highlight 版本（取已校验的 HighlightSet，含稳定 Highlight.ID）。
-	hv, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindHighlight)
+	hs, err := w.currentHighlightSet(ctx, job)
 	if err != nil {
-		return fmt.Errorf("读取当前高光版本失败: %w", err)
-	}
-	var hs provider.HighlightSet
-	if err := json.Unmarshal([]byte(hv.Payload), &hs); err != nil {
-		return fmt.Errorf("解析高光载荷失败: %w", err)
+		return err
 	}
 	if len(hs.Highlights) == 0 {
-		return nil // 无高光，无需合成
+		return nil
 	}
-
-	// 取已存在的 Narration，做幂等（同 voice+model 已合成则跳过）。
 	existing, err := w.store.ListCurrentNarrationsForSource(ctx, job.SourceType, job.SourceID)
 	if err != nil {
 		return fmt.Errorf("读取已有 Narration 失败: %w", err)
 	}
-
-	np := bundle.Narration
-	voice := "" // 用 Provider 默认音色
+	providerName := bundle.Narration.Name()
 	for _, h := range hs.Highlights {
-		if h.ID == "" || h.Gist == "" {
-			continue
+		if err := w.narrateHighlight(ctx, job, bundle.Narration, providerName, h, existing); err != nil {
+			return err
 		}
-		// 幂等：同 highlight_id 已有该 provider 的 Narration → 跳过（避免重复合成）。
-		if cur, ok := existing[h.ID]; ok && cur.Provider == np.Name() {
-			continue
-		}
-		// 合成到 narrations 目录（文件名含 source + highlight_id + version placeholder）。
-		// version 在 CreateNarration 后才确定；这里用临时名 + 重命名，或预查 version。
-		nextVer := w.nextNarrationVersion(ctx, job.SourceType, job.SourceID, h.ID)
-		relPath := fmt.Sprintf("%s_%s_%s_%d.wav", job.SourceType, job.SourceID, h.ID, nextVer)
-		outPath := filepath.Join(w.narrationDir, relPath)
-		if err := os.MkdirAll(w.narrationDir, 0o755); err != nil {
-			return fmt.Errorf("创建 narrations 目录: %w", err)
-		}
-		res, err := np.Synthesize(h.Gist, voice, outPath)
-		if err != nil {
-			log.Printf("任务 %s Highlight %s 的 Narration 合成失败（跳过该段）: %v", job.ID, h.ID, err)
-			continue
-		}
-		// 探测时长（复用 audio.go 的 audioDuration）。
-		dur, _ := audioDuration(outPath)
-		if dur <= 0 {
-			dur = 0 // 探测失败记 0，不阻塞
-		}
-		if _, err := w.store.CreateNarration(ctx, job.SourceType, job.SourceID, h.ID, res.Voice, res.Model, relPath, dur, res.CharCount, np.Name()); err != nil {
-			log.Printf("任务 %s Highlight %s 的 Narration 写库失败（音频已合成）: %v", job.ID, h.ID, err)
-			continue
-		}
+	}
+	return nil
+}
+
+func (w *Worker) currentHighlightSet(ctx context.Context, job *models.ProcessingJob) (provider.HighlightSet, error) {
+	version, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindHighlight)
+	if err != nil {
+		return provider.HighlightSet{}, fmt.Errorf("读取当前高光版本失败: %w", err)
+	}
+	var highlights provider.HighlightSet
+	if err := json.Unmarshal([]byte(version.Payload), &highlights); err != nil {
+		return provider.HighlightSet{}, fmt.Errorf("解析高光载荷失败: %w", err)
+	}
+	return highlights, nil
+}
+
+func (w *Worker) narrateHighlight(ctx context.Context, job *models.ProcessingJob, narration provider.NarrationProvider, providerName string, highlight provider.Highlight, existing map[string]*store.NarrationRow) error {
+	if highlight.ID == "" || highlight.Gist == "" {
+		return nil
+	}
+	if current, ok := existing[highlight.ID]; ok && current.Provider == providerName {
+		return nil
+	}
+	nextVersion := w.nextNarrationVersion(ctx, job.SourceType, job.SourceID, highlight.ID)
+	relPath := fmt.Sprintf("%s_%s_%s_%d.wav", job.SourceType, job.SourceID, highlight.ID, nextVersion)
+	outPath := filepath.Join(w.narrationDir, relPath)
+	if err := os.MkdirAll(w.narrationDir, 0o755); err != nil {
+		return fmt.Errorf("创建 narrations 目录: %w", err)
+	}
+	result, err := narration.Synthesize(highlight.Gist, "", outPath)
+	if err != nil {
+		log.Printf("任务 %s Highlight %s 的 Narration 合成失败（跳过该段）: %v", job.ID, highlight.ID, err)
+		return nil
+	}
+	duration, _ := audioDuration(outPath)
+	if duration < 0 {
+		duration = 0
+	}
+	if _, err := w.store.CreateNarration(ctx, job.SourceType, job.SourceID, highlight.ID, result.Voice, result.Model, relPath, duration, result.CharCount, providerName); err != nil {
+		log.Printf("任务 %s Highlight %s 的 Narration 写库失败（音频已合成）: %v", job.ID, highlight.ID, err)
 	}
 	return nil
 }

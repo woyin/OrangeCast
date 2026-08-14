@@ -667,68 +667,89 @@ func (s *Store) CreateArticleRevision(ctx context.Context, revision models.Artic
 	return s.CreateArticleRevisionWithEvidenceMaps(ctx, revision, nil)
 }
 
+func validateArticleRevisionInput(revision models.ArticleRevision, evidenceMaps []models.EvidenceMap) error {
+	if strings.TrimSpace(revision.DraftID) == "" || strings.TrimSpace(revision.Markdown) == "" || !validRevisionOrigin(revision.Origin) {
+		return fmt.Errorf("%w: invalid article revision", ErrInvalidEditorialState)
+	}
+	for _, evidence := range evidenceMaps {
+		keyPointIDs := defaultString(evidence.KeyPointIDs, "[]")
+		if !validEvidenceMapKind(evidence.Kind) || !validJSON(keyPointIDs, "[]") || (evidence.Kind != models.EvidenceRhetorical && keyPointIDs == "[]") {
+			return fmt.Errorf("%w: invalid evidence map", ErrInvalidEditorialState)
+		}
+	}
+	return nil
+}
+
+func (s *Store) insertArticleRevisionTx(ctx context.Context, tx *sql.Tx, revision models.ArticleRevision) (models.ArticleRevision, error) {
+	var maxVersion int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM article_revisions WHERE draft_id=?`, revision.DraftID).Scan(&maxVersion); err != nil {
+		return revision, err
+	}
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_drafts WHERE id=?`, revision.DraftID).Scan(&exists); err != nil {
+		return revision, err
+	}
+	if exists == 0 {
+		return revision, ErrNotFound
+	}
+	revision.ID = uuid.NewString()
+	revision.Version = maxVersion + 1
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO article_revisions (id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		revision.ID, revision.DraftID, revision.Version, revision.Title, revision.Markdown, revision.Origin, revision.Provider, revision.Model, revision.PromptVersion, revision.CostCents); err != nil {
+		return revision, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE article_drafts SET title=?, current_revision_id=?, status='reviewing', updated_at=datetime('now') WHERE id=?`,
+		revision.Title, revision.ID, revision.DraftID); err != nil {
+		return revision, err
+	}
+	return revision, nil
+}
+
+func insertEvidenceMapsTx(ctx context.Context, tx *sql.Tx, revisionID string, evidenceMaps []models.EvidenceMap) error {
+	for _, evidence := range evidenceMaps {
+		evidence.ID = uuid.NewString()
+		evidence.RevisionID = revisionID
+		evidence.KeyPointIDs = defaultString(evidence.KeyPointIDs, "[]")
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO evidence_maps (id, revision_id, kind, excerpt, keypoint_ids_json) VALUES (?, ?, ?, ?, ?)`,
+			evidence.ID, evidence.RevisionID, string(evidence.Kind), evidence.Excerpt, evidence.KeyPointIDs); err != nil {
+			return err
+		}
+		var keyPointIDs []string
+		if err := json.Unmarshal([]byte(evidence.KeyPointIDs), &keyPointIDs); err != nil {
+			return err
+		}
+		for _, keyPointID := range keyPointIDs {
+			if _, err := tx.ExecContext(ctx, `UPDATE keypoint_index SET production_status=? WHERE id=?`, string(models.KeyPointUsed), keyPointID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // CreateArticleRevisionWithEvidenceMaps atomically appends a revision and its
 // evidence relationships. Writer output is not a valid production snapshot
 // without its maps, so a map failure must not leave an unreviewable current
 // revision behind.
 func (s *Store) CreateArticleRevisionWithEvidenceMaps(ctx context.Context, revision models.ArticleRevision, evidenceMaps []models.EvidenceMap) (*models.ArticleRevision, error) {
-	if strings.TrimSpace(revision.DraftID) == "" || strings.TrimSpace(revision.Markdown) == "" || !validRevisionOrigin(revision.Origin) {
-		return nil, fmt.Errorf("%w: invalid article revision", ErrInvalidEditorialState)
-	}
-	for _, evidence := range evidenceMaps {
-		keyPointIDs := defaultString(evidence.KeyPointIDs, "[]")
-		if !validEvidenceMapKind(evidence.Kind) || !validJSON(keyPointIDs, "[]") || (evidence.Kind != models.EvidenceRhetorical && keyPointIDs == "[]") {
-			return nil, fmt.Errorf("%w: invalid evidence map", ErrInvalidEditorialState)
-		}
+	if err := validateArticleRevisionInput(revision, evidenceMaps); err != nil {
+		return nil, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	var maxVersion int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM article_revisions WHERE draft_id=?`, revision.DraftID).Scan(&maxVersion); err != nil {
-		return nil, err
-	}
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_drafts WHERE id=?`, revision.DraftID).Scan(&exists); err != nil {
-		return nil, err
-	}
-	if exists == 0 {
-		return nil, ErrNotFound
-	}
-	revision.ID = uuid.NewString()
-	revision.Version = maxVersion + 1
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO article_revisions (id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		revision.ID, revision.DraftID, revision.Version, revision.Title, revision.Markdown, revision.Origin, revision.Provider, revision.Model, revision.PromptVersion, revision.CostCents)
+	revision, err = s.insertArticleRevisionTx(ctx, tx, revision)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE article_drafts SET title=?, current_revision_id=?, status='reviewing', updated_at=datetime('now') WHERE id=?`,
-		revision.Title, revision.ID, revision.DraftID); err != nil {
+	if err := insertEvidenceMapsTx(ctx, tx, revision.ID, evidenceMaps); err != nil {
 		return nil, err
-	}
-	for _, evidence := range evidenceMaps {
-		evidence.ID = uuid.NewString()
-		evidence.RevisionID = revision.ID
-		evidence.KeyPointIDs = defaultString(evidence.KeyPointIDs, "[]")
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO evidence_maps (id, revision_id, kind, excerpt, keypoint_ids_json) VALUES (?, ?, ?, ?, ?)`,
-			evidence.ID, evidence.RevisionID, string(evidence.Kind), evidence.Excerpt, evidence.KeyPointIDs); err != nil {
-			return nil, err
-		}
-		var keyPointIDs []string
-		if err := json.Unmarshal([]byte(evidence.KeyPointIDs), &keyPointIDs); err != nil {
-			return nil, err
-		}
-		for _, keyPointID := range keyPointIDs {
-			if _, err := tx.ExecContext(ctx, `UPDATE keypoint_index SET production_status=? WHERE id=?`, string(models.KeyPointUsed), keyPointID); err != nil {
-				return nil, err
-			}
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -909,41 +930,54 @@ func (s *Store) refreshDraftReviewState(ctx context.Context, revisionID string) 
 
 // InvalidateRevisionsForSource durably revokes publication eligibility before
 // a Source's KeyPoints are removed. The audit reason survives the purge.
-func (s *Store) InvalidateRevisionsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) error {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+type editorialQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func sourceKeyPointIDs(ctx context.Context, queryer editorialQueryer, sourceType models.SourceType, sourceID string) (map[string]bool, error) {
+	rows, err := queryer.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	keyPointIDs := map[string]bool{}
+	ids := map[string]bool{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
-		keyPointIDs[id] = true
+		ids[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	if len(keyPointIDs) == 0 {
-		return nil
-	}
-	mapRows, err := s.DB.QueryContext(ctx, `SELECT revision_id,keypoint_ids_json FROM evidence_maps`)
-	if err != nil {
-		return err
-	}
+	return ids, nil
+}
+
+func revisionsReferencingKeyPoints(ctx context.Context, queryer editorialQueryer, keyPointIDs map[string]bool) (map[string]bool, error) {
 	affected := map[string]bool{}
-	for mapRows.Next() {
+	if len(keyPointIDs) == 0 {
+		return affected, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `SELECT revision_id,keypoint_ids_json FROM evidence_maps`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
 		var revisionID, encoded string
-		if err := mapRows.Scan(&revisionID, &encoded); err != nil {
-			mapRows.Close()
-			return err
+		if err := rows.Scan(&revisionID, &encoded); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		var ids []string
 		if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
-			mapRows.Close()
-			return err
+			rows.Close()
+			return nil, err
 		}
 		for _, id := range ids {
 			if keyPointIDs[id] {
@@ -952,19 +986,38 @@ func (s *Store) InvalidateRevisionsForSource(ctx context.Context, sourceType mod
 			}
 		}
 	}
-	if err := mapRows.Close(); err != nil {
-		return err
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
 	}
-	reason := fmt.Sprintf("source purged: %s/%s", sourceType, sourceID)
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return affected, nil
+}
+
+func invalidateRevisions(ctx context.Context, queryer editorialQueryer, affected map[string]bool, reason string) error {
 	for revisionID := range affected {
-		if _, err := s.DB.ExecContext(ctx, `UPDATE article_revisions SET evidence_invalidated_at=COALESCE(evidence_invalidated_at,datetime('now')), evidence_invalidation_reason=COALESCE(evidence_invalidation_reason,?) WHERE id=?`, reason, revisionID); err != nil {
+		if _, err := queryer.ExecContext(ctx, `UPDATE article_revisions SET evidence_invalidated_at=COALESCE(evidence_invalidated_at,datetime('now')), evidence_invalidation_reason=COALESCE(evidence_invalidation_reason,?) WHERE id=?`, reason, revisionID); err != nil {
 			return err
 		}
-		if _, err := s.DB.ExecContext(ctx, `UPDATE article_drafts SET status='blocked',updated_at=datetime('now') WHERE current_revision_id=?`, revisionID); err != nil {
+		if _, err := queryer.ExecContext(ctx, `UPDATE article_drafts SET status='blocked',updated_at=datetime('now') WHERE current_revision_id=?`, revisionID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *Store) InvalidateRevisionsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) error {
+	ids, err := sourceKeyPointIDs(ctx, s.DB, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	affected, err := revisionsReferencingKeyPoints(ctx, s.DB, ids)
+	if err != nil {
+		return err
+	}
+	return invalidateRevisions(ctx, s.DB, affected, fmt.Sprintf("source purged: %s/%s", sourceType, sourceID))
 }
 
 // InvalidateAndDeleteKeyPointsForSource makes the publication revocation and
@@ -976,58 +1029,16 @@ func (s *Store) InvalidateAndDeleteKeyPointsForSource(ctx context.Context, sourc
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+	ids, err := sourceKeyPointIDs(ctx, tx, sourceType, sourceID)
 	if err != nil {
 		return err
 	}
-	ids := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids[id] = true
-	}
-	if err := rows.Close(); err != nil {
+	affected, err := revisionsReferencingKeyPoints(ctx, tx, ids)
+	if err != nil {
 		return err
 	}
-	if len(ids) > 0 {
-		maps, err := tx.QueryContext(ctx, `SELECT revision_id,keypoint_ids_json FROM evidence_maps`)
-		if err != nil {
-			return err
-		}
-		var affected []string
-		for maps.Next() {
-			var revisionID, encoded string
-			if err := maps.Scan(&revisionID, &encoded); err != nil {
-				maps.Close()
-				return err
-			}
-			var referenced []string
-			if err := json.Unmarshal([]byte(encoded), &referenced); err != nil {
-				maps.Close()
-				return err
-			}
-			for _, id := range referenced {
-				if ids[id] {
-					affected = append(affected, revisionID)
-					break
-				}
-			}
-		}
-		if err := maps.Close(); err != nil {
-			return err
-		}
-		reason := fmt.Sprintf("source purged: %s/%s", sourceType, sourceID)
-		for _, revisionID := range affected {
-			if _, err := tx.ExecContext(ctx, `UPDATE article_revisions SET evidence_invalidated_at=COALESCE(evidence_invalidated_at,datetime('now')),evidence_invalidation_reason=COALESCE(evidence_invalidation_reason,?) WHERE id=?`, reason, revisionID); err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE article_drafts SET status='blocked',updated_at=datetime('now') WHERE current_revision_id=?`, revisionID); err != nil {
-				return err
-			}
-		}
+	if err := invalidateRevisions(ctx, tx, affected, fmt.Sprintf("source purged: %s/%s", sourceType, sourceID)); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM keypoint_search WHERE keypoint_id IN (SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?)`, string(sourceType), sourceID); err != nil {
 		return err

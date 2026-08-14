@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -39,45 +40,13 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 取 source 处理状态与最近一次失败原因（供前端展示进度/错误/重试）
 	status, lastError := srv.sourceStatusAndError(r.Context(), sourceType, sourceID)
-
-	// 播放只依赖 EvidenceAudio（ADR-0005）：存在则用内部端点；
-	// 尚未处理的 episode 用外链预览，upload 用原始落盘文件（处理后由证据替代）。
-	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
-	if _, err := srv.store.GetEvidenceAudio(r.Context(), sourceType, sourceID); err != nil {
-		if sourceType == models.SourceEpisode {
-			if ep, err := srv.store.GetEpisodeByID(r.Context(), sourceID); err == nil {
-				audioURL = ep.AudioURL
-			} else {
-				http.NotFound(w, r)
-				return
-			}
-		} else if _, err := srv.store.GetUploadByID(r.Context(), sourceID); err != nil {
-			http.NotFound(w, r)
-			return
-		}
+	audioURL, err := srv.sourceAudioURL(r.Context(), sourceType, sourceID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
 	}
-
-	// 当前 Transcript / KnowledgeCard 版本（ADR-0011）
-	var segments []provider.Segment
-	title := titleForStatus(status)
-	summary := ""
-	var card map[string]any
-	if t, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript); err == nil {
-		var tp provider.TranscriptPayload
-		if json.Unmarshal([]byte(t.Payload), &tp) == nil {
-			segments = tp.Segments
-		}
-	}
-	if c, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
-		var cardData provider.KnowledgeCard
-		if json.Unmarshal([]byte(c.Payload), &cardData) == nil {
-			title = cardData.Title
-			summary = cardData.Summary.Text
-			card = cardView(cardData, segments)
-		}
-	}
+	title, summary, segments, card := srv.sourceDetailContent(r.Context(), sourceType, sourceID, status)
 
 	data := map[string]any{
 		"Title":      title,
@@ -95,6 +64,43 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		data["SourcePolicy"] = policy
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
+}
+
+func (srv *Server) sourceAudioURL(ctx context.Context, sourceType models.SourceType, sourceID string) (string, error) {
+	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
+	if _, err := srv.store.GetEvidenceAudio(ctx, sourceType, sourceID); err == nil {
+		return audioURL, nil
+	}
+	if sourceType == models.SourceEpisode {
+		episode, err := srv.store.GetEpisodeByID(ctx, sourceID)
+		if err != nil {
+			return "", err
+		}
+		return episode.AudioURL, nil
+	}
+	if _, err := srv.store.GetUploadByID(ctx, sourceID); err != nil {
+		return "", err
+	}
+	return audioURL, nil
+}
+
+func (srv *Server) sourceDetailContent(ctx context.Context, sourceType models.SourceType, sourceID string, status models.EpisodeProcessingStatus) (string, string, []provider.Segment, map[string]any) {
+	segments := []provider.Segment(nil)
+	title, summary := titleForStatus(status), ""
+	var card map[string]any
+	if transcript, err := srv.store.GetCurrentVersion(ctx, sourceType, sourceID, store.KindTranscript); err == nil {
+		var payload provider.TranscriptPayload
+		if json.Unmarshal([]byte(transcript.Payload), &payload) == nil {
+			segments = payload.Segments
+		}
+	}
+	if knowledgeCard, err := srv.store.GetCurrentVersion(ctx, sourceType, sourceID, store.KindKnowledgeCard); err == nil {
+		var payload provider.KnowledgeCard
+		if json.Unmarshal([]byte(knowledgeCard.Payload), &payload) == nil {
+			title, summary, card = payload.Title, payload.Summary.Text, cardView(payload, segments)
+		}
+	}
+	return title, summary, segments, card
 }
 
 func (srv *Server) handleSourcePolicy(w http.ResponseWriter, r *http.Request) {

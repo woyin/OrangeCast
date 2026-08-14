@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -180,27 +181,10 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 建会话或载入历史。
-	if sessionID == "" {
-		title := question
-		if len([]rune(title)) > 40 {
-			title = string([]rune(title)[:40]) + "…"
-		}
-		sess, err := srv.store.CreateStudySession(r.Context(), sourceType, sourceID, title)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "创建学习会话失败"})
-			return
-		}
-		sessionID = sess.ID
-	}
-	historyRows, err := srv.store.ListStudyMessages(r.Context(), sessionID, false)
+	sessionID, history, err := srv.studyChatSession(r.Context(), sourceType, sourceID, sessionID, question)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "读取会话历史失败"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
-	}
-	var history []provider.StudyChatMessage
-	for _, h := range historyRows {
-		history = append(history, provider.StudyChatMessage{Role: h.Role, Content: h.Content, ReferenceSegmentIDs: h.ReferenceSegmentIDs})
 	}
 
 	// 先持久化用户问题（无论后续是否生成）。
@@ -234,17 +218,7 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 硬约束二：ReferenceCheck 主题锚定校验。
-	segMap := make(map[string]provider.Segment, len(tp.Segments))
-	for _, seg := range tp.Segments {
-		segMap[seg.ID] = seg
-	}
-	var refSegs []provider.Segment
-	for _, id := range result.Answer.ReferenceSegmentIDs {
-		if seg, ok := segMap[id]; ok {
-			refSegs = append(refSegs, seg)
-		}
-	}
+	refSegs := studyReferenceSegments(result.Answer.ReferenceSegmentIDs, tp.Segments)
 	check, err := bundle.RefChecker.CheckReference(question, result.Answer.Content, refSegs)
 	if err != nil {
 		// 校验本身失败：保守不呈现，记录被抑制的消息（含 suppress 标记）供评测。
@@ -284,6 +258,43 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 		"generated":  true,
 		"ai_note":    "AI 讲解·非原文（参考，不可逐字核验）",
 	})
+}
+
+func (srv *Server) studyChatSession(ctx context.Context, sourceType models.SourceType, sourceID, sessionID, question string) (string, []provider.StudyChatMessage, error) {
+	if sessionID == "" {
+		title := question
+		if len([]rune(title)) > 40 {
+			title = string([]rune(title)[:40]) + "…"
+		}
+		session, err := srv.store.CreateStudySession(ctx, sourceType, sourceID, title)
+		if err != nil {
+			return "", nil, fmt.Errorf("创建学习会话失败")
+		}
+		sessionID = session.ID
+	}
+	rows, err := srv.store.ListStudyMessages(ctx, sessionID, false)
+	if err != nil {
+		return "", nil, fmt.Errorf("读取会话历史失败")
+	}
+	history := make([]provider.StudyChatMessage, 0, len(rows))
+	for _, row := range rows {
+		history = append(history, provider.StudyChatMessage{Role: row.Role, Content: row.Content, ReferenceSegmentIDs: row.ReferenceSegmentIDs})
+	}
+	return sessionID, history, nil
+}
+
+func studyReferenceSegments(referenceIDs []string, segments []provider.Segment) []provider.Segment {
+	byID := make(map[string]provider.Segment, len(segments))
+	for _, segment := range segments {
+		byID[segment.ID] = segment
+	}
+	references := make([]provider.Segment, 0, len(referenceIDs))
+	for _, id := range referenceIDs {
+		if segment, ok := byID[id]; ok {
+			references = append(references, segment)
+		}
+	}
+	return references
 }
 
 // handleStudyChatHistory 返回某会话的历史消息（用于回看）。

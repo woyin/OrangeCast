@@ -30,46 +30,61 @@ var httpClient = &http.Client{Timeout: requestTimeout}
 
 // doWithRetry 对 request 执行 429/5xx 指数退避重试。
 // 429 优先读 Retry-After 头。
+func retryAttemptRequest(ctx context.Context, req *http.Request, attempt int) (*http.Response, error) {
+	attemptRequest := req.Clone(ctx)
+	if attempt > 0 && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		attemptRequest.Body = body
+	}
+	return httpClient.Do(attemptRequest)
+}
+
+func retryableResponse(resp *http.Response, err error) bool {
+	return err == nil && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests
+}
+
+func retryError(resp *http.Response, err error) error {
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("HTTP %d", resp.StatusCode)
+}
+
+func retryBackoff(resp *http.Response, attempt int) time.Duration {
+	backoff := time.Duration(math.Pow(2, float64(attempt))) * baseBackoff
+	if resp != nil {
+		if retryAfter, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+			backoff = time.Duration(retryAfter) * time.Second
+		}
+	}
+	if backoff > maxBackoff {
+		return maxBackoff
+	}
+	return backoff
+}
+
 func doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		attemptRequest := req.Clone(ctx)
-		if attempt > 0 && req.GetBody != nil {
-			body, bodyErr := req.GetBody()
-			if bodyErr != nil {
-				return nil, bodyErr
-			}
-			attemptRequest.Body = body
-		}
-		resp, err := httpClient.Do(attemptRequest)
-		if err == nil && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+		resp, err := retryAttemptRequest(ctx, req, attempt)
+		if retryableResponse(resp, err) {
 			resp.Header.Set("X-CloudWisePod-Retry-Count", strconv.Itoa(attempt))
 			return resp, nil // 成功或非可重试错误
 		}
-		// 读取错误响应体后关闭（每次循环 body 不能复用）
 		if resp != nil {
 			resp.Body.Close()
 		}
-		lastErr = err
-		if err == nil {
-			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-		}
+		lastErr = retryError(resp, err)
 		if attempt == maxRetries {
 			break
 		}
-		// 计算退避：优先 Retry-After，否则指数退避
-		backoff := time.Duration(math.Pow(2, float64(attempt))) * baseBackoff
-		if resp != nil && resp.Header.Get("Retry-After") != "" {
-			if ra, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil {
-				backoff = time.Duration(ra) * time.Second
-			}
-		}
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
+		backoff := retryBackoff(resp, attempt)
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
