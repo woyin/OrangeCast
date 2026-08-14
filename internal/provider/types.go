@@ -1,5 +1,7 @@
 package provider
 
+import "context"
+
 // Segment 转录时间戳段，带稳定标识（ADR-0008）。
 // Citation 必须引用 Segment.ID，时间范围由程序从 Segment 解析，不能由 AI 估算。
 type Segment struct {
@@ -123,11 +125,20 @@ type ArticleWritingResult struct {
 	Title        string            `json:"title"`
 	Markdown     string            `json:"markdown"`
 	EvidenceMaps []ArticleEvidence `json:"evidenceMaps"`
+	Usage        TaskUsage         `json:"-"`
+}
+
+// TaskUsage is provider-reported usage for one paid editorial operation.
+type TaskUsage struct {
+	InputUnits   int
+	OutputUnits  int
+	RetryCount   int
+	FallbackFrom string
 }
 
 // ArticleWriterProvider creates one evidence-mapped article from an Owner-confirmed brief.
 type ArticleWriterProvider interface {
-	WriteArticle(request ArticleWritingRequest) (*ArticleWritingResult, error)
+	WriteArticle(ctx context.Context, request ArticleWritingRequest) (*ArticleWritingResult, error)
 	Name() string
 }
 
@@ -159,11 +170,37 @@ type ScoutProposal struct {
 // ScoutResult is deliberately separate from persisted ArticleProposal to validate generated material IDs first.
 type ScoutResult struct {
 	Proposals []ScoutProposal `json:"proposals"`
+	Usage     TaskUsage       `json:"-"`
 }
 
 // ScoutProvider discovers candidate articles from confirmed cross-episode themes.
 type ScoutProvider interface {
-	Scout(request ScoutRequest) (*ScoutResult, error)
+	Scout(ctx context.Context, request ScoutRequest) (*ScoutResult, error)
+	Name() string
+}
+
+type CuratorRequest struct {
+	Title     string            `json:"title"`
+	Thesis    string            `json:"thesis"`
+	Audience  string            `json:"audience"`
+	Voice     string            `json:"voice"`
+	Materials []ArticleMaterial `json:"materials"`
+}
+
+type CuratorResult struct {
+	Thesis              string    `json:"thesis"`
+	Audience            string    `json:"audience"`
+	Outline             string    `json:"outline"`
+	SelectedKeyPointIDs []string  `json:"selectedKeyPointIds"`
+	RejectedKeyPointIDs []string  `json:"rejectedKeyPointIds"`
+	ConflictPlan        []string  `json:"conflictPlan"`
+	Style               string    `json:"style"`
+	TargetLength        *int      `json:"targetLength,omitempty"`
+	Usage               TaskUsage `json:"-"`
+}
+
+type CuratorProvider interface {
+	Curate(ctx context.Context, request CuratorRequest) (*CuratorResult, error)
 	Name() string
 }
 
@@ -183,13 +220,14 @@ type EvidenceReviewRequest struct {
 
 // EvidenceReviewResult is an independent evidence-gate decision for one immutable revision.
 type EvidenceReviewResult struct {
-	Status string   `json:"status"`
-	Issues []string `json:"issues"`
+	Status string    `json:"status"`
+	Issues []string  `json:"issues"`
+	Usage  TaskUsage `json:"-"`
 }
 
 // EvidenceReviewerProvider reviews mappings independently of Writer.
 type EvidenceReviewerProvider interface {
-	ReviewEvidence(request EvidenceReviewRequest) (*EvidenceReviewResult, error)
+	ReviewEvidence(ctx context.Context, request EvidenceReviewRequest) (*EvidenceReviewResult, error)
 	Name() string
 }
 
@@ -205,13 +243,14 @@ type StyleReviewRequest struct {
 
 // StyleReviewResult offers non-blocking style findings for one revision.
 type StyleReviewResult struct {
-	Status string   `json:"status"`
-	Issues []string `json:"issues"`
+	Status string    `json:"status"`
+	Issues []string  `json:"issues"`
+	Usage  TaskUsage `json:"-"`
 }
 
 // StyleEditorProvider independently reviews style without making evidence assertions.
 type StyleEditorProvider interface {
-	ReviewStyle(request StyleReviewRequest) (*StyleReviewResult, error)
+	ReviewStyle(ctx context.Context, request StyleReviewRequest) (*StyleReviewResult, error)
 	Name() string
 }
 
@@ -222,6 +261,7 @@ type ProviderBundle struct {
 	QA               QAProvider
 	Writer           ArticleWriterProvider
 	Scout            ScoutProvider
+	Curator          CuratorProvider
 	EvidenceReviewer EvidenceReviewerProvider
 	StyleEditor      StyleEditorProvider
 	Highlight        HighlightProvider

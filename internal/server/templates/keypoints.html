@@ -2,6 +2,10 @@
 {{define "content"}}
 <h1>关键要点</h1>
 
+<form method="get" action="/keypoints" class="panel" style="margin-bottom:1rem"><h2>筛选素材</h2><label>来源类型 <select name="source_type"><option value="">全部</option><option value="episode" {{if eq .Filter.SourceType "episode"}}selected{{end}}>Episode</option><option value="upload" {{if eq .Filter.SourceType "upload"}}selected{{end}}>Upload</option><option value="document" {{if eq .Filter.SourceType "document"}}selected{{end}}>Document</option></select></label><label>Source ID <input name="source_id" value="{{.Filter.SourceID}}"></label><label>Podcast ID <input name="podcast_id" value="{{.Filter.PodcastID}}"></label><label>Theme ID <input name="theme_id" value="{{.Filter.ThemeID}}"></label><label>状态 <select name="status"><option value="">全部</option><option value="inbox" {{if eq .Filter.Status "inbox"}}selected{{end}}>Inbox</option><option value="shortlisted" {{if eq .Filter.Status "shortlisted"}}selected{{end}}>Shortlisted</option><option value="used" {{if eq .Filter.Status "used"}}selected{{end}}>Used</option><option value="dismissed" {{if eq .Filter.Status "dismissed"}}selected{{end}}>Dismissed</option></select></label><label>从 <input type="date" name="from" value="{{.Filter.From}}"></label><label>至 <input type="date" name="to" value="{{.Filter.To}}"></label><button class="btn" type="submit">应用筛选</button> <a class="btn btn-secondary" href="/keypoints">清除</a></form>
+
+<form id="kp-batch-form" method="post" action="/api/keypoints/batch-status" class="inline-form" style="margin-bottom:1rem"><input type="hidden" name="_csrf" value="{{.CSRF}}"><label>批量设为 <select name="status"><option value="shortlisted">Shortlisted</option><option value="used">Used</option><option value="dismissed">Dismissed</option><option value="inbox">Inbox</option></select></label><button class="btn btn-secondary" type="submit">更新选中项</button></form>
+
 <div class="search-form" style="margin-bottom:1rem">
   <input type="text" id="kp-search" placeholder="搜索关键要点…" style="flex:1">
   <button type="button" class="btn" id="kp-search-btn">搜索</button>
@@ -11,11 +15,12 @@
 <div id="kp-results">
 {{range .KeyPoints}}
 <div class="list-item kp-row" data-kp-id="{{.ID}}">
+  <input type="checkbox" name="keypoint_ids" value="{{.ID}}" form="kp-batch-form" aria-label="选择 KeyPoint">
   <div class="ep-info" style="flex:1">
     <h3>{{.Content}}</h3>
     <p>{{.Description}}</p>
     <p class="meta">
-      <a href="/sources/{{.SourceType}}/{{.SourceID}}?t={{.TimeStart}}">{{.SourceTitle}}</a>
+      <a href="{{sourceHref .SourceType .SourceID .TimeStart}}">{{.SourceTitle}}</a>
       · {{formatTime .TimeStart}} – {{formatTime .TimeEnd}}
       · {{.CreatedAt}} · {{.Origin}}
     </p>
@@ -187,11 +192,22 @@
     const resp = await fetch('/api/keypoints/search?q=' + encodeURIComponent(q));
     const data = await resp.json();
     searchClear.style.display = '';
-    let html = '';
+    resultsDiv.replaceChildren();
     (data.results || []).forEach(kp => {
-      html += '<div class="list-item kp-row"><div class="ep-info" style="flex:1"><h3>' + kp.content + '</h3><p>' + kp.description + '</p><p class="meta"><a href="/sources/' + kp.source_type + '/' + kp.source_id + '?t=' + kp.time_start + '">' + kp.source_title + '</a> · ' + fmtTime(kp.time_start) + '–' + fmtTime(kp.time_end) + '</p></div></div>';
+      const row = document.createElement('div'); row.className = 'list-item kp-row';
+      const info = document.createElement('div'); info.className = 'ep-info'; info.style.flex = '1';
+      const title = document.createElement('h3'); title.textContent = kp.content;
+      const description = document.createElement('p'); description.textContent = kp.description;
+      const meta = document.createElement('p'); meta.className = 'meta';
+      const link = document.createElement('a');
+      link.href = kp.source_type === 'document'
+        ? '/documents/' + encodeURIComponent(kp.source_id) + '#' + encodeURIComponent(kp.source_id) + '-p' + String(Math.trunc(kp.time_start)).padStart(4, '0')
+        : '/sources/' + encodeURIComponent(kp.source_type) + '/' + encodeURIComponent(kp.source_id) + '?t=' + encodeURIComponent(kp.time_start);
+      link.textContent = kp.source_title;
+      meta.append(link, document.createTextNode(' · ' + fmtTime(kp.time_start) + '–' + fmtTime(kp.time_end)));
+      info.append(title, description, meta); row.append(info); resultsDiv.append(row);
     });
-    resultsDiv.innerHTML = html || '<p class="empty">无匹配结果。</p>';
+    if (!(data.results || []).length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '无匹配结果。'; resultsDiv.append(empty); }
   }
   function fmtTime(s) { const t=Math.floor(s),m=Math.floor(t/60),x=t%60; return m+':'+(x<10?'0':'')+x; }
 })();

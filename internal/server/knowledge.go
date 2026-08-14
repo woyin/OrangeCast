@@ -15,7 +15,8 @@ import (
 func (srv *Server) handleKeyPoints(w http.ResponseWriter, r *http.Request) {
 	page := pageParam(r)
 	const perPage = 20
-	kps, total, err := srv.store.ListKeyPoints(r.Context(), page, perPage)
+	filter := store.KeyPointFilter{SourceType: models.SourceType(strings.TrimSpace(r.URL.Query().Get("source_type"))), SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")), PodcastID: strings.TrimSpace(r.URL.Query().Get("podcast_id")), ThemeID: strings.TrimSpace(r.URL.Query().Get("theme_id")), Status: models.KeyPointProductionStatus(strings.TrimSpace(r.URL.Query().Get("status"))), From: strings.TrimSpace(r.URL.Query().Get("from")), To: strings.TrimSpace(r.URL.Query().Get("to"))}
+	kps, total, err := srv.store.ListKeyPointsFiltered(r.Context(), filter, page, perPage)
 	if err != nil {
 		http.Error(w, "加载失败", http.StatusInternalServerError)
 		return
@@ -28,7 +29,29 @@ func (srv *Server) handleKeyPoints(w http.ResponseWriter, r *http.Request) {
 		"PrevPage":   page - 1,
 		"NextPage":   page + 1,
 		"CSRF":       auth.CSRFValue(r),
+		"Filter":     filter,
 	})
+}
+
+func (srv *Server) handleKeyPointBatchStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "请求格式无效", http.StatusBadRequest)
+		return
+	}
+	ids := r.Form["keypoint_ids"]
+	if len(ids) == 0 {
+		ids = strings.Split(r.FormValue("keypoint_ids_csv"), ",")
+	}
+	status := models.KeyPointProductionStatus(strings.TrimSpace(r.FormValue("status")))
+	if err := srv.store.SetKeyPointProductionStatuses(r.Context(), ids, status); err != nil {
+		http.Error(w, "批量更新失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/keypoints", http.StatusSeeOther)
 }
 func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -36,11 +59,12 @@ func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
 		return
 	}
-	kps, total, err := srv.store.SearchKeyPoints(r.Context(), q, 1, 50)
+	kps, err := srv.store.SearchKeyPointsHybrid(r.Context(), q, 50)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
+	total := len(kps)
 	type result struct {
 		ID               string  `json:"id"`
 		SourceType       string  `json:"source_type"`

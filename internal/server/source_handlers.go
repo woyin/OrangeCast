@@ -91,7 +91,30 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		"SourceID":   sourceID,
 		"CSRF":       auth.CSRFValue(r),
 	}
+	if policy, err := srv.store.GetSourcePolicy(r.Context(), sourceType, sourceID); err == nil {
+		data["SourcePolicy"] = policy
+	}
 	srv.tmpl.Render(w, "source_detail.html", data)
+}
+
+func (srv *Server) handleSourcePolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
+	sourceID := strings.TrimSpace(r.FormValue("source_id"))
+	approved := strings.Split(r.FormValue("approved_providers"), ",")
+	policy := models.SourcePolicy{ProductionUse: strings.TrimSpace(r.FormValue("production_use")), ModelDataPolicy: models.ModelDataPolicy(strings.TrimSpace(r.FormValue("model_data_policy"))), ApprovedProviders: approved, Archived: r.FormValue("archived") == "1"}
+	if err := srv.store.UpdateSourcePolicy(r.Context(), sourceType, sourceID, policy); err != nil {
+		http.Error(w, "更新素材策略失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if sourceType == models.SourceDocument {
+		http.Redirect(w, r, "/documents/"+sourceID, http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
 }
 
 // handleAudio 提供 Source 音频：优先 EvidenceAudio（ADR-0005）；
@@ -303,8 +326,10 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	var hits []store.SearchHit
+	var documents []*models.Document
 	if q != "" {
 		hits, _ = srv.store.SearchSource(r.Context(), q)
+		documents, _ = srv.store.SearchDocuments(r.Context(), q, 20)
 	}
-	srv.tmpl.Render(w, "search.html", map[string]any{"Query": q, "Hits": hits})
+	srv.tmpl.Render(w, "search.html", map[string]any{"Query": q, "Hits": hits, "Documents": documents})
 }

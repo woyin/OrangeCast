@@ -1,8 +1,8 @@
 package server
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"

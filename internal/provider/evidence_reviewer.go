@@ -1,20 +1,24 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-const evidenceReviewerSystemPrompt = `你是独立 EvidenceReviewer。只根据请求中给出的 Revision、EvidenceMap 与 KeyPoint 原始材料检查：每个转述/综合是否被材料支持、直接引语是否可追溯、是否有错误归因。不能使用外部知识。输出 JSON {"status":"passed"或"failed","issues":["..."]}。存在任何硬证据问题必须 failed。`
+const (
+	EvidenceReviewerPromptVersion = "evidence-reviewer-v1"
+	evidenceReviewerSystemPrompt  = `你是独立 EvidenceReviewer。只根据请求中给出的 Revision、EvidenceMap 与 KeyPoint 原始材料检查：每个转述/综合是否被材料支持、直接引语是否可追溯、是否有错误归因。不能使用外部知识。输出 JSON {"status":"passed"或"failed","issues":["..."]}。存在任何硬证据问题必须 failed。`
+)
 
 // ReviewEvidence asks Groq for an independent evidence decision.
-func (g *GroqProvider) ReviewEvidence(request EvidenceReviewRequest) (*EvidenceReviewResult, error) {
+func (g *GroqProvider) ReviewEvidence(ctx context.Context, request EvidenceReviewRequest) (*EvidenceReviewResult, error) {
 	input, err := evidenceReviewInput(request)
 	if err != nil {
 		return nil, err
 	}
-	content, _, err := g.complete([]map[string]string{{"role": "system", "content": evidenceReviewerSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
+	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": evidenceReviewerSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
 	if err != nil {
 		return nil, err
 	}
@@ -22,11 +26,12 @@ func (g *GroqProvider) ReviewEvidence(request EvidenceReviewRequest) (*EvidenceR
 	if err := parseJSONLoose(content, result); err != nil {
 		return nil, fmt.Errorf("解析 EvidenceReviewer 输出: %w", err)
 	}
+	result.Usage = usage
 	return validateEvidenceReviewResult(result)
 }
 
 // ReviewEvidence asks OpenAI for an independent evidence decision.
-func (o *OpenAIProvider) ReviewEvidence(request EvidenceReviewRequest) (*EvidenceReviewResult, error) {
+func (o *OpenAIProvider) ReviewEvidence(ctx context.Context, request EvidenceReviewRequest) (*EvidenceReviewResult, error) {
 	input, err := evidenceReviewInput(request)
 	if err != nil {
 		return nil, err
@@ -35,7 +40,7 @@ func (o *OpenAIProvider) ReviewEvidence(request EvidenceReviewRequest) (*Evidenc
 	if model == "" {
 		model = openaiAnalysisModel
 	}
-	data, err := o.doResponses(map[string]any{"model": model, "instructions": evidenceReviewerSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "EvidenceReviewer")
+	data, retries, err := o.doResponsesWithMeta(ctx, map[string]any{"model": model, "instructions": evidenceReviewerSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "EvidenceReviewer")
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +54,7 @@ func (o *OpenAIProvider) ReviewEvidence(request EvidenceReviewRequest) (*Evidenc
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析 EvidenceReviewer 输出: %w", err)
 	}
+	result.Usage = responsesUsage(data, retries)
 	return validateEvidenceReviewResult(result)
 }
 

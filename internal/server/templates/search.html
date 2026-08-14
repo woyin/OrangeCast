@@ -5,6 +5,7 @@
   <input type="text" name="q" value="{{.Query}}" placeholder="搜索转录与分析内容…" required>
   <button type="submit">搜索</button>
 </form>
+{{range .Documents}}<div class="search-hit"><a href="/documents/{{.ID}}"><h3>{{.Title}}</h3></a><p class="snippet">Document v{{.Version}} · {{.OriginKind}}</p></div>{{end}}
 {{range .Hits}}
 <div class="search-hit">
   {{if .SegmentID}}

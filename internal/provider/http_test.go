@@ -233,7 +233,7 @@ func TestDoWithRetry_RetryAfterCapsBackoff(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		// 第一次返回超大 Retry-After（>maxBackoff=16s）
+		// 第一次返回超大 Retry-After（大于当前 maxBackoff）
 		if calls == 1 {
 			w.Header().Set("Retry-After", "999")
 			w.WriteHeader(http.StatusTooManyRequests)

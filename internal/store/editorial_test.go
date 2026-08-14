@@ -133,7 +133,8 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if ready, err := s.IsRevisionReadyForPublication(ctx, first.ID); err != nil || ready {
 		t.Fatalf("unreviewed revision must not be ready: ready=%v err=%v", ready, err)
 	}
-	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: first.ID, Kind: "evidence", Status: "failed", IssuesJSON: `["missing attribution"]`}); err != nil {
+	reviewerProvider, reviewerModel := "test-reviewer", "test-model"
+	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: first.ID, Kind: "evidence", Status: "failed", IssuesJSON: `["missing attribution"]`, Provider: &reviewerProvider, Model: &reviewerModel}); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := s.IsRevisionReadyForPublication(ctx, first.ID); err != nil || ready {
@@ -151,7 +152,7 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "style", Status: "advisory"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "evidence", Status: "passed"}); err != nil {
+	if _, err := s.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "evidence", Status: "passed", Provider: &reviewerProvider, Model: &reviewerModel}); err != nil {
 		t.Fatal(err)
 	}
 	reviews, err := s.ListArticleReviews(ctx, second.ID)
@@ -159,7 +160,7 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 		t.Fatalf("reviews should be revision-scoped and newest first: reviews=%+v err=%v", reviews, err)
 	}
 	if ready, err := s.IsRevisionReadyForPublication(ctx, second.ID); err != nil || !ready {
-		t.Fatalf("passed evidence review should unlock publication: ready=%v err=%v", ready, err)
+		t.Fatalf("trusted evidence plus style review should unlock publication: ready=%v err=%v", ready, err)
 	}
 	gotDraft, err := s.GetArticleDraft(ctx, draft.ID)
 	if err != nil || gotDraft.CurrentRevisionID == nil || *gotDraft.CurrentRevisionID != second.ID || gotDraft.Status != "ready" {

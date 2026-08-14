@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
@@ -30,9 +31,9 @@ func (s *Store) CreateEditorialProfile(ctx context.Context, profile models.Edito
 		return nil, fmt.Errorf("%w: unknown source attribution %q", ErrInvalidEditorialState, profile.SourceAttribution)
 	}
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO editorial_profiles (id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		profile.ID, profile.Name, profile.TargetAudience, profile.Voice, profile.StyleGuide, profile.SourceAttribution, profile.MonthlyBudgetCents)
+		`INSERT INTO editorial_profiles (id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents, per_article_budget_cents)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		profile.ID, profile.Name, profile.TargetAudience, profile.Voice, profile.StyleGuide, profile.SourceAttribution, profile.MonthlyBudgetCents, profile.PerArticleBudgetCents)
 	if err != nil {
 		return nil, fmt.Errorf("create editorial profile: %w", err)
 	}
@@ -43,9 +44,9 @@ func (s *Store) CreateEditorialProfile(ctx context.Context, profile models.Edito
 func (s *Store) GetEditorialProfile(ctx context.Context, id string) (*models.EditorialProfile, error) {
 	p := &models.EditorialProfile{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents, created_at, updated_at
+		`SELECT id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents, per_article_budget_cents, created_at, updated_at
 		 FROM editorial_profiles WHERE id=?`, id).
-		Scan(&p.ID, &p.Name, &p.TargetAudience, &p.Voice, &p.StyleGuide, &p.SourceAttribution, &p.MonthlyBudgetCents, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.Name, &p.TargetAudience, &p.Voice, &p.StyleGuide, &p.SourceAttribution, &p.MonthlyBudgetCents, &p.PerArticleBudgetCents, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -55,7 +56,7 @@ func (s *Store) GetEditorialProfile(ctx context.Context, id string) (*models.Edi
 // ListEditorialProfiles returns profiles in stable display order.
 func (s *Store) ListEditorialProfiles(ctx context.Context) ([]*models.EditorialProfile, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents, created_at, updated_at
+		`SELECT id, name, target_audience, voice, style_guide, source_attribution, monthly_budget_cents, per_article_budget_cents, created_at, updated_at
 		 FROM editorial_profiles ORDER BY name, id`)
 	if err != nil {
 		return nil, err
@@ -64,7 +65,7 @@ func (s *Store) ListEditorialProfiles(ctx context.Context) ([]*models.EditorialP
 	var out []*models.EditorialProfile
 	for rows.Next() {
 		p := &models.EditorialProfile{}
-		if err := rows.Scan(&p.ID, &p.Name, &p.TargetAudience, &p.Voice, &p.StyleGuide, &p.SourceAttribution, &p.MonthlyBudgetCents, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.TargetAudience, &p.Voice, &p.StyleGuide, &p.SourceAttribution, &p.MonthlyBudgetCents, &p.PerArticleBudgetCents, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -116,18 +117,135 @@ func (s *Store) CanUseSourceForPublication(ctx context.Context, profileID string
 // ApprovedProvidersOnly needs a provider allowlist introduced with role routing, so it is
 // deliberately rejected here rather than silently treated as external_allowed.
 func (s *Store) CanSendSourceToExternalProvider(ctx context.Context, sourceType models.SourceType, sourceID string) (bool, error) {
+	return s.CanSendSourceToProvider(ctx, sourceType, sourceID, "")
+}
+
+// CanSendSourceToProvider applies the Source's model data policy to the exact
+// Provider selected for a task. An empty Provider is never approved by an
+// ApprovedProvidersOnly policy.
+func (s *Store) CanSendSourceToProvider(ctx context.Context, sourceType models.SourceType, sourceID, providerName string) (bool, error) {
 	if !validSourceType(sourceType) {
 		return false, fmt.Errorf("%w: invalid source type", ErrInvalidEditorialState)
 	}
 	var policy models.ModelDataPolicy
-	err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`SELECT model_data_policy FROM %s WHERE id=?`, sourceTable(sourceType)), sourceID).Scan(&policy)
+	var approvedJSON string
+	err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`SELECT model_data_policy, approved_providers_json FROM %s WHERE id=?`, sourceTable(sourceType)), sourceID).Scan(&policy, &approvedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
 	if err != nil {
 		return false, err
 	}
-	return policy == models.ModelDataExternalAllowed, nil
+	switch policy {
+	case models.ModelDataExternalAllowed:
+		return true, nil
+	case models.ModelDataLocalOnly:
+		return false, nil
+	case models.ModelDataApprovedProvidersOnly:
+		var approved []string
+		if err := json.Unmarshal([]byte(approvedJSON), &approved); err != nil {
+			return false, err
+		}
+		for _, candidate := range approved {
+			if strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(providerName)) && strings.TrimSpace(providerName) != "" {
+				return true, nil
+			}
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("%w: unknown model data policy", ErrInvalidEditorialState)
+	}
+}
+
+// SetSourceApprovedProviders configures the explicit allowlist used by
+// ApprovedProvidersOnly without changing publication permission.
+func (s *Store) SetSourceApprovedProviders(ctx context.Context, sourceType models.SourceType, sourceID string, providers []string) error {
+	if !validSourceType(sourceType) {
+		return fmt.Errorf("%w: invalid source type", ErrInvalidEditorialState)
+	}
+	clean := make([]string, 0, len(providers))
+	seen := map[string]bool{}
+	for _, name := range providers {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && !seen[name] {
+			seen[name] = true
+			clean = append(clean, name)
+		}
+	}
+	encoded, _ := json.Marshal(clean)
+	result, err := s.DB.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET approved_providers_json=? WHERE id=?`, sourceTable(sourceType)), string(encoded), sourceID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetSourcePolicy returns all publication and model-data controls together so
+// callers cannot accidentally display or update only half of the policy.
+func (s *Store) GetSourcePolicy(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.SourcePolicy, error) {
+	if !validSourceType(sourceType) {
+		return nil, fmt.Errorf("%w: invalid source type", ErrInvalidEditorialState)
+	}
+	var policy models.SourcePolicy
+	var approvedJSON string
+	var archivedAt *string
+	err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`SELECT production_use,model_data_policy,approved_providers_json,archived_at FROM %s WHERE id=?`, sourceTable(sourceType)), sourceID).
+		Scan(&policy.ProductionUse, &policy.ModelDataPolicy, &approvedJSON, &archivedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(approvedJSON), &policy.ApprovedProviders); err != nil {
+		return nil, err
+	}
+	policy.Archived = archivedAt != nil
+	return &policy, nil
+}
+
+// UpdateSourcePolicy atomically updates both independent permissions and the
+// Provider allowlist represented by ApprovedProvidersOnly.
+func (s *Store) UpdateSourcePolicy(ctx context.Context, sourceType models.SourceType, sourceID string, policy models.SourcePolicy) error {
+	if !validSourceType(sourceType) || !validProductionUse(policy.ProductionUse) || !validModelDataPolicy(policy.ModelDataPolicy) {
+		return fmt.Errorf("%w: invalid source production policy", ErrInvalidEditorialState)
+	}
+	clean := make([]string, 0, len(policy.ApprovedProviders))
+	seen := map[string]bool{}
+	for _, name := range policy.ApprovedProviders {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && !seen[name] {
+			seen[name] = true
+			clean = append(clean, name)
+		}
+	}
+	if policy.ModelDataPolicy == models.ModelDataApprovedProvidersOnly && len(clean) == 0 {
+		return fmt.Errorf("%w: approved provider policy requires an allowlist", ErrInvalidEditorialState)
+	}
+	encoded, _ := json.Marshal(clean)
+	archived := any(nil)
+	if policy.Archived {
+		archived = time.Now().UTC().Format("2006-01-02 15:04:05")
+	}
+	result, err := s.DB.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET production_use=?,model_data_policy=?,approved_providers_json=?,archived_at=? WHERE id=?`, sourceTable(sourceType)), policy.ProductionUse, string(policy.ModelDataPolicy), string(encoded), archived, sourceID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // RevokeSourceScope removes a profile's authorization to use one Source in future production.
@@ -172,6 +290,34 @@ type SourceScopeEntry struct {
 	SourceType         models.SourceType
 	SourceID           string
 	CreatedAt          string
+}
+
+type SourceOption struct {
+	SourceType      models.SourceType
+	SourceID, Title string
+}
+
+// ListSourceOptions exposes the exact SourceScope choices with human-readable
+// titles; callers never need to ask an Owner to copy an opaque database ID.
+func (s *Store) ListSourceOptions(ctx context.Context) ([]SourceOption, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT source_type,id,title FROM (
+		SELECT 'episode' source_type,id,title,created_at FROM episodes
+		UNION ALL SELECT 'upload',id,original_filename,created_at FROM uploads
+		UNION ALL SELECT 'document',id,title,created_at FROM documents)
+		ORDER BY created_at DESC LIMIT 500`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SourceOption
+	for rows.Next() {
+		var option SourceOption
+		if err := rows.Scan(&option.SourceType, &option.SourceID, &option.Title); err != nil {
+			return nil, err
+		}
+		out = append(out, option)
+	}
+	return out, rows.Err()
 }
 
 // SetSourceProductionPolicy updates the source's public-use and model-data restrictions.
@@ -230,9 +376,9 @@ func (s *Store) CreateArticleProposal(ctx context.Context, proposal models.Artic
 	}
 	proposal.CandidateKeyPoints = defaultString(proposal.CandidateKeyPoints, "[]")
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO article_proposals (id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		proposal.ID, proposal.EditorialProfileID, proposal.Kind, proposal.Status, proposal.Title, proposal.Thesis, proposal.Audience, proposal.Rationale, proposal.CandidateKeyPoints)
+		`INSERT INTO article_proposals (id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json,provider,model,prompt_version,cost_cents)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		proposal.ID, proposal.EditorialProfileID, proposal.Kind, proposal.Status, proposal.Title, proposal.Thesis, proposal.Audience, proposal.Rationale, proposal.CandidateKeyPoints, proposal.Provider, proposal.Model, proposal.PromptVersion, proposal.CostCents)
 	if err != nil {
 		return nil, fmt.Errorf("create article proposal: %w", err)
 	}
@@ -243,9 +389,9 @@ func (s *Store) CreateArticleProposal(ctx context.Context, proposal models.Artic
 func (s *Store) GetArticleProposal(ctx context.Context, id string) (*models.ArticleProposal, error) {
 	p := &models.ArticleProposal{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json, created_at, updated_at
+		`SELECT id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json,provider,model,prompt_version,cost_cents, created_at, updated_at
 		 FROM article_proposals WHERE id=?`, id).
-		Scan(&p.ID, &p.EditorialProfileID, &p.Kind, &p.Status, &p.Title, &p.Thesis, &p.Audience, &p.Rationale, &p.CandidateKeyPoints, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.EditorialProfileID, &p.Kind, &p.Status, &p.Title, &p.Thesis, &p.Audience, &p.Rationale, &p.CandidateKeyPoints, &p.Provider, &p.Model, &p.PromptVersion, &p.CostCents, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -255,8 +401,8 @@ func (s *Store) GetArticleProposal(ctx context.Context, id string) (*models.Arti
 // ListArticleProposals returns recent proposals for one editorial profile.
 func (s *Store) ListArticleProposals(ctx context.Context, profileID string) ([]*models.ArticleProposal, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json, created_at, updated_at
-		 FROM article_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC, id DESC`, profileID)
+		`SELECT id, editorial_profile_id, kind, status, title, thesis, audience, rationale, candidate_keypoints_json,provider,model,prompt_version,cost_cents, created_at, updated_at
+		 FROM article_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC, id DESC LIMIT 200`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +410,7 @@ func (s *Store) ListArticleProposals(ctx context.Context, profileID string) ([]*
 	var out []*models.ArticleProposal
 	for rows.Next() {
 		p := &models.ArticleProposal{}
-		if err := rows.Scan(&p.ID, &p.EditorialProfileID, &p.Kind, &p.Status, &p.Title, &p.Thesis, &p.Audience, &p.Rationale, &p.CandidateKeyPoints, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.EditorialProfileID, &p.Kind, &p.Status, &p.Title, &p.Thesis, &p.Audience, &p.Rationale, &p.CandidateKeyPoints, &p.Provider, &p.Model, &p.PromptVersion, &p.CostCents, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -277,7 +423,7 @@ func (s *Store) ListArticleBriefs(ctx context.Context, profileID string) ([]*mod
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT b.id, b.proposal_id, b.status, b.thesis, b.audience, b.outline_markdown, b.material_plan_json, b.conflict_plan_json, b.style, b.target_length, b.confirmed_at, b.created_at, b.updated_at
 		 FROM article_briefs b JOIN article_proposals p ON p.id=b.proposal_id
-		 WHERE p.editorial_profile_id=? ORDER BY b.updated_at DESC, b.id DESC`, profileID)
+		 WHERE p.editorial_profile_id=? ORDER BY b.updated_at DESC, b.id DESC LIMIT 200`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -352,6 +498,18 @@ func (s *Store) GetArticleBrief(ctx context.Context, id string) (*models.Article
 	return b, err
 }
 
+func (s *Store) GetArticleBriefByProposal(ctx context.Context, proposalID string) (*models.ArticleBrief, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx, `SELECT id FROM article_briefs WHERE proposal_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, proposalID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetArticleBrief(ctx, id)
+}
+
 // ConfirmArticleBrief is the explicit Owner authorization point for article generation.
 func (s *Store) ConfirmArticleBrief(ctx context.Context, briefID string) error {
 	result, err := s.DB.ExecContext(ctx,
@@ -408,7 +566,7 @@ func (s *Store) GetArticleDraft(ctx context.Context, id string) (*models.Article
 func (s *Store) ListArticleDrafts(ctx context.Context, profileID string) ([]*models.ArticleDraft, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, editorial_profile_id, brief_id, title, current_revision_id, status, created_at, updated_at
-		 FROM article_drafts WHERE editorial_profile_id=? ORDER BY updated_at DESC, id DESC`, profileID)
+		 FROM article_drafts WHERE editorial_profile_id=? ORDER BY updated_at DESC, id DESC LIMIT 200`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +580,86 @@ func (s *Store) ListArticleDrafts(ctx context.Context, profileID string) ([]*mod
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// GetArticleDraftByBrief resolves the single production draft associated with
+// an Owner-confirmed Brief. It is used by idempotent Writer retries.
+func (s *Store) GetArticleDraftByBrief(ctx context.Context, briefID string) (*models.ArticleDraft, error) {
+	d := &models.ArticleDraft{}
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id, editorial_profile_id, brief_id, title, current_revision_id, status, created_at, updated_at
+		 FROM article_drafts WHERE brief_id=? ORDER BY created_at,id LIMIT 1`, briefID).
+		Scan(&d.ID, &d.EditorialProfileID, &d.BriefID, &d.Title, &d.CurrentRevisionID, &d.Status, &d.CreatedAt, &d.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return d, err
+}
+
+// ClaimEditorialTask acquires or re-acquires a durable paid-task lease. A
+// completed claim is never re-run; a failed or expired claim may be retried.
+func (s *Store) ClaimEditorialTask(ctx context.Context, taskKind, idempotencyKey string) (bool, error) {
+	if strings.TrimSpace(taskKind) == "" || strings.TrimSpace(idempotencyKey) == "" {
+		return false, fmt.Errorf("%w: editorial task identity is required", ErrInvalidEditorialState)
+	}
+	result, err := s.DB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO editorial_task_claims (id,task_kind,idempotency_key,status,lease_until)
+		 VALUES (?,?,?,'running',datetime('now','+10 minutes'))`, uuid.NewString(), taskKind, idempotencyKey)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := result.RowsAffected(); n == 1 {
+		return true, nil
+	}
+	result, err = s.DB.ExecContext(ctx,
+		`UPDATE editorial_task_claims SET status='running',attempt_count=attempt_count+1,last_error=NULL,lease_until=datetime('now','+10 minutes'),updated_at=datetime('now')
+		 WHERE task_kind=? AND idempotency_key=? AND (status='failed' OR (status='running' AND lease_until < datetime('now')))`, taskKind, idempotencyKey)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
+func (s *Store) FinishEditorialTask(ctx context.Context, taskKind, idempotencyKey string, taskErr error) error {
+	status, lastError := "completed", any(nil)
+	if taskErr != nil {
+		status, lastError = "failed", taskErr.Error()
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE editorial_task_claims SET status=?,last_error=?,lease_until=NULL,updated_at=datetime('now') WHERE task_kind=? AND idempotency_key=?`,
+		status, lastError, taskKind, idempotencyKey)
+	return err
+}
+
+func (s *Store) SaveEditorialTaskResult(ctx context.Context, taskKind, idempotencyKey, payload string) error {
+	if !json.Valid([]byte(payload)) {
+		return fmt.Errorf("%w: editorial task result must be JSON", ErrInvalidEditorialState)
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE editorial_task_claims SET result_json=?,updated_at=datetime('now') WHERE task_kind=? AND idempotency_key=?`, payload, taskKind, idempotencyKey)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetEditorialTaskResult(ctx context.Context, taskKind, idempotencyKey string) (string, error) {
+	var payload sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT result_json FROM editorial_task_claims WHERE task_kind=? AND idempotency_key=?`, taskKind, idempotencyKey).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !payload.Valid {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return payload.String, nil
 }
 
 // CreateArticleRevision appends an immutable snapshot and makes it the draft's current revision.
@@ -482,6 +720,15 @@ func (s *Store) CreateArticleRevisionWithEvidenceMaps(ctx context.Context, revis
 			evidence.ID, evidence.RevisionID, string(evidence.Kind), evidence.Excerpt, evidence.KeyPointIDs); err != nil {
 			return nil, err
 		}
+		var keyPointIDs []string
+		if err := json.Unmarshal([]byte(evidence.KeyPointIDs), &keyPointIDs); err != nil {
+			return nil, err
+		}
+		for _, keyPointID := range keyPointIDs {
+			if _, err := tx.ExecContext(ctx, `UPDATE keypoint_index SET production_status=? WHERE id=?`, string(models.KeyPointUsed), keyPointID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -493,9 +740,9 @@ func (s *Store) CreateArticleRevisionWithEvidenceMaps(ctx context.Context, revis
 func (s *Store) GetArticleRevision(ctx context.Context, id string) (*models.ArticleRevision, error) {
 	r := &models.ArticleRevision{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, created_at
+		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
 		 FROM article_revisions WHERE id=?`, id).
-		Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.CreatedAt)
+		Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -505,8 +752,8 @@ func (s *Store) GetArticleRevision(ctx context.Context, id string) (*models.Arti
 // ListArticleRevisions returns newest revisions first.
 func (s *Store) ListArticleRevisions(ctx context.Context, draftID string) ([]*models.ArticleRevision, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, created_at
-		 FROM article_revisions WHERE draft_id=? ORDER BY version DESC`, draftID)
+		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
+		 FROM article_revisions WHERE draft_id=? ORDER BY version DESC LIMIT 200`, draftID)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +761,7 @@ func (s *Store) ListArticleRevisions(ctx context.Context, draftID string) ([]*mo
 	var out []*models.ArticleRevision
 	for rows.Next() {
 		r := &models.ArticleRevision{}
-		if err := rows.Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -567,19 +814,17 @@ func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleRe
 	if !validReviewKind(review.Kind) || !validReviewStatus(review.Status) || !validJSON(review.IssuesJSON, "[]") {
 		return nil, fmt.Errorf("%w: invalid article review", ErrInvalidEditorialState)
 	}
+	if review.Kind == "evidence" && (review.Provider == nil || strings.TrimSpace(*review.Provider) == "" || review.Model == nil || strings.TrimSpace(*review.Model) == "") {
+		return nil, fmt.Errorf("%w: evidence review requires trusted provider provenance", ErrInvalidEditorialState)
+	}
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO article_reviews (id, revision_id, kind, status, issues_json, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		review.ID, review.RevisionID, review.Kind, review.Status, review.IssuesJSON, review.Provider, review.Model)
+		`INSERT INTO article_reviews (id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		review.ID, review.RevisionID, review.Kind, review.Status, review.IssuesJSON, review.Provider, review.Model, review.PromptVersion, review.CostCents)
 	if err != nil {
 		return nil, err
 	}
-	if review.Kind == "evidence" {
-		state := "blocked"
-		if review.Status == "passed" {
-			state = "ready"
-		}
-		_, _ = s.DB.ExecContext(ctx,
-			`UPDATE article_drafts SET status=?, updated_at=datetime('now') WHERE current_revision_id=?`, state, review.RevisionID)
+	if err := s.refreshDraftReviewState(ctx, review.RevisionID); err != nil {
+		return nil, err
 	}
 	return &review, nil
 }
@@ -587,7 +832,7 @@ func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleRe
 // ListArticleReviews returns the audit trail for one immutable revision, newest first.
 func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*models.ArticleReview, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, revision_id, kind, status, issues_json, provider, model, created_at
+		`SELECT id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents, created_at
 		 FROM article_reviews WHERE revision_id=? ORDER BY created_at DESC, id DESC`, revisionID)
 	if err != nil {
 		return nil, err
@@ -596,7 +841,7 @@ func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*m
 	var out []*models.ArticleReview
 	for rows.Next() {
 		review := &models.ArticleReview{}
-		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.CreatedAt); err != nil {
+		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, review)
@@ -604,18 +849,193 @@ func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*m
 	return out, rows.Err()
 }
 
+// ListArticleReviewsForDraft loads the complete review history in one query,
+// avoiding one round trip per immutable revision on the detail page.
+func (s *Store) ListArticleReviewsForDraft(ctx context.Context, draftID string) (map[string][]*models.ArticleReview, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT ar.id,ar.revision_id,ar.kind,ar.status,ar.issues_json,ar.provider,ar.model,ar.prompt_version,ar.cost_cents,ar.created_at
+		FROM article_reviews ar JOIN article_revisions r ON r.id=ar.revision_id WHERE r.draft_id=? ORDER BY ar.created_at DESC,ar.id DESC`, draftID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]*models.ArticleReview{}
+	for rows.Next() {
+		review := &models.ArticleReview{}
+		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[review.RevisionID] = append(out[review.RevisionID], review)
+	}
+	return out, rows.Err()
+}
+
 // IsRevisionReadyForPublication applies the hard evidence gate to an exact revision.
 func (s *Store) IsRevisionReadyForPublication(ctx context.Context, revisionID string) (bool, error) {
-	var status string
+	var ready bool
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT status FROM article_reviews WHERE revision_id=? AND kind='evidence' ORDER BY created_at DESC, id DESC LIMIT 1`, revisionID).Scan(&status)
+		`SELECT r.evidence_invalidated_at IS NULL
+		 AND COALESCE((SELECT status='passed' AND provider IS NOT NULL AND model IS NOT NULL FROM article_reviews WHERE revision_id=r.id AND kind='evidence' ORDER BY created_at DESC,id DESC LIMIT 1),0)
+		 AND EXISTS(SELECT 1 FROM article_reviews WHERE revision_id=r.id AND kind='style')
+		 FROM article_revisions r WHERE r.id=?`, revisionID).Scan(&ready)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return status == "passed", nil
+	return ready, nil
+}
+
+func (s *Store) refreshDraftReviewState(ctx context.Context, revisionID string) error {
+	ready, err := s.IsRevisionReadyForPublication(ctx, revisionID)
+	if err != nil {
+		return err
+	}
+	state := "reviewing"
+	if ready {
+		state = "ready"
+	} else {
+		var failed int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_reviews WHERE revision_id=? AND kind='evidence' AND status='failed'`, revisionID).Scan(&failed); err != nil {
+			return err
+		}
+		if failed > 0 {
+			state = "blocked"
+		}
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE article_drafts SET status=?, updated_at=datetime('now') WHERE current_revision_id=?`, state, revisionID)
+	return err
+}
+
+// InvalidateRevisionsForSource durably revokes publication eligibility before
+// a Source's KeyPoints are removed. The audit reason survives the purge.
+func (s *Store) InvalidateRevisionsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) error {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+	if err != nil {
+		return err
+	}
+	keyPointIDs := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		keyPointIDs[id] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(keyPointIDs) == 0 {
+		return nil
+	}
+	mapRows, err := s.DB.QueryContext(ctx, `SELECT revision_id,keypoint_ids_json FROM evidence_maps`)
+	if err != nil {
+		return err
+	}
+	affected := map[string]bool{}
+	for mapRows.Next() {
+		var revisionID, encoded string
+		if err := mapRows.Scan(&revisionID, &encoded); err != nil {
+			mapRows.Close()
+			return err
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(encoded), &ids); err != nil {
+			mapRows.Close()
+			return err
+		}
+		for _, id := range ids {
+			if keyPointIDs[id] {
+				affected[revisionID] = true
+				break
+			}
+		}
+	}
+	if err := mapRows.Close(); err != nil {
+		return err
+	}
+	reason := fmt.Sprintf("source purged: %s/%s", sourceType, sourceID)
+	for revisionID := range affected {
+		if _, err := s.DB.ExecContext(ctx, `UPDATE article_revisions SET evidence_invalidated_at=COALESCE(evidence_invalidated_at,datetime('now')), evidence_invalidation_reason=COALESCE(evidence_invalidation_reason,?) WHERE id=?`, reason, revisionID); err != nil {
+			return err
+		}
+		if _, err := s.DB.ExecContext(ctx, `UPDATE article_drafts SET status='blocked',updated_at=datetime('now') WHERE current_revision_id=?`, revisionID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InvalidateAndDeleteKeyPointsForSource makes the publication revocation and
+// removal of the source's material projection one atomic database decision.
+// A purge can safely retry this operation after interruption.
+func (s *Store) InvalidateAndDeleteKeyPointsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+	if err != nil {
+		return err
+	}
+	ids := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids[id] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		maps, err := tx.QueryContext(ctx, `SELECT revision_id,keypoint_ids_json FROM evidence_maps`)
+		if err != nil {
+			return err
+		}
+		var affected []string
+		for maps.Next() {
+			var revisionID, encoded string
+			if err := maps.Scan(&revisionID, &encoded); err != nil {
+				maps.Close()
+				return err
+			}
+			var referenced []string
+			if err := json.Unmarshal([]byte(encoded), &referenced); err != nil {
+				maps.Close()
+				return err
+			}
+			for _, id := range referenced {
+				if ids[id] {
+					affected = append(affected, revisionID)
+					break
+				}
+			}
+		}
+		if err := maps.Close(); err != nil {
+			return err
+		}
+		reason := fmt.Sprintf("source purged: %s/%s", sourceType, sourceID)
+		for _, revisionID := range affected {
+			if _, err := tx.ExecContext(ctx, `UPDATE article_revisions SET evidence_invalidated_at=COALESCE(evidence_invalidated_at,datetime('now')),evidence_invalidation_reason=COALESCE(evidence_invalidation_reason,?) WHERE id=?`, reason, revisionID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE article_drafts SET status='blocked',updated_at=datetime('now') WHERE current_revision_id=?`, revisionID); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM keypoint_search WHERE keypoint_id IN (SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?)`, string(sourceType), sourceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CreateEditorialFeedback persists an Owner's explicit editorial decision.

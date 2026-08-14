@@ -19,6 +19,7 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.QAModel = strPtr(r.FormValue("qa_model"))
 		st.WriterModel = strPtr(r.FormValue("writer_model"))
 		st.ScoutModel = strPtr(r.FormValue("scout_model"))
+		st.CuratorModel = strPtr(r.FormValue("curator_model"))
 		st.EvidenceReviewerModel = strPtr(r.FormValue("evidence_reviewer_model"))
 		st.StyleEditorModel = strPtr(r.FormValue("style_editor_model"))
 		st.TranscriptionProvider = strPtr(r.FormValue("transcription_provider"))
@@ -27,6 +28,7 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.QAProvider = strPtr(r.FormValue("qa_provider"))
 		st.WriterProvider = strPtr(r.FormValue("writer_provider"))
 		st.ScoutProvider = strPtr(r.FormValue("scout_provider"))
+		st.CuratorProvider = strPtr(r.FormValue("curator_provider"))
 		st.EvidenceReviewerProvider = strPtr(r.FormValue("evidence_reviewer_provider"))
 		st.StyleEditorProvider = strPtr(r.FormValue("style_editor_provider"))
 		st.GroqAPIKey = strPtr(r.FormValue("groq_api_key"))
@@ -34,12 +36,22 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.OpenAIAPIKey = strPtr(r.FormValue("openai_api_key"))
 		st.OpenAIBaseURL = strPtr(r.FormValue("openai_base_url"))
 		_ = srv.store.UpdateSettings(r.Context(), st)
+		for _, role := range []string{editorialRoleScout, editorialRoleCurator, editorialRoleWriter, editorialRoleEvidence, editorialRoleStyle} {
+			_ = srv.store.SetEditorialRoleFallback(r.Context(), models.EditorialRoleFallback{Role: role, Provider: r.FormValue(role + "_fallback_provider"), Model: r.FormValue(role + "_fallback_model")})
+		}
 		// 立即刷新 Selector 的 key/URL
 		srv.selector.ApplySettingsFrom(st)
 		http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 		return
 	}
 	st, _ := srv.store.GetSettings(r.Context())
+	fallbacks := map[string]*models.EditorialRoleFallback{}
+	for _, role := range []string{editorialRoleScout, editorialRoleCurator, editorialRoleWriter, editorialRoleEvidence, editorialRoleStyle} {
+		fallbacks[role] = &models.EditorialRoleFallback{Role: role}
+		if route, err := srv.store.GetEditorialRoleFallback(r.Context(), role); err == nil {
+			fallbacks[role] = route
+		}
+	}
 	srv.tmpl.Render(w, "settings.html", map[string]any{
 		"TranscriptionModel":       ptrStr(st.TranscriptionModel),
 		"AnalysisModel":            ptrStr(st.AnalysisModel),
@@ -47,6 +59,7 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"QAModel":                  ptrStr(st.QAModel),
 		"WriterModel":              ptrStr(st.WriterModel),
 		"ScoutModel":               ptrStr(st.ScoutModel),
+		"CuratorModel":             ptrStr(st.CuratorModel),
 		"EvidenceReviewerModel":    ptrStr(st.EvidenceReviewerModel),
 		"StyleEditorModel":         ptrStr(st.StyleEditorModel),
 		"TranscriptionProvider":    ptrStr(st.TranscriptionProvider),
@@ -55,6 +68,7 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"QAProvider":               ptrStr(st.QAProvider),
 		"WriterProvider":           ptrStr(st.WriterProvider),
 		"ScoutProvider":            ptrStr(st.ScoutProvider),
+		"CuratorProvider":          ptrStr(st.CuratorProvider),
 		"EvidenceReviewerProvider": ptrStr(st.EvidenceReviewerProvider),
 		"StyleEditorProvider":      ptrStr(st.StyleEditorProvider),
 		"GroqAPIKey":               ptrStr(st.GroqAPIKey),
@@ -64,5 +78,6 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"HasOpenAI":                srv.selector.HasOpenAI(),
 		"Saved":                    r.URL.Query().Get("saved") == "1",
 		"CSRF":                     auth.CSRFValue(r),
+		"Fallbacks":                fallbacks,
 	})
 }

@@ -117,6 +117,9 @@ func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType
 			kpID, strings.TrimSpace(kp.Content), strings.TrimSpace(kp.Description), sourceTitle); err != nil {
 			return err
 		}
+		if err := indexLocalKeyPointEmbedding(ctx, tx, kpID, kp.Content+" "+kp.Description+" "+sourceTitle); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -162,26 +165,100 @@ func keyPointReconciliationKey(citations []string, content string) string {
 
 // ListKeyPoints 分页查询全部 KeyPoint（按 created_at DESC）。
 func (s *Store) ListKeyPoints(ctx context.Context, page, perPage int) ([]*KeyPointRow, int, error) {
+	return s.ListKeyPointsFiltered(ctx, KeyPointFilter{}, page, perPage)
+}
+
+// KeyPointFilter is the unified Inbox query surface. Empty fields are ignored.
+type KeyPointFilter struct {
+	SourceType                   models.SourceType
+	SourceID, PodcastID, ThemeID string
+	Status                       models.KeyPointProductionStatus
+	From, To                     string
+}
+
+// ListKeyPointsFiltered applies all Inbox dimensions in SQL so pagination and
+// totals describe the same result set.
+func (s *Store) ListKeyPointsFiltered(ctx context.Context, filter KeyPointFilter, page, perPage int) ([]*KeyPointRow, int, error) {
 	if page < 1 {
 		page = 1
 	}
 	if perPage < 1 {
 		perPage = 10
 	}
+	var clauses []string
+	var args []any
+	if filter.SourceType != "" {
+		if !validSourceType(filter.SourceType) {
+			return nil, 0, fmt.Errorf("%w: invalid source filter", ErrInvalidEditorialState)
+		}
+		clauses, args = append(clauses, "ki.source_type=?"), append(args, string(filter.SourceType))
+	}
+	if filter.SourceID != "" {
+		clauses, args = append(clauses, "ki.source_id=?"), append(args, filter.SourceID)
+	}
+	if filter.PodcastID != "" {
+		clauses, args = append(clauses, "ki.source_type='episode' AND EXISTS(SELECT 1 FROM episodes e WHERE e.id=ki.source_id AND e.podcast_id=?)"), append(args, filter.PodcastID)
+	}
+	if filter.ThemeID != "" {
+		clauses, args = append(clauses, "EXISTS(SELECT 1 FROM theme_keypoints tk WHERE tk.keypoint_id=ki.id AND tk.theme_id=?)"), append(args, filter.ThemeID)
+	}
+	if filter.Status != "" {
+		if !validKeyPointProductionStatus(filter.Status) {
+			return nil, 0, fmt.Errorf("%w: invalid status filter", ErrInvalidEditorialState)
+		}
+		clauses, args = append(clauses, "ki.production_status=?"), append(args, string(filter.Status))
+	}
+	if filter.From != "" {
+		clauses, args = append(clauses, "ki.created_at>=?"), append(args, filter.From)
+	}
+	if filter.To != "" {
+		clauses, args = append(clauses, "ki.created_at<datetime(?,'+1 day')"), append(args, filter.To)
+	}
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + strings.Join(clauses, " AND ")
+	}
 	var total int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM keypoint_index`).Scan(&total); err != nil {
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM keypoint_index ki`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	offset := (page - 1) * perPage
+	queryArgs := append(append([]any{}, args...), perPage, offset)
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at
-		 FROM keypoint_index ORDER BY created_at DESC, time_start ASC, id LIMIT ? OFFSET ?`, perPage, offset)
+		 FROM keypoint_index ki`+where+` ORDER BY created_at DESC, time_start ASC, id LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
 	r, n, err := scanKeyPointRows(rows)
 	return r, n, err
+}
+
+// SetKeyPointProductionStatuses applies one validated transition to a batch.
+func (s *Store) SetKeyPointProductionStatuses(ctx context.Context, ids []string, status models.KeyPointProductionStatus) error {
+	if len(ids) == 0 || !validKeyPointProductionStatus(status) {
+		return fmt.Errorf("%w: invalid KeyPoint batch", ErrInvalidEditorialState)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		result, err := tx.ExecContext(ctx, `UPDATE keypoint_index SET production_status=? WHERE id=?`, string(status), strings.TrimSpace(id))
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+	}
+	return tx.Commit()
 }
 
 // SearchKeyPoints FTS5 全文搜索 KeyPoint。
@@ -268,6 +345,13 @@ func (s *Store) CreateManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) 
 	if !exists {
 		return nil, ErrNotFound
 	}
+	valid, err := s.ValidateSourceCitations(ctx, keyPoint.SourceType, keyPoint.SourceID, citationIDs)
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		return nil, fmt.Errorf("%w: citation does not resolve inside source", ErrInvalidEditorialState)
+	}
 	keyPoint.ID = uuid.NewString()
 	if keyPoint.ProductionStatus == "" {
 		keyPoint.ProductionStatus = models.KeyPointInbox
@@ -294,10 +378,49 @@ func (s *Store) CreateManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) 
 		`INSERT INTO keypoint_search (keypoint_id, content, description, source_title) VALUES (?, ?, ?, ?)`, keyPoint.ID, keyPoint.Content, keyPoint.Description, keyPoint.SourceTitle); err != nil {
 		return nil, err
 	}
+	if err := indexLocalKeyPointEmbedding(ctx, tx, keyPoint.ID, keyPoint.Content+" "+keyPoint.Description+" "+keyPoint.SourceTitle); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetKeyPoint(ctx, keyPoint.ID)
+}
+
+// ValidateSourceCitations proves that every citation resolves to a stable
+// Segment in the cited Source. Non-empty JSON alone is not evidence validity.
+func (s *Store) ValidateSourceCitations(ctx context.Context, sourceType models.SourceType, sourceID string, citationIDs []string) (bool, error) {
+	if len(citationIDs) == 0 {
+		return false, nil
+	}
+	available := map[string]bool{}
+	if sourceType == models.SourceDocument {
+		document, err := s.GetDocument(ctx, sourceID)
+		if err != nil {
+			return false, err
+		}
+		for _, segment := range DocumentSegments(document) {
+			available[segment.ID] = true
+		}
+	} else {
+		version, err := s.GetCurrentVersion(ctx, sourceType, sourceID, KindTranscript)
+		if err != nil {
+			return false, err
+		}
+		var transcript provider.TranscriptPayload
+		if err := json.Unmarshal([]byte(version.Payload), &transcript); err != nil {
+			return false, err
+		}
+		for _, segment := range transcript.Segments {
+			available[segment.ID] = true
+		}
+	}
+	for _, id := range citationIDs {
+		if !available[strings.TrimSpace(id)] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // SetKeyPointProductionStatus moves one KeyPoint through the material Inbox.

@@ -6,6 +6,7 @@ package rss
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/robfig/cron/v3"
 	"github.com/woyin/orangecast/internal/models"
@@ -61,7 +62,8 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 		return err
 	}
 	knownCandidates := make(map[string]struct{})
-	if p.IngestionPolicy == string(models.IngestionAllNew) {
+	automatic := p.IngestionPolicy == string(models.IngestionAllNew) || p.IngestionPolicy == string(models.IngestionFiltered)
+	if automatic {
 		candidates, err := r.store.ListUnprocessedEpisodes(ctx, p.ID)
 		if err != nil {
 			return err
@@ -73,7 +75,7 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 	if _, err := r.store.MergeEpisodes(ctx, p.ID, eps); err != nil {
 		return err
 	}
-	if p.IngestionPolicy == string(models.IngestionAllNew) {
+	if automatic {
 		candidates, err := r.store.ListUnprocessedEpisodes(ctx, p.ID)
 		if err != nil {
 			return err
@@ -82,10 +84,42 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 			if _, existed := knownCandidates[episode.ID]; existed {
 				continue
 			}
+			if p.IngestionPolicy == string(models.IngestionFiltered) && !matchesIngestionFilter(episode, p.IngestionIncludeKeywords, p.IngestionExcludeKeywords) {
+				continue
+			}
 			if _, err := r.store.EnqueueIngestionJob(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe); err != nil {
 				return err
 			}
 		}
 	}
 	return r.store.UpdatePodcastFetched(ctx, p.ID)
+}
+
+func matchesIngestionFilter(episode *models.Episode, includeCSV, excludeCSV string) bool {
+	haystack := strings.ToLower(episode.Title + "\n" + episode.Description)
+	parse := func(value string) []string {
+		var out []string
+		for _, item := range strings.Split(value, ",") {
+			item = strings.ToLower(strings.TrimSpace(item))
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+	for _, word := range parse(excludeCSV) {
+		if strings.Contains(haystack, word) {
+			return false
+		}
+	}
+	include := parse(includeCSV)
+	if len(include) == 0 {
+		return true
+	}
+	for _, word := range include {
+		if strings.Contains(haystack, word) {
+			return true
+		}
+	}
+	return false
 }

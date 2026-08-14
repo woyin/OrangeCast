@@ -1,9 +1,11 @@
 {{define "title"}}{{.Revision.Title}} · 公众号内容包{{end}}
 {{define "content"}}
 <div class="page-head"><h1>公众号内容包</h1><a class="btn btn-secondary" href="/workbench/drafts/{{.Revision.DraftID}}">返回文章</a></div>
-<p class="meta">Revision v{{.Revision.Version}} 已通过证据审校。复制下方富文本，或下载 Markdown。</p>
-<p><a class="btn" href="/workbench/revisions/{{.Revision.ID}}/package?format=markdown">下载 Markdown</a></p>
-<section class="panel"><h2>可复制富文本</h2><div id="wechat-richtext" class="publication-richtext">{{.RichHTML}}</div><button class="btn" id="copy-richtext" type="button">复制富文本</button></section>
+<p class="meta">Revision v{{.Revision.Version}} 已通过独立证据与风格审校。</p>
+<p><a class="btn" href="/workbench/revisions/{{.Revision.ID}}/package?format=markdown">下载 Markdown</a> <a class="btn btn-secondary" href="/workbench/revisions/{{.Revision.ID}}/package?format=plain">下载纯文本</a> <a class="btn btn-secondary" href="/workbench/revisions/{{.Revision.ID}}/package?format=cover-svg">下载封面 SVG</a></p>
+<section class="panel"><h2>候选标题</h2><ol>{{range .Package.CandidateTitles}}<li>{{.}}</li>{{end}}</ol><h3>摘要</h3><p>{{.Package.Summary}}</p><h3>推荐语</h3><p>{{.Package.Recommendation}}</p><h3>封面文案</h3><p><strong>{{.Package.CoverTitle}}</strong><br>{{.Package.CoverSubtitle}}</p></section>
+<section class="panel" style="margin-top:1rem"><h2>可复制富文本</h2><div id="wechat-richtext" class="publication-richtext">{{.RichHTML}}</div><button class="btn" id="copy-richtext" type="button">复制富文本</button></section>
+<section class="panel" style="margin-top:1rem"><h2>纯文本</h2><pre style="white-space:pre-wrap">{{.Package.PlainText}}</pre></section>
 <section class="panel" style="margin-top:1rem"><h2>实际使用来源</h2><ul>{{range .Sources}}<li>{{.}}</li>{{else}}<li>无外部来源</li>{{end}}</ul></section>
 <script>
 document.getElementById('copy-richtext').addEventListener('click', async function () {

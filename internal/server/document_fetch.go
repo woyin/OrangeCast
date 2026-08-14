@@ -34,9 +34,12 @@ func fetchWebDocument(ctx context.Context, rawURL string) (string, string, error
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") && !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/plain") {
 		return "", "", fmt.Errorf("不支持的内容类型")
 	}
-	body, err := io.ReadAll(safehttp.LimitBody(resp.Body, maxDocumentSize))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocumentSize+1))
 	if err != nil {
 		return "", "", err
+	}
+	if int64(len(body)) > maxDocumentSize {
+		return "", "", fmt.Errorf("网页正文超过 %d 字节上限", maxDocumentSize)
 	}
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/plain") {
 		return rawURL, strings.TrimSpace(string(body)), nil

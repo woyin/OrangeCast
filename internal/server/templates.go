@@ -6,7 +6,11 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"net/url"
 	"path/filepath"
+	"strings"
+
+	"github.com/woyin/orangecast/internal/models"
 )
 
 //go:embed templates/*.html
@@ -32,7 +36,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -60,6 +64,14 @@ func NewTemplates() (*Templates, error) {
 		t.pages[name] = tmpl
 	}
 	return t, nil
+}
+
+func sourceHref(sourceType models.SourceType, sourceID string, position float64) string {
+	id := url.PathEscape(sourceID)
+	if sourceType == models.SourceDocument {
+		return "/documents/" + id + "#" + id + "-p" + fmt.Sprintf("%04d", int(position))
+	}
+	return fmt.Sprintf("/sources/%s/%s?t=%.3f", url.PathEscape(string(sourceType)), id, position)
 }
 
 // Render 渲染指定页面：执行 layout 模板，content/title 块由页面文件提供。

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -10,6 +11,7 @@ import (
 const (
 	editorialRoleWriter   = "writer"
 	editorialRoleScout    = "scout"
+	editorialRoleCurator  = "curator"
 	editorialRoleEvidence = "evidence_reviewer"
 	editorialRoleStyle    = "style_editor"
 )
@@ -24,6 +26,8 @@ func editorialTaskConfig(settings *models.Settings, role string) provider.TaskCo
 		providerOverride, modelOverride = settings.WriterProvider, settings.WriterModel
 	case editorialRoleScout:
 		providerOverride, modelOverride = settings.ScoutProvider, settings.ScoutModel
+	case editorialRoleCurator:
+		providerOverride, modelOverride = settings.CuratorProvider, settings.CuratorModel
 	case editorialRoleEvidence:
 		providerOverride, modelOverride = settings.EvidenceReviewerProvider, settings.EvidenceReviewerModel
 	case editorialRoleStyle:
@@ -37,4 +41,13 @@ func fallbackSetting(override, fallback *string) *string {
 		return override
 	}
 	return fallback
+}
+
+func (srv *Server) editorialFallbackConfig(ctx context.Context, role string) (provider.TaskConfig, bool) {
+	route, err := srv.store.GetEditorialRoleFallback(ctx, role)
+	if err != nil {
+		return provider.TaskConfig{}, false
+	}
+	providerName, model := route.Provider, route.Model
+	return taskConfigFrom(&providerName, &model), true
 }

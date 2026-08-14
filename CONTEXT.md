@@ -193,7 +193,7 @@ _避免使用：Collection、ArticleProposal、Tag；它不是纯人工引用集
 _避免使用：UserPreference、Prompt、公众号；它既不是全局个人偏好或实现提示词，也不限于单一发布渠道_
 
 **SourceScope（素材范围）**：
-一个 EditorialProfile 被明确授权用于内容生产的 Source 范围，可按 Podcast、Source 类型、Theme、语言和时间限制。Source 还可被标记为可公开使用、仅内部研究或禁止内容生产；新 Source 默认不会进入所有画像，素材权限失效会阻止相关 ArticleRevision 生成 PublicationPackage。
+一个 EditorialProfile 被明确授权用于内容生产的 Source 范围。当前版本采用精确 Source ID 授权；按 Podcast、Source 类型、Theme、语言和时间形成规则范围属于后续扩展。Source 还可被标记为可公开使用、仅内部研究或禁止内容生产；新 Source 默认不会进入所有画像，素材权限失效会阻止相关 ArticleRevision 生成 PublicationPackage。
 _避免使用：SearchFilter、Collection、Visibility；它是内容生产权限边界，不只是一次查询条件、素材分组或界面显示状态_
 
 **ModelDataPolicy（模型数据策略）**：

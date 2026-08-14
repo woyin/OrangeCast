@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -46,6 +47,14 @@ func TestIndexKeyPoints_Basic(t *testing.T) {
 	// 第一个要点的时间范围应是 seg-0001+seg-0002 的 min-max = 0-10
 	if kps[0].TimeStart != 0 || kps[0].TimeEnd != 10 {
 		t.Errorf("第一个要点时间范围应为 0-10，实际 %.1f-%.1f", kps[0].TimeStart, kps[0].TimeEnd)
+	}
+	hybrid, err := s.SearchKeyPointsHybrid(ctx, "说明一", 10)
+	if err != nil || len(hybrid) == 0 || hybrid[0].Content != "要点一" {
+		t.Fatalf("hybrid retrieval should preserve the cited KeyPoint: rows=%+v err=%v", hybrid, err)
+	}
+	var providerName, model string
+	if err := s.DB.QueryRowContext(ctx, `SELECT provider,model FROM keypoint_embeddings WHERE keypoint_id=?`, hybrid[0].ID).Scan(&providerName, &model); err != nil || providerName != "local" || model != "char-ngram-v1" {
+		t.Fatalf("embedding provenance must be versioned: provider=%q model=%q err=%v", providerName, model, err)
 	}
 }
 
@@ -93,6 +102,7 @@ func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *te
 	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
 	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
+	seedCurrentTranscript(t, s, models.SourceEpisode, episodes[0].ID, segs)
 	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "自动要点", Citations: []string{"seg-0001"}}}}
 	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
@@ -129,6 +139,25 @@ func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *te
 	}
 }
 
+func seedCurrentTranscript(t *testing.T, s *Store, sourceType models.SourceType, sourceID string, segments []provider.Segment) {
+	t.Helper()
+	payload, err := json.Marshal(provider.TranscriptPayload{Text: "test", Segments: segments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.EnqueueJob(context.Background(), sourceType, sourceID, models.JobTranscribe)
+	if err != nil || job == nil {
+		t.Fatalf("enqueue transcript fixture: job=%+v err=%v", job, err)
+	}
+	version, err := s.CreateArtifactVersion(context.Background(), sourceType, sourceID, KindTranscript, "test", "test", "test", job.ID, string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(context.Background(), sourceType, sourceID, KindTranscript, version); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManualKeyPointValidationAndStatus(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -136,6 +165,7 @@ func TestManualKeyPointValidationAndStatus(t *testing.T) {
 	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
 	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
 	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	seedCurrentTranscript(t, s, models.SourceEpisode, episodes[0].ID, []provider.Segment{{ID: "seg", Start: 0, End: 1, Text: "x"}})
 	if _, err := s.CreateManualKeyPoint(ctx, KeyPointRow{SourceType: models.SourceEpisode, SourceID: episodes[0].ID, Content: "x", CitationsJSON: `[]`, TimeEnd: 1}); err == nil {
 		t.Fatal("manual keypoint without citation should fail")
 	}

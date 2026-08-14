@@ -1,20 +1,24 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-const scoutSystemPrompt = `你是内容 Scout。只根据已确认 Theme 中提供的 KeyPoint 材料发现可写的跨 Episode 公众号选题。不要添加任何外部事实。输出 JSON 对象，字段 proposals；每个 proposal 有 kind（fresh/evergreen/follow_up）、title、thesis、audience、rationale、candidateKeyPointIds。每个候选必须引用输入中的 KeyPoint ID，且至少覆盖两个不同 Source。`
+const (
+	ScoutPromptVersion = "scout-v1"
+	scoutSystemPrompt  = `你是内容 Scout。只根据已确认 Theme 中提供的 KeyPoint 材料发现可写的跨 Episode 公众号选题。不要添加任何外部事实。输出 JSON 对象，字段 proposals；每个 proposal 有 kind（fresh/evergreen/follow_up）、title、thesis、audience、rationale、candidateKeyPointIds。每个候选必须引用输入中的 KeyPoint ID，且至少覆盖两个不同 Source。`
+)
 
 // Scout produces proposal candidates through Groq chat completion.
-func (g *GroqProvider) Scout(request ScoutRequest) (*ScoutResult, error) {
+func (g *GroqProvider) Scout(ctx context.Context, request ScoutRequest) (*ScoutResult, error) {
 	input, err := scoutInput(request)
 	if err != nil {
 		return nil, err
 	}
-	content, _, err := g.complete([]map[string]string{{"role": "system", "content": scoutSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
+	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": scoutSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
 	if err != nil {
 		return nil, err
 	}
@@ -22,11 +26,12 @@ func (g *GroqProvider) Scout(request ScoutRequest) (*ScoutResult, error) {
 	if err := parseJSONLoose(content, result); err != nil {
 		return nil, fmt.Errorf("解析 Scout 输出: %w", err)
 	}
+	result.Usage = usage
 	return validateScoutResult(result, request)
 }
 
 // Scout produces proposal candidates through OpenAI Responses.
-func (o *OpenAIProvider) Scout(request ScoutRequest) (*ScoutResult, error) {
+func (o *OpenAIProvider) Scout(ctx context.Context, request ScoutRequest) (*ScoutResult, error) {
 	input, err := scoutInput(request)
 	if err != nil {
 		return nil, err
@@ -35,7 +40,7 @@ func (o *OpenAIProvider) Scout(request ScoutRequest) (*ScoutResult, error) {
 	if model == "" {
 		model = openaiAnalysisModel
 	}
-	data, err := o.doResponses(map[string]any{"model": model, "instructions": scoutSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "Scout")
+	data, retries, err := o.doResponsesWithMeta(ctx, map[string]any{"model": model, "instructions": scoutSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "Scout")
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +54,7 @@ func (o *OpenAIProvider) Scout(request ScoutRequest) (*ScoutResult, error) {
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析 Scout 输出: %w", err)
 	}
+	result.Usage = responsesUsage(data, retries)
 	return validateScoutResult(result, request)
 }
 

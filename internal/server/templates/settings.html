@@ -76,12 +76,26 @@
         <td style="padding:0.5rem"><input type="text" name="evidence_reviewer_model" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem">Curator（Brief 策展）</td>
+        <td style="padding:0.5rem"><select name="curator_provider"><option value="" {{if eq .CuratorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .CuratorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .CuratorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td style="padding:0.5rem"><input type="text" name="curator_model" value="{{.CuratorModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">Style Editor（风格审校）</td>
         <td style="padding:0.5rem"><select name="style_editor_provider"><option value="" {{if eq .StyleEditorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .StyleEditorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .StyleEditorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
         <td style="padding:0.5rem"><input type="text" name="style_editor_model" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
       </tr>
     </tbody>
   </table>
+  <h3>编辑角色故障切换</h3>
+  <p class="meta">仅在首选调用失败时使用；备用 Provider 仍会重新执行预算和 ModelDataPolicy 检查。留空表示不故障切换。</p>
+  {{with .Fallbacks}}
+  {{$r := index . "writer"}}<label>Writer 备用 Provider <input name="writer_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Writer 备用模型 <input name="writer_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
+  {{$r := index . "scout"}}<label>Scout 备用 Provider <input name="scout_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Scout 备用模型 <input name="scout_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
+  {{$r := index . "curator"}}<label>Curator 备用 Provider <input name="curator_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Curator 备用模型 <input name="curator_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
+  {{$r := index . "evidence_reviewer"}}<label>EvidenceReviewer 备用 Provider <input name="evidence_reviewer_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>EvidenceReviewer 备用模型 <input name="evidence_reviewer_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
+  {{$r := index . "style_editor"}}<label>StyleEditor 备用 Provider <input name="style_editor_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>StyleEditor 备用模型 <input name="style_editor_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
+  {{end}}
   <button type="submit">保存</button>
 </form>
 {{if .Saved}}<p class="success">已保存。新设置对后续任务立即生效。</p>{{end}}

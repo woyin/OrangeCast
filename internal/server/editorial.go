@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +39,12 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "加载编辑画像失败", http.StatusInternalServerError)
 		return
 	}
-	data := map[string]any{"Profiles": profiles, "CSRF": auth.CSRFValue(r)}
+	prices, err := srv.store.ListModelPrices(r.Context())
+	if err != nil {
+		http.Error(w, "加载模型价格失败", http.StatusInternalServerError)
+		return
+	}
+	data := map[string]any{"Profiles": profiles, "ModelPrices": prices, "CSRF": auth.CSRFValue(r)}
 	profileID := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if profileID == "" && len(profiles) > 0 {
 		profileID = profiles[0].ID
@@ -79,6 +85,12 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Scopes"] = scopes
+		options, err := srv.store.ListSourceOptions(r.Context())
+		if err != nil {
+			http.Error(w, "加载可选素材失败", http.StatusInternalServerError)
+			return
+		}
+		data["SourceOptions"] = options
 	}
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
@@ -140,11 +152,6 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		http.Error(w, "读取编辑画像失败", http.StatusInternalServerError)
 		return
 	}
-	request, err := srv.writerRequest(r, profile, brief, proposal)
-	if err != nil {
-		http.Error(w, "素材不满足写作条件："+err.Error(), http.StatusBadRequest)
-		return
-	}
 	settings, err := srv.store.GetSettings(r.Context())
 	if err != nil {
 		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
@@ -156,28 +163,117 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
 		return
 	}
-	result, err := bundle.Writer.WriteArticle(request)
+	claimed, err := srv.store.ClaimEditorialTask(r.Context(), "writer_initial", brief.ID)
 	if err != nil {
-		http.Error(w, "生成文章失败："+err.Error(), http.StatusBadRequest)
+		http.Error(w, "领取 Writer 任务失败", http.StatusInternalServerError)
 		return
 	}
-	draft, err := srv.store.CreateArticleDraft(r.Context(), brief.ID, result.Title)
+	if !claimed {
+		if existing, findErr := srv.store.GetArticleDraftByBrief(r.Context(), brief.ID); findErr == nil {
+			http.Redirect(w, r, "/workbench/drafts/"+existing.ID, http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "该 Brief 的 Writer 任务正在执行，请稍后刷新", http.StatusConflict)
+		return
+	}
+	finishContext := context.WithoutCancel(r.Context())
+	finished := false
+	defer func() {
+		if !finished {
+			_ = srv.store.FinishEditorialTask(finishContext, "writer_initial", brief.ID, errors.New("Writer 任务未完成"))
+		}
+	}()
+	request, err := srv.writerRequest(r, profile, brief, proposal, bundle.Writer.Name())
+	if err != nil {
+		http.Error(w, "素材不满足写作条件："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	draft, err := srv.store.GetArticleDraftByBrief(r.Context(), brief.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		draft, err = srv.store.CreateArticleDraft(r.Context(), brief.ID, proposal.Title)
+	}
 	if err != nil {
 		http.Error(w, "创建文章草稿失败", http.StatusInternalServerError)
 		return
 	}
+	if draft.CurrentRevisionID != nil {
+		_ = srv.store.FinishEditorialTask(finishContext, "writer_initial", brief.ID, nil)
+		finished = true
+		http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
+		return
+	}
 	providerName := bundle.Writer.Name()
 	modelName := provider.EffectiveTaskModel(taskConfig)
+	promptVersion := provider.ArticleWriterPromptVersion
+	var result *provider.ArticleWritingResult
+	var cost *int64
+	if payload, cacheErr := srv.store.GetEditorialTaskResult(r.Context(), "writer_initial", brief.ID); cacheErr == nil {
+		var cached cachedWriterResult
+		if json.Unmarshal([]byte(payload), &cached) != nil || cached.Result == nil {
+			http.Error(w, "Writer 缓存结果损坏", http.StatusInternalServerError)
+			return
+		}
+		result, providerName, modelName, promptVersion = cached.Result, cached.Provider, cached.Model, cached.PromptVersion
+		cachedCost := cached.CostCents
+		cost = &cachedCost
+	} else if !errors.Is(cacheErr, store.ErrNotFound) {
+		http.Error(w, "读取 Writer 缓存失败", http.StatusInternalServerError)
+		return
+	}
+	if result == nil {
+		if err := srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		result, err = bundle.Writer.WriteArticle(r.Context(), request)
+		if err != nil {
+			primary := providerName + "/" + modelName
+			fallbackConfig, ok := srv.editorialFallbackConfig(r.Context(), editorialRoleWriter)
+			fallbackBundle, fallbackErr := srv.bundleFor(fallbackConfig)
+			if !ok || fallbackErr != nil || fallbackBundle.Writer == nil {
+				http.Error(w, "生成文章失败："+err.Error(), http.StatusBadRequest)
+				return
+			}
+			providerName, modelName = fallbackBundle.Writer.Name(), provider.EffectiveTaskModel(fallbackConfig)
+			request, fallbackErr = srv.writerRequest(r, profile, brief, proposal, providerName)
+			if fallbackErr == nil {
+				fallbackErr = srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName)
+			}
+			if fallbackErr == nil {
+				result, fallbackErr = fallbackBundle.Writer.WriteArticle(r.Context(), request)
+			}
+			if fallbackErr != nil {
+				http.Error(w, "Writer 首选与备用 Provider 均失败："+fallbackErr.Error(), http.StatusBadRequest)
+				return
+			}
+			result.Usage.FallbackFrom = primary
+		}
+		cost, err = srv.recordEditorialUsage(r.Context(), profile.ID, &draft.ID, "writer_initial", "draft", draft.ID, providerName, modelName, promptVersion, result.Usage)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		encoded, _ := json.Marshal(cachedWriterResult{Result: result, Provider: providerName, Model: modelName, PromptVersion: promptVersion, CostCents: *cost})
+		if err := srv.store.SaveEditorialTaskResult(r.Context(), "writer_initial", brief.ID, string(encoded)); err != nil {
+			http.Error(w, "缓存 Writer 结果失败", http.StatusInternalServerError)
+			return
+		}
+	}
 	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
 		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
 	}
-	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName, Model: &modelName}, evidenceMaps)
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "writer", Provider: &providerName, Model: &modelName, PromptVersion: &promptVersion, CostCents: cost}, evidenceMaps)
 	if err != nil {
 		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
 		return
 	}
+	if err := srv.store.FinishEditorialTask(finishContext, "writer_initial", brief.ID, nil); err != nil {
+		http.Error(w, "完成 Writer 任务记录失败", http.StatusInternalServerError)
+		return
+	}
+	finished = true
 	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
 }
 
@@ -212,7 +308,18 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		http.Error(w, "读取编辑画像失败", http.StatusBadRequest)
 		return
 	}
-	request, err := srv.writerRequest(r, profile, brief, proposal)
+	settings, err := srv.store.GetSettings(r.Context())
+	if err != nil {
+		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
+		return
+	}
+	taskConfig := editorialTaskConfig(settings, editorialRoleWriter)
+	bundle, err := srv.bundleFor(taskConfig)
+	if err != nil || bundle.Writer == nil {
+		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
+		return
+	}
+	request, err := srv.writerRequest(r, profile, brief, proposal, bundle.Writer.Name())
 	if err != nil {
 		http.Error(w, "素材不满足写作条件："+err.Error(), http.StatusBadRequest)
 		return
@@ -233,30 +340,54 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 		return
 	}
 	request.Title, request.ExistingMarkdown = revision.Title, revision.Markdown
-	settings, err := srv.store.GetSettings(r.Context())
-	if err != nil {
-		http.Error(w, "读取 Writer 配置失败", http.StatusInternalServerError)
-		return
-	}
-	taskConfig := editorialTaskConfig(settings, editorialRoleWriter)
-	bundle, err := srv.bundleFor(taskConfig)
-	if err != nil || bundle.Writer == nil {
-		http.Error(w, "Writer Provider 不可用", http.StatusBadRequest)
-		return
-	}
-	result, err := bundle.Writer.WriteArticle(request)
-	if err != nil {
-		http.Error(w, "生成新修订失败："+err.Error(), http.StatusBadRequest)
-		return
-	}
 	providerName := bundle.Writer.Name()
 	modelName := provider.EffectiveTaskModel(taskConfig)
+	promptVersion := provider.ArticleWriterPromptVersion
+	if err := srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	result, err := bundle.Writer.WriteArticle(r.Context(), request)
+	if err != nil {
+		primary := providerName + "/" + modelName
+		fallbackConfig, ok := srv.editorialFallbackConfig(r.Context(), editorialRoleWriter)
+		fallbackBundle, fallbackErr := srv.bundleFor(fallbackConfig)
+		if !ok || fallbackErr != nil || fallbackBundle.Writer == nil {
+			http.Error(w, "生成新修订失败："+err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerName, modelName = fallbackBundle.Writer.Name(), provider.EffectiveTaskModel(fallbackConfig)
+		request, fallbackErr = srv.writerRequest(r, profile, brief, proposal, providerName)
+		if fallbackErr == nil {
+			for _, review := range reviews {
+				var issues []string
+				if json.Unmarshal([]byte(review.IssuesJSON), &issues) == nil {
+					request.RevisionFeedback = append(request.RevisionFeedback, issues...)
+				}
+			}
+			request.Title, request.ExistingMarkdown = revision.Title, revision.Markdown
+			fallbackErr = srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName)
+		}
+		if fallbackErr == nil {
+			result, fallbackErr = fallbackBundle.Writer.WriteArticle(r.Context(), request)
+		}
+		if fallbackErr != nil {
+			http.Error(w, "Writer 首选与备用 Provider 均失败："+fallbackErr.Error(), http.StatusBadRequest)
+			return
+		}
+		result.Usage.FallbackFrom = primary
+	}
+	cost, err := srv.recordEditorialUsage(r.Context(), profile.ID, &draft.ID, "writer_revision", "revision", revision.ID, providerName, modelName, promptVersion, result.Usage)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	evidenceMaps := make([]models.EvidenceMap, 0, len(result.EvidenceMaps))
 	for _, mapping := range result.EvidenceMaps {
 		ids, _ := json.Marshal(mapping.KeyPointIDs)
 		evidenceMaps = append(evidenceMaps, models.EvidenceMap{Kind: models.EvidenceMapKind(mapping.Kind), Excerpt: mapping.Excerpt, KeyPointIDs: string(ids)})
 	}
-	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName, Model: &modelName}, evidenceMaps)
+	_, err = srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{DraftID: draft.ID, Title: result.Title, Markdown: result.Markdown, Origin: "ai_edit", Provider: &providerName, Model: &modelName, PromptVersion: &promptVersion, CostCents: cost}, evidenceMaps)
 	if err != nil {
 		http.Error(w, "保存 Writer 修订或证据映射失败", http.StatusInternalServerError)
 		return
@@ -264,7 +395,7 @@ func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http
 	http.Redirect(w, r, "/workbench/drafts/"+draft.ID, http.StatusSeeOther)
 }
 
-func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfile, brief *models.ArticleBrief, proposal *models.ArticleProposal) (provider.ArticleWritingRequest, error) {
+func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfile, brief *models.ArticleBrief, proposal *models.ArticleProposal, providerName string) (provider.ArticleWritingRequest, error) {
 	var keyPointIDs []string
 	if err := json.Unmarshal([]byte(brief.MaterialPlan), &keyPointIDs); err != nil || len(keyPointIDs) == 0 {
 		return provider.ArticleWritingRequest{}, errors.New("Brief 必须选择至少一个 KeyPoint")
@@ -284,7 +415,7 @@ func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfi
 		if err != nil || !usable {
 			return provider.ArticleWritingRequest{}, errors.New("存在未授权或不可公开的素材")
 		}
-		external, err := srv.store.CanSendSourceToExternalProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID)
+		external, err := srv.store.CanSendSourceToProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID, providerName)
 		if err != nil || !external {
 			return provider.ArticleWritingRequest{}, errors.New("存在不允许发送给外部 Writer 的素材")
 		}
@@ -415,17 +546,17 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 	if len(revisions) > 0 {
 		currentMarkdown = revisions[0].Markdown
 	}
+	allReviews, err := srv.store.ListArticleReviewsForDraft(r.Context(), id)
+	if err != nil {
+		http.Error(w, "加载审校记录失败", http.StatusInternalServerError)
+		return
+	}
 	for _, revision := range revisions {
 		byID[revision.ID] = revision
 		if draft.CurrentRevisionID != nil && revision.ID == *draft.CurrentRevisionID {
 			currentRevision = revision
 		}
-		reviews, err := srv.store.ListArticleReviews(r.Context(), revision.ID)
-		if err != nil {
-			http.Error(w, "加载审校记录失败", http.StatusInternalServerError)
-			return
-		}
-		for _, review := range reviews {
+		for _, review := range allReviews[revision.ID] {
 			view := articleReviewView{ArticleReview: review}
 			if err := json.Unmarshal([]byte(review.IssuesJSON), &view.Issues); err != nil {
 				view.Issues = []string{"审校记录格式异常"}
@@ -514,30 +645,6 @@ func (srv *Server) inheritedEvidenceMaps(r *http.Request, draftID, markdown stri
 	return inherited, nil
 }
 
-// handleArticleReviewCreate records an exact-revision review; evidence status drives the hard gate.
-func (srv *Server) handleArticleReviewCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
-		return
-	}
-	review, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{
-		RevisionID: strings.TrimSpace(r.FormValue("revision_id")),
-		Kind:       strings.TrimSpace(r.FormValue("kind")),
-		Status:     strings.TrimSpace(r.FormValue("status")),
-		IssuesJSON: strings.TrimSpace(r.FormValue("issues")),
-	})
-	if err != nil {
-		http.Error(w, "记录审校失败："+err.Error(), http.StatusBadRequest)
-		return
-	}
-	revision, err := srv.store.GetArticleRevision(r.Context(), review.RevisionID)
-	if err != nil {
-		http.Error(w, "读取文章修订失败", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
-}
-
 // handleEvidenceReviewRun executes an independent evidence review for the current exact revision.
 func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -547,11 +654,6 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 	revision, err := srv.store.GetArticleRevision(r.Context(), strings.TrimSpace(r.FormValue("revision_id")))
 	if err != nil {
 		http.Error(w, "读取文章修订失败", http.StatusBadRequest)
-		return
-	}
-	request, err := srv.evidenceReviewRequest(r, revision)
-	if err != nil {
-		http.Error(w, "证据映射不满足审校条件："+err.Error(), http.StatusBadRequest)
 		return
 	}
 	settings, err := srv.store.GetSettings(r.Context())
@@ -565,15 +667,53 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "EvidenceReviewer Provider 不可用", http.StatusBadRequest)
 		return
 	}
-	result, err := bundle.EvidenceReviewer.ReviewEvidence(request)
+	request, err := srv.evidenceReviewRequest(r, revision, bundle.EvidenceReviewer.Name())
 	if err != nil {
-		http.Error(w, "证据审校失败："+err.Error(), http.StatusBadRequest)
+		http.Error(w, "证据映射不满足审校条件："+err.Error(), http.StatusBadRequest)
 		return
 	}
-	issues, _ := json.Marshal(result.Issues)
+	draft, _, _, profile, err := srv.editorialContextForRevision(r.Context(), revision)
+	if err != nil {
+		http.Error(w, "读取文章上下文失败", http.StatusBadRequest)
+		return
+	}
 	providerName := bundle.EvidenceReviewer.Name()
 	modelName := provider.EffectiveTaskModel(taskConfig)
-	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "evidence", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName}); err != nil {
+	promptVersion := provider.EvidenceReviewerPromptVersion
+	if err := srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	result, err := bundle.EvidenceReviewer.ReviewEvidence(r.Context(), request)
+	if err != nil {
+		primary := providerName + "/" + modelName
+		fallbackConfig, ok := srv.editorialFallbackConfig(r.Context(), editorialRoleEvidence)
+		fallbackBundle, fallbackErr := srv.bundleFor(fallbackConfig)
+		if !ok || fallbackErr != nil || fallbackBundle.EvidenceReviewer == nil {
+			http.Error(w, "证据审校失败："+err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerName, modelName = fallbackBundle.EvidenceReviewer.Name(), provider.EffectiveTaskModel(fallbackConfig)
+		request, fallbackErr = srv.evidenceReviewRequest(r, revision, providerName)
+		if fallbackErr == nil {
+			fallbackErr = srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName)
+		}
+		if fallbackErr == nil {
+			result, fallbackErr = fallbackBundle.EvidenceReviewer.ReviewEvidence(r.Context(), request)
+		}
+		if fallbackErr != nil {
+			http.Error(w, "EvidenceReviewer 首选与备用 Provider 均失败："+fallbackErr.Error(), http.StatusBadRequest)
+			return
+		}
+		result.Usage.FallbackFrom = primary
+	}
+	issues, _ := json.Marshal(result.Issues)
+	cost, err := srv.recordEditorialUsage(r.Context(), profile.ID, &draft.ID, "evidence_review", "revision", revision.ID, providerName, modelName, promptVersion, result.Usage)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "evidence", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName, PromptVersion: &promptVersion, CostCents: cost}); err != nil {
 		http.Error(w, "保存证据审校失败", http.StatusInternalServerError)
 		return
 	}
@@ -607,15 +747,58 @@ func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "StyleEditor Provider 不可用", http.StatusBadRequest)
 		return
 	}
-	result, err := bundle.StyleEditor.ReviewStyle(request)
+	mapsForPolicy, err := srv.store.ListEvidenceMaps(r.Context(), revision.ID)
 	if err != nil {
-		http.Error(w, "风格审校失败："+err.Error(), http.StatusBadRequest)
+		http.Error(w, "读取文章素材失败", http.StatusInternalServerError)
 		return
 	}
-	issues, _ := json.Marshal(result.Issues)
+	if len(mapsForPolicy) > 0 {
+		if _, err := srv.evidenceReviewRequest(r, revision, bundle.StyleEditor.Name()); err != nil {
+			http.Error(w, "文章素材不可发送给 StyleEditor："+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	draft, _, _, profile, err := srv.editorialContextForRevision(r.Context(), revision)
+	if err != nil {
+		http.Error(w, "读取文章上下文失败", http.StatusBadRequest)
+		return
+	}
 	providerName := bundle.StyleEditor.Name()
 	modelName := provider.EffectiveTaskModel(taskConfig)
-	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "style", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName}); err != nil {
+	promptVersion := provider.StyleEditorPromptVersion
+	if err := srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	result, err := bundle.StyleEditor.ReviewStyle(r.Context(), request)
+	if err != nil {
+		primary := providerName + "/" + modelName
+		fallbackConfig, ok := srv.editorialFallbackConfig(r.Context(), editorialRoleStyle)
+		fallbackBundle, fallbackErr := srv.bundleFor(fallbackConfig)
+		if !ok || fallbackErr != nil || fallbackBundle.StyleEditor == nil {
+			http.Error(w, "风格审校失败："+err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerName, modelName = fallbackBundle.StyleEditor.Name(), provider.EffectiveTaskModel(fallbackConfig)
+		if _, fallbackErr = srv.evidenceReviewRequest(r, revision, providerName); fallbackErr == nil {
+			fallbackErr = srv.checkEditorialBudget(r.Context(), profile.ID, &draft.ID, providerName, modelName)
+		}
+		if fallbackErr == nil {
+			result, fallbackErr = fallbackBundle.StyleEditor.ReviewStyle(r.Context(), request)
+		}
+		if fallbackErr != nil {
+			http.Error(w, "StyleEditor 首选与备用 Provider 均失败："+fallbackErr.Error(), http.StatusBadRequest)
+			return
+		}
+		result.Usage.FallbackFrom = primary
+	}
+	issues, _ := json.Marshal(result.Issues)
+	cost, err := srv.recordEditorialUsage(r.Context(), profile.ID, &draft.ID, "style_review", "revision", revision.ID, providerName, modelName, promptVersion, result.Usage)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := srv.store.CreateArticleReview(r.Context(), models.ArticleReview{RevisionID: revision.ID, Kind: "style", Status: result.Status, IssuesJSON: string(issues), Provider: &providerName, Model: &modelName, PromptVersion: &promptVersion, CostCents: cost}); err != nil {
 		http.Error(w, "保存风格审校失败", http.StatusInternalServerError)
 		return
 	}
@@ -623,35 +806,15 @@ func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) 
 }
 
 func (srv *Server) styleReviewRequest(r *http.Request, revision *models.ArticleRevision) (provider.StyleReviewRequest, error) {
-	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
-	if err != nil {
-		return provider.StyleReviewRequest{}, err
-	}
-	brief, err := srv.store.GetArticleBrief(r.Context(), draft.BriefID)
-	if err != nil {
-		return provider.StyleReviewRequest{}, err
-	}
-	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
-	if err != nil {
-		return provider.StyleReviewRequest{}, err
-	}
-	profile, err := srv.store.GetEditorialProfile(r.Context(), proposal.EditorialProfileID)
+	_, brief, _, profile, err := srv.editorialContextForRevision(r.Context(), revision)
 	if err != nil {
 		return provider.StyleReviewRequest{}, err
 	}
 	return provider.StyleReviewRequest{Title: revision.Title, Markdown: revision.Markdown, TargetAudience: profile.TargetAudience, Voice: profile.Voice, StyleGuide: profile.StyleGuide, TargetLength: brief.TargetLength}, nil
 }
 
-func (srv *Server) evidenceReviewRequest(r *http.Request, revision *models.ArticleRevision) (provider.EvidenceReviewRequest, error) {
-	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
-	if err != nil {
-		return provider.EvidenceReviewRequest{}, err
-	}
-	brief, err := srv.store.GetArticleBrief(r.Context(), draft.BriefID)
-	if err != nil {
-		return provider.EvidenceReviewRequest{}, err
-	}
-	proposal, err := srv.store.GetArticleProposal(r.Context(), brief.ProposalID)
+func (srv *Server) evidenceReviewRequest(r *http.Request, revision *models.ArticleRevision, providerName string) (provider.EvidenceReviewRequest, error) {
+	_, _, proposal, _, err := srv.editorialContextForRevision(r.Context(), revision)
 	if err != nil {
 		return provider.EvidenceReviewRequest{}, err
 	}
@@ -681,7 +844,7 @@ func (srv *Server) evidenceReviewRequest(r *http.Request, revision *models.Artic
 			if err != nil || !usable {
 				return provider.EvidenceReviewRequest{}, errors.New("EvidenceMap 包含未授权或不可公开素材")
 			}
-			external, err := srv.store.CanSendSourceToExternalProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID)
+			external, err := srv.store.CanSendSourceToProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID, providerName)
 			if err != nil || !external {
 				return provider.EvidenceReviewRequest{}, errors.New("EvidenceMap 包含不可发送给审校模型的素材")
 			}
@@ -708,6 +871,13 @@ func (srv *Server) handleEditorialSourceScope(w http.ResponseWriter, r *http.Req
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
 	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
 	sourceID := strings.TrimSpace(r.FormValue("source_id"))
+	if ref := strings.TrimSpace(r.FormValue("source_ref")); ref != "" {
+		parts := strings.SplitN(ref, "|", 2)
+		if len(parts) == 2 {
+			sourceType = models.SourceType(parts[0])
+			sourceID = parts[1]
+		}
+	}
 	var err error
 	if r.FormValue("action") == "revoke" {
 		err = srv.store.RevokeSourceScope(r.Context(), profileID, sourceType, sourceID)
@@ -733,13 +903,19 @@ func (srv *Server) handleEditorialProfileCreate(w http.ResponseWriter, r *http.R
 		http.Error(w, "月度预算必须是非负整数", http.StatusBadRequest)
 		return
 	}
+	articleBudget, err := optionalBudget(r.FormValue("per_article_budget_cents"))
+	if err != nil {
+		http.Error(w, "单篇预算必须是非负整数", http.StatusBadRequest)
+		return
+	}
 	profile, err := srv.store.CreateEditorialProfile(r.Context(), models.EditorialProfile{
-		Name:               name,
-		TargetAudience:     strings.TrimSpace(r.FormValue("target_audience")),
-		Voice:              strings.TrimSpace(r.FormValue("voice")),
-		StyleGuide:         strings.TrimSpace(r.FormValue("style_guide")),
-		SourceAttribution:  strings.TrimSpace(r.FormValue("source_attribution")),
-		MonthlyBudgetCents: budget,
+		Name:                  name,
+		TargetAudience:        strings.TrimSpace(r.FormValue("target_audience")),
+		Voice:                 strings.TrimSpace(r.FormValue("voice")),
+		StyleGuide:            strings.TrimSpace(r.FormValue("style_guide")),
+		SourceAttribution:     strings.TrimSpace(r.FormValue("source_attribution")),
+		MonthlyBudgetCents:    budget,
+		PerArticleBudgetCents: articleBudget,
 	})
 	if err != nil {
 		http.Error(w, "创建编辑画像失败："+err.Error(), http.StatusBadRequest)

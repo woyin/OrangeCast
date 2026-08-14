@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -241,7 +242,7 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataLocalOnly); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Scout must reject local-only material")
 	}
 	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataExternalAllowed); err != nil {
@@ -250,7 +251,7 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='[]' WHERE id=?`, keyPoints[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Scout must reject KeyPoint without Citation")
 	}
 	if _, err := srv.store.DB.Exec(`UPDATE keypoint_index SET citations_json='["seg-1"]' WHERE id=?`, keyPoints[0].ID); err != nil {
@@ -263,7 +264,7 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 	if err := srv.store.AddKeyPointToTheme(t.Context(), oneSourceTheme.ID, keyPoints[0].ID, "supports"); err != nil {
 		t.Fatal(err)
 	}
-	request, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile)
+	request, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake")
 	if err != nil || len(request.Themes) != 1 {
 		t.Fatalf("single-source Theme should be skipped, not included: request=%+v err=%v", request, err)
 	}
@@ -288,7 +289,7 @@ func TestScoutSurfacesThemeMaterialAndSettingsFailures(t *testing.T) {
 	if _, err := srv.store.DB.Exec(`DROP TABLE theme_keypoints`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Theme material query failure should surface")
 	}
 	_ = theme
@@ -310,7 +311,7 @@ func TestScoutRequestRejectsArchivedAndMissingThemeMaterial(t *testing.T) {
 	if err := srv.store.ArchiveSource(t.Context(), models.SourceEpisode, episodes[0].ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Scout must reject archived source material")
 	}
 	if err := srv.store.ArchiveSource(t.Context(), models.SourceEpisode, episodes[0].ID, false); err != nil {
@@ -319,7 +320,7 @@ func TestScoutRequestRejectsArchivedAndMissingThemeMaterial(t *testing.T) {
 	if _, err := srv.store.DB.Exec(`DELETE FROM keypoint_index WHERE id=?`, keyPoints[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Scout must reject missing theme KeyPoint")
 	}
 }
@@ -330,14 +331,14 @@ func TestScoutRequestSurfacesThemeListFailure(t *testing.T) {
 	if _, err := srv.store.DB.Exec(`DROP TABLE themes`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile); err == nil {
+	if _, err := srv.scoutRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, "fake"); err == nil {
 		t.Fatal("Scout must surface Theme list query failures")
 	}
 }
 
 type fakeScout struct{ requests []provider.ScoutRequest }
 
-func (f *fakeScout) Scout(request provider.ScoutRequest) (*provider.ScoutResult, error) {
+func (f *fakeScout) Scout(_ context.Context, request provider.ScoutRequest) (*provider.ScoutResult, error) {
 	f.requests = append(f.requests, request)
 	materials := request.Themes[0].Materials
 	return &provider.ScoutResult{Proposals: []provider.ScoutProposal{{Kind: "evergreen", Title: "跨集工程成本", Thesis: "论点", Audience: "开发者", Rationale: "跨集价值", CandidateKeyPointIDs: []string{materials[0].KeyPointID, materials[1].KeyPointID}}}}, nil
@@ -347,7 +348,7 @@ func (f *fakeScout) Name() string { return "fake-scout" }
 
 type failingScout struct{}
 
-func (failingScout) Scout(provider.ScoutRequest) (*provider.ScoutResult, error) {
+func (failingScout) Scout(context.Context, provider.ScoutRequest) (*provider.ScoutResult, error) {
 	return nil, errors.New("scout failed")
 }
 

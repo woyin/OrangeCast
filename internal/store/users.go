@@ -109,15 +109,15 @@ func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
 	st := &models.Settings{}
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT transcription_model, analysis_model, highlight_model, qa_model,
-		        writer_model, scout_model, evidence_reviewer_model, style_editor_model,
+		        writer_model, scout_model, curator_model, evidence_reviewer_model, style_editor_model,
 		        transcription_provider, analysis_provider, highlight_provider, qa_provider,
-		        writer_provider, scout_provider, evidence_reviewer_provider, style_editor_provider,
+		        writer_provider, scout_provider, curator_provider, evidence_reviewer_provider, style_editor_provider,
 		        groq_api_key, groq_base_url, openai_api_key, openai_base_url
 		 FROM settings WHERE id = 1`).
 		Scan(&st.TranscriptionModel, &st.AnalysisModel, &st.HighlightModel, &st.QAModel,
-			&st.WriterModel, &st.ScoutModel, &st.EvidenceReviewerModel, &st.StyleEditorModel,
+			&st.WriterModel, &st.ScoutModel, &st.CuratorModel, &st.EvidenceReviewerModel, &st.StyleEditorModel,
 			&st.TranscriptionProvider, &st.AnalysisProvider, &st.HighlightProvider, &st.QAProvider,
-			&st.WriterProvider, &st.ScoutProvider, &st.EvidenceReviewerProvider, &st.StyleEditorProvider,
+			&st.WriterProvider, &st.ScoutProvider, &st.CuratorProvider, &st.EvidenceReviewerProvider, &st.StyleEditorProvider,
 			&st.GroqAPIKey, &st.GroqBaseURL, &st.OpenAIAPIKey, &st.OpenAIBaseURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = s.DB.ExecContext(ctx,
@@ -137,11 +137,11 @@ func (s *Store) GetSettings(ctx context.Context) (*models.Settings, error) {
 func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 	_, err := s.DB.ExecContext(ctx,
 		`INSERT INTO settings (id, transcription_model, analysis_model, highlight_model, qa_model,
-		    writer_model, scout_model, evidence_reviewer_model, style_editor_model,
+		    writer_model, scout_model, curator_model, evidence_reviewer_model, style_editor_model,
 		    transcription_provider, analysis_provider, highlight_provider, qa_provider,
-		    writer_provider, scout_provider, evidence_reviewer_provider, style_editor_provider,
+		    writer_provider, scout_provider, curator_provider, evidence_reviewer_provider, style_editor_provider,
 		    groq_api_key, groq_base_url, openai_api_key, openai_base_url)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   transcription_model = excluded.transcription_model,
 		   analysis_model = excluded.analysis_model,
@@ -149,6 +149,7 @@ func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 		   qa_model = excluded.qa_model,
 		   writer_model = excluded.writer_model,
 		   scout_model = excluded.scout_model,
+		   curator_model = excluded.curator_model,
 		   evidence_reviewer_model = excluded.evidence_reviewer_model,
 		   style_editor_model = excluded.style_editor_model,
 		   transcription_provider = excluded.transcription_provider,
@@ -157,6 +158,7 @@ func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 		   qa_provider = excluded.qa_provider,
 		   writer_provider = excluded.writer_provider,
 		   scout_provider = excluded.scout_provider,
+		   curator_provider = excluded.curator_provider,
 		   evidence_reviewer_provider = excluded.evidence_reviewer_provider,
 		   style_editor_provider = excluded.style_editor_provider,
 		   groq_api_key = excluded.groq_api_key,
@@ -165,9 +167,9 @@ func (s *Store) UpdateSettings(ctx context.Context, st *models.Settings) error {
 		   openai_base_url = excluded.openai_base_url,
 		   updated_at = datetime('now')`,
 		st.TranscriptionModel, st.AnalysisModel, st.HighlightModel, st.QAModel,
-		st.WriterModel, st.ScoutModel, st.EvidenceReviewerModel, st.StyleEditorModel,
+		st.WriterModel, st.ScoutModel, st.CuratorModel, st.EvidenceReviewerModel, st.StyleEditorModel,
 		st.TranscriptionProvider, st.AnalysisProvider, st.HighlightProvider, st.QAProvider,
-		st.WriterProvider, st.ScoutProvider, st.EvidenceReviewerProvider, st.StyleEditorProvider,
+		st.WriterProvider, st.ScoutProvider, st.CuratorProvider, st.EvidenceReviewerProvider, st.StyleEditorProvider,
 		st.GroqAPIKey, st.GroqBaseURL, st.OpenAIAPIKey, st.OpenAIBaseURL)
 	return err
 }

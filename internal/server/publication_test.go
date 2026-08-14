@@ -63,7 +63,14 @@ func TestPublicationPackageRequiresReadyCurrentRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: first.ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]"}); err != nil {
+	if _, err := srv.store.CreateEvidenceMap(ctx, models.EvidenceMap{RevisionID: first.ID, Kind: models.EvidenceRhetorical, Excerpt: "第一版", KeyPointIDs: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+	reviewerProvider, reviewerModel := "test-reviewer", "test-model"
+	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: first.ID, Kind: "style", Status: "passed", IssuesJSON: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: first.ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]", Provider: &reviewerProvider, Model: &reviewerModel}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,13 +87,19 @@ func TestPublicationPackageRequiresReadyCurrentRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := srv.store.CreateEvidenceMap(ctx, models.EvidenceMap{RevisionID: second.ID, Kind: models.EvidenceRhetorical, Excerpt: "第二版", KeyPointIDs: "[]"}); err != nil {
+		t.Fatal(err)
+	}
 	if rec := call(first.ID); rec.Code != http.StatusConflict {
 		t.Fatalf("passed historic revision must not publish after an edit: %d", rec.Code)
 	}
 	if rec := call(second.ID); rec.Code != http.StatusConflict {
 		t.Fatalf("unreviewed current revision must not publish: %d", rec.Code)
 	}
-	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]"}); err != nil {
+	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "style", Status: "passed", IssuesJSON: "[]"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.CreateArticleReview(ctx, models.ArticleReview{RevisionID: second.ID, Kind: "evidence", Status: "passed", IssuesJSON: "[]", Provider: &reviewerProvider, Model: &reviewerModel}); err != nil {
 		t.Fatal(err)
 	}
 	if rec := call(second.ID); rec.Code != http.StatusOK {

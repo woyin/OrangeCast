@@ -20,8 +20,8 @@ import (
 // 默认重试策略（第 7 题最小实现：指数退避，最多 3 次）。
 const (
 	maxRetries     = 3
-	baseBackoff    = 2 * time.Second
-	maxBackoff     = 16 * time.Second
+	baseBackoff    = 250 * time.Millisecond
+	maxBackoff     = 2 * time.Second
 	requestTimeout = 5 * time.Minute // 转录/分析可能较慢
 )
 
@@ -36,8 +36,17 @@ func doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resp, err := httpClient.Do(req.Clone(ctx))
+		attemptRequest := req.Clone(ctx)
+		if attempt > 0 && req.GetBody != nil {
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return nil, bodyErr
+			}
+			attemptRequest.Body = body
+		}
+		resp, err := httpClient.Do(attemptRequest)
 		if err == nil && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+			resp.Header.Set("X-CloudWisePod-Retry-Count", strconv.Itoa(attempt))
 			return resp, nil // 成功或非可重试错误
 		}
 		// 读取错误响应体后关闭（每次循环 body 不能复用）
@@ -116,24 +125,30 @@ func uploadFileAsMultipart(ctx context.Context, url, apiKey, fieldName, filePath
 
 // postJSON 发送 JSON 请求并返回响应体（用于 chat completions）。
 func postJSON(ctx context.Context, url, apiKey string, payload any) ([]byte, int, error) {
+	data, code, _, err := postJSONWithMeta(ctx, url, apiKey, payload)
+	return data, code, err
+}
+
+func postJSONWithMeta(ctx context.Context, url, apiKey string, payload any) ([]byte, int, int, error) {
 	buf, err := json.Marshal(payload)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := doWithRetry(ctx, req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	return data, resp.StatusCode, err
+	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
+	return data, resp.StatusCode, retries, err
 }
 
 // codeBlockRe 匹配 markdown 代码块包裹（```json ... ``` 或 ``` ... ```）。

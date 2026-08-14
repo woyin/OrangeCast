@@ -40,8 +40,7 @@
   <h2>素材范围</h2>
   <form method="post" action="/workbench/sources" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
     <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{.ID}}">
-    <label>类型 <select name="source_type"><option value="episode">Episode</option><option value="upload">Upload</option><option value="document">Document</option></select></label>
-    <label>Source ID <input name="source_id" required placeholder="从素材页复制 ID"></label>
+	<label>素材 <select name="source_ref" required><option value="">选择素材…</option>{{range $.SourceOptions}}<option value="{{.SourceType}}|{{.SourceID}}">{{.SourceType}} · {{.Title}}</option>{{end}}</select></label>
     <button class="btn" type="submit">授权素材</button>
   </form>
   {{range $.Scopes}}
@@ -57,6 +56,7 @@
       {{if eq .Status "proposed"}}<form method="post" action="/workbench/proposals/status"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="proposal_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受并写 Brief</button></form>{{end}}
       </div>
       {{if eq .Status "accepted"}}
+      <form method="post" action="/workbench/curate"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="proposal_id" value="{{.ID}}"><button class="btn" type="submit">让 Curator 生成 Brief</button></form>
       <form method="post" action="/workbench/briefs" class="panel" style="margin:.5rem 0 1rem"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><input type="hidden" name="proposal_id" value="{{.ID}}">
         <label>核心论点 <input name="thesis" value="{{.Thesis}}" required></label><label>目标读者 <input name="audience" value="{{.Audience}}"></label><label>文章结构 <textarea name="outline" rows="3" required># 标题
 ## 开场
@@ -65,7 +65,7 @@
       </form>
       {{end}}
     {{else}}
-      <p class="empty">尚无提案。你可以先手动提出选题；Scout 接入后会持续补充 Fresh 与 Evergreen 候选。</p>
+	  <p class="empty">尚无提案。你可以手动提出选题，或在 Theme 页面运行 Scout 生成 Fresh 与 Evergreen 候选。</p>
     {{end}}
     <form method="post" action="/workbench/proposals" class="panel" style="margin-top:1rem"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>选题类型 <select name="kind"><option value="fresh">Fresh</option><option value="evergreen">Evergreen</option><option value="follow_up">Follow-up</option></select></label><label>标题 <input name="title" required></label><label>核心论点 <textarea name="thesis" rows="2"></textarea></label><label>目标读者 <input name="audience" value="{{$.Profile.TargetAudience}}"></label><label>为什么值得写 <textarea name="rationale" rows="2"></textarea></label><label>候选材料（KeyPoint ID JSON）<textarea name="candidate_keypoints" rows="2">[]</textarea></label><button class="btn" type="submit">加入提案池</button></form>
   </section>
@@ -98,7 +98,22 @@
       <select name="source_attribution"><option value="light">轻量</option><option value="standard" selected>标准</option><option value="strict">严格</option></select>
     </label>
     <label>月度预算（分） <input type="number" min="0" name="monthly_budget_cents" placeholder="可留空"></label>
+	<label>单篇预算（分） <input type="number" min="0" name="per_article_budget_cents" placeholder="可留空"></label>
     <button class="btn" type="submit">创建编辑画像</button>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:1rem">
+  <h2>模型价格表</h2>
+  <p class="meta">按 Provider 的计费单位填写每百万输入/输出单位的价格（分）。预算门禁按精确 Provider 与模型匹配。</p>
+  {{range .ModelPrices}}<p><strong>{{.Provider}} / {{.Model}}</strong>：输入 {{.InputCentsPerMillion}}，输出 {{.OutputCentsPerMillion}} 分/百万单位</p>{{end}}
+  <form method="post" action="/workbench/model-prices">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>Provider <input name="provider" required placeholder="openai"></label>
+    <label>模型 <input name="model" required placeholder="gpt-5-mini"></label>
+    <label>输入价格 <input type="number" min="0" name="input_cents_per_million" required></label>
+    <label>输出价格 <input type="number" min="0" name="output_cents_per_million" required></label>
+    <button class="btn" type="submit">保存价格</button>
   </form>
 </section>
 {{end}}

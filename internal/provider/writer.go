@@ -1,20 +1,24 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-const articleWriterSystemPrompt = `你是严格受证据约束的微信公众号文章 Writer。只可使用请求中给出的 KeyPoint 材料，绝不可补充外部事实、常识、数字、人物背景或未给出的出处。输出 JSON：title、markdown、evidenceMaps。evidenceMaps 的每项包含 kind（quoted/paraphrased/synthesized/rhetorical）、excerpt 与 keyPointIds。所有含事实、转述或综合的表达必须映射到一个或多个 KeyPoint；rhetorical 可以为空数组。直接引语必须来自材料内容并在 markdown 中归因。`
+const (
+	ArticleWriterPromptVersion = "writer-v1"
+	articleWriterSystemPrompt  = `你是严格受证据约束的微信公众号文章 Writer。只可使用请求中给出的 KeyPoint 材料，绝不可补充外部事实、常识、数字、人物背景或未给出的出处。输出 JSON：title、markdown、evidenceMaps。evidenceMaps 的每项包含 kind（quoted/paraphrased/synthesized/rhetorical）、excerpt 与 keyPointIds。所有含事实、转述或综合的表达必须映射到一个或多个 KeyPoint；rhetorical 可以为空数组。直接引语必须来自材料内容并在 markdown 中归因。`
+)
 
 // WriteArticle generates an evidence-mapped Markdown article through Groq chat completion.
-func (g *GroqProvider) WriteArticle(request ArticleWritingRequest) (*ArticleWritingResult, error) {
+func (g *GroqProvider) WriteArticle(ctx context.Context, request ArticleWritingRequest) (*ArticleWritingResult, error) {
 	input, err := articleWriterInput(request)
 	if err != nil {
 		return nil, err
 	}
-	content, _, err := g.complete([]map[string]string{
+	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": articleWriterSystemPrompt + "\n必须只输出一个 JSON 对象。"},
 		{"role": "user", "content": input},
 	}, "object")
@@ -25,11 +29,12 @@ func (g *GroqProvider) WriteArticle(request ArticleWritingRequest) (*ArticleWrit
 	if err := parseJSONLoose(content, result); err != nil {
 		return nil, fmt.Errorf("解析文章 Writer 输出: %w", err)
 	}
+	result.Usage = usage
 	return validateArticleWritingResult(result, request.Materials)
 }
 
 // WriteArticle generates an evidence-mapped Markdown article through OpenAI Responses.
-func (o *OpenAIProvider) WriteArticle(request ArticleWritingRequest) (*ArticleWritingResult, error) {
+func (o *OpenAIProvider) WriteArticle(ctx context.Context, request ArticleWritingRequest) (*ArticleWritingResult, error) {
 	input, err := articleWriterInput(request)
 	if err != nil {
 		return nil, err
@@ -42,7 +47,7 @@ func (o *OpenAIProvider) WriteArticle(request ArticleWritingRequest) (*ArticleWr
 		"model": model, "instructions": articleWriterSystemPrompt, "input": input,
 		"text": map[string]any{"format": map[string]any{"type": "json_object"}},
 	}
-	data, err := o.doResponses(payload, "文章写作")
+	data, retries, err := o.doResponsesWithMeta(ctx, payload, "文章写作")
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +61,7 @@ func (o *OpenAIProvider) WriteArticle(request ArticleWritingRequest) (*ArticleWr
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析文章 Writer 输出: %w", err)
 	}
+	result.Usage = responsesUsage(data, retries)
 	return validateArticleWritingResult(result, request.Materials)
 }
 

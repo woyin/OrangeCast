@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
@@ -26,9 +27,9 @@ func (s *Store) CreatePodcast(ctx context.Context, feedURL, title, description, 
 func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast, error) {
 	p := &models.Podcast{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
 		 FROM podcasts WHERE id = ?`, id).
-		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy)
+		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -41,7 +42,7 @@ func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast,
 // ListPodcasts 列出全部订阅。
 func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
 		 FROM podcasts ORDER BY title`)
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -67,10 +68,18 @@ func (s *Store) UpdatePodcastFetched(ctx context.Context, id string) error {
 
 // SetPodcastIngestionPolicy changes how newly discovered episodes enter processing.
 func (s *Store) SetPodcastIngestionPolicy(ctx context.Context, id string, policy models.IngestionPolicy) error {
+	return s.SetPodcastIngestionPolicyWithFilters(ctx, id, policy, "", "")
+}
+
+func (s *Store) SetPodcastIngestionPolicyWithFilters(ctx context.Context, id string, policy models.IngestionPolicy, includeKeywords, excludeKeywords string) error {
 	if policy != models.IngestionManual && policy != models.IngestionAllNew && policy != models.IngestionFiltered {
 		return fmt.Errorf("invalid ingestion policy %q", policy)
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE podcasts SET ingestion_policy=? WHERE id=?`, string(policy), id)
+	includeKeywords, excludeKeywords = strings.TrimSpace(includeKeywords), strings.TrimSpace(excludeKeywords)
+	if policy == models.IngestionFiltered && includeKeywords == "" && excludeKeywords == "" {
+		return fmt.Errorf("filtered ingestion requires at least one include or exclude keyword")
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE podcasts SET ingestion_policy=?,ingestion_include_keywords=?,ingestion_exclude_keywords=? WHERE id=?`, string(policy), includeKeywords, excludeKeywords, id)
 	if err != nil {
 		return err
 	}
@@ -107,7 +116,7 @@ func (s *Store) ListUnprocessedEpisodes(ctx context.Context, podcastID string) (
 // ListPodcastsForRefresh 按 last_fetched_at ASC 取一批用于 cron 刷新。
 func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
 		 FROM podcasts ORDER BY last_fetched_at IS NOT NULL, last_fetched_at ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -116,7 +125,7 @@ func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*model
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

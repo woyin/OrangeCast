@@ -120,7 +120,7 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 		t.Errorf("Owner email 应为 owner@example.com，实际 %s", email)
 	}
 	var migrationVersion int
-	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 22 {
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 23 {
 		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
 	}
 	var profileName, themeName string

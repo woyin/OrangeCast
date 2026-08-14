@@ -13,9 +13,11 @@
       <select name="ingestion_policy">
         <option value="manual" {{if eq .Podcast.IngestionPolicy "manual"}}selected{{end}}>手动选择（推荐）</option>
         <option value="all_new" {{if eq .Podcast.IngestionPolicy "all_new"}}selected{{end}}>自动转录全部新集</option>
-        <option value="filtered" {{if eq .Podcast.IngestionPolicy "filtered"}}selected{{end}} disabled>按规则筛选（即将支持）</option>
+        <option value="filtered" {{if eq .Podcast.IngestionPolicy "filtered"}}selected{{end}}>按关键词筛选</option>
       </select>
     </label>
+    <label>包含关键词（逗号分隔）<input name="include_keywords" value="{{.Podcast.IngestionIncludeKeywords}}" placeholder="AI,创业"></label>
+    <label>排除关键词（逗号分隔）<input name="exclude_keywords" value="{{.Podcast.IngestionExcludeKeywords}}" placeholder="预告,重播"></label>
     <button type="submit" class="btn">保存策略</button>
   </form>
 </section>

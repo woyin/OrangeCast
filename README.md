@@ -1,8 +1,8 @@
 # CloudWisePod
 
-> 单 Owner、自托管、默认零 AI 成本的播客证据库。
+> 单 Owner、自托管、证据优先的播客内容生产工作台。
 
-把主动选择的播客音频转化为持久、可检索、可回听的证据，再在严格分层的衍生内容之上提供学习辅助（带证衍生逐字可核验，生成衍生明确标注为 AI 生成），最终通过 Markdown 沉淀到个人知识库。
+把播客与文档转化为可核验素材，在统一 KeyPoint Inbox 中策展，由 Scout、Curator、Writer、EvidenceReviewer 和 StyleEditor 协作生成可交付的微信公众号内容包。学习与回听能力继续保留，但不再是产品终点。
 
 ---
 
@@ -18,10 +18,19 @@
 
 ### 知识管理
 
-- **全局关键要点**：所有 Source 的 KeyPoint 聚合在一处，按时间排列，FTS5 全文搜索
+- **全局素材 Inbox**：所有 Source 的 KeyPoint 聚合在一处，支持筛选、批量状态、全文与本地向量混合搜索
 - **标注 / 收藏 / 集合**：对任意 Citation 加个人标注、收藏、归入跨 Source 主题集合
 - **知识图谱**：KeyPoint 粒度的力导向可视化——同一集合的要点成簇，文本相似度建议跨 Episode 关联
 - **版本历史**：查看 Transcript / KnowledgeCard 的全部不可变版本，一键回退
+
+### 内容生产
+
+- **跨集选题**：Theme 组织支持、补充与冲突材料；Scout 生成并去重候选提案
+- **可审核 Brief**：Curator 从 Owner 接受的提案中选材，Owner 确认后才授权付费写作
+- **证据门禁**：Writer 输出 EvidenceMap；独立 EvidenceReviewer 与 StyleEditor 都完成后才可生成发布包
+- **公众号发布包**：富文本、Markdown、纯文本、候选标题、摘要、推荐语、封面文案与可下载封面
+- **费用治理**：角色级 Provider/模型、Owner 维护的价格表、月度/单篇预算和不可变用量审计
+- **一等文档 Source**：网页快照、粘贴文本与 PDF，支持稳定 Citation、知识卡片、搜索和版本历史
 
 ### 检索与播放
 
@@ -130,7 +139,7 @@ cmd/cloudwisepod/        入口（serve / backup / restore）
 internal/
   config/                环境变量 + DATA_DIR 布局
   store/                 SQLite + FTS5 + 迁移系统 + 全部仓储
-    migrations/          有序 SQL 迁移（0001–0008）
+    migrations/          有序 SQL 迁移（0001–0023）
   auth/                  argon2id 密码 + cookie session + CSRF + 限流
   models/                领域类型
   provider/              Groq/OpenAI 实现 + Citation 校验 + Highlight
@@ -160,7 +169,7 @@ CONTEXT.md              领域词汇表
 | 概念 | 定义 |
 |---|---|
 | **Owner** | 唯一使用并拥有实例全部内容的人；实例只能被认领一次 |
-| **Source** | Owner 选择处理的音频（Episode 或 Upload） |
+| **Source** | Owner 选择进入证据与生产流程的 Episode、Upload 或不可变 Document 快照 |
 | **EvidenceAudio** | 每个 Source 持久保存的标准化音频 |
 | **Transcript** | EvidenceAudio 的带时间对齐文本，由 Segment 组成 |
 | **Segment** | 有起止时间的连续文本，Citation 的最小核验单位 |
@@ -200,11 +209,11 @@ git diff --check
 
 ## 产品边界
 
-**CloudWisePod 是分层学习平台**——原始来源（EvidenceAudio + Transcript）不可改写，AI 衍生内容分两级：
+**CloudWisePod 是证据优先的内容生产工作台**——PrimarySource 不可改写，AI 衍生内容分层并保留来源关系：
 - **CitedDerivative（带证衍生）**：忠实于原文，挂 Citation 可逐字核验（摘要/要点/章节/金句）。
 - **GeneratedDerivative（生成衍生）**：AI 重新组织/讲解，明确标注非原文，挂 Reference 仅表示参考（Gist/Paraphrase/StudyChat/Narration）。
 平台帮 Owner 一眼区分两类，而不是替 Owner 判断。
 
-**明确不做**：多用户/SaaS、跨 Source RAG、语义搜索、Obsidian 插件/双向同步、自动处理所有新 Episode。
+**当前边界**：不做多用户/SaaS、不自动发布微信公众号、不允许无 Source 的联网事实直接进入文章。除 Podcast/Upload/Document 之外的素材来源是下一阶段扩展方向。
 
 详细产品目标见 [`docs/product-goal.md`](docs/product-goal.md)，部署指南见 [`docs/production-deployment.md`](docs/production-deployment.md)。

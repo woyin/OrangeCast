@@ -71,19 +71,23 @@ type User struct {
 
 // Podcast 播客订阅。单 Owner 实例内所有内容天然属于实例，不携带 user_id（ADR-0007）。
 type Podcast struct {
-	ID              string
-	FeedURL         string
-	Title           string
-	Description     string
-	ImageURL        string
-	LastFetchedAt   *string
-	CreatedAt       string
-	IngestionPolicy string
+	ID                       string
+	FeedURL                  string
+	Title                    string
+	Description              string
+	ImageURL                 string
+	LastFetchedAt            *string
+	CreatedAt                string
+	IngestionPolicy          string
+	IngestionIncludeKeywords string
+	IngestionExcludeKeywords string
 }
 
 // Document is a text PrimarySource whose content is its EvidenceDocument snapshot.
 type Document struct {
 	ID, Title, OriginKind, OriginURL, Content, ContentSHA256 string
+	SeriesID                                                 string
+	Version                                                  int
 	ProductionUse                                            string
 	ModelDataPolicy                                          ModelDataPolicy
 	ArchivedAt                                               *string
@@ -105,7 +109,7 @@ const (
 	IngestionManual IngestionPolicy = "manual"
 	// IngestionAllNew automatically queues every newly discovered episode.
 	IngestionAllNew IngestionPolicy = "all_new"
-	// IngestionFiltered reserves automatic processing for a future explicit rule set.
+	// IngestionFiltered automatically processes new episodes matching the Podcast's include/exclude keywords.
 	IngestionFiltered IngestionPolicy = "filtered"
 )
 
@@ -229,6 +233,7 @@ type Settings struct {
 	// general analysis setting, so existing deployments keep their behavior.
 	WriterModel              *string
 	ScoutModel               *string
+	CuratorModel             *string
 	EvidenceReviewerModel    *string
 	StyleEditorModel         *string
 	TranscriptionProvider    *string
@@ -237,6 +242,7 @@ type Settings struct {
 	QAProvider               *string
 	WriterProvider           *string
 	ScoutProvider            *string
+	CuratorProvider          *string
 	EvidenceReviewerProvider *string
 	StyleEditorProvider      *string
 	GroqAPIKey               *string
@@ -272,18 +278,58 @@ const (
 	ModelDataLocalOnly ModelDataPolicy = "local_only"
 )
 
+// SourcePolicy keeps publication permission and provider data permission
+// explicit and independently editable for one Source.
+type SourcePolicy struct {
+	ProductionUse     string
+	ModelDataPolicy   ModelDataPolicy
+	ApprovedProviders []string
+	Archived          bool
+}
+
 // EditorialProfile 一个内容品牌的长期编辑约束。
 type EditorialProfile struct {
-	ID                 string
-	Name               string
-	TargetAudience     string
-	Voice              string
-	StyleGuide         string
-	SourceAttribution  string
-	MonthlyBudgetCents *int64
-	CreatedAt          string
-	UpdatedAt          string
+	ID                    string
+	Name                  string
+	TargetAudience        string
+	Voice                 string
+	StyleGuide            string
+	SourceAttribution     string
+	MonthlyBudgetCents    *int64
+	PerArticleBudgetCents *int64
+	CreatedAt             string
+	UpdatedAt             string
 }
+
+// ModelPrice is an Owner-controlled rate in cents per million provider units.
+type ModelPrice struct {
+	Provider              string
+	Model                 string
+	InputCentsPerMillion  int64
+	OutputCentsPerMillion int64
+	UpdatedAt             string
+}
+
+// EditorialUsageRecord is the immutable cost/provenance ledger for one model call.
+type EditorialUsageRecord struct {
+	ID                 string
+	EditorialProfileID string
+	ArticleDraftID     *string
+	TaskKind           string
+	EntityType         string
+	EntityID           string
+	Provider           string
+	Model              string
+	PromptVersion      string
+	InputUnits         int
+	OutputUnits        int
+	CostCents          int64
+	RetryCount         int
+	FallbackFrom       *string
+	CreatedAt          string
+}
+
+type EditorialRoleFallback struct{ Role, Provider, Model, UpdatedAt string }
 
 // Theme groups scoped KeyPoints across episodes into an editorially meaningful topic.
 type Theme struct {
@@ -315,6 +361,10 @@ type ArticleProposal struct {
 	Audience           string
 	Rationale          string
 	CandidateKeyPoints string // JSON array
+	Provider           *string
+	Model              *string
+	PromptVersion      *string
+	CostCents          *int64
 	CreatedAt          string
 	UpdatedAt          string
 }
@@ -350,17 +400,19 @@ type ArticleDraft struct {
 
 // ArticleRevision 是一篇文章某时刻的不可变内容快照。
 type ArticleRevision struct {
-	ID            string
-	DraftID       string
-	Version       int
-	Title         string
-	Markdown      string
-	Origin        string // writer | evidence_reviewer | style_editor | owner | ai_edit
-	Provider      *string
-	Model         *string
-	PromptVersion *string
-	CostCents     *int64
-	CreatedAt     string
+	ID                         string
+	DraftID                    string
+	Version                    int
+	Title                      string
+	Markdown                   string
+	Origin                     string // writer | evidence_reviewer | style_editor | owner | ai_edit
+	Provider                   *string
+	Model                      *string
+	PromptVersion              *string
+	CostCents                  *int64
+	EvidenceInvalidatedAt      *string
+	EvidenceInvalidationReason *string
+	CreatedAt                  string
 }
 
 // EvidenceMapKind 表示文章表达和素材之间的语义关系。
@@ -389,14 +441,16 @@ type EvidenceMap struct {
 
 // ArticleReview 是某个 Revision 的独立审校结果。
 type ArticleReview struct {
-	ID         string
-	RevisionID string
-	Kind       string // evidence | style
-	Status     string // passed | failed | advisory
-	IssuesJSON string
-	Provider   *string
-	Model      *string
-	CreatedAt  string
+	ID            string
+	RevisionID    string
+	Kind          string // evidence | style
+	Status        string // passed | failed | advisory
+	IssuesJSON    string
+	Provider      *string
+	Model         *string
+	PromptVersion *string
+	CostCents     *int64
+	CreatedAt     string
 }
 
 // EditorialFeedback 是 Owner 对内容生产对象的显式编辑判断。

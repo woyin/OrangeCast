@@ -44,6 +44,8 @@
   {{end}}
 </div>
 
+{{with .SourcePolicy}}<section class="panel" style="margin:1rem 0"><h2>素材与模型边界</h2><form method="post" action="/api/source-policy"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="{{$.SourceType}}"><input type="hidden" name="source_id" value="{{$.SourceID}}"><label>对外内容用途 <select name="production_use"><option value="public" {{if eq .ProductionUse "public"}}selected{{end}}>可公开使用</option><option value="internal" {{if eq .ProductionUse "internal"}}selected{{end}}>仅内部研究</option><option value="disabled" {{if eq .ProductionUse "disabled"}}selected{{end}}>禁止生产</option></select></label><label>模型数据策略 <select name="model_data_policy"><option value="external_allowed" {{if eq .ModelDataPolicy "external_allowed"}}selected{{end}}>允许外部模型</option><option value="approved_providers_only" {{if eq .ModelDataPolicy "approved_providers_only"}}selected{{end}}>仅批准 Provider</option><option value="local_only" {{if eq .ModelDataPolicy "local_only"}}selected{{end}}>仅本地</option></select></label><label>批准的 Provider（逗号分隔）<input name="approved_providers" value="{{join .ApprovedProviders ","}}" placeholder="groq,openai"></label><label><input type="checkbox" name="archived" value="1" {{if .Archived}}checked{{end}}>归档并停止后续生产</label><button class="btn btn-secondary" type="submit">保存素材策略</button></form></section>{{end}}
+
 {{if .AudioURL}}
 <!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
 <div class="player-bar">

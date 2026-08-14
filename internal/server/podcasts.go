@@ -78,7 +78,7 @@ func (srv *Server) handlePodcastIngestionPolicy(w http.ResponseWriter, r *http.R
 	}
 	podcastID := strings.TrimSpace(r.FormValue("podcast_id"))
 	policy := models.IngestionPolicy(strings.TrimSpace(r.FormValue("ingestion_policy")))
-	if err := srv.store.SetPodcastIngestionPolicy(r.Context(), podcastID, policy); err != nil {
+	if err := srv.store.SetPodcastIngestionPolicyWithFilters(r.Context(), podcastID, policy, r.FormValue("include_keywords"), r.FormValue("exclude_keywords")); err != nil {
 		http.Error(w, "更新自动摄取策略失败："+err.Error(), http.StatusBadRequest)
 		return
 	}

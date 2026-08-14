@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -146,10 +147,56 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 }
 
 func (g *GroqProvider) complete(messages []map[string]string, jsonMode string) (string, int, error) {
+	return g.completeContext(context.Background(), messages, jsonMode)
+}
+
+// completeContext keeps long-running editorial calls bound to their owning task.
+func (g *GroqProvider) completeContext(ctx context.Context, messages []map[string]string, jsonMode string) (string, int, error) {
+	content, code, _, err := g.completeContextWithUsage(ctx, messages, jsonMode)
+	return content, code, err
+}
+
+func (g *GroqProvider) completeContextWithUsage(ctx context.Context, messages []map[string]string, jsonMode string) (string, int, TaskUsage, error) {
 	if g.chatCompleteFn != nil {
-		return g.chatCompleteFn(messages, jsonMode)
+		content, code, err := g.chatCompleteFn(messages, jsonMode)
+		return content, code, TaskUsage{}, err
 	}
-	return g.chatComplete(messages, jsonMode)
+	model := g.model
+	if model == "" {
+		model = groqAnalysisModel
+	}
+	payload := map[string]any{"model": model, "messages": messages, "temperature": 0.3}
+	switch jsonMode {
+	case "schema":
+		payload["response_format"] = map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "knowledge_card", "schema": knowledgeCardSchema}}
+	case "object":
+		payload["response_format"] = map[string]any{"type": "json_object"}
+	}
+	data, code, retries, err := postJSONWithMeta(ctx, g.base()+"/chat/completions", g.apiKey, payload)
+	if err != nil {
+		return "", code, TaskUsage{}, err
+	}
+	if code != http.StatusOK {
+		return "", code, TaskUsage{}, fmt.Errorf("groq chat 失败 HTTP %d: %s", code, string(data))
+	}
+	var response struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return "", code, TaskUsage{}, fmt.Errorf("解析 groq chat 响应: %w", err)
+	}
+	if len(response.Choices) == 0 {
+		return "", code, TaskUsage{}, fmt.Errorf("groq 返回空 choices")
+	}
+	return response.Choices[0].Message.Content, code, TaskUsage{InputUnits: response.Usage.PromptTokens, OutputUnits: response.Usage.CompletionTokens, RetryCount: retries}, nil
 }
 
 // Analyze 生成 KnowledgeCard（Evidence-first）。用 json_object + prompt 约束 + 容错解析，

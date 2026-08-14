@@ -431,18 +431,38 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 	}
 	for _, p := range purges {
 		// 1) 删除文件（EvidenceAudio + upload 原始文件；不存在视为已删，幂等）
-		_ = os.Remove(filepath.Join(w.evidenceDir, fmt.Sprintf("%s_%s.mp3", p.SourceType, p.SourceID)))
-		_ = os.Remove(filepath.Join(w.tempDir, "uploads", p.SourceID))
+		for _, path := range []string{
+			filepath.Join(w.evidenceDir, fmt.Sprintf("%s_%s.mp3", p.SourceType, p.SourceID)),
+			filepath.Join(w.tempDir, "uploads", p.SourceID),
+		} {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("purge 删除文件 %s: %w", path, err)
+			}
+		}
 		// 2) 删除 KeyPoint 索引 + 标注/收藏/集合成员（ADR-0017）
-		_ = w.store.DeleteKeyPointsForSource(ctx, p.SourceType, p.SourceID)
-		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM annotations WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
-		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM pins WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
-		_, _ = w.store.DB.ExecContext(ctx, `DELETE FROM collection_items WHERE source_type=? AND source_id=?`, string(p.SourceType), p.SourceID)
+		if err := w.store.InvalidateAndDeleteKeyPointsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return fmt.Errorf("purge 原子撤销文章证据并删除 KeyPoint（%s/%s）: %w", p.SourceType, p.SourceID, err)
+		}
+		for _, statement := range []string{
+			`DELETE FROM annotations WHERE source_type=? AND source_id=?`,
+			`DELETE FROM pins WHERE source_type=? AND source_id=?`,
+			`DELETE FROM collection_items WHERE source_type=? AND source_id=?`,
+		} {
+			if _, err := w.store.DB.ExecContext(ctx, statement, string(p.SourceType), p.SourceID); err != nil {
+				return fmt.Errorf("purge 删除素材关系（%s/%s）: %w", p.SourceType, p.SourceID, err)
+			}
+		}
 		// ADR-0018：删除 GeneratedDerivative 产物（Paraphrase / StudySession），
 		// 使 PersonalKnowledgeBase 中指向该 Source 的 Citation 与 Reference 一并失效。
-		_ = w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID)
-		_ = w.store.DeleteStudySessionsForSource(ctx, p.SourceType, p.SourceID)
-		_ = w.store.DeleteNarrationsForSource(ctx, p.SourceType, p.SourceID)
+		if err := w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return err
+		}
+		if err := w.store.DeleteStudySessionsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return err
+		}
+		if err := w.store.DeleteNarrationsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return err
+		}
 		// 3) 事务性删除 DB 行
 		if err := w.store.DeleteSourceRows(ctx, p.SourceType, p.SourceID); err != nil {
 			return fmt.Errorf("purge 删除 DB 行（%s/%s）: %w", p.SourceType, p.SourceID, err)

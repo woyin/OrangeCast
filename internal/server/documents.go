@@ -2,9 +2,14 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/ledongthuc/pdf"
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/store"
@@ -20,9 +25,75 @@ func (srv *Server) handleDocuments(w http.ResponseWriter, r *http.Request) {
 	srv.tmpl.Render(w, "documents.html", map[string]any{"Documents": docs, "CSRF": auth.CSRFValue(r)})
 }
 
+func (srv *Server) handleDocumentPDF(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentSize+(1<<20))
+	file, header, err := r.FormFile("pdf")
+	if err != nil {
+		http.Error(w, "请选择不超过 4MB 的 PDF", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	temporary, err := os.CreateTemp("", "cloudwisepod-document-*.pdf")
+	if err != nil {
+		http.Error(w, "创建 PDF 临时文件失败", http.StatusInternalServerError)
+		return
+	}
+	path := temporary.Name()
+	defer os.Remove(path)
+	written, copyErr := io.Copy(temporary, io.LimitReader(file, maxDocumentSize+1))
+	closeErr := temporary.Close()
+	if copyErr != nil || closeErr != nil {
+		http.Error(w, "读取 PDF 失败", http.StatusBadRequest)
+		return
+	}
+	if written > maxDocumentSize {
+		http.Error(w, "PDF 超过 4MB 上限", http.StatusRequestEntityTooLarge)
+		return
+	}
+	pdfFile, reader, err := pdf.Open(path)
+	if err != nil {
+		http.Error(w, "PDF 格式无效："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer pdfFile.Close()
+	plainReader, err := reader.GetPlainText()
+	if err != nil {
+		http.Error(w, "提取 PDF 文本失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	content, err := io.ReadAll(io.LimitReader(plainReader, maxDocumentSize+1))
+	if err != nil || len(content) == 0 {
+		http.Error(w, "PDF 没有可提取文本", http.StatusBadRequest)
+		return
+	}
+	if len(content) > maxDocumentSize {
+		http.Error(w, "PDF 提取文本超过 4MB 上限", http.StatusRequestEntityTooLarge)
+		return
+	}
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" {
+		title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+	}
+	document, err := srv.store.CreatePDFDocument(r.Context(), title, header.Filename, string(content))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("保存 PDF 证据失败：%v", err), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/documents/"+document.ID, http.StatusSeeOther)
+}
+
 func (srv *Server) handleDocumentNew(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		srv.tmpl.Render(w, "document_new.html", map[string]any{"CSRF": auth.CSRFValue(r)})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentSize+(64<<10))
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "文档请求超过大小上限", http.StatusRequestEntityTooLarge)
 		return
 	}
 	doc, err := srv.store.CreatePastedDocument(r.Context(), r.FormValue("title"), r.FormValue("content"))
@@ -74,7 +145,40 @@ func (srv *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "加载文档失败", http.StatusInternalServerError)
 		return
 	}
-	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "CSRF": auth.CSRFValue(r)})
+	policy, err := srv.store.GetSourcePolicy(r.Context(), models.SourceDocument, doc.ID)
+	if err != nil {
+		http.Error(w, "加载文档策略失败", http.StatusInternalServerError)
+		return
+	}
+	versions, err := srv.store.ListDocumentVersions(r.Context(), doc.SeriesID)
+	if err != nil {
+		http.Error(w, "加载文档版本失败", http.StatusInternalServerError)
+		return
+	}
+	card, err := srv.store.GetDocumentKnowledgeCard(r.Context(), doc.ID)
+	if err != nil {
+		http.Error(w, "加载文档知识卡片失败", http.StatusInternalServerError)
+		return
+	}
+	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "SourcePolicy": policy, "Versions": versions, "Card": card, "CSRF": auth.CSRFValue(r)})
+}
+
+func (srv *Server) handleDocumentVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocumentSize+(64<<10))
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "文档请求超过大小上限", http.StatusRequestEntityTooLarge)
+		return
+	}
+	document, err := srv.store.CreateDocumentVersion(r.Context(), strings.TrimSpace(r.FormValue("document_id")), strings.TrimSpace(r.FormValue("title")), r.FormValue("content"))
+	if err != nil {
+		http.Error(w, "创建文档版本失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/documents/"+document.ID, http.StatusSeeOther)
 }
 
 // handleDocumentKeyPoint creates a curator-owned KeyPoint anchored to one exact paragraph.

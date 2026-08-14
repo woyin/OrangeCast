@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -51,26 +52,57 @@ func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
 // doResponses 发送一次 POST /responses，返回原始响应体。
 // 集中 6 处重复的 baseURL 解析、鉴权、超时与 HTTP 错误处理；调用方各自 Unmarshal/解析。
 // label 用于错误信息标注（哪个任务失败）。
-func (o *OpenAIProvider) doResponses(payload map[string]any, label string) ([]byte, error) {
+func (o *OpenAIProvider) doResponses(ctx context.Context, payload map[string]any, label string) ([]byte, error) {
+	data, _, err := o.doResponsesWithMeta(ctx, payload, label)
+	return data, err
+}
+
+func (o *OpenAIProvider) doResponsesWithMeta(ctx context.Context, payload map[string]any, label string) ([]byte, int, error) {
 	bURL := o.baseURL
 	if bURL == "" {
 		bURL = openaiBaseURL
 	}
 	buf, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
+	if err != nil {
+		return nil, 0, fmt.Errorf("openai %s 创建请求: %w", label, err)
+	}
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := doWithRetry(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("openai %s 请求: %w", label, err)
+		if marker := strings.LastIndex(err.Error(), "HTTP "); marker >= 0 {
+			fields := strings.Fields(err.Error()[marker+5:])
+			if len(fields) > 0 {
+				if status, parseErr := strconv.Atoi(fields[0]); parseErr == nil {
+					return nil, maxRetries, fmt.Errorf("openai %s 失败 HTTP %d: %w", label, status, err)
+				}
+			}
+		}
+		return nil, 0, fmt.Errorf("openai %s 请求: %w", label, err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("openai %s 失败 HTTP %d: %s", label, resp.StatusCode, string(data))
+		return nil, 0, fmt.Errorf("openai %s 失败 HTTP %d: %s", label, resp.StatusCode, string(data))
 	}
-	return data, nil
+	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
+	return data, retries, nil
+}
+
+func responsesUsage(data []byte, retryCounts ...int) TaskUsage {
+	var response struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	_ = json.Unmarshal(data, &response)
+	retries := 0
+	if len(retryCounts) > 0 {
+		retries = retryCounts[0]
+	}
+	return TaskUsage{InputUnits: response.Usage.InputTokens, OutputUnits: response.Usage.OutputTokens, RetryCount: retries}
 }
 
 // Transcribe 用 OpenAI 语音识别，将音频转为带时间戳的转录片段。
@@ -155,7 +187,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 			},
 		},
 	}
-	data, err := o.doResponses(payload, "分析")
+	data, err := o.doResponses(context.Background(), payload, "分析")
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +233,7 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 			},
 		},
 	}
-	data, err := o.doResponses(payload, "QA")
+	data, err := o.doResponses(context.Background(), payload, "QA")
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +304,7 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 			},
 		},
 	}
-	data, err := o.doResponses(payload, "高光")
+	data, err := o.doResponses(context.Background(), payload, "高光")
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +339,7 @@ func (o *OpenAIProvider) Paraphrase(question string, referenceSegments []Segment
 		"instructions": paraphraseSystemPrompt,
 		"input":        input,
 	}
-	data, err := o.doResponses(payload, "复述讲解")
+	data, err := o.doResponses(context.Background(), payload, "复述讲解")
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +399,7 @@ func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMes
 			},
 		},
 	}
-	data, err := o.doResponses(payload, "学习对话")
+	data, err := o.doResponses(context.Background(), payload, "学习对话")
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +462,7 @@ func (o *OpenAIProvider) CheckReference(question, answer string, referenceSegmen
 			},
 		},
 	}
-	data, err := o.doResponses(payload, "校验")
+	data, err := o.doResponses(context.Background(), payload, "校验")
 	if err != nil {
 		return ReferenceCheckResult{}, err
 	}
