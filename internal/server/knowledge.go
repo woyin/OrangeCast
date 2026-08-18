@@ -15,7 +15,7 @@ import (
 func (srv *Server) handleKeyPoints(w http.ResponseWriter, r *http.Request) {
 	page := pageParam(r)
 	const perPage = 20
-	filter := store.KeyPointFilter{SourceType: models.SourceType(strings.TrimSpace(r.URL.Query().Get("source_type"))), SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")), PodcastID: strings.TrimSpace(r.URL.Query().Get("podcast_id")), ThemeID: strings.TrimSpace(r.URL.Query().Get("theme_id")), Status: models.KeyPointProductionStatus(strings.TrimSpace(r.URL.Query().Get("status"))), From: strings.TrimSpace(r.URL.Query().Get("from")), To: strings.TrimSpace(r.URL.Query().Get("to"))}
+	filter := store.KeyPointFilter{SourceType: models.SourceType(strings.TrimSpace(r.URL.Query().Get("source_type"))), SourceID: strings.TrimSpace(r.URL.Query().Get("source_id")), PodcastID: strings.TrimSpace(r.URL.Query().Get("podcast_id")), ThemeID: strings.TrimSpace(r.URL.Query().Get("theme_id")), Status: models.KeyPointProductionStatus(strings.TrimSpace(r.URL.Query().Get("status"))), QualityStatus: models.KeyPointQualityStatus(strings.TrimSpace(r.URL.Query().Get("quality_status"))), From: strings.TrimSpace(r.URL.Query().Get("from")), To: strings.TrimSpace(r.URL.Query().Get("to"))}
 	kps, total, err := srv.store.ListKeyPointsFiltered(r.Context(), filter, page, perPage)
 	if err != nil {
 		http.Error(w, "加载失败", http.StatusInternalServerError)
@@ -73,6 +73,8 @@ func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request)
 		Content          string  `json:"content"`
 		Description      string  `json:"description"`
 		ProductionStatus string  `json:"production_status"`
+		QualityStatus    string  `json:"quality_status"`
+		StaleAt          string  `json:"stale_at"`
 		Origin           string  `json:"origin"`
 		TimeStart        float64 `json:"time_start"`
 		TimeEnd          float64 `json:"time_end"`
@@ -82,7 +84,7 @@ func (srv *Server) handleKeyPointsSearch(w http.ResponseWriter, r *http.Request)
 		results = append(results, result{
 			ID: kp.ID, SourceType: string(kp.SourceType), SourceID: kp.SourceID,
 			SourceTitle: kp.SourceTitle, Content: kp.Content, Description: kp.Description,
-			ProductionStatus: string(kp.ProductionStatus), Origin: string(kp.Origin),
+			ProductionStatus: string(kp.ProductionStatus), QualityStatus: string(kp.QualityStatus), StaleAt: kp.StaleAt, Origin: string(kp.Origin),
 			TimeStart: kp.TimeStart, TimeEnd: kp.TimeEnd,
 		})
 	}
@@ -107,6 +109,24 @@ func (srv *Server) handleKeyPointStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
 }
+func (srv *Server) handleKeyPointQuality(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("keypoint_id"))
+	status := models.KeyPointQualityStatus(strings.TrimSpace(r.FormValue("quality_status")))
+	if err := srv.store.SetKeyPointQualityStatus(r.Context(), id, status); err != nil {
+		if err == store.ErrNotFound {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "关键要点不存在"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "quality_status": status})
+}
+
 func (srv *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	srv.tmpl.Render(w, "graph.html", map[string]any{
 		"CSRF": auth.CSRFValue(r),

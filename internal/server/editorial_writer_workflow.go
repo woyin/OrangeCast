@@ -36,6 +36,9 @@ func writeEditorialError(w http.ResponseWriter, err error) {
 	var transportErr *editorialHTTPError
 	if errors.As(err, &transportErr) {
 		status = transportErr.status
+	} else if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidEditorialState) {
+		// Owner 输入或状态不满足属于 4xx，不应伪装成服务端故障。
+		status = http.StatusBadRequest
 	}
 	http.Error(w, err.Error(), status)
 }

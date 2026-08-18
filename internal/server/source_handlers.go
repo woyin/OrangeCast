@@ -63,6 +63,15 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if policy, err := srv.store.GetSourcePolicy(r.Context(), sourceType, sourceID); err == nil {
 		data["SourcePolicy"] = policy
 	}
+	if notes, err := srv.store.ListOwnerNotes(r.Context(), sourceType, sourceID); err == nil {
+		data["OwnerNotes"] = notes
+	}
+	if constraints, err := srv.store.ListRightsConstraints(r.Context(), sourceType, sourceID); err == nil {
+		data["RightsConstraints"] = constraints
+	}
+	if candidates, err := srv.store.ListMaterialCandidates(r.Context(), sourceType, sourceID); err == nil {
+		data["MaterialCandidates"] = candidates
+	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }
 
@@ -110,8 +119,14 @@ func (srv *Server) handleSourcePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
 	sourceID := strings.TrimSpace(r.FormValue("source_id"))
+	current, err := srv.store.GetSourcePolicy(r.Context(), sourceType, sourceID)
+	if err != nil {
+		http.Error(w, "读取素材策略失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
 	approved := strings.Split(r.FormValue("approved_providers"), ",")
-	policy := models.SourcePolicy{ProductionUse: strings.TrimSpace(r.FormValue("production_use")), ModelDataPolicy: models.ModelDataPolicy(strings.TrimSpace(r.FormValue("model_data_policy"))), ApprovedProviders: approved, Archived: r.FormValue("archived") == "1"}
+	// production_use is legacy migration data, not a creative-use permission.
+	policy := models.SourcePolicy{ProductionUse: current.ProductionUse, ModelDataPolicy: models.ModelDataPolicy(strings.TrimSpace(r.FormValue("model_data_policy"))), ApprovedProviders: approved, Archived: r.FormValue("archived") == "1"}
 	if err := srv.store.UpdateSourcePolicy(r.Context(), sourceType, sourceID, policy); err != nil {
 		http.Error(w, "更新素材策略失败："+err.Error(), http.StatusBadRequest)
 		return

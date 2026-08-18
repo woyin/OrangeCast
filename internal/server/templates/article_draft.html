@@ -10,6 +10,8 @@
 
 {{with .CurrentRevision}}<section class="panel" style="margin-top:1rem"><h2>当前版本 · 公众号预览</h2><p class="meta">v{{.Version}} 为当前可编辑快照。预览使用与内容包相同的安全富文本转换；保存新的修订后需要重新通过证据审校。</p><div class="publication-richtext">{{$.CurrentRichHTML}}</div>{{if $.CurrentReady}}<p style="margin-top:1rem"><a class="btn" href="/workbench/revisions/{{.ID}}/package">打开公众号内容包</a></p>{{else}}<p class="meta" style="margin-top:1rem">当前版本尚未通过证据审校，暂不能生成内容包。</p>{{end}}</section>{{end}}
 
+<section class="panel" style="margin-top:1rem"><h2>ClaimMap 与 ClaimReview</h2><p class="meta">旧 EvidenceMap 会以只读兼容投影显示；新的 ClaimReview 检查来源归因、Owner 主张、综合边界与未解决研究缺口。</p>{{range .ClaimMaps}}<article><strong>{{.Kind}}</strong> · {{.Excerpt}} <span class="meta">KeyPoint：{{.KeyPointIDsJSON}}</span></article>{{else}}<p class="empty">当前修订尚无可映射的主张。</p>{{end}}{{with .ClaimReview}}<p><strong>最新 ClaimReview：</strong>{{.Status}} · {{.CreatedAt}}</p><p class="meta">问题：{{.IssuesJSON}}</p>{{end}}</section>
+
 <section class="panel" style="margin-top:1rem"><h2>修订历史</h2>
 {{range .Revisions}}
   <article class="list-item"><div style="flex:1"><h3>v{{.Version}} · {{.Title}}</h3><p class="meta">{{.Origin}} · {{.CreatedAt}}</p><pre style="white-space:pre-wrap">{{.Markdown}}</pre></div>

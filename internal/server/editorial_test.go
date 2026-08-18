@@ -22,7 +22,7 @@ func TestWorkbenchCreatesAndRendersEditorialProfile(t *testing.T) {
 	get.AddCookie(session)
 	getRec := httptest.NewRecorder()
 	srv.Router().ServeHTTP(getRec, get)
-	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), "内容工作台") {
+	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), "创作工作空间") {
 		t.Fatalf("workbench should render: status=%d body=%q", getRec.Code, getRec.Body.String())
 	}
 	csrf := ""
@@ -123,6 +123,19 @@ func TestKeyPointStatusAPIUpdatesInboxState(t *testing.T) {
 	updated, err := srv.store.GetKeyPoint(t.Context(), keyPoints[0].ID)
 	if err != nil || updated.ProductionStatus != models.KeyPointShortlisted {
 		t.Fatalf("updated state should persist: keypoint=%+v err=%v", updated, err)
+	}
+	qualityRequest := httptest.NewRequest(http.MethodPost, "/api/keypoints/quality", strings.NewReader("_csrf="+csrf+"&keypoint_id="+keyPoints[0].ID+"&quality_status=ready"))
+	qualityRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	qualityRequest.AddCookie(session)
+	qualityRequest.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	qualityRecorder := httptest.NewRecorder()
+	srv.Router().ServeHTTP(qualityRecorder, qualityRequest)
+	if qualityRecorder.Code != http.StatusOK {
+		t.Fatalf("quality update should succeed: status=%d body=%s", qualityRecorder.Code, qualityRecorder.Body.String())
+	}
+	updated, err = srv.store.GetKeyPoint(t.Context(), keyPoints[0].ID)
+	if err != nil || updated.QualityStatus != models.KeyPointReady {
+		t.Fatalf("quality update should persist: keypoint=%+v err=%v", updated, err)
 	}
 }
 
@@ -229,49 +242,15 @@ func TestBuildEditorialBoardDerivesWorkflowQueue(t *testing.T) {
 	}
 }
 
-func TestWorkbenchSourceScopeGrantAndRevoke(t *testing.T) {
+func TestWorkbenchNoLongerExposesSourceScopeAuthorization(t *testing.T) {
 	srv := newTestServer(t)
 	session := claimOwnerAndLogin(t, srv, "scope@example.com", "password123")
-	profile, err := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "Pod", "", "")
-	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "Episode", AudioURL: "https://cdn.example.com/ep.mp3"}})
-	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
-
-	page := httptest.NewRequest(http.MethodGet, "/workbench?profile="+profile.ID, nil)
-	page.AddCookie(session)
-	pageRec := httptest.NewRecorder()
-	srv.Router().ServeHTTP(pageRec, page)
-	var csrf string
-	for _, cookie := range pageRec.Result().Cookies() {
-		if cookie.Name == "cwp_csrf" {
-			csrf = cookie.Value
-		}
-	}
-	post := httptest.NewRequest(http.MethodPost, "/workbench/sources", strings.NewReader("_csrf="+csrf+"&profile_id="+profile.ID+"&source_type=episode&source_id="+episodes[0].ID))
-	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	post.AddCookie(session)
-	post.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
-	postRec := httptest.NewRecorder()
-	srv.Router().ServeHTTP(postRec, post)
-	if postRec.Code != http.StatusSeeOther {
-		t.Fatalf("scope grant should redirect: %d", postRec.Code)
-	}
-	inScope, err := srv.store.IsSourceInScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID)
-	if err != nil || !inScope {
-		t.Fatalf("scope grant should persist: inScope=%v err=%v", inScope, err)
-	}
-	post = httptest.NewRequest(http.MethodPost, "/workbench/sources", strings.NewReader("_csrf="+csrf+"&profile_id="+profile.ID+"&source_type=episode&source_id="+episodes[0].ID+"&action=revoke"))
-	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	post.AddCookie(session)
-	post.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
-	postRec = httptest.NewRecorder()
-	srv.Router().ServeHTTP(postRec, post)
-	inScope, err = srv.store.IsSourceInScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID)
-	if err != nil || inScope {
-		t.Fatalf("scope revoke should persist: inScope=%v err=%v", inScope, err)
+	request := httptest.NewRequest(http.MethodGet, "/workbench/sources", nil)
+	request.AddCookie(session)
+	recorder := httptest.NewRecorder()
+	srv.Router().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("removed SourceScope endpoint should not be reachable: %d", recorder.Code)
 	}
 }
 
@@ -314,6 +293,8 @@ func TestWorkbenchProposalAndBriefAuthorizationFlow(t *testing.T) {
 	proposal := proposals[0]
 	if rec := post("/workbench/proposals/status", "profile_id="+profile.ID+"&proposal_id="+proposal.ID+"&status=accepted"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("proposal should be accepted: %d", rec.Code)
+	} else if strings.Contains(rec.Header().Get("Location"), "refill") {
+		t.Fatalf("proposal decision must not schedule automatic refill: %q", rec.Header().Get("Location"))
 	}
 	if rec := post("/workbench/briefs", "profile_id="+profile.ID+"&proposal_id="+proposal.ID+"&thesis=%E6%95%88%E7%8E%87%E9%9C%80%E8%A6%81%E5%AE%A1%E6%9F%A5&outline=%23+%E6%A0%87%E9%A2%98&material_plan=%5B%5D&conflict_plan=%5B%5D&target_length=1200"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("brief should be created: %d", rec.Code)
@@ -786,11 +767,8 @@ func TestWriterRejectsUnconfirmedMaterialsAndProviderFailures(t *testing.T) {
 	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, &missingMaterial, proposal, "fake"); err == nil {
 		t.Fatal("writer must reject missing KeyPoint")
 	}
-	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, brief, proposal, "fake"); err == nil {
-		t.Fatal("writer must reject a Source outside profile scope")
-	}
-	if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
-		t.Fatal(err)
+	if _, err := srv.writerRequest(httptest.NewRequest(http.MethodPost, "/", nil), profile, brief, proposal, "fake"); err != nil {
+		t.Fatalf("writer should accept an Owner-added source without SourceScope: %v", err)
 	}
 	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataLocalOnly); err != nil {
 		t.Fatal(err)
@@ -953,10 +931,9 @@ func TestEvidenceReviewRequestEnforcesMappedSourcePolicy(t *testing.T) {
 	revision, _ := srv.store.CreateArticleRevision(t.Context(), models.ArticleRevision{DraftID: draft.ID, Title: "文章", Markdown: "正文", Origin: "owner"})
 	srv.store.CreateEvidenceMap(t.Context(), models.EvidenceMap{RevisionID: revision.ID, Kind: models.EvidenceParaphrased, Excerpt: "正文", KeyPointIDs: "[\"" + keyPoints[0].ID + "\"]"})
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
-	if _, err := srv.evidenceReviewRequest(request, revision, "fake"); err == nil {
-		t.Fatal("review must reject unscoped evidence KeyPoint")
+	if got, err := srv.evidenceReviewRequest(request, revision, "fake"); err != nil || len(got.Items) != 1 {
+		t.Fatalf("review should accept an Owner-added source without SourceScope: request=%+v err=%v", got, err)
 	}
-	srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID)
 	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "public", models.ModelDataLocalOnly); err != nil {
 		t.Fatal(err)
 	}

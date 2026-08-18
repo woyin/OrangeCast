@@ -160,7 +160,22 @@ func (srv *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "加载文档知识卡片失败", http.StatusInternalServerError)
 		return
 	}
-	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "SourcePolicy": policy, "Versions": versions, "Card": card, "CSRF": auth.CSRFValue(r)})
+	notes, err := srv.store.ListOwnerNotes(r.Context(), models.SourceDocument, doc.ID)
+	if err != nil {
+		http.Error(w, "加载 OwnerNote 失败", http.StatusInternalServerError)
+		return
+	}
+	constraints, err := srv.store.ListRightsConstraints(r.Context(), models.SourceDocument, doc.ID)
+	if err != nil {
+		http.Error(w, "加载 RightsConstraint 失败", http.StatusInternalServerError)
+		return
+	}
+	candidates, err := srv.store.ListMaterialCandidates(r.Context(), models.SourceDocument, doc.ID)
+	if err != nil {
+		http.Error(w, "加载 MaterialCandidate 失败", http.StatusInternalServerError)
+		return
+	}
+	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "SourcePolicy": policy, "Versions": versions, "Card": card, "OwnerNotes": notes, "RightsConstraints": constraints, "MaterialCandidates": candidates, "CSRF": auth.CSRFValue(r)})
 }
 
 func (srv *Server) handleDocumentVersion(w http.ResponseWriter, r *http.Request) {

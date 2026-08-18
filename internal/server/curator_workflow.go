@@ -57,7 +57,7 @@ func (srv *Server) curatorRequest(ctx context.Context, authorization *curatorAut
 		}
 		usable, err := srv.store.CanUseSourceForPublication(ctx, authorization.profile.ID, kp.SourceType, kp.SourceID)
 		if err != nil || !usable {
-			return provider.CuratorRequest{}, errors.New("候选材料不在可发布范围")
+			return provider.CuratorRequest{}, errors.New("候选材料已归档或不可用")
 		}
 		send, err := srv.store.CanSendSourceToProvider(ctx, kp.SourceType, kp.SourceID, providerName)
 		if err != nil || !send {

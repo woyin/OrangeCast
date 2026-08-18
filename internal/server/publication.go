@@ -166,7 +166,7 @@ func (srv *Server) publicationSources(r *http.Request, revisionID, profileID str
 			}
 			usable, err := srv.store.CanUseSourceForPublication(r.Context(), profileID, keyPoint.SourceType, keyPoint.SourceID)
 			if err != nil || !usable {
-				return nil, fmt.Errorf("Source %s/%s 不再获准用于发布", keyPoint.SourceType, keyPoint.SourceID)
+				return nil, fmt.Errorf("Source %s/%s 已归档或不可用", keyPoint.SourceType, keyPoint.SourceID)
 			}
 			var citations []string
 			if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil {

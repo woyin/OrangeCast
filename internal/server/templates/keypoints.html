@@ -3,7 +3,7 @@
 <h1>关键要点</h1>
 <p class="meta">要把素材用于 Scout，请前往 <a href="/themes">主题</a> 选择已授权的 KeyPoint；“集合”不是编辑流程的一部分。</p>
 
-<form method="get" action="/keypoints" class="panel" style="margin-bottom:1rem"><h2>筛选素材</h2><label>来源类型 <select name="source_type"><option value="">全部</option><option value="episode" {{if eq .Filter.SourceType "episode"}}selected{{end}}>Episode</option><option value="upload" {{if eq .Filter.SourceType "upload"}}selected{{end}}>Upload</option><option value="document" {{if eq .Filter.SourceType "document"}}selected{{end}}>Document</option></select></label><label>Source ID <input name="source_id" value="{{.Filter.SourceID}}"></label><label>Podcast ID <input name="podcast_id" value="{{.Filter.PodcastID}}"></label><label>Theme ID <input name="theme_id" value="{{.Filter.ThemeID}}"></label><label>状态 <select name="status"><option value="">全部</option><option value="inbox" {{if eq .Filter.Status "inbox"}}selected{{end}}>Inbox</option><option value="shortlisted" {{if eq .Filter.Status "shortlisted"}}selected{{end}}>Shortlisted</option><option value="used" {{if eq .Filter.Status "used"}}selected{{end}}>Used</option><option value="dismissed" {{if eq .Filter.Status "dismissed"}}selected{{end}}>Dismissed</option></select></label><label>从 <input type="date" name="from" value="{{.Filter.From}}"></label><label>至 <input type="date" name="to" value="{{.Filter.To}}"></label><button class="btn" type="submit">应用筛选</button> <a class="btn btn-secondary" href="/keypoints">清除</a></form>
+<form method="get" action="/keypoints" class="panel" style="margin-bottom:1rem"><h2>筛选素材</h2><label>来源类型 <select name="source_type"><option value="">全部</option><option value="episode" {{if eq .Filter.SourceType "episode"}}selected{{end}}>Episode</option><option value="upload" {{if eq .Filter.SourceType "upload"}}selected{{end}}>Upload</option><option value="document" {{if eq .Filter.SourceType "document"}}selected{{end}}>Document</option></select></label><label>Source ID <input name="source_id" value="{{.Filter.SourceID}}"></label><label>Podcast ID <input name="podcast_id" value="{{.Filter.PodcastID}}"></label><label>Theme ID <input name="theme_id" value="{{.Filter.ThemeID}}"></label><label>状态 <select name="status"><option value="">全部</option><option value="inbox" {{if eq .Filter.Status "inbox"}}selected{{end}}>Inbox</option><option value="shortlisted" {{if eq .Filter.Status "shortlisted"}}selected{{end}}>Shortlisted</option><option value="used" {{if eq .Filter.Status "used"}}selected{{end}}>Used</option><option value="dismissed" {{if eq .Filter.Status "dismissed"}}selected{{end}}>Dismissed</option></select></label><label>学习质量 <select name="quality_status"><option value="">全部</option><option value="needs_review" {{if eq .Filter.QualityStatus "needs_review"}}selected{{end}}>待审</option><option value="ready" {{if eq .Filter.QualityStatus "ready"}}selected{{end}}>可发现</option><option value="owner_confirmed" {{if eq .Filter.QualityStatus "owner_confirmed"}}selected{{end}}>Owner 确认</option><option value="dismissed" {{if eq .Filter.QualityStatus "dismissed"}}selected{{end}}>不采用</option></select></label><label>从 <input type="date" name="from" value="{{.Filter.From}}"></label><label>至 <input type="date" name="to" value="{{.Filter.To}}"></label><button class="btn" type="submit">应用筛选</button> <a class="btn btn-secondary" href="/keypoints">清除</a></form>
 
 <form id="kp-batch-form" method="post" action="/api/keypoints/batch-status" class="inline-form" style="margin-bottom:1rem"><input type="hidden" name="_csrf" value="{{.CSRF}}"><label>批量设为 <select name="status"><option value="shortlisted">Shortlisted</option><option value="used">Used</option><option value="dismissed">Dismissed</option><option value="inbox">Inbox</option></select></label><button class="btn btn-secondary" type="submit">更新选中项</button></form>
 
@@ -33,6 +33,13 @@
       <option value="used" {{if eq .ProductionStatus "used"}}selected{{end}}>Used</option>
       <option value="dismissed" {{if eq .ProductionStatus "dismissed"}}selected{{end}}>Dismissed</option>
     </select>
+    <select class="kp-quality" data-kp-id="{{.ID}}" aria-label="学习质量状态">
+      <option value="needs_review" {{if eq .QualityStatus "needs_review"}}selected{{end}}>待审</option>
+      <option value="ready" {{if eq .QualityStatus "ready"}}selected{{end}}>可用于发现</option>
+      <option value="owner_confirmed" {{if eq .QualityStatus "owner_confirmed"}}selected{{end}}>Owner 确认</option>
+      <option value="dismissed" {{if eq .QualityStatus "dismissed"}}selected{{end}}>不采用</option>
+    </select>
+    {{if .StaleAt}}<span class="meta" title="{{.StaleReason}}">已陈旧</span>{{end}}
     <button class="btn btn-secondary kp-annotate" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">标注</button>
     <button class="btn btn-secondary kp-pin" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">收藏</button>
   </div>
@@ -160,6 +167,20 @@
       const resp = await fetch('/api/keypoints/status', { method: 'POST', body: fd });
       if (!resp.ok) {
         alert('更新素材状态失败');
+        location.reload();
+      }
+    });
+  });
+
+  document.querySelectorAll('.kp-quality').forEach(select => {
+    select.addEventListener('change', async () => {
+      const fd = new FormData();
+      fd.append('_csrf', csrf);
+      fd.append('keypoint_id', select.dataset.kpId);
+      fd.append('quality_status', select.value);
+      const resp = await fetch('/api/keypoints/quality', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        alert('更新学习质量失败');
         location.reload();
       }
     });

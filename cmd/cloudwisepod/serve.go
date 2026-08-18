@@ -60,6 +60,7 @@ func runServe() {
 	if err != nil {
 		log.Fatalf("初始化 server: %v", err)
 	}
+	srv.StartAutomaticDiscovery(workerCtx)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,

@@ -44,12 +44,40 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.autoRefill = false
 	return srv
 }
 
 // claimOwnerAndLogin 认领 Owner 并返回带 session + CSRF cookie 的 jar。
 // 先 GET /register 获取 CSRF cookie，再 POST 认领。
+func TestSourcePolicyUpdatesDataFlowWithoutChangingLegacyProductionUse(t *testing.T) {
+	srv := newTestServer(t)
+	podcast, err := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/source-policy.xml", "边界播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "policy-episode", Title: "策略单集", AudioURL: "https://cdn.example.com/policy.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	episodes, err := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	if err != nil || len(episodes) != 1 {
+		t.Fatalf("episode setup failed: episodes=%+v err=%v", episodes, err)
+	}
+	if err := srv.store.SetSourceProductionPolicy(t.Context(), models.SourceEpisode, episodes[0].ID, "internal", models.ModelDataExternalAllowed); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/source-policy", strings.NewReader("source_type=episode&source_id="+episodes[0].ID+"&model_data_policy=local_only&approved_providers=openai&archived=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.handleSourcePolicy(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("source policy should redirect after update: %d", rec.Code)
+	}
+	policy, err := srv.store.GetSourcePolicy(t.Context(), models.SourceEpisode, episodes[0].ID)
+	if err != nil || policy.ProductionUse != "internal" || policy.ModelDataPolicy != models.ModelDataLocalOnly || !policy.Archived {
+		t.Fatalf("handler must preserve legacy production_use while updating data policy: policy=%+v err=%v", policy, err)
+	}
+}
+
 func claimOwnerAndLogin(t *testing.T, srv *Server, email, pw string) *http.Cookie {
 	t.Helper()
 	router := srv.Router()

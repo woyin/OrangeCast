@@ -121,20 +121,18 @@ func (srv *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "加载 KeyPoint 选项失败", http.StatusInternalServerError)
 			return
 		}
-		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
-		if err != nil {
-			http.Error(w, "加载素材范围失败", http.StatusInternalServerError)
-			return
-		}
-		scope := make(map[string]bool, len(scopes))
-		for _, entry := range scopes {
-			scope[string(entry.SourceType)+"|"+entry.SourceID] = true
-		}
+		// SourceScope is no longer a creative-use gate. Archived Sources are
+		// still rejected by AddKeyPointToTheme when the Owner chooses one.
 		options := make([]themeKeyPointOption, 0, len(keyPoints))
 		for _, keyPoint := range keyPoints {
-			if scope[string(keyPoint.SourceType)+"|"+keyPoint.SourceID] {
-				options = append(options, themeKeyPointOption{ID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content})
+			if keyPoint.QualityStatus != models.KeyPointReady && keyPoint.QualityStatus != models.KeyPointOwnerConfirmed || keyPoint.StaleAt != "" {
+				continue
 			}
+			eligible, eligibilityErr := srv.store.IsKeyPointEligibleForProfile(r.Context(), profile.ID, keyPoint.ID)
+			if eligibilityErr != nil || !eligible {
+				continue
+			}
+			options = append(options, themeKeyPointOption{ID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content})
 		}
 		data["Profile"] = profile
 		data["Themes"] = themes
@@ -146,14 +144,15 @@ func (srv *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleScoutRun generates a five-proposal brainstorming batch in either cross-episode or explicit deep-read mode.
+// handleScoutRun asks Scout for up to the target number of distinct candidates.
+// A smaller result is valid when the available material cannot support more.
 func (srv *Server) handleScoutRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
-	options := scoutOptions{Mode: strings.TrimSpace(r.FormValue("mode")), SourceID: strings.TrimSpace(r.FormValue("source_id")), ThemeID: strings.TrimSpace(r.FormValue("theme_id")), ProposalCount: scoutBrainstormCount}
+	options := scoutOptions{Mode: strings.TrimSpace(r.FormValue("mode")), SourceID: strings.TrimSpace(r.FormValue("source_id")), ThemeID: strings.TrimSpace(r.FormValue("theme_id")), ProposalCount: scoutProposalTarget}
 	created, err := srv.runScoutWithOptions(r, profileID, options)
 	if err != nil {
 		writeEditorialError(w, err)
@@ -252,6 +251,16 @@ func (srv *Server) scoutRequestWithOptions(ctx context.Context, profile *models.
 			keyPoint, err := srv.store.GetKeyPoint(ctx, relation.KeyPointID)
 			if err != nil {
 				return provider.ScoutRequest{}, err
+			}
+			if keyPoint.QualityStatus != models.KeyPointReady && keyPoint.QualityStatus != models.KeyPointOwnerConfirmed || keyPoint.StaleAt != "" {
+				return provider.ScoutRequest{}, fmt.Errorf("Theme %q 包含尚未通过学习质量闸门的 KeyPoint", theme.Name)
+			}
+			eligible, eligibilityErr := srv.store.IsKeyPointEligibleForProfile(ctx, profile.ID, keyPoint.ID)
+			if eligibilityErr != nil || !eligible {
+				return provider.ScoutRequest{}, fmt.Errorf("Theme %q 包含已被当前画像排除的 KeyPoint", theme.Name)
+			}
+			if mode == provider.ScoutModeCrossEpisode && keyPoint.SourceType != models.SourceEpisode {
+				continue
 			}
 			if mode == provider.ScoutModeDeepRead && keyPoint.SourceType != models.SourceEpisode {
 				continue

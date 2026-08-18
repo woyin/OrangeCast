@@ -1,0 +1,9 @@
+{{define "title"}}注意力队列 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><div><h1>注意力队列</h1><p class="meta">学习与创作各自显示下一步；失败、陈旧和阻断不会被静默隐藏。</p></div><a class="btn btn-secondary" href="/workbench{{if .ProfileID}}?profile={{.ProfileID}}{{end}}">旧工作台</a></div>
+<div class="profile-switcher">{{range .Profiles}}<a class="profile-chip {{if eq $.ProfileID .ID}}active{{end}}" href="/attention?profile={{.ID}}"><strong>{{.Name}}</strong><span>切换画像</span></a>{{end}}</div>
+<div class="workbench-stages">
+<section class="workbench-stage"><header class="stage-header"><div><span class="stage-number">学习</span><div><h2>学习泳道</h2><p class="meta">候选质量、学习缺口和新成果。</p></div></div></header>{{range .Learning}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Kind}}</div><h3><a href="{{.Href}}">{{.Title}}</a></h3><p class="meta">{{.Detail}}</p></div></article>{{else}}<p class="empty">当前没有需要处理的学习事项。</p>{{end}}</section>
+<section class="workbench-stage"><header class="stage-header"><div><span class="stage-number">创作</span><div><h2>创作泳道</h2><p class="meta">发现批次、构思、研究缺口和待确认 Brief。</p></div></div></header>{{range .Creation}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Kind}}</div><h3><a href="{{.Href}}">{{.Title}}</a></h3><p class="meta">{{.Detail}}</p></div></article>{{else}}<p class="empty">当前没有需要处理的创作事项。</p>{{end}}</section>
+</div>
+{{end}}

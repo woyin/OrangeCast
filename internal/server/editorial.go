@@ -23,14 +23,13 @@ var errBudget = errors.New("invalid budget")
 // production queue. It deliberately derives state from immutable workflow
 // objects instead of creating another mutable board record.
 type editorialBoard struct {
-	ProposalPool         int
-	ProposalRefillNeeded bool
-	BriefsPending        int
-	ReadyToWrite         int
-	Reviewing            int
-	Blocked              int
-	Ready                int
-	Archived             int
+	ProposalPool  int
+	BriefsPending int
+	ReadyToWrite  int
+	Reviewing     int
+	Blocked       int
+	Ready         int
+	Archived      int
 }
 
 type workbenchBriefMaterial struct {
@@ -57,7 +56,7 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "加载模型价格失败", http.StatusInternalServerError)
 		return
 	}
-	data := map[string]any{"Profiles": profiles, "ModelPrices": prices, "CSRF": auth.CSRFValue(r), "RefillNotice": r.URL.Query().Get("refill")}
+	data := map[string]any{"Profiles": profiles, "ModelPrices": prices, "CSRF": auth.CSRFValue(r)}
 	profileID := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if profileID == "" && len(profiles) > 0 {
 		profileID = profiles[0].ID
@@ -83,8 +82,6 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Profile"] = profile
-		refillRunning, refillError := srv.proposalRefillState(profile.ID)
-		data["RefillRunning"], data["RefillError"] = refillRunning, refillError
 		data["Proposals"] = proposals
 		data["Drafts"] = drafts
 		briefs, err := srv.store.ListArticleBriefs(r.Context(), profile.ID)
@@ -109,18 +106,48 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		}
 		data["BriefViews"] = briefViews
 		data["Board"] = buildEditorialBoard(proposals, briefs, drafts)
-		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
-		if err != nil {
-			http.Error(w, "加载素材范围失败", http.StatusInternalServerError)
+		discoverySettings, discoveryErr := srv.store.GetDiscoverySettings(r.Context(), profile.ID)
+		if discoveryErr != nil && discoveryErr != store.ErrNotFound {
+			http.Error(w, "加载自动发现设置失败", http.StatusInternalServerError)
 			return
 		}
-		data["Scopes"] = scopes
-		options, err := srv.store.ListSourceOptions(r.Context())
+		batches, err := srv.store.ListProposalBatches(r.Context(), profile.ID)
 		if err != nil {
-			http.Error(w, "加载可选素材失败", http.StatusInternalServerError)
+			http.Error(w, "加载自动发现批次失败", http.StatusInternalServerError)
 			return
 		}
-		data["SourceOptions"] = options
+		creationProposals, err := srv.store.ListCreationProposals(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载创作方向失败", http.StatusInternalServerError)
+			return
+		}
+		creationBriefs, err := srv.store.ListCreationBriefs(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载 CreationBrief 失败", http.StatusInternalServerError)
+			return
+		}
+		ideationSessions, err := srv.store.ListIdeationSessions(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载定向构思失败", http.StatusInternalServerError)
+			return
+		}
+		researchNeeds, err := srv.store.ListResearchNeeds(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载研究需求失败", http.StatusInternalServerError)
+			return
+		}
+		creationHistory, err := srv.store.ListCreationHistory(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载创作历史失败", http.StatusInternalServerError)
+			return
+		}
+		data["DiscoverySettings"] = discoverySettings
+		data["ProposalBatches"] = batches
+		data["CreationProposals"] = creationProposals
+		data["CreationBriefs"] = creationBriefs
+		data["IdeationSessions"] = ideationSessions
+		data["ResearchNeeds"] = researchNeeds
+		data["CreationHistory"] = creationHistory
 	}
 	if err := srv.tmpl.Render(w, "workbench.html", data); err != nil {
 		http.Error(w, "渲染工作台失败", http.StatusInternalServerError)
@@ -158,7 +185,6 @@ func buildEditorialBoard(proposals []*models.ArticleProposal, briefs []*models.A
 			}
 		}
 	}
-	board.ProposalRefillNeeded = board.ProposalPool < scoutBrainstormCount
 	return board
 }
 
@@ -208,7 +234,7 @@ func (srv *Server) writerRequest(r *http.Request, profile *models.EditorialProfi
 		}
 		usable, err := srv.store.CanUseSourceForPublication(r.Context(), profile.ID, keyPoint.SourceType, keyPoint.SourceID)
 		if err != nil || !usable {
-			return provider.ArticleWritingRequest{}, errors.New("存在未授权或不可公开的素材")
+			return provider.ArticleWritingRequest{}, errors.New("存在已归档或不可用的素材")
 		}
 		external, err := srv.store.CanSendSourceToProvider(r.Context(), keyPoint.SourceType, keyPoint.SourceID, providerName)
 		if err != nil || !external {
@@ -258,12 +284,10 @@ func (srv *Server) handleArticleProposalStatus(w http.ResponseWriter, r *http.Re
 		http.Error(w, "更新选题失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
-	redirect := "/workbench?profile=" + profileID
-	if status != "proposed" {
-		srv.scheduleProposalRefill(profileID)
-		redirect += "&refill=automatic"
-	}
-	http.Redirect(w, r, redirect, http.StatusSeeOther)
+	// Proposal decisions deliberately do not trigger paid Scout calls. Automatic
+	// discovery will be introduced as a material-snapshot ProposalBatch; until
+	// then, Owner can explicitly run Scout from the Theme board.
+	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
 }
 
 // handleArticleBriefCreate records a reviewable material and structure contract.
@@ -340,7 +364,21 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 		writeEditorialError(w, err)
 		return
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "CSRF": auth.CSRFValue(r)})
+	claimMaps := []*models.ClaimMap{}
+	var claimReview *models.ClaimReview
+	if data.CurrentRevision != nil {
+		claimMaps, err = srv.store.ListClaimMaps(r.Context(), data.CurrentRevision.ID)
+		if err != nil {
+			writeEditorialError(w, err)
+			return
+		}
+		claimReview, err = srv.store.LatestClaimReview(r.Context(), data.CurrentRevision.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeEditorialError(w, err)
+			return
+		}
+	}
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {
@@ -478,7 +516,7 @@ func (srv *Server) evidenceReviewItem(ctx context.Context, mapping *models.Evide
 		}
 		usable, err := srv.store.CanUseSourceForPublication(ctx, profileID, keyPoint.SourceType, keyPoint.SourceID)
 		if err != nil || !usable {
-			return provider.EvidenceReviewItem{}, errors.New("EvidenceMap 包含未授权或不可公开素材")
+			return provider.EvidenceReviewItem{}, errors.New("EvidenceMap 包含已归档或不可用素材")
 		}
 		external, err := srv.store.CanSendSourceToProvider(ctx, keyPoint.SourceType, keyPoint.SourceID, providerName)
 		if err != nil || !external {
@@ -494,35 +532,6 @@ func (srv *Server) evidenceReviewItem(ctx context.Context, mapping *models.Evide
 		return provider.EvidenceReviewItem{}, errors.New("事实表达缺少证据素材")
 	}
 	return item, nil
-}
-
-// handleEditorialSourceScope grants or revokes an explicit source authorization.
-func (srv *Server) handleEditorialSourceScope(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
-		return
-	}
-	profileID := strings.TrimSpace(r.FormValue("profile_id"))
-	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
-	sourceID := strings.TrimSpace(r.FormValue("source_id"))
-	if ref := strings.TrimSpace(r.FormValue("source_ref")); ref != "" {
-		parts := strings.SplitN(ref, "|", 2)
-		if len(parts) == 2 {
-			sourceType = models.SourceType(parts[0])
-			sourceID = parts[1]
-		}
-	}
-	var err error
-	if r.FormValue("action") == "revoke" {
-		err = srv.store.RevokeSourceScope(r.Context(), profileID, sourceType, sourceID)
-	} else {
-		err = srv.store.GrantSourceScope(r.Context(), profileID, sourceType, sourceID)
-	}
-	if err != nil {
-		http.Error(w, "更新素材范围失败："+err.Error(), http.StatusBadRequest)
-		return
-	}
-	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
 }
 
 // handleEditorialProfileCreate creates an Owner-controlled EditorialProfile.

@@ -10,7 +10,12 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
-const scoutBrainstormCount = 5
+const (
+	// scoutProposalTarget is a quality target, not an inventory floor. A Scout
+	// may return fewer distinct candidates when the material cannot support more.
+	scoutProposalTarget  = 5
+	scoutProposalMaximum = 10
+)
 
 type scoutOptions struct {
 	Mode          string
@@ -131,7 +136,10 @@ func (srv *Server) runScoutContext(ctx context.Context, profileID string, option
 		options.Mode = provider.ScoutModeCrossEpisode
 	}
 	if options.ProposalCount <= 0 {
-		options.ProposalCount = scoutBrainstormCount
+		options.ProposalCount = scoutProposalTarget
+	}
+	if options.ProposalCount > scoutProposalMaximum {
+		return 0, badEditorial("Scout 单次最多生成 10 条候选")
 	}
 	authorization, err := srv.loadScoutAuthorization(ctx, profileID)
 	if err != nil {

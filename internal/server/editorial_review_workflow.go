@@ -101,6 +101,10 @@ func (srv *Server) runEvidenceReview(r *http.Request, revisionID string) (string
 	if err := srv.saveEditorialReview(ctx, reviewContext, "evidence", providerName, modelName, provider.EvidenceReviewerPromptVersion, result.Status, result.Issues, cost); err != nil {
 		return "", internalEditorial("保存证据审校失败")
 	}
+	issuesJSON, _ := json.Marshal(result.Issues)
+	if _, err := srv.store.CreateClaimReview(ctx, models.ClaimReview{WorkRevisionID: reviewContext.revision.ID, Status: result.Status, IssuesJSON: string(issuesJSON), Provider: &providerName, Model: &modelName, PromptVersion: providerStringPtr(provider.EvidenceReviewerPromptVersion), CostCents: cost}); err != nil {
+		return "", internalEditorial("保存主张审校失败")
+	}
 	return reviewContext.revision.DraftID, nil
 }
 

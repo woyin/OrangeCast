@@ -12,6 +12,19 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+func approveThemeTestKeyPoints(t *testing.T, srv *Server) {
+	t.Helper()
+	keyPoints, _, err := srv.store.ListKeyPoints(t.Context(), 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, keyPoint := range keyPoints {
+		if err := srv.store.SetKeyPointQualityStatus(t.Context(), keyPoint.ID, models.KeyPointReady); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestThemeBoardCreateConfirmAndLinkKeyPoint(t *testing.T) {
 	srv := newTestServer(t)
 	session := claimOwnerAndLogin(t, srv, "theme-board@example.com", "password123")
@@ -22,6 +35,7 @@ func TestThemeBoardCreateConfirmAndLinkKeyPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	approveThemeTestKeyPoints(t, srv)
 	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
 	if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
 		t.Fatal(err)
@@ -170,6 +184,7 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 		}
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	approveThemeTestKeyPoints(t, srv)
 	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌", TargetAudience: "开发者"})
 	for _, episode := range episodes {
 		if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episode.ID); err != nil {
@@ -300,6 +315,7 @@ func TestScoutRequestSupportsExplicitSingleEpisodeDeepRead(t *testing.T) {
 		}
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	approveThemeTestKeyPoints(t, srv)
 	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "深读品牌"})
 	for _, episode := range episodes {
 		if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episode.ID); err != nil {
@@ -348,6 +364,7 @@ func TestScoutRequestRejectsArchivedAndMissingThemeMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	approveThemeTestKeyPoints(t, srv)
 	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "品牌"})
 	srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episodes[0].ID)
 	theme, _ := srv.store.CreateTheme(t.Context(), models.Theme{EditorialProfileID: profile.ID, Name: "主题", Status: "confirmed"})
