@@ -25,6 +25,7 @@ func (s *Store) SetModelPrice(ctx context.Context, price models.ModelPrice) erro
 	return err
 }
 
+// GetModelPrice returns the Owner-maintained price for one provider/model pair.
 func (s *Store) GetModelPrice(ctx context.Context, providerName, model string) (*models.ModelPrice, error) {
 	price := &models.ModelPrice{}
 	err := s.DB.QueryRowContext(ctx, `SELECT provider,model,input_cents_per_million,output_cents_per_million,updated_at
@@ -36,6 +37,7 @@ func (s *Store) GetModelPrice(ctx context.Context, providerName, model string) (
 	return price, err
 }
 
+// ListModelPrices returns every Owner-maintained model price entry.
 func (s *Store) ListModelPrices(ctx context.Context) ([]models.ModelPrice, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT provider,model,input_cents_per_million,output_cents_per_million,updated_at FROM model_prices ORDER BY provider,model`)
 	if err != nil {
@@ -53,6 +55,7 @@ func (s *Store) ListModelPrices(ctx context.Context) ([]models.ModelPrice, error
 	return prices, rows.Err()
 }
 
+// SetEditorialRoleFallback upserts the fallback provider/model routing for an editorial role.
 func (s *Store) SetEditorialRoleFallback(ctx context.Context, route models.EditorialRoleFallback) error {
 	route.Role = strings.TrimSpace(route.Role)
 	route.Provider = strings.ToLower(strings.TrimSpace(route.Provider))
@@ -68,6 +71,7 @@ func (s *Store) SetEditorialRoleFallback(ctx context.Context, route models.Edito
 	return err
 }
 
+// GetEditorialRoleFallback loads the fallback provider/model routing for an editorial role.
 func (s *Store) GetEditorialRoleFallback(ctx context.Context, role string) (*models.EditorialRoleFallback, error) {
 	route := &models.EditorialRoleFallback{}
 	err := s.DB.QueryRowContext(ctx, `SELECT role,provider,model,updated_at FROM editorial_role_fallbacks WHERE role=?`, role).Scan(&route.Role, &route.Provider, &route.Model, &route.UpdatedAt)
@@ -78,6 +82,8 @@ func (s *Store) GetEditorialRoleFallback(ctx context.Context, role string) (*mod
 }
 
 // CalculateEditorialCost rounds any non-zero fractional cent up so spend is never understated.
+// An un-priced model is recorded as zero cost (usage audit row is still written); a configured
+// budget still requires an exact price via CheckEditorialBudget, so this never bypasses the cap.
 func (s *Store) CalculateEditorialCost(ctx context.Context, providerName, model string, inputUnits, outputUnits int) (int64, error) {
 	// Deterministic/fake providers may report no billable units. This is an exact
 	// zero-cost call and does not require a price-table entry.
@@ -86,6 +92,11 @@ func (s *Store) CalculateEditorialCost(ctx context.Context, providerName, model 
 	}
 	price, err := s.GetModelPrice(ctx, providerName, model)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// 未登记价格的模型（如自定义兼容端点的模型）：记账为 0，不阻塞主流程。
+			// 预算由 CheckEditorialBudget 在派发前单独保证（设了预算必配价格）。
+			return 0, nil
+		}
 		return 0, err
 	}
 	numerator := int64(inputUnits)*price.InputCentsPerMillion + int64(outputUnits)*price.OutputCentsPerMillion
@@ -95,6 +106,7 @@ func (s *Store) CalculateEditorialCost(ctx context.Context, providerName, model 
 	return (numerator + 999999) / 1000000, nil
 }
 
+// RecordEditorialUsage appends an immutable usage and cost audit row for one editorial task attempt.
 func (s *Store) RecordEditorialUsage(ctx context.Context, record models.EditorialUsageRecord) (*models.EditorialUsageRecord, error) {
 	if record.EditorialProfileID == "" || record.TaskKind == "" || record.EntityID == "" || record.Provider == "" || record.Model == "" || record.PromptVersion == "" || record.InputUnits < 0 || record.OutputUnits < 0 || record.CostCents < 0 {
 		return nil, fmt.Errorf("%w: incomplete editorial usage record", ErrInvalidEditorialState)

@@ -10,6 +10,15 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+const scoutBrainstormCount = 5
+
+type scoutOptions struct {
+	Mode          string
+	SourceID      string
+	ThemeID       string
+	ProposalCount int
+}
+
 type scoutAuthorization struct {
 	profile *models.EditorialProfile
 	config  provider.TaskConfig
@@ -33,10 +42,9 @@ func (srv *Server) loadScoutAuthorization(ctx context.Context, profileID string)
 	return &scoutAuthorization{profile: profile, config: config, bundle: bundle}, nil
 }
 
-func (srv *Server) generateScout(r *http.Request, authorization *scoutAuthorization) (*provider.ScoutResult, string, string, error) {
-	ctx := r.Context()
+func (srv *Server) generateScoutContext(ctx context.Context, authorization *scoutAuthorization, options scoutOptions) (*provider.ScoutResult, string, string, error) {
 	primaryName := authorization.bundle.Scout.Name()
-	request, err := srv.scoutRequest(r, authorization.profile, primaryName)
+	request, err := srv.scoutRequestWithOptions(ctx, authorization.profile, primaryName, options)
 	if err != nil {
 		return nil, "", "", badEditorial("主题不满足 Scout 条件：" + err.Error())
 	}
@@ -56,7 +64,7 @@ func (srv *Server) generateScout(r *http.Request, authorization *scoutAuthorizat
 				return nil, "", errors.New("Scout Provider 不可用")
 			}
 			fallbackName := fallbackBundle.Scout.Name()
-			fallbackRequest, requestErr := srv.scoutRequest(r, authorization.profile, fallbackName)
+			fallbackRequest, requestErr := srv.scoutRequestWithOptions(ctx, authorization.profile, fallbackName, options)
 			if requestErr != nil {
 				return nil, fallbackName, requestErr
 			}
@@ -114,18 +122,28 @@ func (srv *Server) persistScoutProposals(ctx context.Context, profileID, provide
 
 func providerStringPtr(value string) *string { return &value }
 
-func (srv *Server) runScout(r *http.Request, profileID string) (int, error) {
-	authorization, err := srv.loadScoutAuthorization(r.Context(), profileID)
+func (srv *Server) runScoutWithOptions(r *http.Request, profileID string, options scoutOptions) (int, error) {
+	return srv.runScoutContext(r.Context(), profileID, options)
+}
+
+func (srv *Server) runScoutContext(ctx context.Context, profileID string, options scoutOptions) (int, error) {
+	if options.Mode == "" {
+		options.Mode = provider.ScoutModeCrossEpisode
+	}
+	if options.ProposalCount <= 0 {
+		options.ProposalCount = scoutBrainstormCount
+	}
+	authorization, err := srv.loadScoutAuthorization(ctx, profileID)
 	if err != nil {
 		return 0, err
 	}
-	result, providerName, modelName, err := srv.generateScout(r, authorization)
+	result, providerName, modelName, err := srv.generateScoutContext(ctx, authorization, options)
 	if err != nil {
 		return 0, err
 	}
-	cost, err := srv.recordEditorialUsage(r.Context(), authorization.profile.ID, nil, "scout", "profile", authorization.profile.ID, providerName, modelName, provider.ScoutPromptVersion, result.Usage)
+	cost, err := srv.recordEditorialUsage(ctx, authorization.profile.ID, nil, "scout", "profile", authorization.profile.ID, providerName, modelName, provider.ScoutPromptVersion, result.Usage)
 	if err != nil {
 		return 0, internalEditorial(err.Error())
 	}
-	return srv.persistScoutProposals(r.Context(), authorization.profile.ID, providerName, modelName, result, cost)
+	return srv.persistScoutProposals(ctx, authorization.profile.ID, providerName, modelName, result, cost)
 }

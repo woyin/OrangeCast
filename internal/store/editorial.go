@@ -268,7 +268,14 @@ func (s *Store) IsSourceInScope(ctx context.Context, profileID string, sourceTyp
 // ListScopedSources returns the explicit SourceScope entries for an editorial profile.
 func (s *Store) ListScopedSources(ctx context.Context, profileID string) ([]SourceScopeEntry, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT source_type, source_id, created_at FROM editorial_source_scopes WHERE editorial_profile_id=? ORDER BY created_at DESC, source_id`, profileID)
+		`SELECT s.source_type, s.source_id, COALESCE(o.title, ''), s.created_at
+		 FROM editorial_source_scopes s
+		 LEFT JOIN (
+			SELECT 'episode' source_type, id, title FROM episodes
+			UNION ALL SELECT 'upload' source_type, id, original_filename title FROM uploads
+			UNION ALL SELECT 'document' source_type, id, title FROM documents
+		 ) o ON o.source_type=s.source_type AND o.id=s.source_id
+		 WHERE s.editorial_profile_id=? ORDER BY s.created_at DESC, s.source_id`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +283,7 @@ func (s *Store) ListScopedSources(ctx context.Context, profileID string) ([]Sour
 	var out []SourceScopeEntry
 	for rows.Next() {
 		entry := SourceScopeEntry{EditorialProfileID: profileID}
-		if err := rows.Scan(&entry.SourceType, &entry.SourceID, &entry.CreatedAt); err != nil {
+		if err := rows.Scan(&entry.SourceType, &entry.SourceID, &entry.Title, &entry.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, entry)
@@ -288,10 +295,11 @@ func (s *Store) ListScopedSources(ctx context.Context, profileID string) ([]Sour
 type SourceScopeEntry struct {
 	EditorialProfileID string
 	SourceType         models.SourceType
-	SourceID           string
+	SourceID, Title    string
 	CreatedAt          string
 }
 
+// SourceOption is one Source selectable for an EditorialProfile's SourceScope.
 type SourceOption struct {
 	SourceType      models.SourceType
 	SourceID, Title string
@@ -498,6 +506,7 @@ func (s *Store) GetArticleBrief(ctx context.Context, id string) (*models.Article
 	return b, err
 }
 
+// GetArticleBriefByProposal returns the most recent ArticleBrief generated for a proposal.
 func (s *Store) GetArticleBriefByProposal(ctx context.Context, proposalID string) (*models.ArticleBrief, error) {
 	var id string
 	err := s.DB.QueryRowContext(ctx, `SELECT id FROM article_briefs WHERE proposal_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, proposalID).Scan(&id)
@@ -621,6 +630,7 @@ func (s *Store) ClaimEditorialTask(ctx context.Context, taskKind, idempotencyKey
 	return n == 1, err
 }
 
+// FinishEditorialTask closes a claimed editorial task as completed or failed and releases its lease.
 func (s *Store) FinishEditorialTask(ctx context.Context, taskKind, idempotencyKey string, taskErr error) error {
 	status, lastError := "completed", any(nil)
 	if taskErr != nil {
@@ -632,6 +642,7 @@ func (s *Store) FinishEditorialTask(ctx context.Context, taskKind, idempotencyKe
 	return err
 }
 
+// SaveEditorialTaskResult stores a validated JSON result payload on its claimed editorial task.
 func (s *Store) SaveEditorialTaskResult(ctx context.Context, taskKind, idempotencyKey, payload string) error {
 	if !json.Valid([]byte(payload)) {
 		return fmt.Errorf("%w: editorial task result must be JSON", ErrInvalidEditorialState)
@@ -650,6 +661,7 @@ func (s *Store) SaveEditorialTaskResult(ctx context.Context, taskKind, idempoten
 	return nil
 }
 
+// GetEditorialTaskResult reads a finished editorial task's JSON result; ErrNotFound before completion.
 func (s *Store) GetEditorialTaskResult(ctx context.Context, taskKind, idempotencyKey string) (string, error) {
 	var payload sql.NullString
 	err := s.DB.QueryRowContext(ctx, `SELECT result_json FROM editorial_task_claims WHERE task_kind=? AND idempotency_key=?`, taskKind, idempotencyKey).Scan(&payload)
@@ -1008,6 +1020,7 @@ func invalidateRevisions(ctx context.Context, queryer editorialQueryer, affected
 	return nil
 }
 
+// InvalidateRevisionsForSource marks article revisions evidence-invalidated when a Source's KeyPoints disappear or change.
 func (s *Store) InvalidateRevisionsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) error {
 	ids, err := sourceKeyPointIDs(ctx, s.DB, sourceType, sourceID)
 	if err != nil {
@@ -1094,7 +1107,7 @@ func validModelDataPolicy(value models.ModelDataPolicy) bool {
 	return value == models.ModelDataExternalAllowed || value == models.ModelDataApprovedProvidersOnly || value == models.ModelDataLocalOnly
 }
 func validProposalKind(value string) bool {
-	return value == "fresh" || value == "evergreen" || value == "follow_up"
+	return value == "fresh" || value == "evergreen" || value == "follow_up" || value == "deep_read"
 }
 func validProposalStatus(value string) bool {
 	return value == "proposed" || value == "accepted" || value == "parked" || value == "rejected" || value == "merged"

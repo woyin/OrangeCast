@@ -185,3 +185,71 @@ func TestRefresher_RunScheduled_Error(t *testing.T) {
 	s.Close()
 	r.runScheduled()
 }
+
+// TestRefreshAll_FilteredIngestionAppliesKeywords 验证 Filtered 策略只对命中
+// 包含关键词、且未命中排除关键词的新单集自动入队（旅程第 2 步关键路径）。
+func TestRefreshAll_FilteredIngestionAppliesKeywords(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	p, err := s.CreatePodcast(ctx, "https://feed.example.com/pod.xml", "测试播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastIngestionPolicyWithFilters(ctx, p.ID, models.IngestionFiltered, "AI, 深度学习", "赞助,preview"); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRefresher(s)
+	r.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		return &models.Podcast{FeedURL: feedURL}, []models.Episode{
+			{GUID: "hit-title", Title: "第 1 集：AI 如何改变科研", AudioURL: "https://cdn.example.com/1.mp3"},
+			{GUID: "hit-desc", Title: "第 2 集：闲聊", Description: "本期深度学习专题", AudioURL: "https://cdn.example.com/2.mp3"},
+			{GUID: "excluded", Title: "第 3 集：AI 赞助特辑", AudioURL: "https://cdn.example.com/3.mp3"},
+			{GUID: "miss", Title: "第 4 集：美食之旅", AudioURL: "https://cdn.example.com/4.mp3"},
+		}, nil
+	}
+	if err := r.RefreshAll(ctx); err != nil {
+		t.Fatalf("RefreshAll: %v", err)
+	}
+	jobs, err := s.ListQueuedOrRunning(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, job := range jobs {
+		got[job.SourceID] = true
+	}
+	eps, _ := s.ListEpisodes(ctx, p.ID)
+	byGUID := map[string]string{}
+	for _, ep := range eps {
+		byGUID[ep.GUID] = ep.ID
+	}
+	if len(jobs) != 2 || !got[byGUID["hit-title"]] || !got[byGUID["hit-desc"]] {
+		t.Fatalf("Filtered 应只入队命中关键词的两集：jobs=%+v", jobs)
+	}
+	if got[byGUID["excluded"]] || got[byGUID["miss"]] {
+		t.Fatalf("排除关键词与未命中单集不得入队：jobs=%+v", jobs)
+	}
+}
+
+// TestMatchesIngestionFilter 验证关键词解析与匹配的边界行为。
+func TestMatchesIngestionFilter(t *testing.T) {
+	episode := &models.Episode{Title: "Episode: AI Research", Description: "A deep dive"}
+	cases := []struct {
+		name         string
+		include, exc string
+		want         bool
+	}{
+		{"无关键词默认放行", "", "", true},
+		{"标题命中包含词", "ai, ", "", true},
+		{"描述命中包含词", "deep dive", "", true},
+		{"大小写不敏感", "EPISODE", "", true},
+		{"排除词命中则拒绝", "ai", "research", false},
+		{"包含未命中则拒绝", "climate", "", false},
+		{"逗号分隔与空格容忍", " ai , deep ", "", true},
+	}
+	for _, tc := range cases {
+		if got := matchesIngestionFilter(episode, tc.include, tc.exc); got != tc.want {
+			t.Fatalf("%s: matchesIngestionFilter(%q, %q) = %v, want %v", tc.name, tc.include, tc.exc, got, tc.want)
+		}
+	}
+}

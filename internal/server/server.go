@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/woyin/orangecast/internal/auth"
@@ -25,6 +26,10 @@ type Server struct {
 	fetchDocument func(context.Context, string) (string, string, error)
 	tmpl          *Templates
 	loginLimiter  *auth.RateLimiter
+	autoRefill    bool
+	refillMu      sync.Mutex
+	refilling     map[string]bool
+	refillErrors  map[string]string
 }
 
 // New 装配 Server 全部依赖：模板、登录限流、默认 bundleFor/fetchFeed。
@@ -36,7 +41,7 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 	}
 	// 登录限流：每 IP 每 5 分钟最多 20 次尝试（ADR-0013）
 	limiter := auth.NewRateLimiter(20, 5*time.Minute)
-	srv := &Server{cfg: cfg, store: s, worker: worker, refresher: refresher, selector: selector, tmpl: tmpl, loginLimiter: limiter}
+	srv := &Server{cfg: cfg, store: s, worker: worker, refresher: refresher, selector: selector, tmpl: tmpl, loginLimiter: limiter, autoRefill: true, refilling: map[string]bool{}, refillErrors: map[string]string{}}
 	// 默认 bundle 解析走 selector；测试可注入 srv.bundleFor 提供 fake provider。
 	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return selector.BundleForTask(tc)

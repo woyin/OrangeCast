@@ -1,4 +1,9 @@
-.PHONY: test cover cover-gate lint
+.PHONY: test cover cover-gate lint serve
+
+# 本地运行：加载 .env 后启动（二进制缺失时先构建）
+serve:
+	@test -x ./cloudwisepod || go build -o cloudwisepod ./cmd/cloudwisepod
+	@set -a; . ./.env; set +a; exec ./cloudwisepod
 
 # 测试：跑全部 Go 单测（含 race 检测）
 test:

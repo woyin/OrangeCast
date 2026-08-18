@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// CuratorPromptVersion identifies the prompt contract used by brief curation requests.
 	CuratorPromptVersion = "curator-v1"
 	curatorSystemPrompt  = `你是内容 Curator。根据 Owner 接受的提案和候选 KeyPoint，生成可供 Owner 审核的 ArticleBrief。只能选择输入材料；必须明确入选、淘汰和冲突处理，输出 thesis、audience、outline、selectedKeyPointIds、rejectedKeyPointIds、conflictPlan、style、targetLength。不得写正文。`
 )
@@ -39,6 +40,7 @@ func validateCuratorResult(result *CuratorResult, request CuratorRequest) (*Cura
 	return result, nil
 }
 
+// Curate generates an ArticleBrief draft from an accepted proposal via the Groq chat endpoint.
 func (g *GroqProvider) Curate(ctx context.Context, request CuratorRequest) (*CuratorResult, error) {
 	input, err := curatorInput(request)
 	if err != nil {
@@ -56,6 +58,7 @@ func (g *GroqProvider) Curate(ctx context.Context, request CuratorRequest) (*Cur
 	return validateCuratorResult(result, request)
 }
 
+// Curate generates an ArticleBrief draft from an accepted proposal via the OpenAI chat endpoint.
 func (o *OpenAIProvider) Curate(ctx context.Context, request CuratorRequest) (*CuratorResult, error) {
 	input, err := curatorInput(request)
 	if err != nil {
@@ -65,7 +68,7 @@ func (o *OpenAIProvider) Curate(ctx context.Context, request CuratorRequest) (*C
 	if model == "" {
 		model = openaiAnalysisModel
 	}
-	data, retries, err := o.doResponsesWithMeta(ctx, map[string]any{"model": model, "instructions": curatorSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "Curator")
+	data, retries, err := o.chatCompleteWithMeta(ctx, map[string]any{"model": model, "instructions": curatorSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "Curator")
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +82,6 @@ func (o *OpenAIProvider) Curate(ctx context.Context, request CuratorRequest) (*C
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析 Curator 输出: %w", err)
 	}
-	result.Usage = responsesUsage(data, retries)
+	result.Usage = chatUsage(data, retries)
 	return validateCuratorResult(result, request)
 }

@@ -71,6 +71,7 @@ func (s *Store) SetPodcastIngestionPolicy(ctx context.Context, id string, policy
 	return s.SetPodcastIngestionPolicyWithFilters(ctx, id, policy, "", "")
 }
 
+// SetPodcastIngestionPolicyWithFilters persists a podcast's IngestionPolicy together with its Filtered-mode keywords.
 func (s *Store) SetPodcastIngestionPolicyWithFilters(ctx context.Context, id string, policy models.IngestionPolicy, includeKeywords, excludeKeywords string) error {
 	if policy != models.IngestionManual && policy != models.IngestionAllNew && policy != models.IngestionFiltered {
 		return fmt.Errorf("invalid ingestion policy %q", policy)

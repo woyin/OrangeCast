@@ -55,6 +55,13 @@ func TestThemeBoardCreateConfirmAndLinkKeyPoint(t *testing.T) {
 	if len(themes) != 1 {
 		t.Fatalf("theme should persist: %+v", themes)
 	}
+	checkPage := httptest.NewRequest(http.MethodGet, "/themes?profile="+profile.ID, nil)
+	checkPage.AddCookie(session)
+	checkRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(checkRec, checkPage)
+	if !strings.Contains(checkRec.Body.String(), "选择一条素材") || !strings.Contains(checkRec.Body.String(), "审查成本") {
+		t.Fatalf("theme board should show material selector and visible member: %s", checkRec.Body.String())
+	}
 	if rec := post("/themes/keypoints", "profile_id="+profile.ID+"&theme_id="+themes[0].ID+"&keypoint_id="+keyPoints[0].ID+"&relationship=conflicts"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("keypoint relation should persist: %d", rec.Code)
 	}
@@ -279,6 +286,43 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 	}
 	if rec := directRun(); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("settings read failure should be 500: %d", rec.Code)
+	}
+}
+
+func TestScoutRequestSupportsExplicitSingleEpisodeDeepRead(t *testing.T) {
+	srv := newTestServer(t)
+	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/deep-read.xml", "深读播客", "", "")
+	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "deep-one", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"}, {GUID: "deep-two", Title: "第二集", AudioURL: "https://cdn.example.com/2.mp3"}})
+	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	for _, episode := range episodes {
+		if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "观点", Citations: []string{"seg-1"}}, {Content: episode.Title + "补充", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
+	profile, _ := srv.store.CreateEditorialProfile(t.Context(), models.EditorialProfile{Name: "深读品牌"})
+	for _, episode := range episodes {
+		if err := srv.store.GrantSourceScope(t.Context(), profile.ID, models.SourceEpisode, episode.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	theme, err := srv.store.CreateTheme(t.Context(), models.Theme{EditorialProfileID: profile.ID, Name: "单集主题", Status: "confirmed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, keyPoint := range keyPoints {
+		if err := srv.store.AddKeyPointToTheme(t.Context(), theme.ID, keyPoint.ID, "supports"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request, err := srv.scoutRequestWithOptions(t.Context(), profile, "fake", scoutOptions{Mode: provider.ScoutModeDeepRead, SourceID: episodes[0].ID, ThemeID: theme.ID, ProposalCount: 5})
+	if err != nil || request.Mode != provider.ScoutModeDeepRead || request.SourceID != episodes[0].ID || len(request.Themes) != 1 || len(request.Themes[0].Materials) != 2 {
+		t.Fatalf("deep-read request should be narrowed to one Episode: request=%+v err=%v", request, err)
+	}
+	for _, material := range request.Themes[0].Materials {
+		if material.SourceID != episodes[0].ID {
+			t.Fatalf("deep-read request leaked another Episode: %+v", request.Themes[0].Materials)
+		}
 	}
 }
 

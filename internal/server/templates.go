@@ -2,6 +2,7 @@ package server
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -36,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -64,6 +65,15 @@ func NewTemplates() (*Templates, error) {
 		t.pages[name] = tmpl
 	}
 	return t, nil
+}
+
+// jsonArray 把 JSON 数组字符串解析为字符串切片（解析失败返回 nil，模板可 range）。
+func jsonArray(raw string) []string {
+	var out []string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func sourceHref(sourceType models.SourceType, sourceID string, position float64) string {

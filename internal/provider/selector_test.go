@@ -54,6 +54,10 @@ func TestSelector_BundleForTask_ModelOverride(t *testing.T) {
 	if g.model != "custom-model" {
 		t.Errorf("model 应为 custom-model，实际 %s", g.model)
 	}
+	// 回归钉：Curator 曾是唯一漏注入配置模型的角色（08-17 修复）。
+	if c, ok := bundle.Curator.(*GroqProvider); !ok || c.model != "custom-model" {
+		t.Errorf("Curator 也应注入 custom-model，实际 %v", bundle.Curator)
+	}
 }
 
 func TestEffectiveTaskModel(t *testing.T) {
@@ -133,6 +137,10 @@ func TestSelector_BundleForTask_OpenAIModelOverride(t *testing.T) {
 	}
 	if o.analysisModel != "gpt-4o" {
 		t.Errorf("model 应为 gpt-4o，实际 %s", o.analysisModel)
+	}
+	// 回归钉：Curator 曾是唯一漏注入配置模型的角色（08-17 修复）。
+	if c, ok := bundle.Curator.(*OpenAIProvider); !ok || c.analysisModel != "gpt-4o" {
+		t.Errorf("Curator 也应注入 gpt-4o，实际 %v", bundle.Curator)
 	}
 }
 

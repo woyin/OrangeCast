@@ -44,6 +44,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv.autoRefill = false
 	return srv
 }
 

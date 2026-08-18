@@ -205,7 +205,7 @@ Owner 对 ArticleProposal、ArticleBrief 或 ArticleRevision 作出的显式编�
 _避免使用：ImplicitPreference、TrainingData、Analytics；它是 Owner 可见且可解释的编辑决策，不是暗中推断的偏好_
 
 **ArticleProposal（文章提案）**：
-CloudWisePod 针对一个 EditorialProfile、从跨 Source 的 KeyPoint 中主动发现的候选写作方向，包含主题、核心论点、目标读者、写作价值与候选素材。提案分为 Fresh（近期来源）、Evergreen（历史素材重组）与 Follow-up（已发布文章的更新或延展）三种模式，并须与历史提案和 PublishedArticle 做重复检查。ArticleProposal 只有经 Owner 选择或调整后，才能进入完整文章生成；每个 EditorialProfile 可以配置各模式的生成节奏。
+CloudWisePod 针对一个 EditorialProfile、从跨 Source 的 KeyPoint 中主动发现的候选写作方向，包含主题、核心论点、目标读者、写作价值与候选素材。提案分为 Fresh（近期来源）、Evergreen（历史素材重组）、Follow-up（已发布文章的更新或延展）与 DeepRead（Owner 明确选择单个 Episode 的单集深读）四种模式，并须与历史提案和 PublishedArticle 做重复检查。跨 Episode Scout 仍要求每条候选至少覆盖两个不同 Episode；DeepRead 是显式例外，只允许使用被 Owner 选择的单个 Episode，不能通过默认模式隐式放宽跨集规则。每次 Scout 头脑风暴返回 5 条候选，提案池低于 5 条时在提案离开池后自动补货（GET 页面不产生付费副作用）。ArticleProposal 只有经 Owner 选择或调整后，才能进入完整文章生成；每个 EditorialProfile 可以配置各模式的生成节奏。
 _避免使用：ArticleBrief、ArticleDraft、Topic；前两者已经进入选材或成稿阶段，后者没有表达提案所需的论点、读者与素材_
 
 **ArticleBrief（文章简报）**：

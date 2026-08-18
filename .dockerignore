@@ -1,0 +1,13 @@
+# 构建上下文瘦身 + 防止真实数据/密钥进入镜像层
+data/
+.env
+.dev.vars
+.git/
+.worktrees/
+.claude/
+.agents/
+.pi-subagents/
+cloudwisepod
+*.db
+*.db.bak-*
+docs/

@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// StyleEditorPromptVersion identifies the prompt contract used by style review requests.
 	StyleEditorPromptVersion = "style-editor-v1"
 	styleEditorSystemPrompt  = `你是独立 StyleEditor。只依据 EditorialProfile 的目标读者、语气、风格说明和目标篇幅检查文章的标题、结构、节奏、重复、篇幅与禁用表达。不要判断事实或证据。输出 JSON {"status":"passed"或"advisory","issues":["..."]}。有建议时必须 advisory；风格审校永远不能解除或替代证据门禁。`
 )
@@ -40,7 +41,7 @@ func (o *OpenAIProvider) ReviewStyle(ctx context.Context, request StyleReviewReq
 	if model == "" {
 		model = openaiAnalysisModel
 	}
-	data, retries, err := o.doResponsesWithMeta(ctx, map[string]any{"model": model, "instructions": styleEditorSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "StyleEditor")
+	data, retries, err := o.chatCompleteWithMeta(ctx, map[string]any{"model": model, "instructions": styleEditorSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "StyleEditor")
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +55,7 @@ func (o *OpenAIProvider) ReviewStyle(ctx context.Context, request StyleReviewReq
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析 StyleEditor 输出: %w", err)
 	}
-	result.Usage = responsesUsage(data, retries)
+	result.Usage = chatUsage(data, retries)
 	return validateStyleReviewResult(result)
 }
 

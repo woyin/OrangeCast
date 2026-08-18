@@ -26,6 +26,23 @@
 <main class="container">
 {{block "content" .}}{{end}}
 </main>
+<script>
+(function() {
+  function localTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const iso = raw.includes('T') ? raw : raw.replace(' ', 'T');
+    const date = new Date(/[zZ]|[+-]\\d{2}:\\d{2}$/.test(iso) ? iso : iso + 'Z');
+    if (Number.isNaN(date.getTime())) return raw;
+    return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(date);
+  }
+  window.cwpLocalTime = localTime;
+  document.querySelectorAll('[data-utc]').forEach(function(node) {
+    node.textContent = localTime(node.dataset.utc);
+    node.title = node.dataset.utc + ' UTC';
+  });
+})();
+</script>
 <script src="/static/player.js"></script>
 </body>
 </html>{{end}}

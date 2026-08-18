@@ -19,6 +19,7 @@ CloudWisePod 的主定位从“播客学习平台”转为“播客内容生产�
 8. **支持多品牌且隔离素材和模型数据**：每个 ArticleProposal 属于一个 EditorialProfile。SourceScope 决定素材能否用于某品牌；ModelDataPolicy 独立决定素材能否发送给云端 Provider，混合任务继承最严格策略。
 9. **分期扩展 Source**：V1 只使用播客事实材料；V1.1 将 URL、PDF 和粘贴文本升级为一等 Document Source，保存 EvidenceDocument。其他音视频随后接入，自主联网研究最后引入；任何外部材料都必须先成为 Source。
 10. **保留单 Owner 和人工发布**：现有学习能力降为次级研究区但不删除；首版使用 Markdown 编辑、公众号预览与复制/导出，不接微信 API、不做团队审批、不自动群发。
+11. **提案供给与单集深读必须显式受控**：每次 Scout 头脑风暴生成 5 条候选；提案池低于 5 条时，仅在 Owner 让提案离开池或主动触发补货后后台补货，普通 GET 不调用 Provider。跨 Episode 模式仍要求每条候选覆盖至少两个 Episode；DeepRead 是 Owner 明确选择一个 Episode 后的独立提案类型，只允许使用该 Episode 的 KeyPoint，不改变默认跨集规则。
 
 ## 取代与修订
 

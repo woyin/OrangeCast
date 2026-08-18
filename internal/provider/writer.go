@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// ArticleWriterPromptVersion identifies the prompt contract used by WriteArticle requests.
 	ArticleWriterPromptVersion = "writer-v1"
 	articleWriterSystemPrompt  = `你是严格受证据约束的微信公众号文章 Writer。只可使用请求中给出的 KeyPoint 材料，绝不可补充外部事实、常识、数字、人物背景或未给出的出处。输出 JSON：title、markdown、evidenceMaps。evidenceMaps 的每项包含 kind（quoted/paraphrased/synthesized/rhetorical）、excerpt 与 keyPointIds。所有含事实、转述或综合的表达必须映射到一个或多个 KeyPoint；rhetorical 可以为空数组。直接引语必须来自材料内容并在 markdown 中归因。`
 )
@@ -47,7 +48,7 @@ func (o *OpenAIProvider) WriteArticle(ctx context.Context, request ArticleWritin
 		"model": model, "instructions": articleWriterSystemPrompt, "input": input,
 		"text": map[string]any{"format": map[string]any{"type": "json_object"}},
 	}
-	data, retries, err := o.doResponsesWithMeta(ctx, payload, "文章写作")
+	data, retries, err := o.chatCompleteWithMeta(ctx, payload, "文章写作")
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +62,7 @@ func (o *OpenAIProvider) WriteArticle(ctx context.Context, request ArticleWritin
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析文章 Writer 输出: %w", err)
 	}
-	result.Usage = responsesUsage(data, retries)
+	result.Usage = chatUsage(data, retries)
 	return validateArticleWritingResult(result, request.Materials)
 }
 

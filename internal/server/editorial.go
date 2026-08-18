@@ -23,13 +23,26 @@ var errBudget = errors.New("invalid budget")
 // production queue. It deliberately derives state from immutable workflow
 // objects instead of creating another mutable board record.
 type editorialBoard struct {
-	ProposalPool  int
-	BriefsPending int
-	ReadyToWrite  int
-	Reviewing     int
-	Blocked       int
-	Ready         int
-	Archived      int
+	ProposalPool         int
+	ProposalRefillNeeded bool
+	BriefsPending        int
+	ReadyToWrite         int
+	Reviewing            int
+	Blocked              int
+	Ready                int
+	Archived             int
+}
+
+type workbenchBriefMaterial struct {
+	ID          string
+	SourceTitle string
+	Content     string
+}
+
+type workbenchBriefView struct {
+	ID, ProposalID, Status, Thesis, Audience, Outline, MaterialPlan, ConflictPlan, Style string
+	TargetLength                                                                         *int
+	Materials                                                                            []workbenchBriefMaterial
 }
 
 // handleWorkbench renders the initial personal editorial board.
@@ -44,7 +57,7 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "加载模型价格失败", http.StatusInternalServerError)
 		return
 	}
-	data := map[string]any{"Profiles": profiles, "ModelPrices": prices, "CSRF": auth.CSRFValue(r)}
+	data := map[string]any{"Profiles": profiles, "ModelPrices": prices, "CSRF": auth.CSRFValue(r), "RefillNotice": r.URL.Query().Get("refill")}
 	profileID := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if profileID == "" && len(profiles) > 0 {
 		profileID = profiles[0].ID
@@ -70,6 +83,8 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Profile"] = profile
+		refillRunning, refillError := srv.proposalRefillState(profile.ID)
+		data["RefillRunning"], data["RefillError"] = refillRunning, refillError
 		data["Proposals"] = proposals
 		data["Drafts"] = drafts
 		briefs, err := srv.store.ListArticleBriefs(r.Context(), profile.ID)
@@ -78,6 +93,21 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Briefs"] = briefs
+		briefViews := make([]workbenchBriefView, 0, len(briefs))
+		for _, brief := range briefs {
+			view := workbenchBriefView{ID: brief.ID, ProposalID: brief.ProposalID, Status: brief.Status, Thesis: brief.Thesis, Audience: brief.Audience, Outline: brief.Outline, MaterialPlan: brief.MaterialPlan, ConflictPlan: brief.ConflictPlan, Style: brief.Style, TargetLength: brief.TargetLength}
+			var materialIDs []string
+			if json.Unmarshal([]byte(brief.MaterialPlan), &materialIDs) == nil {
+				for _, id := range materialIDs {
+					keyPoint, keyPointErr := srv.store.GetKeyPoint(r.Context(), id)
+					if keyPointErr == nil {
+						view.Materials = append(view.Materials, workbenchBriefMaterial{ID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content})
+					}
+				}
+			}
+			briefViews = append(briefViews, view)
+		}
+		data["BriefViews"] = briefViews
 		data["Board"] = buildEditorialBoard(proposals, briefs, drafts)
 		scopes, err := srv.store.ListScopedSources(r.Context(), profile.ID)
 		if err != nil {
@@ -128,6 +158,7 @@ func buildEditorialBoard(proposals []*models.ArticleProposal, briefs []*models.A
 			}
 		}
 	}
+	board.ProposalRefillNeeded = board.ProposalPool < scoutBrainstormCount
 	return board
 }
 
@@ -222,11 +253,17 @@ func (srv *Server) handleArticleProposalStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
-	if err := srv.store.SetArticleProposalStatus(r.Context(), strings.TrimSpace(r.FormValue("proposal_id")), strings.TrimSpace(r.FormValue("status"))); err != nil {
+	status := strings.TrimSpace(r.FormValue("status"))
+	if err := srv.store.SetArticleProposalStatus(r.Context(), strings.TrimSpace(r.FormValue("proposal_id")), status); err != nil {
 		http.Error(w, "更新选题失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
-	http.Redirect(w, r, "/workbench?profile="+profileID, http.StatusSeeOther)
+	redirect := "/workbench?profile=" + profileID
+	if status != "proposed" {
+		srv.scheduleProposalRefill(profileID)
+		redirect += "&refill=automatic"
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 // handleArticleBriefCreate records a reviewable material and structure contract.

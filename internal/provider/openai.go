@@ -16,8 +16,9 @@ import (
 )
 
 // OpenAIProvider 兜底实现（第 9 题中间层：groq 主力、openai 可切换）。
-// 转录走 /audio/transcriptions（gpt-4o-mini-transcribe），分析/QA 走 /responses（json_schema strict）。
-// 注意：OpenAI 的 /responses 与 Groq 的 /chat/completions 契约不对称（第 10 题），此处独立实现。
+// 转录走 /audio/transcriptions（gpt-4o-mini-transcribe），分析/QA/编辑角色走 /chat/completions。
+// 说明：自定义 baseURL 的 OpenAI 兼容端点普遍未实现 /responses 与 response_format 参数，
+// 故统一走 /chat/completions（官方 OpenAI 同样支持），结构约束以 schema 文本随提示词下发。
 type OpenAIProvider struct {
 	apiKey        string
 	baseURL       string // 空则用默认
@@ -49,21 +50,47 @@ func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
 	return &OpenAIProvider{apiKey: o.apiKey, baseURL: o.baseURL, analysisModel: model}
 }
 
-// doResponses 发送一次 POST /responses，返回原始响应体。
+// chatComplete 发送一次 POST /chat/completions，返回合成后的响应体。
 // 集中 6 处重复的 baseURL 解析、鉴权、超时与 HTTP 错误处理；调用方各自 Unmarshal/解析。
 // label 用于错误信息标注（哪个任务失败）。
-func (o *OpenAIProvider) doResponses(ctx context.Context, payload map[string]any, label string) ([]byte, error) {
-	data, _, err := o.doResponsesWithMeta(ctx, payload, label)
+func (o *OpenAIProvider) chatComplete(ctx context.Context, payload map[string]any, label string) ([]byte, error) {
+	data, _, err := o.chatCompleteWithMeta(ctx, payload, label)
 	return data, err
 }
 
-func (o *OpenAIProvider) doResponsesWithMeta(ctx context.Context, payload map[string]any, label string) ([]byte, int, error) {
+// chatCompleteWithMeta 以 /responses 风格载荷（model/instructions/input/text.format.schema）
+// 调用 /chat/completions，并把 choices[0].message.content 合成为 {"output_text":...} 响应体，
+// 使 Analyze/Scout 等调用方无需感知端点差异；usage 映射 prompt/completion tokens。
+// 兼容端点不支持 response_format，schema 以文本追加到用户消息；非 JSON 响应体原样返回由调用方报错。
+func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[string]any, label string) ([]byte, int, error) {
 	bURL := o.baseURL
 	if bURL == "" {
 		bURL = openaiBaseURL
 	}
-	buf, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bURL+"/responses", bytes.NewReader(buf))
+	system, _ := payload["instructions"].(string)
+	user, _ := payload["input"].(string)
+	if text, ok := payload["text"].(map[string]any); ok {
+		if format, ok := text["format"].(map[string]any); ok {
+			if schema, ok := format["schema"]; ok {
+				if b, err := json.Marshal(schema); err == nil {
+					user += "\n\n输出必须是 JSON，字段结构如下：\n" + string(b)
+				}
+			} else if format["type"] == "json_object" {
+				// 兼容端点不支持 response_format：用提示词强制 JSON，否则
+				// 推理型模型会输出 YAML/文本而非 JSON（08-17 Curator 实证）。
+				user += "\n\n输出必须是 JSON 对象（不要输出任何其他文字）。"
+			}
+		}
+	}
+	chatPayload := map[string]any{
+		"model": payload["model"],
+		"messages": []map[string]any{
+			{"role": "system", "content": system},
+			{"role": "user", "content": user},
+		},
+	}
+	buf, _ := json.Marshal(chatPayload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bURL+"/chat/completions", bytes.NewReader(buf))
 	if err != nil {
 		return nil, 0, fmt.Errorf("openai %s 创建请求: %w", label, err)
 	}
@@ -87,10 +114,42 @@ func (o *OpenAIProvider) doResponsesWithMeta(ctx context.Context, payload map[st
 		return nil, 0, fmt.Errorf("openai %s 失败 HTTP %d: %s", label, resp.StatusCode, string(data))
 	}
 	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
-	return data, retries, nil
+	var chat struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &chat); err != nil {
+		return data, retries, nil
+	}
+	content := ""
+	if len(chat.Choices) > 0 {
+		content = chat.Choices[0].Message.Content
+	}
+	synth, _ := json.Marshal(map[string]any{
+		"output_text": content,
+		"usage":       map[string]any{"input_tokens": chat.Usage.PromptTokens, "output_tokens": chat.Usage.CompletionTokens},
+	})
+	return synth, retries, nil
 }
 
-func responsesUsage(data []byte, retryCounts ...int) TaskUsage {
+// effectiveAnalysisModel 返回生效的分析模型：未显式配置时用官方默认。
+// 自定义 baseURL 的兼容端点必须显式配置模型，否则官方默认模型名在端点上不存在。
+func (o *OpenAIProvider) effectiveAnalysisModel() string {
+	if o.analysisModel != "" {
+		return o.analysisModel
+	}
+	return openaiAnalysisModel
+}
+
+// chatUsage 从 chatCompleteWithMeta 合成的响应体提取用量（input/output tokens 与重试次数）。
+func chatUsage(data []byte, retryCounts ...int) TaskUsage {
 	var response struct {
 		Usage struct {
 			InputTokens  int `json:"input_tokens"`
@@ -164,16 +223,13 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 	return res, nil
 }
 
-// Analyze 走 /responses + json_schema strict（OpenAI 保证结构化输出）。
+// Analyze 走 /chat/completions，schema 以文本随提示词下发（兼容官方与 OpenAI 兼容端点）。
 func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
-	aModel := o.analysisModel
-	if aModel == "" {
-		aModel = openaiAnalysisModel
-	}
+	aModel := o.effectiveAnalysisModel()
 	payload := map[string]any{
 		"model":        aModel,
 		"instructions": analysisSystemPrompt,
@@ -187,7 +243,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 			},
 		},
 	}
-	data, err := o.doResponses(context.Background(), payload, "分析")
+	data, err := o.chatComplete(context.Background(), payload, "分析")
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +270,7 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 	}
 	input := fmt.Sprintf("基于以下播客片段回答，输出 JSON {\"answer\":\"\",\"cited\":[编号]}。\n\n%s\n问题：%s", ctxSB.String(), question)
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        o.effectiveAnalysisModel(),
 		"instructions": "你是播客内容助手。通过 cited 标注引用的片段编号。",
 		"input":        input,
 		"text": map[string]any{
@@ -233,7 +289,7 @@ func (o *OpenAIProvider) Answer(question string, segments []Segment) (*QAResult,
 			},
 		},
 	}
-	data, err := o.doResponses(context.Background(), payload, "QA")
+	data, err := o.chatComplete(context.Background(), payload, "QA")
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +332,7 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        o.effectiveAnalysisModel(),
 		"instructions": highlightSystemPrompt,
 		"input":        "请基于以下全部带编号片段的播客转录稿，选出最值得听的高光区间：\n\n" + sb.String(),
 		"text": map[string]any{
@@ -304,7 +360,7 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 			},
 		},
 	}
-	data, err := o.doResponses(context.Background(), payload, "高光")
+	data, err := o.chatComplete(context.Background(), payload, "高光")
 	if err != nil {
 		return nil, err
 	}
@@ -335,11 +391,11 @@ func (o *OpenAIProvider) Paraphrase(question string, referenceSegments []Segment
 	}
 	input := fmt.Sprintf("参考片段：\n%s\n\n用户的疑问：%s\n\n请基于参考片段重新讲解，帮用户理解。", sb.String(), question)
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        o.effectiveAnalysisModel(),
 		"instructions": paraphraseSystemPrompt,
 		"input":        input,
 	}
-	data, err := o.doResponses(context.Background(), payload, "复述讲解")
+	data, err := o.chatComplete(context.Background(), payload, "复述讲解")
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +409,7 @@ func (o *OpenAIProvider) Paraphrase(question string, referenceSegments []Segment
 }
 
 // StudyChatAnswer 学习对话一轮（GeneratedDerivative，ADR-0018 R3）。
-// OpenAI /responses 接口不接收完整 chat history，故把历史折叠进 input 文本。
+// 与 Groq 对偶：把对话历史折叠进用户消息文本，保持窗口策略一致。
 func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error) {
 	if len(candidates) == 0 {
 		return &StudyChatResult{ScopeFeedback: "这已超出本集内容范围——我找不到任何相关片段来回答这个问题。"}, nil
@@ -380,7 +436,7 @@ func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMes
 	}
 	input := fmt.Sprintf("候选片段：\n%s\n对话历史：\n%s当前用户问题：%s", ctxSB.String(), histSB.String(), question)
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        o.effectiveAnalysisModel(),
 		"instructions": studyChatSystemPrompt,
 		"input":        input,
 		"text": map[string]any{
@@ -399,7 +455,7 @@ func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMes
 			},
 		},
 	}
-	data, err := o.doResponses(context.Background(), payload, "学习对话")
+	data, err := o.chatComplete(context.Background(), payload, "学习对话")
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +499,7 @@ func (o *OpenAIProvider) CheckReference(question, answer string, referenceSegmen
 	}
 	input := fmt.Sprintf("用户问题：%s\n\nAI 回答：\n%s\n\n参考片段原文：\n%s", question, answer, sb.String())
 	payload := map[string]any{
-		"model":        openaiAnalysisModel,
+		"model":        o.effectiveAnalysisModel(),
 		"instructions": referenceCheckSystemPrompt,
 		"input":        input,
 		"text": map[string]any{
@@ -462,7 +518,7 @@ func (o *OpenAIProvider) CheckReference(question, answer string, referenceSegmen
 			},
 		},
 	}
-	data, err := o.doResponses(context.Background(), payload, "校验")
+	data, err := o.chatComplete(context.Background(), payload, "校验")
 	if err != nil {
 		return ReferenceCheckResult{}, err
 	}

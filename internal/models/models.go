@@ -329,6 +329,7 @@ type EditorialUsageRecord struct {
 	CreatedAt          string
 }
 
+// EditorialRoleFallback records the fallback provider and model a role may use when the primary routing fails.
 type EditorialRoleFallback struct{ Role, Provider, Model, UpdatedAt string }
 
 // Theme groups scoped KeyPoints across episodes into an editorially meaningful topic.
@@ -354,7 +355,7 @@ type ThemeKeyPoint struct {
 type ArticleProposal struct {
 	ID                 string
 	EditorialProfileID string
-	Kind               string // fresh | evergreen | follow_up
+	Kind               string // fresh | evergreen | follow_up | deep_read
 	Status             string // proposed | accepted | parked | rejected | merged
 	Title              string
 	Thesis             string

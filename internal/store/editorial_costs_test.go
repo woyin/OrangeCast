@@ -40,6 +40,28 @@ func TestEditorialCostLedgerAndBudgetGate(t *testing.T) {
 	}
 }
 
+// TestEditorialCostUnpricedModelIsZeroCost 验证未登记价格的模型按 0 成本记账、不报错
+// （自定义兼容端点模型；预算由 CheckEditorialBudget 单独保证）。
+func TestEditorialCostUnpricedModelIsZeroCost(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	cost, err := s.CalculateEditorialCost(ctx, "openai", "cmc/deepseek/deepseek-v4-flash", 1000, 500)
+	if err != nil {
+		t.Fatalf("未登记价格的模型不应报错: %v", err)
+	}
+	if cost != 0 {
+		t.Fatalf("未登记价格的模型应按 0 成本记账，实际 %d", cost)
+	}
+	// 无预算画像仍可记账（审计行照写，成本为 0）
+	profile, err := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: "unpriced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordEditorialUsage(ctx, models.EditorialUsageRecord{EditorialProfileID: profile.ID, TaskKind: "scout", EntityType: "profile", EntityID: profile.ID, Provider: "openai", Model: "cmc/deepseek/deepseek-v4-flash", PromptVersion: "v1", InputUnits: 1000, OutputUnits: 500, CostCents: cost}); err != nil {
+		t.Fatalf("无价格模型也应能记录用量: %v", err)
+	}
+}
+
 func TestEditorialBudgetRequiresConfiguredPrice(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

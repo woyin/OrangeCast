@@ -1,6 +1,7 @@
 {{define "title"}}关键要点 · CloudWisePod{{end}}
 {{define "content"}}
 <h1>关键要点</h1>
+<p class="meta">要把素材用于 Scout，请前往 <a href="/themes">主题</a> 选择已授权的 KeyPoint；“集合”不是编辑流程的一部分。</p>
 
 <form method="get" action="/keypoints" class="panel" style="margin-bottom:1rem"><h2>筛选素材</h2><label>来源类型 <select name="source_type"><option value="">全部</option><option value="episode" {{if eq .Filter.SourceType "episode"}}selected{{end}}>Episode</option><option value="upload" {{if eq .Filter.SourceType "upload"}}selected{{end}}>Upload</option><option value="document" {{if eq .Filter.SourceType "document"}}selected{{end}}>Document</option></select></label><label>Source ID <input name="source_id" value="{{.Filter.SourceID}}"></label><label>Podcast ID <input name="podcast_id" value="{{.Filter.PodcastID}}"></label><label>Theme ID <input name="theme_id" value="{{.Filter.ThemeID}}"></label><label>状态 <select name="status"><option value="">全部</option><option value="inbox" {{if eq .Filter.Status "inbox"}}selected{{end}}>Inbox</option><option value="shortlisted" {{if eq .Filter.Status "shortlisted"}}selected{{end}}>Shortlisted</option><option value="used" {{if eq .Filter.Status "used"}}selected{{end}}>Used</option><option value="dismissed" {{if eq .Filter.Status "dismissed"}}selected{{end}}>Dismissed</option></select></label><label>从 <input type="date" name="from" value="{{.Filter.From}}"></label><label>至 <input type="date" name="to" value="{{.Filter.To}}"></label><button class="btn" type="submit">应用筛选</button> <a class="btn btn-secondary" href="/keypoints">清除</a></form>
 
@@ -22,7 +23,7 @@
     <p class="meta">
       <a href="{{sourceHref .SourceType .SourceID .TimeStart}}">{{.SourceTitle}}</a>
       · {{formatTime .TimeStart}} – {{formatTime .TimeEnd}}
-      · {{.CreatedAt}} · {{.Origin}}
+      · <time data-utc="{{.CreatedAt}}">{{.CreatedAt}}</time> · {{.Origin}} · ID <code>{{.ID}}</code>
     </p>
   </div>
   <div class="kp-actions" style="display:flex;gap:0.5rem;flex-shrink:0">
@@ -34,7 +35,6 @@
     </select>
     <button class="btn btn-secondary kp-annotate" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">标注</button>
     <button class="btn btn-secondary kp-pin" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">收藏</button>
-    <button class="btn btn-secondary kp-collect" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-segment-ids="{{.CitationsJSON}}" data-start="{{.TimeStart}}" data-end="{{.TimeEnd}}" data-title="{{.SourceTitle}}">加入集合</button>
   </div>
 </div>
 {{else}}

@@ -120,6 +120,7 @@ func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.Sourc
 	return nil
 }
 
+// IndexKeyPoints refreshes the global KeyPoint projection for one Source from a validated KnowledgeCard and its Segments (ADR-0017).
 func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -394,6 +395,7 @@ func insertManualKeyPointTx(ctx context.Context, tx *sql.Tx, keyPoint KeyPointRo
 	return indexLocalKeyPointEmbedding(ctx, tx, keyPoint.ID, keyPoint.Content+" "+keyPoint.Description+" "+keyPoint.SourceTitle)
 }
 
+// CreateManualKeyPoint persists an Owner-created or human-edited KeyPoint that re-analysis must never overwrite.
 func (s *Store) CreateManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) (*KeyPointRow, error) {
 	keyPoint, err := s.prepareManualKeyPoint(ctx, keyPoint)
 	if err != nil {

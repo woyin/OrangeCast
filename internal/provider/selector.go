@@ -142,6 +142,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
 				bundle.StyleEditor = custom
+				bundle.Curator = custom
 				bundle.Paraphrase = custom
 				bundle.StudyChat = custom
 				bundle.RefChecker = custom
@@ -156,6 +157,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
 				bundle.StyleEditor = custom
+				bundle.Curator = custom
 				bundle.Paraphrase = custom
 				bundle.StudyChat = custom
 				bundle.RefChecker = custom

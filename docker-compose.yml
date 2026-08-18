@@ -13,14 +13,13 @@ services:
       # 可选：OpenAI key（仅按单次任务显式授权时使用，ADR-0009）
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # 公网 URL（反向代理场景必须设置，用于 Secure Cookie 与 Markdown 链接）
-      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      # 兼容 .env 里的 BASE_URL 写法：PUBLIC_URL 未设时程序回退到 BASE_URL
+      PUBLIC_URL: ${PUBLIC_URL:-${BASE_URL:-http://localhost:8080}}
       # 受信任反向代理（如 Caddy 在宿主网络：172.17.0.1/32；按实际调整）
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       PORT: "8080"
       DATA_DIR: /app/data
     volumes:
-      # 单一持久卷：数据库 + EvidenceAudio + 临时文件 + 备份（ADR-0010）
-      - cwp-data:/app/data
-
-volumes:
-  cwp-data:
+      # 宿主 data 目录直接映射（ADR-0010 便携数据目录）：与 make serve 共用同一实例，
+      # 但二者严禁同时运行（SQLite 锁 + EvidenceAudio 写入冲突）
+      - ./data:/app/data

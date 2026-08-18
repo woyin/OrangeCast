@@ -126,6 +126,7 @@ func rankHybridCandidates(candidates []hybridScoredKeyPoint, limit int) []*KeyPo
 	return result
 }
 
+// SearchKeyPointsHybrid merges lexical FTS and semantic vector recall for KeyPoint search.
 func (s *Store) SearchKeyPointsHybrid(ctx context.Context, query string, limit int) ([]*KeyPointRow, error) {
 	if limit < 1 || limit > 100 {
 		limit = 50

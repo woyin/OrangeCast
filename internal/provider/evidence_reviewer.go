@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	// EvidenceReviewerPromptVersion identifies the prompt contract used by evidence review requests.
 	EvidenceReviewerPromptVersion = "evidence-reviewer-v1"
 	evidenceReviewerSystemPrompt  = `你是独立 EvidenceReviewer。只根据请求中给出的 Revision、EvidenceMap 与 KeyPoint 原始材料检查：每个转述/综合是否被材料支持、直接引语是否可追溯、是否有错误归因。不能使用外部知识。输出 JSON {"status":"passed"或"failed","issues":["..."]}。存在任何硬证据问题必须 failed。`
 )
@@ -40,7 +41,7 @@ func (o *OpenAIProvider) ReviewEvidence(ctx context.Context, request EvidenceRev
 	if model == "" {
 		model = openaiAnalysisModel
 	}
-	data, retries, err := o.doResponsesWithMeta(ctx, map[string]any{"model": model, "instructions": evidenceReviewerSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "EvidenceReviewer")
+	data, retries, err := o.chatCompleteWithMeta(ctx, map[string]any{"model": model, "instructions": evidenceReviewerSystemPrompt, "input": input, "text": map[string]any{"format": map[string]any{"type": "json_object"}}}, "EvidenceReviewer")
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +55,7 @@ func (o *OpenAIProvider) ReviewEvidence(ctx context.Context, request EvidenceRev
 	if err := parseJSONLoose(response.OutputText, result); err != nil {
 		return nil, fmt.Errorf("解析 EvidenceReviewer 输出: %w", err)
 	}
-	result.Usage = responsesUsage(data, retries)
+	result.Usage = chatUsage(data, retries)
 	return validateEvidenceReviewResult(result)
 }
 

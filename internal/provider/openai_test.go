@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,20 +11,30 @@ import (
 	"testing"
 )
 
-// TestOpenAI_Analyze 验证 OpenAI Analyze 走 /responses 并解析 output_text。
+// TestOpenAI_Analyze 验证 OpenAI Analyze 走 /chat/completions：载荷翻译为 messages、
+// 不下发 response_format（兼容端点不支持）、schema 以文本随用户消息下发，并解析 content。
 func TestOpenAI_Analyze(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			t.Errorf("路径应为 /responses，实际 %s", r.URL.Path)
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("路径应为 /chat/completions，实际 %s", r.URL.Path)
 		}
-		// 验证请求体含 instructions
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		if body["instructions"] == nil {
-			t.Error("请求应含 instructions")
+		msgs, _ := body["messages"].([]any)
+		if len(msgs) != 2 {
+			t.Errorf("请求应含 system+user 两条消息，实际 %d 条", len(msgs))
+		}
+		if _, has := body["response_format"]; has {
+			t.Error("不应下发 response_format（兼容端点不支持）")
+		}
+		if len(msgs) == 2 {
+			user, _ := msgs[1].(map[string]any)
+			if content, _ := user["content"].(string); !strings.Contains(content, "字段结构") {
+				t.Error("用户消息应附 schema 文本以约束输出结构")
+			}
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"output_text":"{\"title\":\"通胀\",\"summary\":{\"text\":\"概览\",\"citations\":[\"seg-0001\"]},\"keyPoints\":[{\"content\":\"要点\",\"description\":\"d\",\"citations\":[\"seg-0001\"]}],\"chapters\":[],\"quotes\":[],\"tags\":[\"经济\"],\"suggestedQuestions\":[]}"}`))
+		w.Write([]byte(`{"choices":[{"message":{"content":` + mustJSON(`{"title":"通胀","summary":{"text":"概览","citations":["seg-0001"]},"keyPoints":[{"content":"要点","description":"d","citations":["seg-0001"]}],"chapters":[],"quotes":[],"tags":["经济"],"suggestedQuestions":[]}`) + `}}]}`))
 	}))
 	defer srv.Close()
 
@@ -34,6 +45,26 @@ func TestOpenAI_Analyze(t *testing.T) {
 	}
 	if card.Title != "通胀" || len(card.KeyPoints) != 1 {
 		t.Errorf("卡片解析错误: %+v", card)
+	}
+}
+
+// TestOpenAI_Analyze_UsesConfiguredModel 验证 Analyze 使用显式配置的模型
+// （自定义 baseURL 的兼容端点上官方默认模型名不存在，必须下发配置值）。
+func TestOpenAI_Analyze_UsesConfiguredModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["model"] != "custom-model" {
+			t.Errorf("应下发配置模型 custom-model，实际 %v", body["model"])
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"t\",\"summary\":{\"text\":\"s\",\"citations\":[\"seg-0001\"]},\"keyPoints\":[],\"chapters\":[],\"quotes\":[],\"tags\":[],\"suggestedQuestions\":[]}"}}]}`))
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL).WithModel("custom-model")
+	if _, err := o.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}}); err != nil {
+		t.Fatalf("Analyze: %v", err)
 	}
 }
 
@@ -134,9 +165,9 @@ func TestOpenAI_Transcribe_ParseError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_DoResponses_NetworkError 验证 doResponses 网络错误时报错。
-// 覆盖 doResponses 中 "openai %s 请求" 分支（经 Answer 触发）。
-func TestOpenAI_DoResponses_NetworkError(t *testing.T) {
+// TestOpenAI_Chat_NetworkError 验证 chatComplete 网络错误时报错。
+// 覆盖 chatComplete 中 "openai %s 请求" 分支（经 Answer 触发）。
+func TestOpenAI_Chat_NetworkError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	url := srv.URL
 	srv.Close()
@@ -151,9 +182,9 @@ func TestOpenAI_DoResponses_NetworkError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_DoResponses_HTTPError 验证 doResponses 非 200 时报错。
-// 覆盖 doResponses 中 "openai %s 失败 HTTP" 分支（经 Answer 触发）。
-func TestOpenAI_DoResponses_HTTPError(t *testing.T) {
+// TestOpenAI_Chat_HTTPError 验证 chatComplete 非 200 时报错。
+// 覆盖 chatComplete 中 "openai %s 失败 HTTP" 分支（经 Answer 触发）。
+func TestOpenAI_Chat_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}))
@@ -276,9 +307,9 @@ func TestOpenAI_StudyChat_AssistantHistory(t *testing.T) {
 	}
 }
 
-// TestOpenAI_CheckReference_DoResponsesError 验证校验 doResponses 失败时报错。
-// 覆盖 CheckReference 中 doResponses err → return ReferenceCheckResult{}, err 分支。
-func TestOpenAI_CheckReference_DoResponsesError(t *testing.T) {
+// TestOpenAI_CheckReference_ChatError 验证校验 chatComplete 失败时报错。
+// 覆盖 CheckReference 中 chatComplete err → return ReferenceCheckResult{}, err 分支。
+func TestOpenAI_CheckReference_ChatError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))
@@ -425,15 +456,46 @@ func TestOpenAI_Analyze_ParseError(t *testing.T) {
 	}
 }
 
-// newOpenAITestServer 构造返回固定 output_text 的 /responses 测试服务器。
+// TestOpenAI_ChatCompletion_JsonObjectPrompt 验证 json_object 格式请求的用户消息
+// 会追加“输出必须是 JSON”指令（兼容端点不支持 response_format，08-17 Curator 实证
+// 推理型模型会输出 YAML 而非 JSON）。
+func TestOpenAI_ChatCompletion_JsonObjectPrompt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		msgs, _ := body["messages"].([]any)
+		if len(msgs) != 2 {
+			t.Fatalf("请求应含 system+user 两条消息，实际 %d 条", len(msgs))
+		}
+		user, _ := msgs[1].(map[string]any)
+		content, _ := user["content"].(string)
+		if !strings.Contains(content, "输出必须是 JSON") {
+			t.Errorf("json_object 请求应追加 JSON 输出指令，实际用户消息: %q", content)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"{\"thesis\":\"t\",\"audience\":\"a\",\"outline\":\"o\",\"selectedKeyPointIds\":[\"kp-1\"]}"}}]}`))
+	}))
+	defer srv.Close()
+
+	o := NewOpenAIProvider("key").WithBaseURL(srv.URL).WithModel("custom-model")
+	result, err := o.Curate(context.Background(), CuratorRequest{Title: "提案", Materials: []ArticleMaterial{{KeyPointID: "kp-1", SourceID: "s1", Content: "素材"}}})
+	if err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+	if len(result.SelectedKeyPointIDs) != 1 {
+		t.Errorf("应解析出 1 个入选 KeyPoint，实际 %+v", result.SelectedKeyPointIDs)
+	}
+}
+
+// newOpenAITestServer 构造返回固定 content 的 /chat/completions 测试服务器。
 func newOpenAITestServer(t *testing.T, outputText string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			t.Errorf("路径应为 /responses，实际 %s", r.URL.Path)
+		if r.URL.Path != "/chat/completions" {
+			t.Errorf("路径应为 /chat/completions，实际 %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"output_text":` + mustJSON(outputText) + `}`))
+		w.Write([]byte(`{"choices":[{"message":{"content":` + mustJSON(outputText) + `}}]}`))
 	}))
 }
 
@@ -497,9 +559,9 @@ func TestOpenAI_GenerateHighlights_ParseError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_Paraphrase_DoResponsesError 验证 Paraphrase 的 doResponses 失败时报错。
-// 覆盖 Paraphrase 中 doResponses err → return nil, err 分支。
-func TestOpenAI_Paraphrase_DoResponsesError(t *testing.T) {
+// TestOpenAI_Paraphrase_ChatError 验证 Paraphrase 的 chatComplete 失败时报错。
+// 覆盖 Paraphrase 中 chatComplete err → return nil, err 分支。
+func TestOpenAI_Paraphrase_ChatError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))
@@ -529,9 +591,9 @@ func TestOpenAI_Paraphrase_ParseError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_StudyChat_DoResponsesError 验证 StudyChatAnswer 的 doResponses 失败时报错。
-// 覆盖 StudyChatAnswer 中 doResponses err → return nil, err 分支。
-func TestOpenAI_StudyChat_DoResponsesError(t *testing.T) {
+// TestOpenAI_StudyChat_ChatError 验证 StudyChatAnswer 的 chatComplete 失败时报错。
+// 覆盖 StudyChatAnswer 中 chatComplete err → return nil, err 分支。
+func TestOpenAI_StudyChat_ChatError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))
@@ -587,9 +649,9 @@ func TestOpenAI_Transcribe_CopyError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_Analyze_DoResponsesError 验证 Analyze 的 doResponses 失败时报错。
-// 覆盖 Analyze 中 doResponses err → return nil, err 分支。
-func TestOpenAI_Analyze_DoResponsesError(t *testing.T) {
+// TestOpenAI_Analyze_ChatError 验证 Analyze 的 chatComplete 失败时报错。
+// 覆盖 Analyze 中 chatComplete err → return nil, err 分支。
+func TestOpenAI_Analyze_ChatError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))
@@ -601,9 +663,9 @@ func TestOpenAI_Analyze_DoResponsesError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_GenerateHighlights_DoResponsesError 验证 GenerateHighlights 的 doResponses 失败时报错。
-// 覆盖 GenerateHighlights 中 doResponses err → return nil, err 分支。
-func TestOpenAI_GenerateHighlights_DoResponsesError(t *testing.T) {
+// TestOpenAI_GenerateHighlights_ChatError 验证 GenerateHighlights 的 chatComplete 失败时报错。
+// 覆盖 GenerateHighlights 中 chatComplete err → return nil, err 分支。
+func TestOpenAI_GenerateHighlights_ChatError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))
@@ -615,9 +677,9 @@ func TestOpenAI_GenerateHighlights_DoResponsesError(t *testing.T) {
 	}
 }
 
-// TestOpenAI_StudyChat_DoResponsesError2 验证 StudyChatAnswer 的 doResponses 失败时报错。
-// 覆盖 StudyChatAnswer 中 doResponses err → return nil, err 分支（HTTP 500 路径）。
-func TestOpenAI_StudyChat_DoResponsesError2(t *testing.T) {
+// TestOpenAI_StudyChat_ChatError2 验证 StudyChatAnswer 的 chatComplete 失败时报错。
+// 覆盖 StudyChatAnswer 中 chatComplete err → return nil, err 分支（HTTP 500 路径）。
+func TestOpenAI_StudyChat_ChatError2(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "error", http.StatusInternalServerError)
 	}))

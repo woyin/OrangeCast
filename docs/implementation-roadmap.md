@@ -3,6 +3,45 @@
 基线：现有 Go 单 Owner、自托管证据与学习平台（旧 Phase 0–7 已完成）
 目标：完成 [`product-goal.md`](product-goal.md) 定义的内容生产工作台，架构决策见 [ADR-0021](adr/0021-evidence-grounded-content-workbench.md)
 
+## V1 验证冲刺：真实黄金旅程（当前唯一优先级）
+
+状态：已确认（2026-08-14 方向拷问会话；取代本文件后续阶段的排序权威）
+
+依据：截至落盘，生产闭环代码已齐备（迁移至 0023，Phase 8–13 及 Phase 15 的 Document Source 已实现），但真实实例中 320 个 Episode 候选、19 个旧管线 Transcript、0 KeyPoint、0 EditorialProfile、0 ArticleProposal——ADR-0021 转型的核心闭环从未被真实使用过。继续横向加功能等于在未验证的地基上加盖楼层。
+
+### 冻结范围
+
+- Phase 16（Translation/Speaker）、Phase 17（视觉资产/编辑日历）、Phase 18（发布反馈闭环）及一切新功能开发冻结。
+- 不编写存量素材回填工具；已知缺口登记进旅程报告。
+- 唯一允许的代码变更是交战规则定义的"硬阻塞最小修复"；另经 Owner 批准（方案 B，2026-08-14）：冲刺开始前的既红门禁修复——35 处导出符号注释、旅程关键路径测试（rss Filtered 摄取、provider Curator/Writer）、store/server 覆盖率缺口改为登记地板（见 KNOWN_GAP_FLOORS）。
+
+### 唯一目标与验收口径（DoD）
+
+- Owner 在本地真实实例上完整走一遍 `product-goal.md` 的 V1 黄金旅程全部 10 步。
+- 发布验证到"富文本粘贴进微信公众号后台编辑器"为止；群发不是验收条件。
+- 第 10 步备份→全新实例恢复全部编辑成果必须真实执行。
+- 旅程报告与摩擦清单落盘 [`v1-golden-journey-run.md`](v1-golden-journey-run.md)。
+
+### 交战规则
+
+- 一口气走完；摩擦只记录不修复。记录四要素：所在步骤、期望、实际、Owner 本能反应。
+- 仅硬阻塞允许最小修复后原地继续，不从头重来。硬阻塞指：产品完全无法表达必要操作（如无入口），或继续前进有数据损坏风险。
+- "懒得用 UI、SQL 更快"算摩擦，不算硬阻塞；被迫直接改库推进即是硬阻塞信号。
+- 允许用 UI 内任何手动方式绕过；绕过方式本身就是摩擦证据。
+
+### 旅程参数（已确认）
+
+- 素材：Owner 内容上熟悉且仍在更新的一个播客；新处理 3–5 集（批量入队 + Filtered 或 AllNew IngestionPolicy）。
+- 19 个旧管线 Source 不回填、不重新处理；"存量已处理 Source 无 KeyPoint 回填路径"作为已知缺口登记。
+- 预算：EditorialProfile 内显式设置单篇与月度上限，量级"肉疼但不打断旅程"；确保预算治理被真实行使，包括超限"暂停并请求 Owner 决策"路径被触发或至少被检验。
+
+### 摩擦清单排序（下一版本唯一需求来源）
+
+1. 第一层按步骤权重：越靠近发布出口（Scout / Brief / 写作审校 / 发布包）的阻断性摩擦，优先级越高。
+2. 第二层按杠杆：修复所解锁的步骤数 × 复现频率。
+3. Phase 16/17/18 维持冻结；仅"不解决则旅程无法重复进行"的单点例外可由 Owner 显式批准（是例外解冻，不是整体解冻）。
+4. 排序结果与本文冲突时，以旅程报告为准，并回写更新本文。
+
 ## 执行原则
 
 - 每个阶段结束时应用必须可构建、可启动、可从上一版本数据安全升级。
@@ -54,10 +93,11 @@
 - 语义检索与关键词检索混合召回，只返回具有有效 Citation 且符合 SourceScope/ModelDataPolicy 的候选。
 - 实现 Theme 建议、Owner 确认/改名/合并/拆分/忽略及多对多 KeyPoint 关系。
 - Theme 页面展示来源分布、新增趋势、观点支持/补充/冲突、已用素材和内容空白。
-- Scout 按 EditorialProfile 生成 Fresh 与 Evergreen ArticleProposal，记录候选素材、目标读者、核心论点、写作价值，并对历史提案做重复检查；PublishedArticle 去重与 Follow-up 在 V1.2 补齐。
+- Scout 按 EditorialProfile 生成 Fresh、Evergreen、Follow-up 和显式 DeepRead ArticleProposal，记录候选素材、目标读者、核心论点、写作价值，并对历史提案做重复检查；跨 Episode 模式要求每条候选覆盖至少两个 Episode，DeepRead 必须由 Owner 选择单个 Episode；每次头脑风暴严格返回 5 条。PublishedArticle 去重与 Follow-up 的更深关联在 V1.2 继续完善。
+- 提案池低于 5 条时，在提案接受/搁置/拒绝后后台自动补货；普通工作台 GET 不触发付费调用，且保留手动补货入口。
 - 建立角色路由基础：首选/备用 Provider、超时、重试、预算、实际费用与 Prompt 版本；提供经济/均衡/质量优先预设。
 
-退出条件：Scout 能从多个 Episode 产生带真实来源、通过权限过滤且不与历史提案明显重复的候选选题。
+退出条件：Scout 能从多个 Episode 产生带真实来源、通过权限过滤且不与历史提案明显重复的候选选题；Owner 也能在明确选择一个 Episode 后生成单集 DeepRead 候选，提案池能在离开池后恢复到 5 条目标。
 
 ### Phase 11：Curator 与 ArticleBrief
 
@@ -94,7 +134,7 @@
 - 证据与审校警告显示在旁栏，不污染正文。
 - PublicationPackage 输出公众号富文本、Markdown、纯文本、候选标题、摘要、推荐语和封面文案。
 - 对外来源按画像提供轻量/标准/严格密度；直接引语强制署名，文末列出实际 Source。
-- 提供提案池、待确认 Brief、生成中、待审核、可发布、已发布、搁置的个人看板；不做多人权限或自动发布。
+- 提供按生产阶段组织的个人工作台：1 选题池、2 Brief 审核、3 写作与审校；画像、SourceScope、模型价格和手动兜底进入设置区，空材料 Brief 不得授权写作。
 - 完成一键复制与文件导出；不接微信 API。
 
 退出条件：Owner 能完成 [`product-goal.md`](product-goal.md) 的 V1 黄金旅程，并把通过证据门禁的文章粘贴到微信公众号编辑器。

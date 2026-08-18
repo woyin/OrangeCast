@@ -27,6 +27,7 @@ func (s *Store) CreateWebDocument(ctx context.Context, title, sourceURL, content
 	return s.createDocument(ctx, title, "url", sourceURL, content)
 }
 
+// CreatePDFDocument stores an uploaded PDF's extracted text as a first-class Document Source.
 func (s *Store) CreatePDFDocument(ctx context.Context, title, filename, content string) (*models.Document, error) {
 	return s.createDocument(ctx, title, "pdf", filename, content)
 }
@@ -82,6 +83,7 @@ func (s *Store) CreateDocumentVersion(ctx context.Context, documentID, title, co
 	return s.createDocumentVersion(ctx, previous.SeriesID, next, title, "revision", previous.OriginURL, content)
 }
 
+// GetDocument loads one Document Source by ID.
 func (s *Store) GetDocument(ctx context.Context, id string) (*models.Document, error) {
 	d := &models.Document{}
 	err := s.DB.QueryRowContext(ctx, `SELECT id,title,origin_kind,origin_url,content,content_sha256,series_id,version,production_use,model_data_policy,archived_at,created_at,updated_at FROM documents WHERE id=?`, id).Scan(&d.ID, &d.Title, &d.OriginKind, &d.OriginURL, &d.Content, &d.ContentSHA256, &d.SeriesID, &d.Version, &d.ProductionUse, &d.ModelDataPolicy, &d.ArchivedAt, &d.CreatedAt, &d.UpdatedAt)
@@ -91,6 +93,7 @@ func (s *Store) GetDocument(ctx context.Context, id string) (*models.Document, e
 	return d, err
 }
 
+// ListDocuments returns all Document Sources newest first.
 func (s *Store) ListDocuments(ctx context.Context) ([]*models.Document, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,title,origin_kind,origin_url,content,content_sha256,series_id,version,production_use,model_data_policy,archived_at,created_at,updated_at FROM documents ORDER BY created_at DESC,id DESC`)
 	if err != nil {
@@ -108,6 +111,7 @@ func (s *Store) ListDocuments(ctx context.Context) ([]*models.Document, error) {
 	return out, rows.Err()
 }
 
+// ListDocumentVersions returns the immutable version history of one Document series.
 func (s *Store) ListDocumentVersions(ctx context.Context, seriesID string) ([]*models.Document, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,title,origin_kind,origin_url,content,content_sha256,series_id,version,production_use,model_data_policy,archived_at,created_at,updated_at FROM documents WHERE series_id=? ORDER BY version DESC`, seriesID)
 	if err != nil {
@@ -125,6 +129,7 @@ func (s *Store) ListDocumentVersions(ctx context.Context, seriesID string) ([]*m
 	return out, rows.Err()
 }
 
+// GetDocumentKnowledgeCard loads the KnowledgeCard generated for a Document Source.
 func (s *Store) GetDocumentKnowledgeCard(ctx context.Context, documentID string) (*provider.KnowledgeCard, error) {
 	var payload string
 	if err := s.DB.QueryRowContext(ctx, `SELECT payload FROM document_knowledge_cards WHERE document_id=?`, documentID).Scan(&payload); err != nil {
@@ -160,6 +165,7 @@ func truncateDocumentText(value string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
+// SearchDocuments runs full-text search over Document Sources via the FTS index.
 func (s *Store) SearchDocuments(ctx context.Context, query string, limit int) ([]*models.Document, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20

@@ -40,7 +40,7 @@
 <div class="list-item">
   <div class="ep-info" style="flex:1">
     <h3><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a></h3>
-    <p class="meta">{{if eq (printf "%s" .Job.Status) "succeeded"}}✅ 成功{{else}}❌ 失败{{end}} · {{.Job.JobType}} · {{.Job.UpdatedAt}}</p>
+    <p class="meta">{{if eq (printf "%s" .Job.Status) "succeeded"}}✅ 成功{{else}}❌ 失败{{end}} · {{.Job.JobType}} · <time data-utc="{{.Job.UpdatedAt}}">{{.Job.UpdatedAt}}</time></p>
   </div>
 </div>
 {{end}}
@@ -75,7 +75,7 @@
         html += '<h2 style="margin-top:1.5rem">最近完成</h2><div id="recent-list">';
         data.recent.forEach(function(j) {
           const icon = j.status === 'succeeded' ? '✅' : '❌';
-          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + icon + (j.status === 'succeeded' ? ' 成功' : ' 失败') + ' · ' + j.job_type + ' · ' + j.updated_at + '</p></div></div>';
+          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + icon + (j.status === 'succeeded' ? ' 成功' : ' 失败') + ' · ' + j.job_type + ' · ' + (window.cwpLocalTime ? window.cwpLocalTime(j.updated_at) : j.updated_at) + '</p></div></div>';
         });
         html += '</div>';
       }

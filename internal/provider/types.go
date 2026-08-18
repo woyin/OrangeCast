@@ -142,6 +142,12 @@ type ArticleWriterProvider interface {
 	Name() string
 }
 
+// ScoutMode identifies the editorial breadth required for one brainstorming run.
+const (
+	ScoutModeCrossEpisode = "cross_episode"
+	ScoutModeDeepRead     = "deep_read"
+)
+
 // ScoutTheme is a confirmed editorial topic with only its scoped, usable evidence material.
 type ScoutTheme struct {
 	ID          string            `json:"id"`
@@ -152,9 +158,12 @@ type ScoutTheme struct {
 
 // ScoutRequest supplies a profile's confirmed themes to the topic-discovery role.
 type ScoutRequest struct {
-	Audience string       `json:"audience"`
-	Voice    string       `json:"voice"`
-	Themes   []ScoutTheme `json:"themes"`
+	Audience      string       `json:"audience"`
+	Voice         string       `json:"voice"`
+	Mode          string       `json:"mode,omitempty"`
+	SourceID      string       `json:"sourceId,omitempty"`
+	ProposalCount int          `json:"proposalCount,omitempty"`
+	Themes        []ScoutTheme `json:"themes"`
 }
 
 // ScoutProposal is a candidate topic that remains proposed until the Owner accepts it.
@@ -179,6 +188,7 @@ type ScoutProvider interface {
 	Name() string
 }
 
+// CuratorRequest carries an accepted proposal and its candidate materials into brief curation.
 type CuratorRequest struct {
 	Title     string            `json:"title"`
 	Thesis    string            `json:"thesis"`
@@ -187,6 +197,7 @@ type CuratorRequest struct {
 	Materials []ArticleMaterial `json:"materials"`
 }
 
+// CuratorResult is the Owner-reviewable brief draft produced by a CuratorProvider.
 type CuratorResult struct {
 	Thesis              string    `json:"thesis"`
 	Audience            string    `json:"audience"`
@@ -199,6 +210,7 @@ type CuratorResult struct {
 	Usage               TaskUsage `json:"-"`
 }
 
+// CuratorProvider generates ArticleBrief drafts from accepted proposals.
 type CuratorProvider interface {
 	Curate(ctx context.Context, request CuratorRequest) (*CuratorResult, error)
 	Name() string

@@ -66,6 +66,27 @@ func TestGroqScoutValidatesCrossSourceKeyPointProposal(t *testing.T) {
 	}
 }
 
+func TestScoutDeepReadAllowsSingleSourceAndHonorsBatchSize(t *testing.T) {
+	request := ScoutRequest{Mode: ScoutModeDeepRead, ProposalCount: 2, SourceID: "episode-1", Themes: []ScoutTheme{{Materials: []ArticleMaterial{{KeyPointID: "kp-1", SourceID: "episode-1"}, {KeyPointID: "kp-2", SourceID: "episode-1"}}}}}
+	result, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{
+		{Kind: "deep_read", Title: "深读一", CandidateKeyPointIDs: []string{"kp-1"}},
+		{Kind: "deep_read", Title: "深读二", CandidateKeyPointIDs: []string{"kp-2"}},
+	}}, request)
+	if err != nil || len(result.Proposals) != 2 {
+		t.Fatalf("single-episode deep read should accept two same-source proposals: result=%+v err=%v", result, err)
+	}
+	tooFew := request
+	tooFew.ProposalCount = 5
+	if _, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{{Kind: "deep_read", Title: "一条", CandidateKeyPointIDs: []string{"kp-1"}}}}, tooFew); err == nil {
+		t.Fatal("Scout must honor an exact requested batch size")
+	}
+	cross := request
+	cross.Mode = ScoutModeCrossEpisode
+	cross.ProposalCount = 0
+	if _, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{{Kind: "fresh", Title: "跨集", CandidateKeyPointIDs: []string{"kp-1"}}}}, cross); err == nil {
+		t.Fatal("cross-episode mode must still require two sources")
+	}
+}
 func TestScoutRejectsEmptyAndInvalidModelOutput(t *testing.T) {
 	if _, err := scoutInput(ScoutRequest{}); err == nil {
 		t.Fatal("Scout input must require a confirmed theme")
@@ -96,13 +117,13 @@ func TestScoutRejectsEmptyAndInvalidModelOutput(t *testing.T) {
 	}
 }
 
-func TestOpenAIScoutParsesResponsesOutput(t *testing.T) {
+func TestOpenAIScoutParsesChatOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			t.Fatalf("expected Responses endpoint, got %s", r.URL.Path)
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected chat/completions endpoint, got %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output_text":"{\"proposals\":[{\"kind\":\"fresh\",\"title\":\"选题\",\"thesis\":\"论点\",\"candidateKeyPointIds\":[\"kp-1\",\"kp-2\"]}]}"}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"proposals\":[{\"kind\":\"fresh\",\"title\":\"选题\",\"thesis\":\"论点\",\"candidateKeyPointIds\":[\"kp-1\",\"kp-2\"]}]}"}}]}`))
 	}))
 	defer server.Close()
 	provider := NewOpenAIProvider("key").WithBaseURL(server.URL)
@@ -161,7 +182,7 @@ func TestEvidenceReviewerRequiresMappedTextAndValidDecision(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output_text":"{\"status\":\"failed\",\"issues\":[\"unsupported claim\"]}"}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"status\":\"failed\",\"issues\":[\"unsupported claim\"]}"}}]}`))
 	}))
 	result, err = NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewEvidence(context.Background(), request)
 	server.Close()
@@ -204,7 +225,7 @@ func TestStyleEditorRequiresProfileConstrainedValidDecision(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output_text":"{\"status\":\"passed\",\"issues\":[]}"}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"status\":\"passed\",\"issues\":[]}"}}]}`))
 	}))
 	result, err = NewOpenAIProvider("key").WithBaseURL(server.URL).ReviewStyle(context.Background(), request)
 	server.Close()
@@ -234,5 +255,75 @@ func TestStyleEditorRequiresProfileConstrainedValidDecision(t *testing.T) {
 		if err == nil {
 			t.Fatalf("invalid OpenAI style output should fail: %+v", response)
 		}
+	}
+}
+
+func TestOpenAIWriterParsesChatOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("expected chat/completions endpoint, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"标题\",\"markdown\":\"# 标题——正文。\",\"evidenceMaps\":[{\"kind\":\"quoted\",\"excerpt\":\"正文。\",\"keyPointIds\":[\"kp-1\"]},{\"kind\":\"rhetorical\",\"excerpt\":\"语气句\",\"keyPointIds\":[]}]}"}}]}`))
+	}))
+	defer server.Close()
+	request := ArticleWritingRequest{Thesis: "论点", Outline: "# 结构", Materials: []ArticleMaterial{{KeyPointID: "kp-1", Content: "正文。", Citations: []string{"seg-1"}}}}
+	result, err := NewOpenAIProvider("key").WithBaseURL(server.URL).WriteArticle(context.Background(), request)
+	if err != nil || result.Title != "标题" || len(result.EvidenceMaps) != 2 {
+		t.Fatalf("OpenAI writer should parse output: result=%+v err=%v", result, err)
+	}
+}
+
+func TestOpenAIWriterSurfacesFailures(t *testing.T) {
+	request := ArticleWritingRequest{Thesis: "论点", Outline: "# 结构", Materials: []ArticleMaterial{{KeyPointID: "kp-1"}}}
+	for _, response := range []struct {
+		status int
+		body   string
+	}{{http.StatusInternalServerError, `failure`}, {http.StatusOK, `not-json`}, {http.StatusOK, `{"output_text":"{\"markdown\":\"# x\",\"evidenceMaps\":[{\"kind\":\"rhetorical\",\"excerpt\":\"\"}]}"}`}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(response.status)
+			_, _ = w.Write([]byte(response.body))
+		}))
+		_, err := NewOpenAIProvider("key").WithBaseURL(server.URL).WriteArticle(context.Background(), request)
+		server.Close()
+		if err == nil {
+			t.Fatalf("OpenAI writer should surface invalid response: %+v", response)
+		}
+	}
+}
+
+func TestGroqWriterRejectsInvalidOutput(t *testing.T) {
+	request := ArticleWritingRequest{Thesis: "论点", Outline: "# 结构", Materials: []ArticleMaterial{{KeyPointID: "kp-1"}}}
+	for _, response := range []string{"not-json", `{"markdown":"# x","evidenceMaps":[]}`, `{"markdown":"# x","evidenceMaps":[{"kind":"quoted","excerpt":"x","keyPointIds":[]}]}`} {
+		writer := NewGroqProvider("key")
+		writer.chatCompleteFn = func([]map[string]string, string) (string, int, error) { return response, 200, nil }
+		if _, err := writer.WriteArticle(context.Background(), request); err == nil {
+			t.Fatalf("invalid Groq writer output should fail: %q", response)
+		}
+	}
+	failing := NewGroqProvider("key")
+	failing.chatCompleteFn = func([]map[string]string, string) (string, int, error) { return "", 500, fmt.Errorf("provider failed") }
+	if _, err := failing.WriteArticle(context.Background(), request); err == nil {
+		t.Fatal("provider failure should surface from writer")
+	}
+}
+
+func TestValidateArticleWritingResultBranches(t *testing.T) {
+	materials := []ArticleMaterial{{KeyPointID: "kp-1", Content: "素材观点"}}
+	if _, err := validateArticleWritingResult(&ArticleWritingResult{Markdown: " ", EvidenceMaps: []ArticleEvidence{{Kind: "rhetorical", Excerpt: "x"}}}, materials); err == nil {
+		t.Fatal("empty markdown must fail")
+	}
+	for _, mapping := range []ArticleEvidence{
+		{Kind: "paraphrased", Excerpt: " ", KeyPointIDs: []string{"kp-1"}},
+		{Kind: "synthesized", Excerpt: "综合", KeyPointIDs: nil},
+		{Kind: "mystery", Excerpt: "x", KeyPointIDs: []string{"kp-1"}},
+	} {
+		if _, err := validateArticleWritingResult(&ArticleWritingResult{Markdown: "正文", EvidenceMaps: []ArticleEvidence{mapping}}, materials); err == nil {
+			t.Fatalf("invalid evidence mapping must fail: %+v", mapping)
+		}
+	}
+	fallback, err := validateArticleWritingResult(&ArticleWritingResult{Markdown: "正文", EvidenceMaps: []ArticleEvidence{{Kind: "rhetorical", Excerpt: "语气"}}}, materials)
+	if err != nil || fallback.Title != "素材观点" {
+		t.Fatalf("missing title should fall back to first material: result=%+v err=%v", fallback, err)
 	}
 }

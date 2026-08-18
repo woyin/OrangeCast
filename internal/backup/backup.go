@@ -165,6 +165,7 @@ func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manif
 	return nil
 }
 
+// Create writes a consistent backup package of the store and evidence directory to destFile and returns its Manifest.
 func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (Manifest, error) {
 	var manifest Manifest
 	if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
@@ -290,6 +291,7 @@ func installArchive(archive extractedArchive, manifest Manifest, targetDataDir s
 	return nil
 }
 
+// Restore unpacks a backup package into targetDataDir and verifies it against the embedded Manifest.
 func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) (Manifest, error) {
 	var manifest Manifest
 	f, err := os.Open(backupPath)

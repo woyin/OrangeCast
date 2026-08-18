@@ -129,6 +129,7 @@ func graphEdgeKey(source, target string) string {
 	return source + "\x00" + target
 }
 
+// GetKpGraph returns the force-directed KeyPoint graph of collections and cross-episode similarity edges.
 func (s *Store) GetKpGraph(ctx context.Context) (*KpGraphData, error) {
 	kps, _, err := s.ListKeyPoints(ctx, 1, 500)
 	if err != nil {
