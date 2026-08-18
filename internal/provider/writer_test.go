@@ -66,7 +66,7 @@ func TestGroqScoutValidatesCrossSourceKeyPointProposal(t *testing.T) {
 	}
 }
 
-func TestScoutDeepReadAllowsSingleSourceAndHonorsBatchSize(t *testing.T) {
+func TestScoutDeepReadAllowsSingleSourceAndPermitsSmallerBatch(t *testing.T) {
 	request := ScoutRequest{Mode: ScoutModeDeepRead, ProposalCount: 2, SourceID: "episode-1", Themes: []ScoutTheme{{Materials: []ArticleMaterial{{KeyPointID: "kp-1", SourceID: "episode-1"}, {KeyPointID: "kp-2", SourceID: "episode-1"}}}}}
 	result, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{
 		{Kind: "deep_read", Title: "深读一", CandidateKeyPointIDs: []string{"kp-1"}},
@@ -77,8 +77,8 @@ func TestScoutDeepReadAllowsSingleSourceAndHonorsBatchSize(t *testing.T) {
 	}
 	tooFew := request
 	tooFew.ProposalCount = 5
-	if _, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{{Kind: "deep_read", Title: "一条", CandidateKeyPointIDs: []string{"kp-1"}}}}, tooFew); err == nil {
-		t.Fatal("Scout must honor an exact requested batch size")
+	if result, err := validateScoutResult(&ScoutResult{Proposals: []ScoutProposal{{Kind: "deep_read", Title: "一条", CandidateKeyPointIDs: []string{"kp-1"}}}}, tooFew); err != nil || len(result.Proposals) != 1 {
+		t.Fatalf("Scout may return fewer than the target when material is insufficient: result=%+v err=%v", result, err)
 	}
 	cross := request
 	cross.Mode = ScoutModeCrossEpisode

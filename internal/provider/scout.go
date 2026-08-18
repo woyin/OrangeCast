@@ -10,7 +10,7 @@ import (
 const (
 	// ScoutPromptVersion identifies the prompt contract used by topic scouting requests.
 	ScoutPromptVersion = "scout-v2"
-	scoutSystemPrompt  = `你是内容 Scout。只根据已确认 Theme 中提供的 KeyPoint 材料发现可写的公众号选题。不要添加任何外部事实。输出 JSON 对象，字段 proposals；每个 proposal 有 kind（fresh/evergreen/follow_up/deep_read）、title、thesis、audience、rationale、candidateKeyPointIds。`
+	scoutSystemPrompt  = `你是内容 Scout。只根据提供的、已审的 KeyPoint 材料发现可写的创作方向。不要添加任何外部事实。输出 JSON 对象，字段 proposals；每个 proposal 有 kind（fresh/evergreen/follow_up/deep_read）、title、thesis、audience、rationale、candidateKeyPointIds。`
 )
 
 func scoutPrompt(request ScoutRequest) string {
@@ -23,9 +23,9 @@ func scoutPrompt(request ScoutRequest) string {
 		count = 1
 	}
 	if mode == ScoutModeDeepRead {
-		return scoutSystemPrompt + fmt.Sprintf("当前模式是单集深读：所有候选必须只使用当前选定 Episode 的材料，kind 必须为 deep_read；每个候选至少引用一个输入 KeyPoint。必须返回恰好 %d 条互不重复的候选。", count)
+		return scoutSystemPrompt + fmt.Sprintf("当前模式是单集深读：所有候选必须只使用当前选定 Episode 的材料，kind 必须为 deep_read；每个候选至少引用一个输入 KeyPoint。以 %d 条实质不同候选为目标，最多 %d 条；素材不足时允许返回更少，绝不使用同义标题或轻微改写凑数。", count, maxScoutProposalCount)
 	}
-	return scoutSystemPrompt + fmt.Sprintf("当前模式是跨 Episode：每个候选必须引用至少两个不同 Episode 的输入 KeyPoint，kind 使用 fresh、evergreen 或 follow_up。必须返回恰好 %d 条互不重复的候选。", count)
+	return scoutSystemPrompt + fmt.Sprintf("当前模式是跨 Episode：每个候选必须引用至少两个不同 Episode 的输入 KeyPoint，kind 使用 fresh、evergreen 或 follow_up。以 %d 条实质不同候选为目标，最多 %d 条；素材不足时允许返回更少，绝不使用同义标题或轻微改写凑数。", count, maxScoutProposalCount)
 }
 
 // Scout produces proposal candidates through Groq chat completion.
@@ -76,7 +76,7 @@ func (o *OpenAIProvider) Scout(ctx context.Context, request ScoutRequest) (*Scou
 
 func scoutInput(request ScoutRequest) (string, error) {
 	if len(request.Themes) == 0 {
-		return "", fmt.Errorf("至少需要一个包含素材的确认 Theme")
+		return "", fmt.Errorf("至少需要一个包含素材的分组")
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
@@ -85,9 +85,14 @@ func scoutInput(request ScoutRequest) (string, error) {
 	return "基于下列 Theme 与 KeyPoint 材料提出不重复的写作选题：\n" + string(encoded), nil
 }
 
+const maxScoutProposalCount = 10
+
 func validateScoutResult(result *ScoutResult, request ScoutRequest) (*ScoutResult, error) {
 	if result == nil || len(result.Proposals) == 0 {
 		return nil, fmt.Errorf("Scout 必须返回至少一个提案")
+	}
+	if len(result.Proposals) > maxScoutProposalCount {
+		return nil, fmt.Errorf("Scout 最多只能返回 %d 条提案", maxScoutProposalCount)
 	}
 	mode := request.Mode
 	if mode == "" {
@@ -95,9 +100,6 @@ func validateScoutResult(result *ScoutResult, request ScoutRequest) (*ScoutResul
 	}
 	if mode != ScoutModeCrossEpisode && mode != ScoutModeDeepRead {
 		return nil, fmt.Errorf("Scout 模式无效")
-	}
-	if request.ProposalCount > 0 && len(result.Proposals) != request.ProposalCount {
-		return nil, fmt.Errorf("Scout 必须返回恰好 %d 条提案，实际 %d 条", request.ProposalCount, len(result.Proposals))
 	}
 	allowed, sourceByKeyPoint := scoutMaterialIndexes(request)
 	titles := map[string]bool{}
