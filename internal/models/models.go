@@ -266,7 +266,7 @@ const (
 )
 
 // ModelDataPolicy 限制一个 Source 的内容可以发送给哪些 AI Provider。
-// 它独立于 EditorialProfile 的 SourceScope：前者约束数据流向，后者约束发布用途。
+// 它只约束数据流向；Owner 纳入的 Source 默认可用于学习与创作。
 type ModelDataPolicy string
 
 const (
@@ -278,8 +278,9 @@ const (
 	ModelDataLocalOnly ModelDataPolicy = "local_only"
 )
 
-// SourcePolicy keeps publication permission and provider data permission
-// explicit and independently editable for one Source.
+// SourcePolicy keeps legacy production_use for migration compatibility and
+// the active provider data permission for one Source. ProductionUse no longer
+// grants or denies creative use; Archived remains a lifecycle control.
 type SourcePolicy struct {
 	ProductionUse     string
 	ModelDataPolicy   ModelDataPolicy

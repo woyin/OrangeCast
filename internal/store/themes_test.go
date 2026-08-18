@@ -9,7 +9,7 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
-func TestThemeLifecycleRequiresScopedPublicationEligibleKeyPoints(t *testing.T) {
+func TestThemeLifecycleAcceptsOwnerAddedActiveKeyPointsWithoutScope(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	seedUser(t, s, "themes@example.com")
@@ -20,18 +20,15 @@ func TestThemeLifecycleRequiresScopedPublicationEligibleKeyPoints(t *testing.T) 
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := s.ListKeyPoints(ctx, 1, 10)
+	if err := s.SetKeyPointQualityStatus(ctx, keyPoints[0].ID, models.KeyPointReady); err != nil {
+		t.Fatal(err)
+	}
 	profile, err := s.CreateEditorialProfile(ctx, models.EditorialProfile{Name: "技术周刊"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	theme, err := s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "AI 工程成本", Description: "速度与审查"})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddKeyPointToTheme(ctx, theme.ID, keyPoints[0].ID, "supports"); !errors.Is(err, ErrInvalidEditorialState) {
-		t.Fatalf("unscoped KeyPoint should be rejected: %v", err)
-	}
-	if err := s.GrantSourceScope(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AddKeyPointToTheme(ctx, theme.ID, keyPoints[0].ID, "supports"); err != nil {

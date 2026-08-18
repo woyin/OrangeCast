@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -30,6 +31,9 @@ type KeyPointRow struct {
 	ProductionStatus models.KeyPointProductionStatus
 	ParentKeyPointID *string
 	EvidenceStatus   string
+	QualityStatus    models.KeyPointQualityStatus
+	StaleAt          string
+	StaleReason      string
 	CreatedAt        string
 }
 
@@ -100,12 +104,12 @@ func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.Sourc
 			kpID = uuid.NewString()
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, evidence_status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+			`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, evidence_status, quality_status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 			kpID, string(sourceType), sourceID, sourceTitle,
 			strings.TrimSpace(kp.Content), strings.TrimSpace(kp.Description),
 			string(citationsJSON), string(models.RelationCitation), start, end, cardVersion,
-			string(models.KeyPointAutomatic), string(models.KeyPointInbox), "valid"); err != nil {
+			string(models.KeyPointAutomatic), string(models.KeyPointInbox), "valid", string(models.KeyPointNeedsReview)); err != nil {
 			return fmt.Errorf("写入 keypoint_index: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -189,6 +193,7 @@ type KeyPointFilter struct {
 	SourceType                   models.SourceType
 	SourceID, PodcastID, ThemeID string
 	Status                       models.KeyPointProductionStatus
+	QualityStatus                models.KeyPointQualityStatus
 	From, To                     string
 }
 
@@ -224,6 +229,12 @@ func (s *Store) ListKeyPointsFiltered(ctx context.Context, filter KeyPointFilter
 		}
 		clauses, args = append(clauses, "ki.production_status=?"), append(args, string(filter.Status))
 	}
+	if filter.QualityStatus != "" {
+		if !validKeyPointQualityStatus(filter.QualityStatus) {
+			return nil, 0, fmt.Errorf("%w: invalid quality status filter", ErrInvalidEditorialState)
+		}
+		clauses, args = append(clauses, "ki.quality_status=?"), append(args, string(filter.QualityStatus))
+	}
 	if filter.From != "" {
 		clauses, args = append(clauses, "ki.created_at>=?"), append(args, filter.From)
 	}
@@ -241,7 +252,7 @@ func (s *Store) ListKeyPointsFiltered(ctx context.Context, filter KeyPointFilter
 	offset := (page - 1) * perPage
 	queryArgs := append(append([]any{}, args...), perPage, offset)
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at
+		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, quality_status, COALESCE(stale_at,''), COALESCE(stale_reason,''), created_at
 		 FROM keypoint_index ki`+where+` ORDER BY created_at DESC, time_start ASC, id LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return nil, 0, err
@@ -294,7 +305,7 @@ func (s *Store) SearchKeyPoints(ctx context.Context, query string, page, perPage
 	}
 	offset := (page - 1) * perPage
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT ki.id, ki.source_type, ki.source_id, ki.source_title, ki.content, ki.description, ki.citations_json, ki.relation_kind, ki.time_start, ki.time_end, ki.card_version, ki.origin, ki.production_status, ki.parent_keypoint_id, ki.evidence_status, ki.created_at
+		`SELECT ki.id, ki.source_type, ki.source_id, ki.source_title, ki.content, ki.description, ki.citations_json, ki.relation_kind, ki.time_start, ki.time_end, ki.card_version, ki.origin, ki.production_status, ki.parent_keypoint_id, ki.evidence_status, ki.quality_status, COALESCE(ki.stale_at,''), COALESCE(ki.stale_reason,''), ki.created_at
 		 FROM keypoint_search ks JOIN keypoint_index ki ON ks.keypoint_id = ki.id
 		 WHERE keypoint_search MATCH ? ORDER BY rank LIMIT ? OFFSET ?`,
 		query, perPage, offset)
@@ -313,7 +324,7 @@ func scanKeyPointRows(rows *sql.Rows) ([]*KeyPointRow, int, error) {
 		r := &KeyPointRow{}
 		var rk string
 		var origin, productionStatus string
-		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.SourceTitle, &r.Content, &r.Description, &r.CitationsJSON, &rk, &r.TimeStart, &r.TimeEnd, &r.CardVersion, &origin, &productionStatus, &r.ParentKeyPointID, &r.EvidenceStatus, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.SourceTitle, &r.Content, &r.Description, &r.CitationsJSON, &rk, &r.TimeStart, &r.TimeEnd, &r.CardVersion, &origin, &productionStatus, &r.ParentKeyPointID, &r.EvidenceStatus, &r.QualityStatus, &r.StaleAt, &r.StaleReason, &r.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		r.RelationKind = models.RelationKind(rk)
@@ -327,7 +338,7 @@ func scanKeyPointRows(rows *sql.Rows) ([]*KeyPointRow, int, error) {
 // GetKeyPoint reads a persistent KeyPoint from the production material layer.
 func (s *Store) GetKeyPoint(ctx context.Context, id string) (*KeyPointRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at
+		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, quality_status, COALESCE(stale_at,''), COALESCE(stale_reason,''), created_at
 		 FROM keypoint_index WHERE id=?`, id)
 	if err != nil {
 		return nil, err
@@ -383,9 +394,9 @@ func (s *Store) prepareManualKeyPoint(ctx context.Context, keyPoint KeyPointRow)
 
 func insertManualKeyPointTx(ctx context.Context, tx *sql.Tx, keyPoint KeyPointRow) error {
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, datetime('now'))`,
-		keyPoint.ID, string(keyPoint.SourceType), keyPoint.SourceID, keyPoint.SourceTitle, keyPoint.Content, keyPoint.Description, keyPoint.CitationsJSON, string(models.RelationCitation), keyPoint.TimeStart, keyPoint.TimeEnd, string(models.KeyPointManual), string(keyPoint.ProductionStatus), keyPoint.ParentKeyPointID, keyPoint.EvidenceStatus); err != nil {
+		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, quality_status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, datetime('now'))`,
+		keyPoint.ID, string(keyPoint.SourceType), keyPoint.SourceID, keyPoint.SourceTitle, keyPoint.Content, keyPoint.Description, keyPoint.CitationsJSON, string(models.RelationCitation), keyPoint.TimeStart, keyPoint.TimeEnd, string(models.KeyPointManual), string(keyPoint.ProductionStatus), keyPoint.ParentKeyPointID, keyPoint.EvidenceStatus, string(models.KeyPointOwnerConfirmed)); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -472,6 +483,86 @@ func (s *Store) SetKeyPointProductionStatus(ctx context.Context, id string, stat
 
 func validKeyPointProductionStatus(status models.KeyPointProductionStatus) bool {
 	return status == models.KeyPointInbox || status == models.KeyPointShortlisted || status == models.KeyPointUsed || status == models.KeyPointDismissed
+}
+
+func validKeyPointQualityStatus(status models.KeyPointQualityStatus) bool {
+	switch status {
+	case models.KeyPointNeedsReview, models.KeyPointReady, models.KeyPointOwnerConfirmed, models.KeyPointQualityDismissed:
+		return true
+	default:
+		return false
+	}
+}
+
+// SetKeyPointQualityStatus records the learning-quality decision. The first
+// transition to a discovery-eligible state also creates an idempotent material
+// change, so AutomaticDiscovery only sees reviewed learning results.
+func (s *Store) SetKeyPointQualityStatus(ctx context.Context, id string, status models.KeyPointQualityStatus) error {
+	if !validKeyPointQualityStatus(status) {
+		return fmt.Errorf("%w: invalid KeyPoint quality status", ErrInvalidEditorialState)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var sourceType models.SourceType
+	var sourceID, content, citations, previous string
+	if err := tx.QueryRowContext(ctx, `SELECT source_type,source_id,content,citations_json,quality_status FROM keypoint_index WHERE id=?`, id).Scan(&sourceType, &sourceID, &content, &citations, &previous); err == sql.ErrNoRows {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE keypoint_index SET quality_status=? WHERE id=?`, string(status), id); err != nil {
+		return err
+	}
+	wasEligible := previous == string(models.KeyPointReady) || previous == string(models.KeyPointOwnerConfirmed)
+	isEligible := status == models.KeyPointReady || status == models.KeyPointOwnerConfirmed
+	if isEligible && !wasEligible {
+		snapshot := sha256.Sum256([]byte(content + "\x00" + citations))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO material_changes (id,keypoint_id,source_type,source_id,change_kind,snapshot_hash) VALUES (?,?,?,?,?,?) ON CONFLICT(keypoint_id,change_kind,snapshot_hash) DO NOTHING`, uuid.NewString(), id, sourceType, sourceID, "quality_approved", fmt.Sprintf("%x", snapshot)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// MarkKeyPointStale keeps a potentially outdated learning result visible but
+// excludes it from automatic discovery until the Owner re-evaluates it.
+func (s *Store) MarkKeyPointStale(ctx context.Context, id, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return fmt.Errorf("%w: stale reason required", ErrInvalidEditorialState)
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE keypoint_index SET stale_at=datetime('now'),stale_reason=? WHERE id=?`, reason, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearKeyPointStaleness records that the Owner has re-evaluated a stale
+// learning result. It does not silently promote the quality status.
+func (s *Store) ClearKeyPointStaleness(ctx context.Context, id string) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE keypoint_index SET stale_at=NULL,stale_reason=NULL WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteKeyPointsForSource Purge 时删除该 Source 的全部 KeyPoint 索引。

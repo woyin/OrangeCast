@@ -91,26 +91,23 @@ func (s *Store) GrantSourceScope(ctx context.Context, profileID string, sourceTy
 	return err
 }
 
-// CanUseSourceForPublication checks both explicit SourceScope and the source's publication state.
-// Archived, internal-only, and disabled Sources cannot enter a new public ArticleBrief.
-func (s *Store) CanUseSourceForPublication(ctx context.Context, profileID string, sourceType models.SourceType, sourceID string) (bool, error) {
-	inScope, err := s.IsSourceInScope(ctx, profileID, sourceType, sourceID)
-	if err != nil || !inScope {
-		return inScope, err
-	}
+// CanUseSourceForPublication is retained as a compatibility name while the
+// old Article workflow is migrated. SourceScope and production_use no longer
+// authorize creative use: every Owner-added, non-archived Source is eligible.
+// Provider data restrictions remain enforced separately by CanSendSourceToProvider.
+func (s *Store) CanUseSourceForPublication(ctx context.Context, _ string, sourceType models.SourceType, sourceID string) (bool, error) {
 	if !validSourceType(sourceType) {
 		return false, fmt.Errorf("%w: invalid source type", ErrInvalidEditorialState)
 	}
-	var productionUse string
 	var archivedAt *string
-	err = s.DB.QueryRowContext(ctx, fmt.Sprintf(`SELECT production_use, archived_at FROM %s WHERE id=?`, sourceTable(sourceType)), sourceID).Scan(&productionUse, &archivedAt)
+	err := s.DB.QueryRowContext(ctx, fmt.Sprintf(`SELECT archived_at FROM %s WHERE id=?`, sourceTable(sourceType)), sourceID).Scan(&archivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
 	if err != nil {
 		return false, err
 	}
-	return productionUse == "public" && archivedAt == nil, nil
+	return archivedAt == nil, nil
 }
 
 // CanSendSourceToExternalProvider checks the model data policy before task enqueueing.

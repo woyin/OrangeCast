@@ -19,6 +19,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 	_ "modernc.org/sqlite"
 )
@@ -71,6 +72,29 @@ func buildFixture(t *testing.T, dataDir string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "Ep", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "可恢复的学习素材", Citations: []string{"seg-0001"}}}}, []provider.Segment{{ID: "seg-0001", End: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	keyPoints, _, err := s.ListKeyPoints(ctx, 1, 10)
+	if err != nil || len(keyPoints) != 1 {
+		t.Fatalf("创建备份工作空间 fixture 的 KeyPoint: points=%d err=%v", len(keyPoints), err)
+	}
+	candidate, err := s.CreateMaterialCandidate(ctx, models.MaterialCandidate{SourceType: string(models.SourceEpisode), SourceID: sourceID, OriginKind: "summary", Content: "可恢复的学习候选", CitationsJSON: `["seg-0001"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMaterialCandidateStatus(ctx, candidate.ID, "accepted", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordMaterialChange(ctx, models.MaterialChange{KeyPointID: keyPoints[0].ID, SourceType: string(models.SourceEpisode), SourceID: sourceID, ChangeKind: "ready", SnapshotHash: "backup-fixture-v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEditorialRelevance(ctx, models.EditorialRelevance{EditorialProfileID: profile.ID, KeyPointID: keyPoints[0].ID, Assessment: "relevant", Rationale: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateProposalBatch(ctx, models.ProposalBatch{EditorialProfileID: profile.ID, MaterialSnapshotJSON: `["backup-fixture-v1"]`, IdempotencyKey: "backup-fixture-batch"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "AI 工作流"}); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +144,7 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 		t.Errorf("Owner email 应为 owner@example.com，实际 %s", email)
 	}
 	var migrationVersion int
-	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 23 {
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 24 {
 		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
 	}
 	var profileName, themeName string
@@ -129,6 +153,12 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	}
 	if err := dstDB.QueryRow(`SELECT name FROM themes`).Scan(&themeName); err != nil || themeName != "AI 工作流" {
 		t.Fatalf("跨集主题应恢复: name=%q err=%v", themeName, err)
+	}
+	for _, table := range []string{"material_candidates", "material_changes", "editorial_relevance", "proposal_batches"} {
+		var count int
+		if err := dstDB.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("工作空间对象应随 SQLite 快照恢复: table=%s count=%d err=%v", table, count, err)
+		}
 	}
 	// 转录版本保留
 	var cnt int

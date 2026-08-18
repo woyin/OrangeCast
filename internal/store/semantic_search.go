@@ -79,7 +79,7 @@ type hybridScoredKeyPoint struct {
 }
 
 func (s *Store) scanHybridCandidates(ctx context.Context, query string, limit int, lexicalRank map[string]int) ([]hybridScoredKeyPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT ki.id,ki.source_type,ki.source_id,ki.source_title,ki.content,ki.description,ki.citations_json,ki.relation_kind,ki.time_start,ki.time_end,ki.card_version,ki.origin,ki.production_status,ki.parent_keypoint_id,ki.evidence_status,ki.created_at,ke.vector_json
+	rows, err := s.DB.QueryContext(ctx, `SELECT ki.id,ki.source_type,ki.source_id,ki.source_title,ki.content,ki.description,ki.citations_json,ki.relation_kind,ki.time_start,ki.time_end,ki.card_version,ki.origin,ki.production_status,ki.parent_keypoint_id,ki.evidence_status,ki.quality_status,COALESCE(ki.stale_at,''),COALESCE(ki.stale_reason,''),ki.created_at,ke.vector_json
 		FROM keypoint_embeddings ke JOIN keypoint_index ki ON ki.id=ke.keypoint_id WHERE ke.provider='local' AND ke.model='char-ngram-v1' LIMIT 5000`)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (s *Store) scanHybridCandidates(ctx context.Context, query string, limit in
 	for rows.Next() {
 		keyPoint := &KeyPointRow{}
 		var relation, origin, status, payload string
-		if err := rows.Scan(&keyPoint.ID, &keyPoint.SourceType, &keyPoint.SourceID, &keyPoint.SourceTitle, &keyPoint.Content, &keyPoint.Description, &keyPoint.CitationsJSON, &relation, &keyPoint.TimeStart, &keyPoint.TimeEnd, &keyPoint.CardVersion, &origin, &status, &keyPoint.ParentKeyPointID, &keyPoint.EvidenceStatus, &keyPoint.CreatedAt, &payload); err != nil {
+		if err := rows.Scan(&keyPoint.ID, &keyPoint.SourceType, &keyPoint.SourceID, &keyPoint.SourceTitle, &keyPoint.Content, &keyPoint.Description, &keyPoint.CitationsJSON, &relation, &keyPoint.TimeStart, &keyPoint.TimeEnd, &keyPoint.CardVersion, &origin, &status, &keyPoint.ParentKeyPointID, &keyPoint.EvidenceStatus, &keyPoint.QualityStatus, &keyPoint.StaleAt, &keyPoint.StaleReason, &keyPoint.CreatedAt, &payload); err != nil {
 			return nil, err
 		}
 		keyPoint.RelationKind = models.RelationKind(relation)

@@ -46,8 +46,11 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 	if err := s.SetSourceProductionPolicy(ctx, models.SourceEpisode, episodes[0].ID, "internal", models.ModelDataLocalOnly); err != nil {
 		t.Fatal(err)
 	}
-	if usable, err := s.CanUseSourceForPublication(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil || usable {
-		t.Fatalf("internal source must not be publication-ready: usable=%v err=%v", usable, err)
+	if policy, err := s.GetSourcePolicy(ctx, models.SourceEpisode, episodes[0].ID); err != nil || policy.ProductionUse != "internal" || policy.ModelDataPolicy != models.ModelDataLocalOnly {
+		t.Fatalf("source policy should remain readable as migration data: policy=%+v err=%v", policy, err)
+	}
+	if usable, err := s.CanUseSourceForPublication(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil || !usable {
+		t.Fatalf("Owner-added active source must remain creatively usable: usable=%v err=%v", usable, err)
 	}
 	if external, err := s.CanSendSourceToExternalProvider(ctx, models.SourceEpisode, episodes[0].ID); err != nil || external {
 		t.Fatalf("local-only source must not be sent externally: external=%v err=%v", external, err)
@@ -56,7 +59,7 @@ func TestEditorialProductionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if usable, err := s.CanUseSourceForPublication(ctx, profile.ID, models.SourceEpisode, episodes[0].ID); err != nil || !usable {
-		t.Fatalf("scoped public source must be publication-ready: usable=%v err=%v", usable, err)
+		t.Fatalf("active source must be creatively usable without scope authorization: usable=%v err=%v", usable, err)
 	}
 	if external, err := s.CanSendSourceToExternalProvider(ctx, models.SourceEpisode, episodes[0].ID); err != nil || !external {
 		t.Fatalf("external-allowed source should be eligible: external=%v err=%v", external, err)

@@ -76,7 +76,8 @@ func (s *Store) SetThemeStatus(ctx context.Context, themeID, status string) erro
 	return nil
 }
 
-// AddKeyPointToTheme links a KeyPoint only if its source is scoped and publication-eligible.
+// AddKeyPointToTheme links a KeyPoint when its Source remains active. Themes
+// organize material; they do not grant source-level creative authorization.
 func (s *Store) AddKeyPointToTheme(ctx context.Context, themeID, keyPointID, relationship string) error {
 	if !validThemeRelationship(relationship) {
 		return fmt.Errorf("%w: invalid theme relationship", ErrInvalidEditorialState)
@@ -89,12 +90,22 @@ func (s *Store) AddKeyPointToTheme(ctx context.Context, themeID, keyPointID, rel
 	if err != nil {
 		return err
 	}
+	if keyPoint.QualityStatus != models.KeyPointReady && keyPoint.QualityStatus != models.KeyPointOwnerConfirmed || keyPoint.StaleAt != "" {
+		return fmt.Errorf("%w: KeyPoint is not discovery-ready", ErrInvalidEditorialState)
+	}
+	eligible, err := s.IsKeyPointEligibleForProfile(ctx, theme.EditorialProfileID, keyPoint.ID)
+	if err != nil {
+		return err
+	}
+	if !eligible {
+		return fmt.Errorf("%w: KeyPoint is excluded for this profile", ErrInvalidEditorialState)
+	}
 	usable, err := s.CanUseSourceForPublication(ctx, theme.EditorialProfileID, keyPoint.SourceType, keyPoint.SourceID)
 	if err != nil {
 		return err
 	}
 	if !usable {
-		return fmt.Errorf("%w: KeyPoint source is not eligible for this profile", ErrInvalidEditorialState)
+		return fmt.Errorf("%w: KeyPoint source is archived or unavailable", ErrInvalidEditorialState)
 	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO theme_keypoints (theme_id, keypoint_id, relationship) VALUES (?, ?, ?) ON CONFLICT(theme_id, keypoint_id) DO UPDATE SET relationship=excluded.relationship`, themeID, keyPointID, relationship)
 	return err
