@@ -1,6 +1,8 @@
 # V1 黄金旅程实录与摩擦清单
 
-状态：待开始（2026-08-14 建立）
+> 历史实录：本文记录 ADR-0021 文章生产模型下的真实摩擦，不再作为目标产品验收权威。2026-08-18 起产品模型以 [ADR-0022](adr/0022-learning-creation-workspaces.md) 与 [`product-goal.md`](product-goal.md) 为准；旧实现差距见 [`learning-creation-migration-gap.md`](learning-creation-migration-gap.md)。表内的 SourceScope、Theme 强制 Scout、固定五条和离池补货等描述按当时事实保留。
+
+状态：历史记录（2026-08-14 建立；2026-08-18 被新产品模型取代）
 实例：本地 `data/cloudwisepod.db`（320 个 Episode 候选、19 个旧管线 Transcript、0 KeyPoint、0 EditorialProfile）
 对照：`product-goal.md`「V1 黄金旅程」10 步；冻结范围、DoD、交战规则与排序方法见 `implementation-roadmap.md`「V1 验证冲刺」。
 

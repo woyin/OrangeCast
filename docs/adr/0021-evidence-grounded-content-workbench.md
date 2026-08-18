@@ -1,9 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0022
 date: 2026-08-12
+superseded_date: 2026-08-18
 ---
 
 # ADR-0021：转型为以证据为底座的播客内容生产工作台
+
+> 历史决策：本 ADR 完成了从纯学习工具到内容生产的转型；产品形态、发现模型、SourceScope 与审校语义已由 [ADR-0022](0022-learning-creation-workspaces.md) 修订。实现仍处于迁移期，因此旧对象和路由可能暂时存在。
 
 CloudWisePod 的主定位从“播客学习平台”转为“播客内容生产工作台”。EvidenceArchive 不再是产品终点，而是选题与写作的可信底座；产品主闭环改为从跨 Source KeyPoint 主动发现 ArticleProposal，经 Owner 确认 ArticleBrief 后，由多角色模型完成写作、证据审校、风格审校与修订，最终生成由 Owner 手工发布的 PublicationPackage。作出这一选择，是因为转写与单集摘要已经产生高成本材料，却缺少跨集复用和持续发布的出口；保留学习平台为主会继续让素材价值停在单集消费阶段。
 

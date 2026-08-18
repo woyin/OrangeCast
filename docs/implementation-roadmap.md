@@ -1,196 +1,193 @@
 # CloudWisePod 实施路线
 
-基线：现有 Go 单 Owner、自托管证据与学习平台（旧 Phase 0–7 已完成）
-目标：完成 [`product-goal.md`](product-goal.md) 定义的内容生产工作台，架构决策见 [ADR-0021](adr/0021-evidence-grounded-content-workbench.md)
+基线：Go、SQLite、单 Owner、自托管；现有学习能力和 ADR-0021 文章生产链路均已落地
+目标：实现 [`product-goal.md`](product-goal.md) 与 [ADR-0022](adr/0022-learning-creation-workspaces.md) 定义的学习与创作闭环
+状态：产品模型已确认，代码处于兼容迁移期
 
-## V1 验证冲刺：真实黄金旅程（当前唯一优先级）
+## 当前实施基线
 
-状态：已确认（2026-08-14 方向拷问会话；取代本文件后续阶段的排序权威）
+现有代码已经具备：
 
-依据：截至落盘，生产闭环代码已齐备（迁移至 0023，Phase 8–13 及 Phase 15 的 Document Source 已实现），但真实实例中 320 个 Episode 候选、19 个旧管线 Transcript、0 KeyPoint、0 EditorialProfile、0 ArticleProposal——ADR-0021 转型的核心闭环从未被真实使用过。继续横向加功能等于在未验证的地基上加盖楼层。
+- Podcast、Upload 与 Document Source；
+- EvidenceAudio、EvidenceDocument、Transcript、Segment 与 Citation；
+- Summary、KnowledgeCard、Highlight、KeyPoint、EvidenceQA、StudyChat、Paraphrase 与 KnowledgeNote；
+- EditorialProfile、Theme、ArticleProposal、ArticleBrief、ArticleDraft、ArticleRevision、EvidenceMap；
+- Scout、Curator、Writer、EvidenceReviewer、StyleEditor；
+- 模型角色路由、预算、费用记录、幂等任务、备份与恢复；
+- Markdown、公众号预览和 PublicationPackage。
 
-### 冻结范围
+这些能力是迁移资产，不再直接定义目标领域模型。当前实现与 ADR-0022 的差距见 [`learning-creation-migration-gap.md`](learning-creation-migration-gap.md)。旧黄金旅程保留在 [`v1-golden-journey-run.md`](v1-golden-journey-run.md) 作为历史实录。
 
-- Phase 16（Translation/Speaker）、Phase 17（视觉资产/编辑日历）、Phase 18（发布反馈闭环）及一切新功能开发冻结。
-- 不编写存量素材回填工具；已知缺口登记进旅程报告。
-- 唯一允许的代码变更是交战规则定义的"硬阻塞最小修复"；另经 Owner 批准（方案 B，2026-08-14）：冲刺开始前的既红门禁修复——35 处导出符号注释、旅程关键路径测试（rss Filtered 摄取、provider Curator/Writer）、store/server 覆盖率缺口改为登记地板（见 KNOWN_GAP_FLOORS）。
+## 迁移原则
 
-### 唯一目标与验收口径（DoD）
+1. **数据优先兼容**：现有 Source、KeyPoint、提案、Brief、Draft、Revision、审校、费用和备份数据不得丢失。
+2. **先增加新语义，再删除旧语义**：通过迁移表、兼容读取和投影逐步替换旧对象，不进行一次性破坏性改名。
+3. **来源忠实继续严格**：Transcript、Citation、SourceNote 与 SourceClaim 的准确性不能因产品重新定位而放宽。
+4. **AI 不静默承担主张**：ProposedClaim 只有经 Owner 接受或编辑后才成为 OwnerClaim。
+5. **普通 GET 不调用付费模型**：所有自动付费任务都有持久状态、预算、幂等键和可见失败。
+6. **新自动发现不得继续沿用离池补货**：在 ProposalBatch 落地前，关闭或隔离现有自动补货，避免扩大错误语义。
+7. **每阶段可构建、可启动、可回滚**：数据库迁移、备份恢复和旧记录浏览必须同步验证。
 
-- Owner 在本地真实实例上完整走一遍 `product-goal.md` 的 V1 黄金旅程全部 10 步。
-- 发布验证到"富文本粘贴进微信公众号后台编辑器"为止；群发不是验收条件。
-- 第 10 步备份→全新实例恢复全部编辑成果必须真实执行。
-- 旅程报告与摩擦清单落盘 [`v1-golden-journey-run.md`](v1-golden-journey-run.md)。
+## Phase 0：冻结错误方向并建立迁移护栏
 
-### 交战规则
+目标：阻止现有临时实现继续产生与新模型冲突的数据。
 
-- 一口气走完；摩擦只记录不修复。记录四要素：所在步骤、期望、实际、Owner 本能反应。
-- 仅硬阻塞允许最小修复后原地继续，不从头重来。硬阻塞指：产品完全无法表达必要操作（如无入口），或继续前进有数据损坏风险。
-- "懒得用 UI、SQL 更快"算摩擦，不算硬阻塞；被迫直接改库推进即是硬阻塞信号。
-- 允许用 UI 内任何手动方式绕过；绕过方式本身就是摩擦证据。
+- 将 ADR-0022、产品目标和领域词汇作为设计权威。
+- 关闭“提案离开池后立即补货”的自动行为；保留手动 Scout 作为迁移期入口。
+- 将“必须恰好 5 条”改为兼容接受 1–10 条，生成侧目标 5 条、最多 10 条。
+- 停止新增依赖 SourceScope 的产品功能；现有表和数据暂时只作兼容读取。
+- 在 UI 显示“当前创作流程处于迁移期”，避免把旧 Theme/Scout 规则当作长期产品承诺。
+- 建立迁移 EvalSet：标题变体、硬重复、相关延展、来源观点与作者主张混淆、模型偷补事实。
 
-### 旅程参数（已确认）
+退出条件：新数据不再依赖固定五条和离池补货；旧数据仍可浏览、写作和导出。
 
-- 素材：Owner 内容上熟悉且仍在更新的一个播客；新处理 3–5 集（批量入队 + Filtered 或 AllNew IngestionPolicy）。
-- 19 个旧管线 Source 不回填、不重新处理；"存量已处理 Source 无 KeyPoint 回填路径"作为已知缺口登记。
-- 预算：EditorialProfile 内显式设置单篇与月度上限，量级"肉疼但不打断旅程"；确保预算治理被真实行使，包括超限"暂停并请求 Owner 决策"路径被触发或至少被检验。
+## Phase 1：学习成果模型
 
-### 摩擦清单排序（下一版本唯一需求来源）
+目标：让 LearningWorkspace 稳定产出可用于发现的 KeyPoint，同时区分来源整理和个人思考。
 
-1. 第一层按步骤权重：越靠近发布出口（Scout / Brief / 写作审校 / 发布包）的阻断性摩擦，优先级越高。
-2. 第二层按杠杆：修复所解锁的步骤数 × 复现频率。
-3. Phase 16/17/18 维持冻结；仅"不解决则旅程无法重复进行"的单点例外可由 Owner 显式批准（是例外解冻，不是整体解冻）。
-4. 排序结果与本文冲突时，以旅程报告为准，并回写更新本文。
+- 引入 MaterialCandidate，记录来自 Summary、Highlight、SourceNote 或 PrimarySource 的候选来源。
+- KeyPoint 增加 Ready、NeedsReview、OwnerConfirmed、Dismissed 质量状态。
+- 建立 Source 级质量门槛：独立表达、来源位置、本集去重、非纯背景。
+- 将 Owner 标注拆为 SourceNote 与 OwnerReflection：前者使用 Citation，后者使用 Reference。
+- 引入 MaterialChange，区分实质发现变化和纯展示修改。
+- PrimarySource 变化导致依赖失效时，将相关 KeyPoint 和下游对象标为 Stale。
+- 为现有 KeyPoint 制定保守回填：有有效 Citation 的自动记录可标 Ready；无法判断的记录标 NeedsReview；Owner 手工记录按实际来源关系迁移。
 
-## 执行原则
+退出条件：新 Source 能自动形成质量分层 KeyPoint；OwnerReflection 不会被误存为来源观点；重分析不会伪造新发现价值。
 
-- 每个阶段结束时应用必须可构建、可启动、可从上一版本数据安全升级。
-- 先建立数据关系、版本和恢复能力，再开放自动付费任务或批量生成。
-- Embedding/RAG 只负责候选召回，证据必须落到 KeyPoint、Citation 与 PrimarySource。
-- AI 与人工修改一律产生不可变 ArticleRevision；硬性审校结果只属于确切 Revision。
-- SourceScope、ModelDataPolicy 和预算在任务入队前校验，不能依赖 Prompt 约束。
-- 新功能维持 ADR-0020 的测试与 lint 门禁；涉及迁移、任务恢复、备份和文件生命周期时使用真实 SQLite 与临时目录集成测试。
-- 现有学习功能不删除，但除非直接服务素材研究，不阻塞内容生产里程碑。
+## Phase 2：画像相关性、Theme 降级与数据策略简化
 
-## 已完成基线
+目标：取消创作素材授权，让画像只负责发现相关性和创作偏好。
 
-旧路线 Phase 0–7 已完成：Go 单实现、可升级 SQLite、单 Owner 与公网安全、持久 EvidenceAudio、SQLite durable jobs、不可变 Transcript/KnowledgeCard、稳定 Segment/Citation、分段 FTS、Markdown KnowledgeNote、备份恢复和严格单 Source EvidenceQA。真实一小时播客黄金旅程已于 2026-08-02 验证。
+- 建立 DefaultEditorialProfile，首次创作无需先配置完整品牌。
+- 引入 EditorialRelevance：Relevant、Adjacent、Irrelevant、OwnerIncluded、OwnerExcluded。
+- 移除 UI 中的 SourceScope 授权流程；迁移期忽略旧授权缺失，不删除旧表，待确认无回滚需求后再清理。
+- Theme 从 Scout 门禁改为组织、召回加权、定向探索和内容空白观察。
+- ModelDataPolicy 改为默认开放、Source 级例外：ConfiguredProviders 或 LocalOnly。
+- 混合素材没有共同 Provider 时，明确拆分或报阻断，不静默丢素材。
+- RightsConstraint 作用于直接引语、长篇复制、原音、音乐、图片和其他媒体资产，不建立 Source 级创作许可。
 
-这组能力成为新工作台的证据底座，不再是最终产品闭环。
+退出条件：所有非 OwnerExcluded KeyPoint 都可按画像相关性参与本地发现；Theme 和 SourceScope 不再是生成前置条件；Provider 限制仍不可绕过。
 
-## V1：播客到公众号
+## Phase 3：ProposalBatch 与 AutomaticDiscovery
 
-### Phase 8：内容生产迁移与权限底座
+目标：用素材快照和注意力背压替换库存补货式 Scout。
 
-目标：在不破坏现有 Source 和 ArtifactVersion 的前提下，引入内容生产的稳定身份、权限和版本边界。
+- 引入 DiscoveryWindow、ProposalBatch、SavedProposal 和批次素材快照。
+- 自动触发默认规则：至少 6 项 MaterialChange、至少 2 个 Episode、30 分钟防抖、每画像每天最多一批。
+- 每画像由 Owner 一次开启 AutomaticDiscovery，明确模型、预算、频率和暂停方式。
+- 存在 Ready 或 Reviewing 批次时只记录“新素材已就绪”，不继续生成。
+- 新素材作为种子，语义召回历史 KeyPoint；每个自动候选至少使用一项当前窗口的新价值。
+- 批次目标 5 条、最多 10 条；允许更少并返回批次级不足原因和 ResearchNeed。
+- CreationProposal 以 ProposedClaim 为身份，WorkingTitle 只是展示建议。
+- 去重综合比较主张、受众、素材和作品承诺；同一主张的标题变体不占多个名额。
+- 批次状态：Ready、Reviewing、Completed、Superseded、Failed；素材失效时为 Stale。
+- 候选卡提供浏览层和展开层，并支持接受、编辑后接受、保存、带原因拒绝或转入 IdeationSession。
 
-- 为 EditorialProfile、SourceScope、ModelDataPolicy、ArticleProposal、ArticleBrief、ArticleDraft、ArticleRevision、EvidenceMap、审校结果与 EditorialFeedback 建立迁移。
-- ArticleRevision 不复用通用 ArtifactVersion：前者是持续编辑历史，后者是 ProcessingJob 产物历史。
-- Source 增加生产用途与 Archive 状态；实现使用关系检查和证据失效标记。
-- 更新 Purge：Draft 使用时显示影响，删除后相关 Revision 标记证据失效；PublishedArticle 的保护在 V1.2 随发布记录落地。
-- 扩展备份 manifest，覆盖新表、Revision、EvidenceMap、审校结果与后续选定资产。
+退出条件：AutomaticDiscovery 在无人逐条整理 Theme 的情况下产生可解释批次；不凑数、不堆积、不重复扣费，失败与成本可见。
 
-退出条件：现有数据库无损升级；新对象可创建、版本化、备份和恢复；权限或证据失效不能被静默忽略。
+## Phase 4：CreationHistory 与重复判断
 
-### Phase 9：自动摄取与 KeyPoint 素材 Inbox
+目标：排除 Owner 已经实质表达过的内容，而不是只比较 CloudWisePod 内标题。
 
-目标：让内容工作台持续获得可整理、可追溯的播客素材。
+- 引入 CreationHistory、PublishedWork 与 UnpublishedWork。
+- 支持正文粘贴、Markdown、URL 快照，以及标题+核心主张+摘要的降级导入。
+- 从历史作品提取核心主张、目标受众、作品承诺和 CreationForm。
+- 完整正文参与高置信度 HardDuplicate；摘要和标题只产生低置信度提醒。
+- FollowUp 关联具体历史作品并说明新材料、反方视角、不同受众或更深分支的增量价值。
+- EditorialFeedback 使用 HardDuplicate、WeakClaim、PoorFit、InsufficientMaterial、WrongAngle、NotNow 和 Other；不同原因影响后续发现，不静默修改画像。
 
-- Podcast 支持 Manual、AllNew、Filtered IngestionPolicy，以及 Podcast 级和全局预算。
-- 自动流程只入队 EvidenceAudio、Transcript、KnowledgeCard 和 KeyPoint；失败进入可见队列。
-- 将 keypoint_index 从只读展示投影演进为具有稳定生产身份的素材层，同时保留 ArtifactVersion 真理来源与派生关系。
-- 增加 Inbox、Shortlisted、Used、Dismissed 状态、批量操作和按 Episode/Podcast/时间/状态筛选。
-- 支持从 Transcript Segment 手工创建 KeyPoint、从自动 KeyPoint 派生人工编辑版，以及 PrimarySource 变化后的证据重映射/待修复状态。
-- 显示 KeyPoint 参与过的 Proposal、Brief 和 Draft；PublishedArticle 关系在 V1.2 补齐。
+退出条件：导入外部历史作品后，实质重复候选被排除，相关延展保留且解释差异。
 
-退出条件：新 Episode 可按策略自动形成 KeyPoint；Owner 能在统一 Inbox 完成筛选和人工补充，重新分析不会覆盖人工成果。
+## Phase 5：DirectedIdeation 与研究回路
 
-### Phase 10：Embedding、Theme 与 Scout
+目标：让 Owner 从自己的问题和判断出发，用已有学习成果形成 CreationProposal。
 
-目标：从跨 Episode 素材中发现可写且不重复的选题。
+- 引入 IdeationSession、IdeationIntent、MaterialDiagnosis、ProposedClaim。
+- 默认检索当前画像 Relevant 与 Adjacent 素材；Owner 可限定 Episode、Podcast、Theme、时间和 KeyPoint。
+- MaterialDiagnosis 显示支持、反驳、补充和缺口；范围变化后重新诊断。
+- Owner 可以编辑主张、增删素材、缩小范围、坚持立场、放弃，或从 ProposalBatch 转入会话继续细化。
+- Owner 提升方向时，ProposedClaim 转为 OwnerClaim，并形成已接受 CreationProposal。
+- 引入 BlockingResearchNeed、EnhancementNeed、Researching 和 ReadyForBrief。
+- V1 通过 Owner 手动导入 Source 解决 ResearchNeed；ResearchPlan 只落数据与授权契约，不执行联网研究。
 
-- 为 KeyPoint 建立可重建的 Embedding 索引；Provider、模型、维度和索引版本可追踪。
-- 语义检索与关键词检索混合召回，只返回具有有效 Citation 且符合 SourceScope/ModelDataPolicy 的候选。
-- 实现 Theme 建议、Owner 确认/改名/合并/拆分/忽略及多对多 KeyPoint 关系。
-- Theme 页面展示来源分布、新增趋势、观点支持/补充/冲突、已用素材和内容空白。
-- Scout 按 EditorialProfile 生成 Fresh、Evergreen、Follow-up 和显式 DeepRead ArticleProposal，记录候选素材、目标读者、核心论点、写作价值，并对历史提案做重复检查；跨 Episode 模式要求每条候选覆盖至少两个 Episode，DeepRead 必须由 Owner 选择单个 Episode；每次头脑风暴严格返回 5 条。PublishedArticle 去重与 Follow-up 的更深关联在 V1.2 继续完善。
-- 提案池低于 5 条时，在提案接受/搁置/拒绝后后台自动补货；普通工作台 GET 不触发付费调用，且保留手动补货入口。
-- 建立角色路由基础：首选/备用 Provider、超时、重试、预算、实际费用与 Prompt 版本；提供经济/均衡/质量优先预设。
+退出条件：Owner 能从模糊想法经过多轮素材诊断形成可承担主张；素材不足的好方向被保留，但不能越过阻断进入 Brief。
 
-退出条件：Scout 能从多个 Episode 产生带真实来源、通过权限过滤且不与历史提案明显重复的候选选题；Owner 也能在明确选择一个 Episode 后生成单集 DeepRead 候选，提案池能在离开池后恢复到 5 条目标。
+## Phase 6：CreationBrief 与通用作品边界
 
-### Phase 11：Curator 与 ArticleBrief
+目标：把接受方向和授权创作保持为两个不同决策点。
 
-目标：在生成全文前，用低成本、可审核的方式锁定选材与论证结构。
+- 将 ArticleProposal 兼容映射为 CreationProposal；V1 旧记录默认 CreationForm=Article。
+- 引入 CreationBrief 与 CreationBriefDraft；现有 ArticleBrief 兼容映射为 Article 形态 Brief。
+- 接受素材充足的 CreationProposal 后自动整理 CreationBriefDraft；画像可选择关闭自动整理。
+- Brief 显示 OwnerClaim、预计 SourceClaim/SynthesisClaim/VerifiedFact、入选/淘汰素材、关系、ResearchNeed、结构、篇幅、风格和 RightsConstraint。
+- BlockingResearchNeed 未解决时不得生成 Brief。
+- 只有 Owner 确认 CreationBrief 才授权 WorkDraft 生成。
+- 引入 WorkDraft 与 WorkRevision 领域接口；V1 底层可继续复用 article_drafts/article_revisions，直到兼容层稳定。
 
-- Owner 可接受、暂存、拒绝或合并 Proposal，并记录结构化 EditorialFeedback。
-- Curator 生成 ArticleBrief：论点、读者、入选/淘汰 KeyPoint、各节素材、篇幅和风格。
-- 识别 KeyPoint 间的支持、补充和冲突；冲突必须由 Owner 选择并列、站队、缩小论点或淘汰，不能静默消失。
-- Brief 编辑产生历史，只有 Owner 显式确认后才授权单篇写作流水线与预算。
-- 执行前计算所有素材的 SourceScope 与 ModelDataPolicy，混合任务采用最严格策略。
+退出条件：Owner 接受方向后无需额外点击“让 Curator 生成”，但系统仍不能在 Brief 未确认时生成作品。
 
-退出条件：Owner 能在不生成全文的情况下看清文章将写什么、用什么、舍弃什么，以及如何处理冲突。
+## Phase 7：ClaimMap 与 ClaimReview
 
-### Phase 12：多角色写作、EvidenceMap 与质量门禁
+目标：把质量门禁从“所有表达必须有 KeyPoint”升级为“主张身份、责任和核验真实”。
 
-目标：产出可追溯、可审校、不可覆盖的文章版本。
+- 引入 ClaimMap：SourceClaim、OwnerClaim、SynthesisClaim、VerifiedFact。
+- Writer 只能使用 CreationBrief 中已确认的主张，不得自行创造 OwnerClaim 或偷补模型事实。
+- ClaimReview 检查来源归因、Owner 授权、综合边界、事实核验、ResearchNeed、RightsConstraint 和 Brief 外主张。
+- StyleReview 保持独立，检查目标受众、结构、节奏、篇幅和画像风格。
+- 将现有 EvidenceMap 迁移为 ClaimMap 兼容记录：Quoted/Paraphrased 映射为 SourceClaim，Synthesized 映射为 SynthesisClaim，Rhetorical 作为非主张表达保留。
+- 旧 EvidenceReviewer 角色逐步重命名为 ClaimReviewer；配置迁移保留模型选择。
+- Owner 修改 WorkRevision 后，只继承仍然逐字存在且身份未变化的 ClaimMap；其他主张重新审校。
 
-- Writer 按已确认 Brief 生成初稿及逐项 EvidenceMap，区分 Quoted、Paraphrased、Synthesized、Rhetorical；拒绝 ExternalFact。
-- EvidenceReviewer 独立检查素材支撑、直接引语、来源归因、Citation 有效性、冲突处理与“有出处不等于已事实验证”。
-- StyleEditor 独立检查 EditorialProfile、标题、结构、节奏、重复、篇幅和禁用表达。
-- Writer 根据两类审校意见修订；证据硬错误未解决时停留在待处理，不能无限自动重试掩盖问题。
-- AI 初稿、审校修订、Owner 手改和局部 AI 操作都创建 ArticleRevision；支持比较、选择当前版本与回退。
-- 修改后按 diff 增量重审；任何当前 Revision 的硬性审校失效都会阻止生成 PublicationPackage。
-- 建立写作 EvalSet：无依据事实、错误归因、虚假译引、歪曲反方、综合冒充原意、软风格偏差。
+退出条件：作品不能把来源观点写成客观事实，不能把 AI 综合写成来源原意，也不能把未确认判断归给 Owner。
 
-退出条件：无法把含硬证据错误的 Revision 标记为可交付；历史 Revision 可比较回退，审校与模型/Prompt/费用来历完整。
+## Phase 8：PublicationPackage、权利约束与创作历史闭环
 
-### Phase 13：编辑器、发布内容包与个人看板
+目标：输出诚实归因、权利清晰且可回到内部 ClaimMap 的发布内容包。
 
-目标：把已审校文章可靠交付到微信公众号后台。
+- PublicationPackage 支持 Minimal、Standard、Detailed 三档来源密度。
+- 直接引语、SourceClaim、VerifiedFact 和特定框架按作品形态强制适当归因。
+- RightsConstraint 阻止长篇逐字复刻、未授权原音、音乐、图片和媒体资产进入发布包。
+- Owner 发布后形成 PublishedWork，指向确切 WorkRevision 和 CreationProposal。
+- 未发布但已实质写作的内容形成 UnpublishedWork 并参与去重。
+- 备份覆盖 ClaimMap、ClaimReview、CreationHistory、RightsConstraint 和发布包。
 
-- Markdown 作为正文规范格式，提供公众号兼容实时预览。
-- 支持局部精简、展开、换语气、改标题和检查依据；每次操作创建 Revision。
-- 证据与审校警告显示在旁栏，不污染正文。
-- PublicationPackage 输出公众号富文本、Markdown、纯文本、候选标题、摘要、推荐语和封面文案。
-- 对外来源按画像提供轻量/标准/严格密度；直接引语强制署名，文末列出实际 Source。
-- 提供按生产阶段组织的个人工作台：1 选题池、2 Brief 审核、3 写作与审校；画像、SourceScope、模型价格和手动兜底进入设置区，空材料 Brief 不得授权写作。
-- 完成一键复制与文件导出；不接微信 API。
+退出条件：内部 ClaimMap 完整，对外来源密度可控；权利风险不会因不显示来源而被掩盖。
 
-退出条件：Owner 能完成 [`product-goal.md`](product-goal.md) 的 V1 黄金旅程，并把通过证据门禁的文章粘贴到微信公众号编辑器。
+## Phase 9：AttentionQueue 与双工作空间导航
 
-### Phase 14：V1 恢复与发布验证
+目标：首页回答“现在最值得我处理什么”，而不是罗列所有对象。
 
-目标：证明内容生产成果不会因升级、重启、Provider 故障或迁移而丢失。
+- LearningWorkspace 与 CreationWorkspace 各有完整入口，共享 Source、KeyPoint、OwnerReflection 与 ResearchNeed。
+- 首页建立学习泳道：处理失败、NeedsReview、学习会话、ResearchNeed、新学习成果。
+- 首页建立创作泳道：ProposalBatch、IdeationSession、CreationBriefDraft、ClaimReview、Stale、可发布作品。
+- 显示学习如何满足 DiscoveryWindow、创作缺口如何返回学习。
+- 普通事项可隐藏；失败、Stale 和预算阻断不得静默隐藏。
+- 旧 Workbench 三栏逐步退场，保留兼容入口直到新旅程完成。
 
-- 更新 backup/restore E2E，验证画像、KeyPoint 人工编辑、Theme 人工关系、Proposal、Brief、全部 Revision、EvidenceMap、审校和费用记录。
-- 验证恢复后不连接原 AI Provider 也能浏览、编辑、回退和导出历史文章。
-- 对自动摄取、提案扫描、写作与审校任务执行进程中断恢复和幂等测试。
-- 执行真实跨 Episode 播客到公众号黄金旅程，并人工检查证据映射和粘贴排版。
+退出条件：Owner 不需要理解数据库对象，就能从首页进入最重要的学习或创作下一步。
 
-退出条件：V1 数据可跨全新实例恢复；任务重试不重复扣费或创建歧义版本；真实文章完成发布前人工验收。
+## Phase 10：迁移收口与新黄金旅程
 
-## V1.1：多来源与视觉
+目标：证明新闭环可在真实实例持续使用并完整恢复。
 
-### Phase 15：Document 成为一等 Source
+- 执行 [`product-goal.md`](product-goal.md) 的 12 步 V1 验收旅程。
+- 验证旧 ArticleProposal、ArticleBrief、ArticleDraft、ArticleRevision、EvidenceMap 与审校记录在新界面可读、可继续、可导出。
+- 验证 SourceScope 退场后不扩大 ModelDataPolicy；旧授权数据保留审计但不再阻断创作。
+- 验证 ProposalBatch 自动任务的幂等、预算、进程中断恢复和注意力背压。
+- 验证 IdeationSession、OwnerClaim、ResearchNeed、CreationBrief、ClaimMap 和 CreationHistory 的备份恢复。
+- 新建 `docs/v1-learning-creation-journey-run.md` 记录真实摩擦；旧黄金旅程不再作为验收权威。
+- 所有迁移确认稳定后，再删除 SourceScope、固定五条补货和旧 EvidenceReviewer 等兼容代码。
 
-- 接入网页 URL、PDF 与粘贴文本，保存不可变 EvidenceDocument 快照。
-- 为文档建立稳定位置的 Segment、Citation、KnowledgeCard、KeyPoint、全文搜索与版本历史。
-- 网页抓取复用 SSRF、重定向、体积、超时与内容类型安全策略。
-- 抽象音频/文档共享的 PrimarySource 与 Segment 行为，不强迫 Document 伪装成 Transcript。
+退出条件：新模型数据可跨全新实例恢复；旧数据无损继续；真实学习、自动发现、定向构思、主张审校和手工发布完成闭环。
 
-### Phase 16：Translation 与 Speaker 归因
+## 后续能力
 
-- 原语言 PrimarySource 永不被译文覆盖；Translation 按 Segment 对齐并独立版本化。
-- KeyPoint 使用画像目标语言但引用原文 Segment；译引显示原文/译文并标“译”。
-- 音频生成稳定 Speaker A/B 标识，允许建议实名映射和 Owner 确认。
-- 未确认 Speaker 禁止实名归因；EvidenceReviewer 增加翻译忠实度与实名归因检查。
-
-### Phase 17：视觉资产与编辑日历
-
-- ImageCreator 生成多个封面方案、正文示意图与配图位置建议，保留模型和 Prompt。
-- 不抓取网络图片；数据图只接受可追溯结构化数据。
-- Owner 选定资产进入不可再生备份，未采用候选可清理或重建。
-- 增加目标发布日期、优先级、画像节奏、个人编辑日历与内容缺口提示。
-
-## V1.2：发布反馈闭环
-
-### Phase 18：发布记录、表现与 Follow-up
-
-- PublishedArticle 绑定确切 ArticleRevision，记录渠道、时间和外部链接。
-- PublishedArticle 落地后启用 Source 默认 Purge 保护、KeyPoint 使用关系与提案重复检查；Owner 强制删除时只保留证据已删除的审计事实。
-- 首版手工录入阅读、点赞、在看、分享、收藏和关注增长等 PublicationPerformance。
-- 以长期模式而非单篇爆款分析主题、结构、篇幅和标题表现。
-- Scout 生成 Follow-up 提案，寻找新证据、反方观点和可延展分支。
-- 系统可根据 EditorialFeedback 与 PublicationPerformance 提议画像变更，但必须由 Owner 确认。
-
-## 后续候选
-
-- 其他音视频 Source，复用 EvidenceAudio/Transcript 流程。
-- 自主联网研究与独立 FactCheck；检索结果必须先保存为 Source 才能进入文章。
-- 微信公众号草稿箱 API 与发布指标自动同步，仍不自动群发。
-- 从已审校 ArticleRevision 派生短帖、视频脚本、邮件简报等跨渠道 PublicationPackage。
-- 数据规模证明 SQLite 向量方案不足后，再评估独立向量数据库；不提前引入运维负担。
+- 执行 Owner 授权的联网 ResearchPlan；结果必须保存为 Source。
+- Article 之外的 CreationForm：ShortCommentary、PostSeries、Script 等。
+- Translation、Speaker 确认、生成视觉资产和编辑日历。
+- PublicationPerformance 与画像调整建议；任何画像修改仍需 Owner 确认。
+- 微信草稿箱 API、指标同步和跨渠道适配；仍不自动群发。
 
 ## 每阶段通用验证
 
@@ -203,4 +200,4 @@ make lint
 git diff --check
 ```
 
-涉及模型质量的阶段必须同时运行对应 EvalSet；涉及付费任务时必须验证预算、幂等和实际费用记录；涉及 SourceScope 或 ModelDataPolicy 时必须包含拒绝路径与故障切换测试。
+涉及模型质量时运行对应 EvalSet；涉及付费任务时验证预算、幂等和费用记录；涉及迁移时使用真实 SQLite、备份恢复和旧数据兼容测试；涉及 ModelDataPolicy 时验证限制路径和故障切换不能绕过例外策略。
