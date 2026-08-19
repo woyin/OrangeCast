@@ -45,7 +45,7 @@
 
 - **可恢复任务队列**：SQLite 持久化，租约 + 心跳，进程重启自动恢复
 - **处理进度**：全局进度页，5 秒自动轮询，显示正在处理 + 排队中 + 最近完成
-- **备份/恢复**：`cloudwisepod backup|restore` 一致性备份包（manifest + SHA256，不含密钥），可在全新实例恢复
+- **备份/恢复**：`cloudwisepod backup|restore` 一致性备份包（manifest + SHA256），可在全新实例恢复；`scripts/export.sh` / `scripts/remote-setup.sh` 一键跨机器迁移
 - **公网安全**：CSRF、登录限流、可信代理 + Secure Cookie、SSRF 防护（逐跳重定向校验 + 私网拦截）
 
 ---
@@ -118,7 +118,7 @@ docker compose up -d
 ## 备份与恢复
 
 ```bash
-# 备份（一致性快照 + 证据音频 + manifest，不含密钥）
+# 备份（一致性快照 + 证据音频 + manifest）
 ./cloudwisepod backup /path/backup.tar.gz
 
 # 恢复到全新目录
@@ -129,6 +129,21 @@ DATA_DIR=/new/instance ./cloudwisepod restore /path/backup.tar.gz --force
 ```
 
 恢复会校验 manifest 格式版本、数据库 SHA256 与每个证据文件的 SHA256。
+
+### 跨机器迁移
+
+```bash
+# 本机导出（时间戳命名 + chmod 600 + 打印 SHA256）
+SESSION_SECRET=<密钥> ./scripts/export.sh ~/backups/cloudwisepod
+
+# 传输（加密通道）后，新机器上：
+git clone git@github.com:woyin/OrangeCast.git && cd OrangeCast
+./scripts/remote-setup.sh --backup ~/cloudwisepod-YYYYMMDD-HHMMSS.tar.gz
+```
+
+`remote-setup.sh` 一条命令完成：编译 → 恢复备份 → 生成并持久化 `SESSION_SECRET`（`DATA_DIR/.session-secret`，0600，重启不失效）→ 启动服务。已有数据库时拒绝覆盖，需 `--force-restore`；`--port` 指定端口（默认 8080）。
+
+**安全注意**：备份包内的 `settings` 表包含 Provider API key 明文（数据库快照的一部分，恢复后新实例直接可用、无需重配）。因此备份包是敏感文件——只能经加密通道（scp / AirDrop / 加密U盘）传输，不要经网盘明文、聊天工具或邮件发送；用完即删。
 
 ---
 
