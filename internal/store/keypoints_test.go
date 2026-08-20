@@ -94,6 +94,32 @@ func TestIndexKeyPoints_ReindexReplaces(t *testing.T) {
 	}
 }
 
+func TestGetKeyPointsReturnsRequestedRowsAndMarksMissingIDs(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "batch@b.com")
+	podcast, _ := s.CreatePodcast(ctx, "https://batch.example/feed", "Pod", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "batch", Title: "ep", AudioURL: "https://batch.example/audio.mp3"}})
+	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "批量要点", Citations: []string{"seg"}}}}
+	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	keyPoints, _, _ := s.ListKeyPoints(ctx, 1, 10)
+
+	got, err := s.GetKeyPoints(ctx, []string{"", keyPoints[0].ID, keyPoints[0].ID, "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[keyPoints[0].ID] == nil || got["missing"] != nil {
+		t.Fatalf("batch lookup should return present rows and nil for missing IDs: %+v", got)
+	}
+	empty, err := s.GetKeyPoints(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty batch lookup: rows=%+v err=%v", empty, err)
+	}
+}
+
 func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

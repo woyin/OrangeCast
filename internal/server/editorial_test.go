@@ -80,6 +80,30 @@ func TestEditorialProfileCreationRejectsInvalidBudget(t *testing.T) {
 	}
 }
 
+func TestBuildWorkbenchBriefViewsPreservesMaterialOrderAndMissingRows(t *testing.T) {
+	briefs := []*models.ArticleBrief{
+		{ID: "valid", MaterialPlan: `["second","missing","first","second"]`},
+		{ID: "invalid", MaterialPlan: `{`},
+	}
+	keyPoints := map[string]*store.KeyPointRow{
+		"first":   {ID: "first", SourceTitle: "A", Content: "one"},
+		"second":  {ID: "second", SourceTitle: "B", Content: "two"},
+		"missing": nil,
+	}
+
+	ids := briefMaterialIDs(briefs)
+	if strings.Join(ids, ",") != "second,missing,first" {
+		t.Fatalf("material IDs should be unique and stable: %v", ids)
+	}
+	views := buildWorkbenchBriefViews(briefs, keyPoints)
+	if len(views) != 2 || len(views[0].Materials) != 3 || views[0].Materials[0].ID != "second" || views[0].Materials[1].ID != "first" || views[0].Materials[2].ID != "second" {
+		t.Fatalf("brief views should preserve the material plan and omit missing rows: %+v", views)
+	}
+	if len(views[1].Materials) != 0 {
+		t.Fatalf("invalid material JSON should produce no material rows: %+v", views[1])
+	}
+}
+
 func TestKeyPointStatusAPIUpdatesInboxState(t *testing.T) {
 	srv := newTestServer(t)
 	session := claimOwnerAndLogin(t, srv, "inbox@example.com", "password123")

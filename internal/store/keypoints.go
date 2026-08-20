@@ -354,6 +354,46 @@ func (s *Store) GetKeyPoint(ctx context.Context, id string) (*KeyPointRow, error
 	return result[0], nil
 }
 
+// GetKeyPoints reads the requested KeyPoints in one query. Missing IDs are
+// omitted, allowing callers to distinguish them from present rows by ID.
+func (s *Store) GetKeyPoints(ctx context.Context, ids []string) (map[string]*KeyPointRow, error) {
+	result := make(map[string]*KeyPointRow, len(ids))
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			result[id] = nil
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) == 0 {
+		return result, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(unique)), ",")
+	args := make([]any, len(unique))
+	for i, id := range unique {
+		args[i] = id
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, parent_keypoint_id, evidence_status, quality_status, COALESCE(stale_at,''), COALESCE(stale_reason,''), created_at
+		 FROM keypoint_index WHERE id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keyPoints, _, err := scanKeyPointRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, keyPoint := range keyPoints {
+		result[keyPoint.ID] = keyPoint
+	}
+	return result, nil
+}
+
 // CreateManualKeyPoint adds an Owner-curated KeyPoint without replacing automatic analysis.
 func (s *Store) prepareManualKeyPoint(ctx context.Context, keyPoint KeyPointRow) (KeyPointRow, error) {
 	keyPoint.Content = strings.TrimSpace(keyPoint.Content)

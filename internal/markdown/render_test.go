@@ -219,7 +219,7 @@ func TestRender_NilCard(t *testing.T) {
 // 覆盖 Render 中 title == "" → title = in.Card.Title 分支。
 func TestRender_TitleFallbackToCard(t *testing.T) {
 	in := Input{
-		Card: &provider.KnowledgeCard{Title: "卡片标题", Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}}, KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}, Chapters: []provider.Chapter{{Title: "CH", Citations: []string{"seg-0001"}}}},
+		Card:       &provider.KnowledgeCard{Title: "卡片标题", Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}}, KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}, Chapters: []provider.Chapter{{Title: "CH", Citations: []string{"seg-0001"}}}},
 		Segments:   []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "文本"}},
 		SourceType: "episode", SourceID: "ep-1",
 		Title: "", // 空 → 回退 Card.Title

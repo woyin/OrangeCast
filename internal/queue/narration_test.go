@@ -310,8 +310,8 @@ func TestDoNarration_SkipsEmptyHighlightID(t *testing.T) {
 	ctx := context.Background()
 	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
 	hs := &provider.HighlightSet{Highlights: []provider.Highlight{
-		{ID: "", Gist: "no id", Citations: []string{"seg-0001"}}, // 空 ID 跳过
-		{ID: "hl-b", Gist: "", Citations: []string{"seg-0002"}},  // 空 Gist 跳过
+		{ID: "", Gist: "no id", Citations: []string{"seg-0001"}},     // 空 ID 跳过
+		{ID: "hl-b", Gist: "", Citations: []string{"seg-0002"}},      // 空 Gist 跳过
 		{ID: "hl-c", Gist: "valid", Citations: []string{"seg-0003"}}, // 有效
 	}}
 	seedCurrentHighlight(t, s, models.SourceUpload, up.ID, hs)

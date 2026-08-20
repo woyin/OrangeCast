@@ -12,7 +12,7 @@ import (
 // 配套的 middleware.go 实现 RequireAuth（未登录 401/303）与 CSRFProtect 中间件。
 var (
 	// ErrInvalidEmail 邮箱格式非法。
-	ErrInvalidEmail     = errors.New("invalid email")
+	ErrInvalidEmail = errors.New("invalid email")
 	// ErrPasswordTooShort 密码长度不足 8 字符。
 	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
 )

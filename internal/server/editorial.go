@@ -44,6 +44,41 @@ type workbenchBriefView struct {
 	Materials                                                                            []workbenchBriefMaterial
 }
 
+func briefMaterialIDs(briefs []*models.ArticleBrief) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	for _, brief := range briefs {
+		var materialIDs []string
+		if json.Unmarshal([]byte(brief.MaterialPlan), &materialIDs) != nil {
+			continue
+		}
+		for _, id := range materialIDs {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+func buildWorkbenchBriefViews(briefs []*models.ArticleBrief, keyPoints map[string]*store.KeyPointRow) []workbenchBriefView {
+	views := make([]workbenchBriefView, 0, len(briefs))
+	for _, brief := range briefs {
+		view := workbenchBriefView{ID: brief.ID, ProposalID: brief.ProposalID, Status: brief.Status, Thesis: brief.Thesis, Audience: brief.Audience, Outline: brief.Outline, MaterialPlan: brief.MaterialPlan, ConflictPlan: brief.ConflictPlan, Style: brief.Style, TargetLength: brief.TargetLength}
+		var materialIDs []string
+		if json.Unmarshal([]byte(brief.MaterialPlan), &materialIDs) == nil {
+			for _, id := range materialIDs {
+				if keyPoint := keyPoints[id]; keyPoint != nil {
+					view.Materials = append(view.Materials, workbenchBriefMaterial{ID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content})
+				}
+			}
+		}
+		views = append(views, view)
+	}
+	return views
+}
+
 // handleWorkbench renders the initial personal editorial board.
 func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 	profiles, err := srv.store.ListEditorialProfiles(r.Context())
@@ -90,21 +125,12 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data["Briefs"] = briefs
-		briefViews := make([]workbenchBriefView, 0, len(briefs))
-		for _, brief := range briefs {
-			view := workbenchBriefView{ID: brief.ID, ProposalID: brief.ProposalID, Status: brief.Status, Thesis: brief.Thesis, Audience: brief.Audience, Outline: brief.Outline, MaterialPlan: brief.MaterialPlan, ConflictPlan: brief.ConflictPlan, Style: brief.Style, TargetLength: brief.TargetLength}
-			var materialIDs []string
-			if json.Unmarshal([]byte(brief.MaterialPlan), &materialIDs) == nil {
-				for _, id := range materialIDs {
-					keyPoint, keyPointErr := srv.store.GetKeyPoint(r.Context(), id)
-					if keyPointErr == nil {
-						view.Materials = append(view.Materials, workbenchBriefMaterial{ID: keyPoint.ID, SourceTitle: keyPoint.SourceTitle, Content: keyPoint.Content})
-					}
-				}
-			}
-			briefViews = append(briefViews, view)
+		keyPoints, err := srv.store.GetKeyPoints(r.Context(), briefMaterialIDs(briefs))
+		if err != nil {
+			http.Error(w, "加载 Brief 素材失败", http.StatusInternalServerError)
+			return
 		}
-		data["BriefViews"] = briefViews
+		data["BriefViews"] = buildWorkbenchBriefViews(briefs, keyPoints)
 		data["Board"] = buildEditorialBoard(proposals, briefs, drafts)
 		discoverySettings, discoveryErr := srv.store.GetDiscoverySettings(r.Context(), profile.ID)
 		if discoveryErr != nil && discoveryErr != store.ErrNotFound {

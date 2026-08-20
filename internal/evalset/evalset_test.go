@@ -81,8 +81,8 @@ func TestCheckSample_IssueBranches(t *testing.T) {
 		Card: &provider.KnowledgeCard{
 			Title: "",
 			Summary: provider.CitedText{
-				Text:       "无标题卡片且引用不存在的段",
-				Citations:  []string{"seg-9999"},
+				Text:      "无标题卡片且引用不存在的段",
+				Citations: []string{"seg-9999"},
 			},
 			Quotes: []provider.Quote{
 				{Text: "完全不在片段中的金句", Citations: []string{"seg-0001"}},
