@@ -2748,3 +2748,46 @@ func TestLogin_SetSessionError(t *testing.T) {
 		t.Errorf("SetSessionCookie 失败应 500，实际 %d", rec.Code)
 	}
 }
+
+// TestSettings_BudgetFormSaves 全局预算与自动日限额表单保存（B04）；空值取消配置。
+func TestSettings_BudgetFormSaves(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "budget@example.com", "password123")
+
+	rec := postForm(t, srv, cookie, "/settings", "monthly_budget_cents=5000&auto_daily_job_limit=20")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("设置保存应 303: %d", rec.Code)
+	}
+	budget, err := srv.store.GetOwnerMonthlyBudget(t.Context())
+	if err != nil || budget == nil || *budget != 5000 {
+		t.Fatalf("月度预算应保存: %v %+v", err, budget)
+	}
+	limit, err := srv.store.GetAutoDailyJobLimit(t.Context())
+	if err != nil || limit == nil || *limit != 20 {
+		t.Fatalf("日限额应保存: %v %+v", err, limit)
+	}
+	// 空值 = 取消配置
+	rec = postForm(t, srv, cookie, "/settings", "monthly_budget_cents=&auto_daily_job_limit=")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("第二次保存应 303: %d", rec.Code)
+	}
+	if b, _ := srv.store.GetOwnerMonthlyBudget(t.Context()); b != nil {
+		t.Fatalf("空值应取消预算配置: %+v", b)
+	}
+}
+
+// TestSettings_BudgetPageShowsEstimateNotice 设置页明确"预算检查/估算"语义（B04）。
+func TestSettings_BudgetPageShowsEstimateNotice(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "budgetview@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/settings")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("设置页应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"全局月度预算", "预算检查与估算", "实际远端费用可能高于预估"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("设置页缺少 %q", want)
+		}
+	}
+}

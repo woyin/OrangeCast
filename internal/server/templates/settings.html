@@ -87,6 +87,15 @@
       </tr>
     </tbody>
   </table>
+  <h3>全局预算与自动处理限额</h3>
+  <p class="meta">这是调用前的预算检查与估算：当月已知费用 + 在途预估达到预算上限时，新的付费任务会被拒绝并显示原因。估算基于按预估用量折算的价格，实际远端费用可能高于预估；未登记价格的付费自动任务会被视为配置缺口而阻止。费用未知时不显示为免费。</p>
+  <label>全局月度预算（分，留空表示不启用）<input type="number" min="0" name="monthly_budget_cents" value="{{with .MonthlyBudgetCents}}{{.}}{{end}}"></label>
+  <label>自动处理任务单日上限（个，留空表示不限制）<input type="number" min="0" name="auto_daily_job_limit" value="{{with .AutoDailyJobLimit}}{{.}}{{end}}"></label>
+  <p class="meta">当月已计费用（含无画像精读文与学习任务）：{{.MonthlyUsageCents}} 分。</p>
+  {{with .BudgetReservations}}{{if .}}
+  <table><thead><tr><th>任务</th><th>阶段</th><th>预估（分）</th><th>状态</th></tr></thead><tbody>
+  {{range .}}<tr><td>{{.JobID}}</td><td>{{.Operation}}</td><td>{{.EstimatedCostCents}}</td><td>{{.Status}}</td></tr>{{end}}
+  </tbody></table>{{end}}{{end}}
   <h3>编辑角色故障切换</h3>
   <p class="meta">仅在首选调用失败时使用；备用 Provider 仍会重新执行预算和 ModelDataPolicy 检查。留空表示不故障切换。</p>
   {{with .Fallbacks}}

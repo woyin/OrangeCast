@@ -8,6 +8,7 @@ package queue
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,8 @@ type Worker struct {
 	poll         time.Duration
 	// bundleFor 选择本次任务的 provider bundle（ADR-0009 默认 Groq；测试可注入 fake）。
 	bundleFor func(*models.ProcessingJob) (*provider.ProviderBundle, error)
+	// taskConfigFor 解析任务的 Provider/Model 配置（B04 预算检查使用）。
+	taskConfigFor func(*models.ProcessingJob) (provider.TaskConfig, error)
 }
 
 // NewWorker 构造一个 worker。tempDir 存放下载数据与转码中间产物；evidenceDir 持久保存
@@ -58,11 +61,11 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir, narrationDir: narrationDir,
 		client: client, poll: pollInterval,
 	}
-	w.bundleFor = func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
+	w.taskConfigFor = func(job *models.ProcessingJob) (provider.TaskConfig, error) {
 		// 读 settings 选每任务的 Provider + Model（ADR-0009 扩展）
 		st, err := w.store.GetSettings(context.Background())
 		if err != nil {
-			return w.selector.Bundle("groq") // 降级默认
+			return provider.TaskConfig{Provider: "groq"}, nil // 降级默认
 		}
 		var tc provider.TaskConfig
 		switch job.JobType {
@@ -79,6 +82,13 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		}
 		if tc.Provider == "" {
 			tc.Provider = "groq"
+		}
+		return tc, nil
+	}
+	w.bundleFor = func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
+		tc, err := w.taskConfigFor(job)
+		if err != nil {
+			return w.selector.Bundle("groq")
 		}
 		return w.selector.BundleForTask(tc)
 	}
@@ -146,9 +156,72 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		log.Printf("任务 %s 处理失败: %v", job.ID, err)
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
 		w.markSourceFailed(ctx, job)
-		return nil // 已标记失败，不算周期错误
+		w.releaseJobBudget(ctx, job) // B04：失败释放预占，区分是否已发生远端调用
+		return nil                   // 已标记失败，不算周期错误
 	}
+	w.settleJobBudget(ctx, job) // B04：成功后以实际费用结算预占
 	return w.store.MarkJobSucceeded(ctx, job.ID)
+}
+
+// budgetEstimateUnits 返回预算预估计量单位（B04）。转录按音频计费、单位未知，
+// 预估 0（价格缺失时由配置缺口路径显式阻塞）；chat 类操作用保守默认值。
+func budgetEstimateUnits(operation string) (int, int) {
+	switch operation {
+	case "analyze":
+		return 100_000, 20_000
+	case "episode_digest":
+		return 120_000, 30_000
+	default:
+		return 0, 0
+	}
+}
+
+// holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
+func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
+	switch job.JobType {
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest:
+	default:
+		return nil
+	}
+	tc, err := w.taskConfigFor(job)
+	if err != nil {
+		return err
+	}
+	// 预算针对将要实际调用的生效模型（配置为空时用 Provider 官方默认）。
+	model := provider.EffectiveModel(tc.Provider, tc.Model, string(job.JobType))
+	in, out := budgetEstimateUnits(string(job.JobType))
+	if _, err := w.store.HoldBudget(ctx, job.ID, string(job.JobType), job.Automated, tc.Provider, model, in, out); err != nil {
+		return fmt.Errorf("预算检查拒绝任务: %w", err)
+	}
+	return nil
+}
+
+// jobReceiptUsage 返回任务本次执行已落账的 receipt 数与已知费用合计。
+func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64) {
+	var n int64
+	var cost sql.NullFloat64
+	if err := w.store.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(estimated_cost),0) FROM usage_records WHERE receipt_id LIKE ? AND estimated_cost IS NOT NULL`,
+		jobID+":%").Scan(&n, &cost); err != nil {
+		return 0, 0
+	}
+	return int(n), int64(cost.Float64)
+}
+
+// settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
+func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
+	_, actual := w.jobReceiptUsage(ctx, job.ID)
+	if err := w.store.SettleBudget(ctx, job.ID, actual); err != nil && !errors.Is(err, store.ErrNotFound) {
+		log.Printf("任务 %s 预算结算失败: %v", job.ID, err)
+	}
+}
+
+// releaseJobBudget 失败释放：已发生远端调用（有 receipt）时标记结果未知，否则直接解除。
+func (w *Worker) releaseJobBudget(ctx context.Context, job *models.ProcessingJob) {
+	receipts, _ := w.jobReceiptUsage(ctx, job.ID)
+	if err := w.store.ReleaseBudget(ctx, job.ID, receipts > 0); err != nil && !errors.Is(err, store.ErrNotFound) {
+		log.Printf("任务 %s 预算释放失败: %v", job.ID, err)
+	}
 }
 
 func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
@@ -168,6 +241,11 @@ func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
 
 // processJob 执行一个已领取任务（不处理终态写回）。
 func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) error {
+	// B04：付费任务在构建 Provider 之前做全局预算检查并预占在途预估；
+	// 预算不足/未配价格/日限额超限以显式错误失败（可见原因，不无限重试）。
+	if err := w.holdJobBudget(ctx, job); err != nil {
+		return err
+	}
 	bundle, err := w.bundleFor(job)
 	if err != nil {
 		return err

@@ -249,6 +249,8 @@ type Purge struct {
 // Settings 实例级设置（单例，id=1）。ADR-0009 移除全局 active_provider：
 // Groq 是默认零成本 Provider；付费 Provider 仅按单次 ProcessingJob 尝试显式授权。
 type Settings struct {
+	MonthlyBudgetCents *int64 // 全局单 Owner 月度预算（分）；NULL = 未配置（B04）
+	AutoDailyJobLimit  *int64 // 自动处理任务单日数量上限；NULL = 不限制（B04）
 	TranscriptionModel *string
 	AnalysisModel      *string
 	HighlightModel     *string
@@ -531,3 +533,25 @@ type UsageReceipt struct {
 	CostCents   int64
 	CostKnown   bool
 }
+
+// BudgetReservation 任务级预算在途预估（B04）。
+// held 计入月度占用；结算以实际费用替换；释放区分是否已发生远端调用。
+type BudgetReservation struct {
+	ID                 string
+	JobID              string
+	Operation          string
+	EstimatedCostCents int64
+	Status             string // held | settled | released_no_call | released_unknown
+	Reason             string
+	ActualCostCents    *int64
+	CreatedAt          string
+	SettledAt          *string
+}
+
+// 预算预留状态。
+const (
+	BudgetHeld            = "held"
+	BudgetSettled         = "settled"
+	BudgetReleasedNoCall  = "released_no_call"
+	BudgetReleasedUnknown = "released_unknown"
+)

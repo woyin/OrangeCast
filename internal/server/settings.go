@@ -4,6 +4,8 @@ package server
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
@@ -36,6 +38,17 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		st.OpenAIAPIKey = strPtr(r.FormValue("openai_api_key"))
 		st.OpenAIBaseURL = strPtr(r.FormValue("openai_base_url"))
 		_ = srv.store.UpdateSettings(r.Context(), st)
+		// B04：全局月度预算与自动处理日限额（空值 = 不启用该约束）。
+		if v := strings.TrimSpace(r.FormValue("monthly_budget_cents")); v == "" {
+			_ = srv.store.SetOwnerMonthlyBudget(r.Context(), nil)
+		} else if cents, err := strconv.ParseInt(v, 10, 64); err == nil && cents >= 0 {
+			_ = srv.store.SetOwnerMonthlyBudget(r.Context(), &cents)
+		}
+		if v := strings.TrimSpace(r.FormValue("auto_daily_job_limit")); v == "" {
+			_ = srv.store.SetAutoDailyJobLimit(r.Context(), nil)
+		} else if limit, err := strconv.ParseInt(v, 10, 64); err == nil && limit >= 0 {
+			_ = srv.store.SetAutoDailyJobLimit(r.Context(), &limit)
+		}
 		for _, role := range []string{editorialRoleScout, editorialRoleCurator, editorialRoleWriter, editorialRoleEvidence, editorialRoleStyle} {
 			_ = srv.store.SetEditorialRoleFallback(r.Context(), models.EditorialRoleFallback{Role: role, Provider: r.FormValue(role + "_fallback_provider"), Model: r.FormValue(role + "_fallback_model")})
 		}
@@ -52,7 +65,15 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			fallbacks[role] = route
 		}
 	}
+	budget, _ := srv.store.GetOwnerMonthlyBudget(r.Context())
+	dailyLimit, _ := srv.store.GetAutoDailyJobLimit(r.Context())
+	usageCents, _ := srv.store.OwnerMonthlyUsageCents(r.Context())
+	reservations, _ := srv.store.ListBudgetReservations(r.Context(), 10)
 	srv.tmpl.Render(w, "settings.html", map[string]any{
+		"MonthlyBudgetCents":       budget,
+		"AutoDailyJobLimit":        dailyLimit,
+		"MonthlyUsageCents":        usageCents,
+		"BudgetReservations":       reservations,
 		"TranscriptionModel":       ptrStr(st.TranscriptionModel),
 		"AnalysisModel":            ptrStr(st.AnalysisModel),
 		"HighlightModel":           ptrStr(st.HighlightModel),

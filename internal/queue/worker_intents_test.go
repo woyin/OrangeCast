@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -167,5 +168,67 @@ func TestWorker_RecordsActualModelAndUsage(t *testing.T) {
 	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_records WHERE operation='analysis'`).Scan(&n2)
 	if n != n2 {
 		t.Fatalf("重放记账不得新增行: %d → %d", n, n2)
+	}
+}
+
+// TestWorker_BudgetGateBlocksAndSettles B04：预算配置缺口显式失败（不调 Provider、
+// 原因可见）；正常执行成功后预占被结算。
+func TestWorker_BudgetGateBlocksAndSettles(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	providerCalled := false
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		providerCalled = true
+		return &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}, nil
+	}
+
+	// 未登记价格：付费任务被配置缺口阻塞（可见原因，不冒充免费，不调用 Provider）。
+	if _, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "a-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("被拒任务不应报周期错误: %v", err)
+	}
+	if providerCalled {
+		t.Fatal("配置缺口下不得调用 Provider")
+	}
+	jobs, _ := s.ListRecentCompleted(ctx, 5)
+	if len(jobs) == 0 || jobs[0].LastError == nil || !strings.Contains(*jobs[0].LastError, "预算检查拒绝任务") {
+		t.Fatalf("失败原因应可见: %+v", jobs)
+	}
+
+	// 登记价格后：任务可执行，成功后预占被结算。
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: provider.EffectiveModel("groq", "", "analyze"), InputCentsPerMillion: 1, OutputCentsPerMillion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "a-2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("正常分析失败: %v", err)
+	}
+	res, err := s.ListBudgetReservations(ctx, 10)
+	if err != nil || len(res) == 0 {
+		t.Fatalf("应存在预算预占记录: %v", err)
+	}
+	var settled bool
+	for _, r := range res {
+		if r.Status == models.BudgetSettled {
+			settled = true
+		}
+	}
+	if !settled {
+		t.Fatalf("成功任务应结算预占: %+v", res)
 	}
 }

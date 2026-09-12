@@ -393,3 +393,24 @@ type ConfigurableProvider interface {
 	// WithModel 返回一个使用指定模型名的新实例（不修改原实例）。
 	WithModel(model string) interface{}
 }
+
+// EffectiveModel 返回预算核算应针对的生效模型（B04）：
+// 配置了模型用配置值；未配置时用 Provider 对该阶段的官方默认——
+// 预算检查必须针对将要实际调用的模型，而不是把空配置当作不可知。
+func EffectiveModel(providerName, configuredModel, stage string) string {
+	if configuredModel != "" {
+		return configuredModel
+	}
+	switch providerName {
+	case "openai":
+		if stage == "transcribe" {
+			return openaiTranscribeModel
+		}
+		return openaiAnalysisModel
+	default:
+		if stage == "transcribe" {
+			return groqTranscribeModel
+		}
+		return groqAnalysisModel
+	}
+}
