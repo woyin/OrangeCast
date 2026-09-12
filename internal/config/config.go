@@ -11,26 +11,29 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
-	Port           string
-	DBPath         string
-	SessionSecret  string
-	TempDir        string // 临时文件目录（下载/转码中间产物）
-	GroqAPIKey     string
-	OpenAIAPIKey   string
-	PublicURL      string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
-	TrustedProxies []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
-	DataDir        string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
-	EvidenceDir    string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
-	BackupDir      string   // 备份输出目录（DATA_DIR/backups）
-	NarrationDir   string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
-	KokoroBinary   string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
-	KokoroVoice    string   // Kokoro 默认音色（默认 af_heart）
-	KokoroModel    string   // Kokoro 模型文件路径（可选，某些发行版需要）
+	Port                 string
+	DBPath               string
+	SessionSecret        string
+	TempDir              string // 临时文件目录（下载/转码中间产物）
+	GroqAPIKey           string
+	OpenAIAPIKey         string
+	PublicURL            string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
+	TrustedProxies       []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
+	DataDir              string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
+	EvidenceDir          string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
+	BackupDir            string   // 备份输出目录（DATA_DIR/backups）
+	NarrationDir         string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	KokoroBinary         string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	KokoroVoice          string   // Kokoro 默认音色（默认 af_heart）
+	KokoroModel          string   // Kokoro 模型文件路径（可选，某些发行版需要）
+	KokoroLanguage       string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
+	KokoroTimeoutSeconds int      // 单次合成超时秒数（D03，默认 120）
 }
 
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
@@ -53,6 +56,10 @@ func Load() (*Config, error) {
 	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
 	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
 	c.KokoroModel = os.Getenv("KOKORO_MODEL")
+	c.KokoroLanguage = envOrDefault("KOKORO_LANGUAGE", "en")
+	if v, err := strconv.Atoi(envOrDefault("KOKORO_TIMEOUT_SECONDS", "120")); err == nil && v > 0 {
+		c.KokoroTimeoutSeconds = v
+	}
 
 	if c.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET 必须设置")

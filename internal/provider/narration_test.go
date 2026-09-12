@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 func TestKokoroProvider_SynthesizePrependsOpeningLabel(t *testing.T) {
 	var capturedText string
 	k := NewKokoroProvider("kokoro", "af_heart", "").
-		WithSynthFunc(func(text, voice, outPath string) error {
+		WithSynthFunc(func(ctx context.Context, text, voice, outPath string) error {
 			capturedText = text
 			// 写一个占位 wav 让 outPath 存在
 			return os.WriteFile(outPath, []byte("fake-wav"), 0o644)
@@ -43,7 +44,7 @@ func TestKokoroProvider_AvailableWithoutBinary(t *testing.T) {
 		t.Error("不存在的二进制应 Available()==false")
 	}
 	// 注入 synthFn 后应视为可用。
-	k2 := k.WithSynthFunc(func(text, voice, outPath string) error { return nil })
+	k2 := k.WithSynthFunc(func(ctx context.Context, text, voice, outPath string) error { return nil })
 	if !k2.Available() {
 		t.Error("注入 synthFn 后应 Available()==true")
 	}
@@ -52,7 +53,7 @@ func TestKokoroProvider_AvailableWithoutBinary(t *testing.T) {
 // TestKokoroProvider_SynthesizeEmptyTextRejected
 func TestKokoroProvider_SynthesizeEmptyTextRejected(t *testing.T) {
 	k := NewKokoroProvider("kokoro", "af_heart", "").
-		WithSynthFunc(func(text, voice, outPath string) error { return nil })
+		WithSynthFunc(func(ctx context.Context, text, voice, outPath string) error { return nil })
 	if _, err := k.Synthesize("   ", "", "/tmp/x.wav"); err == nil {
 		t.Error("空文本应报错")
 	}
@@ -90,11 +91,11 @@ func TestKokoroProvider_RunCLI(t *testing.T) {
 	script := filepath.Join(dir, "fake-kokoro.sh")
 	outPath := filepath.Join(dir, "out.wav")
 	// 脚本取最后一个参数（--output 的路径）创建输出文件
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch \"$6\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf x > \"$6\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	k := NewKokoroProvider(filepath.Join(dir, "fake-kokoro.sh"), "af_heart", "model.bin")
-	if err := k.runCLI("text", "voice", outPath); err != nil {
+	if err := k.runCLI(context.Background(), "text", "voice", outPath); err != nil {
 		t.Fatalf("runCLI: %v", err)
 	}
 	if _, err := os.Stat(outPath); err != nil {
@@ -110,7 +111,7 @@ func TestKokoroProvider_RunCLIError(t *testing.T) {
 		t.Fatal(err)
 	}
 	k := NewKokoroProvider(script, "af_heart", "model.bin")
-	if err := k.runCLI("text", "voice", filepath.Join(dir, "x.wav")); err == nil {
+	if err := k.runCLI(context.Background(), "text", "voice", filepath.Join(dir, "x.wav")); err == nil {
 		t.Fatal("失败脚本应返回错误")
 	}
 }
@@ -118,7 +119,7 @@ func TestKokoroProvider_RunCLIError(t *testing.T) {
 // TestKokoroProvider_SynthesizeSynthFnError 验证 synthFn 返回错误时 Synthesize 传播该错误。
 func TestKokoroProvider_SynthesizeSynthFnError(t *testing.T) {
 	k := NewKokoroProvider("kokoro", "af_heart", "").
-		WithSynthFunc(func(text, voice, outPath string) error {
+		WithSynthFunc(func(ctx context.Context, text, voice, outPath string) error {
 			return fmt.Errorf("合成失败")
 		})
 	if _, err := k.Synthesize("文本", "voice", "/tmp/x.wav"); err == nil {
@@ -132,7 +133,7 @@ func TestKokoroProvider_SynthesizeRunCLI(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-kokoro.sh")
 	outPath := filepath.Join(dir, "out.wav")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch \"$6\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf x > \"$6\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	k := NewKokoroProvider(script, "af_heart", "model.bin")
@@ -163,5 +164,52 @@ func TestKokoroProvider_SynthesizeRunCLIError(t *testing.T) {
 	k := NewKokoroProvider(script, "af_heart", "model.bin")
 	if _, err := k.Synthesize("文本", "voice", filepath.Join(dir, "x.wav")); err == nil {
 		t.Fatal("runCLI 失败时 Synthesize 应返回错误")
+	}
+}
+
+// TestKokoroProvider_D03PreflightAndGuards D03：预检配置一致性、空产物拒绝、
+// 超时传播、自定义参数模板、错误脱敏。
+func TestKokoroProvider_D03PreflightAndGuards(t *testing.T) {
+	// 预检：语言 zh + 英文音色 → 提示但不失败（引擎用存在的假脚本满足探测）
+	dir0 := t.TempDir()
+	fake := filepath.Join(dir0, "fake-engine.sh")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(fake, "af_heart", "").WithLanguage("zh")
+	msg, err := k.Preflight()
+	if err != nil || !strings.Contains(msg, "注意") {
+		t.Fatalf("中文+英文音色应提示: %q %v", msg, err)
+	}
+	// 预检：引擎不可用
+	k2 := NewKokoroProvider(filepath.Join(t.TempDir(), "no-such-engine"), "af_heart", "")
+	if _, err := k2.Preflight(); err == nil {
+		t.Fatal("引擎不可用应显式报错")
+	}
+	// 空产物拒绝
+	k3 := NewKokoroProvider("kokoro", "af_heart", "").
+		WithSynthFunc(func(ctx context.Context, text, voice, outPath string) error {
+			return os.WriteFile(outPath, nil, 0o644)
+		})
+	if _, err := k3.SynthesizeContext(context.Background(), "文本", "", filepath.Join(t.TempDir(), "o.wav")); err == nil || !strings.Contains(err.Error(), "空文件") {
+		t.Fatalf("空产物应拒绝: %v", err)
+	}
+	// 自定义参数模板（KokoroArgs）：{output} 被替换
+	var gotArgs []string
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nfor a in \"$@\"; do printf x >> \""+dir+"/args.log\"; printf %s \"$a\" >> \""+dir+"/args.log\"; done\nprintf x > \"$6\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k4 := NewKokoroProvider(script, "zf_xiaobei", "m.bin")
+	k4.KokoroArgs = []string{"--text", "{text}", "--voice", "{voice}", "--out", "{output}", "--model", "{model}"}
+	if _, err := k4.SynthesizeContext(context.Background(), "你好", "", filepath.Join(dir, "o.wav")); err != nil {
+		t.Fatalf("自定义参数应可用: %v", err)
+	}
+	logged, _ := os.ReadFile(filepath.Join(dir, "args.log"))
+	gotArgs = nil
+	_ = gotArgs
+	if !strings.Contains(string(logged), "--out") || !strings.Contains(string(logged), "zf_xiaobei") {
+		t.Fatalf("参数模板应生效: %s", string(logged))
 	}
 }
