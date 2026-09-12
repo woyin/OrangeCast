@@ -219,3 +219,33 @@ func (s *Store) SetProposalBatchStatus(ctx context.Context, id, status, reason s
 	}
 	return nil
 }
+
+// RejectProposal 带原因拒绝一条提案（C06）：幂等（已 rejected 不重复写入反馈）。
+func (s *Store) RejectProposal(ctx context.Context, proposalID, feedbackKind, reason string) error {
+	feedbackKind = strings.TrimSpace(feedbackKind)
+	if feedbackKind == "" {
+		feedbackKind = "NotNow"
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE creation_proposals SET status='rejected', updated_at=datetime('now') WHERE id=? AND status='proposed'`,
+		proposalID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// SaveProposalForLater 暂存提案（C06）：不创建作品，不触发计费，不改变素材。
+func (s *Store) SaveProposalForLater(ctx context.Context, proposalID string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE creation_proposals SET status='saved', updated_at=datetime('now') WHERE id=? AND status='proposed'`,
+		proposalID)
+	return err
+}
+
+// CountOpenProposalsForBatch 统计批次中未处理的提案数（proposed 状态）。
+func (s *Store) CountOpenProposalsForBatch(ctx context.Context, batchID string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM creation_proposals WHERE proposal_batch_id=? AND status='proposed'`, batchID).Scan(&n)
+	return n, err
+}

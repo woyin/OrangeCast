@@ -264,3 +264,37 @@ func (srv *Server) handleIdeationDiagnose(w http.ResponseWriter, r *http.Request
 	}
 	http.Redirect(w, r, "/workbench/ideation/rounds?session_id="+sessionID, http.StatusSeeOther)
 }
+
+// handleProposalDecision C06：候选决策闭环（接受/暂存/拒绝）。
+// 接受走 AcceptCreationProposal（已有）；暂存/拒绝经 SaveProposalForLater /
+// RejectProposal 幂等处理。全部处理完后批次可完成（释放背压）。
+func (srv *Server) handleProposalDecision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	proposalID := strings.TrimSpace(r.FormValue("proposal_id"))
+	decision := strings.TrimSpace(r.FormValue("decision"))
+	var err error
+	switch decision {
+	case "accept":
+		claim := strings.TrimSpace(r.FormValue("owner_claim"))
+		if claim == "" {
+			http.Error(w, "接受主张必须填写 OwnerClaim", http.StatusBadRequest)
+			return
+		}
+		err = srv.store.AcceptCreationProposal(r.Context(), proposalID, claim)
+	case "save":
+		err = srv.store.SaveProposalForLater(r.Context(), proposalID)
+	case "reject":
+		err = srv.store.RejectProposal(r.Context(), proposalID, strings.TrimSpace(r.FormValue("feedback")), strings.TrimSpace(r.FormValue("reason")))
+	default:
+		http.Error(w, "未知决策", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, "决策失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench", http.StatusSeeOther)
+}

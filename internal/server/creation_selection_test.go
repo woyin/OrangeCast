@@ -354,3 +354,69 @@ func TestAutomaticCreationProposalsValidation(t *testing.T) {
 		t.Fatalf("保留候选应含两集素材: %s", proposals[0].MaterialIDsJSON)
 	}
 }
+
+// TestProposalDecisionLifecycle C06：接受/暂存/拒绝闭环——重复提交幂等；
+// 全部处理完后开放提案数为零（释放背压）。
+func TestProposalDecisionLifecycle(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "c06@example.com", "password123")
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := srv.store.CreateIdeationSession(ctx, models.IdeationSession{EditorialProfileID: profile.ID, Intent: "C06"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, IdeationSessionID: sess.ID,
+		Status: "proposed", WorkingTitle: "候选一", ProposedClaim: "主张一", CreationForm: "article",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, IdeationSessionID: sess.ID,
+		Status: "proposed", WorkingTitle: "候选二", ProposedClaim: "主张二", CreationForm: "article",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec0 := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	postDecision := func(id, decision string) {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/proposal-decision",
+			strings.NewReader(url.Values{"_csrf": {csrf}, "proposal_id": {id}, "decision": {decision}, "owner_claim": {"Owner 主张"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-CSRF-Token", csrf)
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("决策 %s 应 303: %d %s", decision, rec.Code, rec.Body.String())
+		}
+	}
+	postDecision(p1.ID, "accept")
+	postDecision(p2.ID, "save")
+	open1, _ := srv.store.CountOpenProposalsForBatch(ctx, "batch-1")
+	open2, _ := srv.store.CountOpenProposalsForBatch(ctx, "batch-1")
+	if open1+open2 != 0 {
+		t.Fatalf("全部决策后开放提案数应为 0: %d+%d", open1, open2)
+	}
+	// 接受后 p1 的状态为 accepted。
+	got1, _ := srv.store.GetCreationProposal(ctx, p1.ID)
+	if got1.Status != "accepted" {
+		t.Fatalf("接受后应为 accepted: %+v", got1)
+	}
+	got2, _ := srv.store.GetCreationProposal(ctx, p2.ID)
+	if got2.Status != "saved" {
+		t.Fatalf("暂存后应为 saved: %+v", got2)
+	}
+}
