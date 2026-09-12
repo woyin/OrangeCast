@@ -121,7 +121,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/workbench/ideation/round", srv.handleIdeationRoundCreate)   // C02：追加构思轮次
 	mux.HandleFunc("/workbench/ideation/rounds", srv.handleIdeationRoundsDetail) // C02：轮次详情
 	mux.HandleFunc("/workbench/ideation/diagnose", srv.handleIdeationDiagnose)   // C03：入队诊断
-	mux.HandleFunc("/workbench/proposal-decision", srv.handleProposalDecision) // C06：候选决策
+	mux.HandleFunc("/workbench/proposal-decision", srv.handleProposalDecision)   // C06：候选决策
 	mux.HandleFunc("/api/source-snapshots/", srv.handleSourceSnapshot)           // 来源快照只读定位（B01）
 	mux.HandleFunc("/api/retry-stage", srv.handleRetryStage)                     // 分阶段精确重试（B09）
 	mux.HandleFunc("/digests", srv.handleDigestList)
