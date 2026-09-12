@@ -74,7 +74,7 @@ func TestWriteArticleWithClaims_Groq(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Markdown, "低剂量") || len(res.ClaimMap) != 1  {
+	if !strings.Contains(res.Markdown, "低剂量") || len(res.ClaimMap) != 1 {
 		t.Fatalf("v2 写作结果不符: %+v", res)
 	}
 	// 非法输出 → 校验拒绝
