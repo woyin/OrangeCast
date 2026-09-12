@@ -34,19 +34,60 @@ type HighlightProvider interface {
 
 // ValidateHighlightSet 校验并清洗高光片段（ADR-0016）。
 // 规则：Citation 必须是真实存在的 Segment ID；时间范围由程序从 Citation 算。
+// ValidateHighlightSet 高光校验（D01）：在引用存在性之上增加程序化约束——
+//   - 连续性：一个高光的引用必须是转录顺序上连续的 Segment 区间；跨空洞
+//     （如广告段被跳过）或乱序引用显式拒绝，不允许 min/max 把无关音频带进区间；
+//   - 重叠：不同高光的 Segment 区间不得相交；重复 Citation 集合去重；
+//   - 零时长：解析出的时间跨度 end<=start 显式拒绝。
+//
+// 起止时间始终由程序从 Segment 解析，模型不参与估算（ADR-0016/0008）。
 func ValidateHighlightSet(hs *HighlightSet, segments []Segment) (*HighlightSet, error) {
 	if hs == nil {
 		return nil, fmt.Errorf("高光片段为空")
 	}
 	segs := segmentIndex(segments)
+	order := make(map[string]int, len(segments))
+	for i, seg := range segments {
+		order[seg.ID] = i
+	}
+	type span struct{ lo, hi int }
 	cleaned := &HighlightSet{}
+	seen := map[string]bool{}
+	var taken []span
 	for _, h := range hs.Highlights {
 		cites := validCitations(h.Citations, segs)
 		if strings.TrimSpace(h.Gist) == "" || len(cites) == 0 {
-			continue // 省略无效项
+			continue // 省略无效项（既有行为）
 		}
+		// 连续性检查：引用的 Segment 下标必须构成连续区间。
+		indices := make([]int, 0, len(cites))
+		for _, c := range cites {
+			indices = append(indices, order[c])
+		}
+		sort.Ints(indices)
+		lo, hi := indices[0], indices[len(indices)-1]
+		if len(indices) != hi-lo+1 {
+			return nil, fmt.Errorf("高光 %q 的引用跨越不连续区间（seg %d..%d 中有未引用片段）：区间非法",
+				strings.TrimSpace(h.Gist), lo, hi)
+		}
+		// 零时长/缺时间检查。
+		if valid, zero := spanTimeRange(cites, segs); !valid || zero {
+			return nil, fmt.Errorf("高光 %q 时间区间非法（零时长或缺少时间）", strings.TrimSpace(h.Gist))
+		}
+		// 完全相同的引用集合先去重（规范化），再检查与其它高光的重叠。
+		id := stableHighlightID(cites)
+		if seen[id] {
+			continue
+		}
+		for _, t := range taken {
+			if lo <= t.hi && t.lo <= hi {
+				return nil, fmt.Errorf("高光 %q 与既有区间重叠（片段 %d..%d）", strings.TrimSpace(h.Gist), lo, hi)
+			}
+		}
+		seen[id] = true
+		taken = append(taken, span{lo, hi})
 		cleaned.Highlights = append(cleaned.Highlights, Highlight{
-			ID:        stableHighlightID(cites),
+			ID:        id,
 			Gist:      strings.TrimSpace(h.Gist),
 			Citations: cites,
 		})
@@ -55,6 +96,34 @@ func ValidateHighlightSet(hs *HighlightSet, segments []Segment) (*HighlightSet, 
 		return nil, fmt.Errorf("全部高光片段缺少有效 Citation")
 	}
 	return cleaned, nil
+}
+
+// spanTimeRange 解析区间起止：返回 (时间合法, 是否零时长)。
+// 每条引用都必须能解析到 Segment 时间；全部解析后要求 start < end。
+func spanTimeRange(cites []string, segs map[string]Segment) (valid, zero bool) {
+	var start, end float64
+	first := true
+	for _, c := range cites {
+		seg, ok := segs[c]
+		if !ok {
+			return false, false
+		}
+		if first {
+			start, end = seg.Start, seg.End
+			first = false
+			continue
+		}
+		if seg.Start < start {
+			start = seg.Start
+		}
+		if seg.End > end {
+			end = seg.End
+		}
+	}
+	if first || end <= start {
+		return true, true
+	}
+	return true, false
 }
 
 // stableHighlightID 由 Citation 集合生成稳定 ID（ADR-0019）。

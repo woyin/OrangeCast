@@ -23,7 +23,8 @@ func TestStableHighlightID_StableAndDistinct(t *testing.T) {
 // ValidateHighlightSet 必须为每个 Highlight 分配基于 Citation 集合的稳定 ID。
 func TestValidateHighlightSet_AssignsStableIDs(t *testing.T) {
 	segs := []Segment{
-		{ID: "seg-0001"}, {ID: "seg-0002"}, {ID: "seg-0003"}, {ID: "seg-0004"},
+		{ID: "seg-0001", Start: 0, End: 5}, {ID: "seg-0002", Start: 5, End: 10},
+		{ID: "seg-0003", Start: 10, End: 15}, {ID: "seg-0004", Start: 15, End: 20},
 	}
 	hs := &HighlightSet{Highlights: []Highlight{
 		{Gist: "g1", Citations: []string{"seg-0001", "seg-0002"}},
