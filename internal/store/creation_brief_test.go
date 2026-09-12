@@ -34,7 +34,37 @@ func TestCreationBriefConfirmationRechecksNewBlockingResearch(t *testing.T) {
 	if err := s.ConfirmCreationBrief(ctx, brief.ID); !errors.Is(err, ErrInvalidEditorialState) {
 		t.Fatalf("new blocking research must still stop a draft brief: %v", err)
 	}
-	if err := s.ResolveResearchNeed(ctx, need.ID, "new-source"); err != nil {
+	// C04：解决缺口需要真实已处理来源（转录就绪），字符串占位不再足够。
+	podcast, perr := s.CreatePodcast(ctx, "https://feed.example.com/brief-recheck.xml", "研究来源", "", "")
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if _, merr := s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "br", Title: "研究单集", AudioURL: "https://a.mp3"}}); merr != nil {
+		t.Fatal(merr)
+	}
+	eps, _ := s.ListEpisodes(ctx, podcast.ID)
+	trJob, terr := s.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	if terr != nil {
+		t.Fatal(terr)
+	}
+	trVersion, terr := s.CreateArtifactVersion(ctx, models.SourceEpisode, eps[0].ID, KindTranscript, "test", "test", "1", trJob.ID,
+		`{"language":"zh","text":"素材","segments":[{"id":"seg-1","start":0,"end":2,"text":"素材"}]}`)
+	if terr != nil {
+		t.Fatal(terr)
+	}
+	if _, err := s.MarkJobRunning(ctx, trJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobSucceeded(ctx, trJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateEpisodeStatus(ctx, eps[0].ID, models.StatusProcessed); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, eps[0].ID, KindTranscript, trVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveResearchNeed(ctx, need.ID, eps[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ConfirmCreationBrief(ctx, brief.ID); err != nil {

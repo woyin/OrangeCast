@@ -9,6 +9,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 // seedC01Keypoints 一次索引建立单集全部关键观点（K03 协调语义下，
@@ -245,5 +246,72 @@ func TestIdeationRounds_Lifecycle(t *testing.T) {
 	rounds, _ = srv.store.ListIdeationRounds(ctx, sess.ID)
 	if len(rounds) != 3 {
 		t.Fatalf("应有三轮: %d", len(rounds))
+	}
+}
+
+// TestResearchNeed_RequiresProcessedSource C04：虚构/未处理来源不能 resolved；
+// 已处理来源可解决。
+func TestResearchNeed_RequiresProcessedSource(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := srv.store.CreateIdeationSession(ctx, models.IdeationSession{EditorialProfileID: profile.ID, Intent: "研究缺口"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, Status: "proposed", WorkingTitle: "方向",
+		ProposedClaim: "主张", IdeationSessionID: sess.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	need, err := srv.store.CreateResearchNeed(ctx, models.ResearchNeed{
+		CreationProposalID: proposal.ID, Severity: "blocking", Question: "缺口问题",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 虚构来源（"new-source" 字符串占位）→ 拒绝。
+	if err := srv.store.ResolveResearchNeed(ctx, need.ID, "new-source"); err == nil {
+		t.Fatal("虚构来源不得解决缺口")
+	}
+	// 已处理来源（有转录）→ 可解决。
+	podcast3, _ := srv.store.CreatePodcast(ctx, "https://feed.example.com/research-src.xml", "研究来源", "", "")
+	srv.store.MergeEpisodes(ctx, podcast3.ID, []models.Episode{{GUID: "rs-1", Title: "研究单集", AudioURL: "https://a.mp3"}})
+	eps3, _ := srv.store.ListEpisodes(ctx, podcast3.ID)
+	srcEp := eps3[0].ID
+	job, _, err := srv.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: srcEp, JobType: models.JobTranscribe, IntentID: "research-src-tr",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"language":"zh","text":"t","segments":[{"id":"seg-0001","start":0,"end":10,"text":"研究内容"}]}`
+	version, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, srcEp, store.KindTranscript, "fake", "m", "1", job.ID, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MarkJobRunning(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.MarkJobSucceeded(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.UpdateEpisodeStatus(ctx, srcEp, models.StatusProcessed); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetCurrentVersion(ctx, models.SourceEpisode, srcEp, store.KindTranscript, version); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ResolveResearchNeed(ctx, need.ID, srcEp); err != nil {
+		t.Fatalf("已处理来源应可解决: %v", err)
+	}
+	got, _ := srv.store.GetResearchNeed(ctx, need.ID)
+	if got.Status != "resolved" || got.ResolutionSourceID != srcEp {
+		t.Fatalf("缺口应已解决并记录来源: %+v", got)
 	}
 }

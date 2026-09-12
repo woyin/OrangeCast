@@ -219,10 +219,23 @@ func (s *Store) ListResearchNeeds(ctx context.Context, profileID string) ([]*mod
 // ResolveResearchNeed records the source that supplied the missing learning.
 // Research execution itself remains out of scope for V1; an Owner must first
 // create a ResearchPlan and later add the resulting Source to this workspace.
+// ResolveResearchNeed 用已处理来源解决研究缺口（C04 / ADR-0024 §1）：
+// 校验来源存在且已处理（转录/内容就绪），非空 sourceID 不再足以 resolved；
+// 来源删除或失效后由 Purge 级联重新阻断相关下游（research_needs 行保留）。
 func (s *Store) ResolveResearchNeed(ctx context.Context, id, sourceID string) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return fmt.Errorf("%w: resolution source required", ErrInvalidEditorialState)
+	}
+	need, err := s.GetResearchNeed(ctx, id)
+	if err != nil {
+		return err
+	}
+	if need.Status != "open" {
+		return ErrInvalidEditorialState
+	}
+	if !s.sourceProcessed(ctx, models.SourceType(""), sourceID) {
+		return fmt.Errorf("%w: 来源 %s 不存在或未处理，不能解决缺口", ErrInvalidEditorialState, sourceID)
 	}
 	result, err := s.DB.ExecContext(ctx, `UPDATE research_needs SET status='resolved',resolution_source_id=?,resolved_at=datetime('now') WHERE id=? AND status='open'`, sourceID, id)
 	if err != nil {
@@ -236,6 +249,20 @@ func (s *Store) ResolveResearchNeed(ctx context.Context, id, sourceID string) er
 		return ErrInvalidEditorialState
 	}
 	return nil
+}
+
+// sourceProcessed 判断来源存在且已完成处理（转录或文档内容就绪）。
+func (s *Store) sourceProcessed(ctx context.Context, _ models.SourceType, sourceID string) bool {
+	// 音频来源：有当前转录版本；文档：行存在且内容非空。
+	if _, err := s.GetCurrentVersion(ctx, models.SourceEpisode, sourceID, KindTranscript); err == nil {
+		return true
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, sourceID, KindTranscript); err == nil {
+		return true
+	}
+	var content string
+	err := s.DB.QueryRowContext(ctx, `SELECT content FROM documents WHERE id=?`, sourceID).Scan(&content)
+	return err == nil && strings.TrimSpace(content) != ""
 }
 
 // CreateResearchPlan records a future, Owner-reviewable research contract and
