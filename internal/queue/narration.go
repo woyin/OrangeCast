@@ -34,9 +34,15 @@ func (w *Worker) EnqueueNarrationJob(ctx context.Context, sourceType models.Sour
 	if err != nil {
 		return nil, fmt.Errorf("尚未生成高光，无法合成解说: %w", err)
 	}
+	return w.EnqueueNarrationJobForVersion(ctx, sourceType, sourceID, version.Version, version.ID, voice, language)
+}
+
+// EnqueueNarrationJobForVersion 冻结指定高光版本入队解说任务（B08 链式衔接用：
+// 高光任务完成后按其产出版本衔接，不依赖 current 指针）。
+func (w *Worker) EnqueueNarrationJobForVersion(ctx context.Context, sourceType models.SourceType, sourceID string, highlightVersion int, highlightVersionID, voice, language string) (*models.ProcessingJob, error) {
 	snapshot, err := json.Marshal(narrationTaskSnapshot{
-		HighlightVersion:   version.Version,
-		HighlightVersionID: version.ID,
+		HighlightVersion:   highlightVersion,
+		HighlightVersionID: highlightVersionID,
 		Voice:              voice,
 		Language:           language,
 	})
@@ -45,7 +51,7 @@ func (w *Worker) EnqueueNarrationJob(ctx context.Context, sourceType models.Sour
 	}
 	job, created, err := w.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
 		SourceType: sourceType, SourceID: sourceID, JobType: models.JobNarration,
-		IntentID:          fmt.Sprintf("narration:%s:%s:hv%d", sourceType, sourceID, version.Version),
+		IntentID:          fmt.Sprintf("narration:%s:%s:hv%d", sourceType, sourceID, highlightVersion),
 		InputSnapshotJSON: string(snapshot),
 	})
 	if err != nil {

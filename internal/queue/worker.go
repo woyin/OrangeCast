@@ -313,9 +313,15 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 
 	w.recordCallUsage(ctx, job, "transcription", bundle.Transcription.Name(), transcribeModel, result.Usage)
 
-	// 4) 入队分析任务（已有进行中 analyze 则不重复创建）
-	if _, err := w.store.EnqueueAnalyzeForIngestion(ctx, job.SourceType, job.SourceID, job.Automated); err != nil {
+	// 4) 入队分析任务（已有进行中 analyze 则不重复创建），并继承处理深度快照（B08）。
+	analyzeJob, err := w.store.EnqueueAnalyzeForIngestion(ctx, job.SourceType, job.SourceID, job.Automated)
+	if err != nil {
 		return err
+	}
+	if analyzeJob != nil {
+		if err := w.store.InheritJobInputSnapshot(ctx, job.ID, analyzeJob.ID); err != nil {
+			return fmt.Errorf("继承处理深度快照: %w", err)
+		}
 	}
 	return nil
 }
@@ -375,16 +381,29 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 
 	w.recordCallUsage(ctx, job, "analysis", bundle.Analysis.Name(), analysisModel, analysis.Usage)
 
-	if !job.Automated {
-		// Owner 触发的处理才自动附带可选衍生产物；订阅自动采集止于 KeyPoint。
-		if err := w.doHighlight(ctx, job, bundle, payload.Segments); err != nil {
-			log.Printf("任务 %s 高光生成失败（不阻塞主流程）: %v", job.ID, err)
-		}
-		if err := w.doNarration(ctx, job, bundle); err != nil {
-			log.Printf("任务 %s Narration 合成失败（不阻塞主流程）: %v", job.ID, err)
+	// B08：统一编排——分析完成后按深度/来源衔接高光任务（高光成功后再衔接解说）：
+	//   手动处理：始终衔接（替代旧内联高光/解说）；
+	//   自动处理：knowledge_dj 深度衔接；knowledge 深度与旧无快照自动任务止于 KeyPoint。
+	// 衔接失败必须可见（B09 进度页展示），但不回抹已完成的卡片。
+	if !job.Automated || jobSnapshotDepth(ctx, w, job) == string(models.DepthKnowledgeDJ) {
+		if _, err := w.store.EnqueueHighlightJobWithChain(ctx, job.SourceType, job.SourceID, true); err != nil {
+			log.Printf("任务 %s 衔接高光任务失败: %v", job.ID, err)
 		}
 	}
 	return nil
+}
+
+// jobSnapshotDepth 读取任务冻结快照中的处理深度；无快照（旧任务）返回 knowledge 语义的空串。
+func jobSnapshotDepth(ctx context.Context, w *Worker, job *models.ProcessingJob) string {
+	exec, err := w.store.GetJobExecution(ctx, job.ID)
+	if err != nil {
+		return ""
+	}
+	var snapshot struct {
+		ProcessingDepth string `json:"processing_depth"`
+	}
+	_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snapshot)
+	return snapshot.ProcessingDepth
 }
 
 // doHighlight 生成高光片段并存为独立 ArtifactVersion（ADR-0016）。

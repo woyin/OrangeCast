@@ -2791,3 +2791,46 @@ func TestSettings_BudgetPageShowsEstimateNotice(t *testing.T) {
 		}
 	}
 }
+
+// TestPodcastIngestionPolicy_SavesProcessingDepth B08：策略表单同时保存处理深度；
+// 非法深度被拒绝且不影响策略。
+func TestPodcastIngestionPolicy_SavesProcessingDepth(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "poddepth@example.com", "password123")
+	podcast, err := srv.store.CreatePodcast(context.Background(), "https://feed.example.com/depth-form.xml", "深度播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/podcasts/"+podcast.ID, nil)
+	get.AddCookie(cookie)
+	getRec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(getRec, get)
+	var csrf string
+	for _, c := range getRec.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	post := func(form string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/podcasts/ingestion-policy", strings.NewReader(form))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post("_csrf=" + csrf + "&podcast_id=" + podcast.ID + "&ingestion_policy=all_new&processing_depth=knowledge_dj")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("合法深度应保存成功: %d", rec.Code)
+	}
+	updated, err := srv.store.GetPodcastByID(context.Background(), podcast.ID)
+	if err != nil || updated.ProcessingDepth != string(models.DepthKnowledgeDJ) {
+		t.Fatalf("深度应保存: %+v %v", updated, err)
+	}
+	// 非法深度 → 400
+	rec = post("_csrf=" + csrf + "&podcast_id=" + podcast.ID + "&ingestion_policy=all_new&processing_depth=everything")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("非法深度应 400: %d", rec.Code)
+	}
+}

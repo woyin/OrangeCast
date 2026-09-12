@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
@@ -33,6 +34,7 @@ func (w *Worker) doHighlightJob(ctx context.Context, job *models.ProcessingJob, 
 	var snapshot struct {
 		TranscriptVersion   int    `json:"transcript_version"`
 		TranscriptVersionID string `json:"transcript_version_id"`
+		ChainNarration      bool   `json:"chain_narration"`
 	}
 	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &snapshot); err != nil || snapshot.TranscriptVersion == 0 {
 		return fmt.Errorf("任务缺少冻结的转录版本快照（应经 EnqueueHighlightJob 入队）")
@@ -86,6 +88,12 @@ func (w *Worker) doHighlightJob(ctx context.Context, job *models.ProcessingJob, 
 	w.recordCallUsage(ctx, job, "highlight", bundle.Highlight.Name(), highlightModel, raw.Usage)
 	if err := w.saveHighlightCheckpoint(ctx, job.ID, highlightCheckpoint{Stage: "validated"}); err != nil {
 		return err
+	}
+	// B08：自动 DJ 链条——高光完成后按产出版本衔接解说任务（幂等意图）。
+	if snapshot.ChainNarration {
+		if _, err := w.EnqueueNarrationJobForVersion(ctx, job.SourceType, job.SourceID, version, "", "", ""); err != nil {
+			log.Printf("任务 %s 衔接解说任务失败: %v", job.ID, err)
+		}
 	}
 	result, _ := json.Marshal(map[string]any{"highlight_version": version, "transcript_version": snapshot.TranscriptVersion})
 	return w.store.SaveJobResult(ctx, job.ID, string(result), models.JobResultComplete)

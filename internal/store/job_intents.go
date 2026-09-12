@@ -182,3 +182,35 @@ func (s *Store) EnqueueHighlightJob(ctx context.Context, sourceType models.Sourc
 	}
 	return job, nil
 }
+
+// InheritJobInputSnapshot 把上游任务的冻结输入快照传给下游任务（B08 衔接）：
+// 仅当下游尚无快照时写入，不覆盖下游已有契约。
+func (s *Store) InheritJobInputSnapshot(ctx context.Context, fromJobID, toJobID string) error {
+	var snapshot string
+	if err := s.DB.QueryRowContext(ctx, `SELECT input_snapshot_json FROM processing_jobs WHERE id = ?`, fromJobID).Scan(&snapshot); err != nil {
+		return err
+	}
+	if snapshot == "" {
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET input_snapshot_json = ? WHERE id = ? AND COALESCE(input_snapshot_json,'') = ''`,
+		snapshot, toJobID)
+	return err
+}
+
+// EnqueueHighlightJobWithChain 入队高光任务并声明完成后继续衔接解说（B08 自动 DJ）。
+func (s *Store) EnqueueHighlightJobWithChain(ctx context.Context, sourceType models.SourceType, sourceID string, chainNarration bool) (*models.ProcessingJob, error) {
+	job, err := s.EnqueueHighlightJob(ctx, sourceType, sourceID)
+	if err != nil || job == nil {
+		return job, err
+	}
+	if chainNarration {
+		if _, err := s.DB.ExecContext(ctx,
+			`UPDATE processing_jobs SET input_snapshot_json = json_set(input_snapshot_json, '$.chain_narration', json('true')) WHERE id = ?`,
+			job.ID); err != nil {
+			return job, err
+		}
+	}
+	return job, nil
+}

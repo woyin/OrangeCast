@@ -16,6 +16,12 @@
         <option value="filtered" {{if eq .Podcast.IngestionPolicy "filtered"}}selected{{end}}>按关键词筛选</option>
       </select>
     </label>
+    <label>自动处理深度
+      <select name="processing_depth">
+        <option value="knowledge" {{if eq .Podcast.ProcessingDepth "knowledge"}}selected{{end}}>只提取知识（转录、卡片、重点）</option>
+        <option value="knowledge_dj" {{if eq .Podcast.ProcessingDepth "knowledge_dj"}}selected{{end}}>知识 + 自动准备 DJ 精听</option>
+      </select>
+    </label>
     <label>包含关键词（逗号分隔）<input name="include_keywords" value="{{.Podcast.IngestionIncludeKeywords}}" placeholder="AI,创业"></label>
     <label>排除关键词（逗号分隔）<input name="exclude_keywords" value="{{.Podcast.IngestionExcludeKeywords}}" placeholder="预告,重播"></label>
     <button type="submit" class="btn">保存策略</button>

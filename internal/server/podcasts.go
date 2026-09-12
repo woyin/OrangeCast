@@ -82,6 +82,13 @@ func (srv *Server) handlePodcastIngestionPolicy(w http.ResponseWriter, r *http.R
 		http.Error(w, "更新自动摄取策略失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// B08：处理深度（只提取知识 / 知识+DJ）与策略一起保存；只影响之后入队的新意图。
+	if depth := strings.TrimSpace(r.FormValue("processing_depth")); depth != "" {
+		if err := srv.store.SetPodcastProcessingDepth(r.Context(), podcastID, models.ProcessingDepth(depth)); err != nil {
+			http.Error(w, "更新处理深度失败："+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	http.Redirect(w, r, "/podcasts/"+podcastID, http.StatusSeeOther)
 }
 func (srv *Server) handleUploads(w http.ResponseWriter, r *http.Request) {

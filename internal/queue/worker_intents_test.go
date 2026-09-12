@@ -232,3 +232,118 @@ func TestWorker_BudgetGateBlocksAndSettles(t *testing.T) {
 		t.Fatalf("成功任务应结算预占: %+v", res)
 	}
 }
+
+// TestPipeline_KnowledgeDJDepthChainsFullDJ B08：knowledge_dj 深度的自动摄取
+// 衔接 转录→分析→高光→解说，全部产物就绪。
+func TestPipeline_KnowledgeDJDepthChainsFullDJ(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "dj.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+
+	hl := &countingHighlight{set: provider.HighlightSet{Highlights: []provider.Highlight{
+		{ID: "hl-1", Gist: "开场", Citations: []string{"seg-0001"}},
+	}}}
+	nar := &taskNarration{available: true}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			Transcription: &fakeTranscriber{},
+			Analysis:      &fakeAnalyzer{},
+			Highlight:     hl,
+			Narration:     nar,
+		}, nil
+	}
+	if _, err := s.EnqueueIngestionJobWithSnapshot(ctx, models.SourceUpload, up.ID, models.JobTranscribe, `{"processing_depth":"knowledge_dj"}`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if err := w.ProcessOne(ctx); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindKnowledgeCard); err != nil {
+		t.Fatalf("卡片应就绪: %v", err)
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindHighlight); err != nil {
+		t.Fatalf("高光应就绪: %v", err)
+	}
+	rows, err := s.ListCurrentNarrationsForSource(ctx, models.SourceUpload, up.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("解说应就绪: %v %+v", err, rows)
+	}
+}
+
+// TestPipeline_KnowledgeDepthStopsAfterKeyPoints B08：knowledge 深度止于重点，
+// 不排队任何 DJ 任务（按深度断言替代旧的 Automated 一刀切规则）。
+func TestPipeline_KnowledgeDepthStopsAfterKeyPoints(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "k.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			Transcription: &fakeTranscriber{},
+			Analysis:      &fakeAnalyzer{},
+			Highlight:     &countingHighlight{},
+			Narration:     &taskNarration{available: true},
+		}, nil
+	}
+	if _, err := s.EnqueueIngestionJobWithSnapshot(ctx, models.SourceUpload, up.ID, models.JobTranscribe, `{"processing_depth":"knowledge"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindKnowledgeCard); err != nil {
+		t.Fatalf("卡片应就绪: %v", err)
+	}
+	pending, _ := s.ListQueuedOrRunning(ctx)
+	for _, j := range pending {
+		if j.JobType == models.JobHighlight || j.JobType == models.JobNarration {
+			t.Fatalf("knowledge 深度不得排队 DJ 任务: %+v", pending)
+		}
+	}
+	if _, err := s.GetCurrentVersion(ctx, models.SourceUpload, up.ID, store.KindHighlight); err == nil {
+		t.Fatal("knowledge 深度不应生成高光")
+	}
+}
+
+// TestManualAnalyzeChainsHighlightJob B08：手动分析同样走任务编排（单一编排）。
+func TestManualAnalyzeChainsHighlightJob(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &countingHighlight{}}, nil
+	}
+	if _, err := s.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.ListQueuedOrRunning(ctx)
+	chained := false
+	for _, j := range pending {
+		if j.JobType == models.JobHighlight {
+			chained = true
+			exec, _ := s.GetJobExecution(ctx, j.ID)
+			if !strings.Contains(exec.InputSnapshotJSON, "chain_narration") {
+				t.Fatalf("手动链应衔接解说: %s", exec.InputSnapshotJSON)
+			}
+		}
+	}
+	if !chained {
+		t.Fatalf("手动分析应衔接高光任务: %+v", pending)
+	}
+}
