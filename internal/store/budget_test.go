@@ -180,3 +180,51 @@ func TestAutoDailyJobLimit(t *testing.T) {
 		t.Fatalf("手动任务不受日限额约束: %v", err)
 	}
 }
+
+// TestPodcastProcessingDepth_B05 深度读写与合法组合检查；旧订阅回填 knowledge。
+func TestPodcastProcessingDepth_B05(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	p, err := s.CreatePodcast(ctx, "https://feed.example.com/depth-store.xml", "深度播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 旧订阅（未显式设置深度）回填为 knowledge，行为不变。
+	pod, err := s.GetPodcastByID(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pod.ProcessingDepth != string(models.DepthKnowledge) {
+		t.Fatalf("旧订阅应回填 knowledge，实际 %q", pod.ProcessingDepth)
+	}
+	// 合法值写入与读取。
+	if err := s.SetPodcastProcessingDepth(ctx, p.ID, models.DepthKnowledgeDJ); err != nil {
+		t.Fatal(err)
+	}
+	pod, _ = s.GetPodcastByID(ctx, p.ID)
+	if pod.ProcessingDepth != string(models.DepthKnowledgeDJ) {
+		t.Fatalf("深度应更新为 knowledge_dj: %+v", pod)
+	}
+	// 非法值显式拒绝（深度不是布尔开关，不塞任意字符串）。
+	if err := s.SetPodcastProcessingDepth(ctx, p.ID, models.ProcessingDepth("everything")); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("非法深度应拒绝: %v", err)
+	}
+	// 深度更新只影响新意图：已入队任务使用入队时的快照。
+	if _, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: "ep-x", JobType: models.JobAnalyze,
+		IntentID: "snap-depth", InputSnapshotJSON: `{"processing_depth":"knowledge_dj"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastProcessingDepth(ctx, p.ID, models.DepthKnowledge); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.GetActiveJobByIntent(ctx, models.SourceEpisode, "ep-x", models.JobAnalyze, "snap-depth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, _ := s.GetJobExecution(ctx, job.ID)
+	if exec.InputSnapshotJSON != `{"processing_depth":"knowledge_dj"}` {
+		t.Fatalf("排队任务快照不应漂移: %s", exec.InputSnapshotJSON)
+	}
+}

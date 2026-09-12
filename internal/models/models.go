@@ -83,7 +83,17 @@ type Podcast struct {
 	IngestionPolicy          string
 	IngestionIncludeKeywords string
 	IngestionExcludeKeywords string
+	ProcessingDepth          string // knowledge | knowledge_dj（B05；旧数据回填 knowledge）
 }
+
+// ProcessingDepth 订阅自动处理的到达层级（ADR-0024 §2）。
+// 深度只影响之后入队的新意图；已排队任务使用入队时的输入快照。
+const (
+	// DepthKnowledge 只提取知识（转录 + 知识卡片 + 关键观点），旧自动路径默认。
+	DepthKnowledge ProcessingDepth = "knowledge"
+	// DepthKnowledgeDJ 知识之外自动准备 DJ（高光、解说与播放清单）。
+	DepthKnowledgeDJ ProcessingDepth = "knowledge_dj"
+)
 
 // Document is a text PrimarySource whose content is its EvidenceDocument snapshot.
 type Document struct {
@@ -102,6 +112,9 @@ type DocumentSegment struct {
 	Position int
 	Text     string
 }
+
+// ProcessingDepth 决定订阅自动处理到达的产物层级（B05 / ADR-0024 §2）。
+type ProcessingDepth string
 
 // IngestionPolicy decides how newly discovered Podcast episodes enter processing.
 type IngestionPolicy string

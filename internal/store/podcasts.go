@@ -27,9 +27,9 @@ func (s *Store) CreatePodcast(ctx context.Context, feedURL, title, description, 
 func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast, error) {
 	p := &models.Podcast{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords,COALESCE(processing_depth,'knowledge')
 		 FROM podcasts WHERE id = ?`, id).
-		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords)
+		Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords, &p.ProcessingDepth)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -42,7 +42,7 @@ func (s *Store) GetPodcastByID(ctx context.Context, id string) (*models.Podcast,
 // ListPodcasts 列出全部订阅。
 func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords,COALESCE(processing_depth,'knowledge')
 		 FROM podcasts ORDER BY title`)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (s *Store) ListPodcasts(ctx context.Context) ([]*models.Podcast, error) {
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords, &p.ProcessingDepth); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -117,7 +117,7 @@ func (s *Store) ListUnprocessedEpisodes(ctx context.Context, podcastID string) (
 // ListPodcastsForRefresh 按 last_fetched_at ASC 取一批用于 cron 刷新。
 func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*models.Podcast, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords
+		`SELECT id, feed_url, title, COALESCE(description,''), COALESCE(image_url,''), last_fetched_at, created_at, ingestion_policy,ingestion_include_keywords,ingestion_exclude_keywords,COALESCE(processing_depth,'knowledge')
 		 FROM podcasts ORDER BY last_fetched_at IS NOT NULL, last_fetched_at ASC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func (s *Store) ListPodcastsForRefresh(ctx context.Context, limit int) ([]*model
 	var out []*models.Podcast
 	for rows.Next() {
 		p := &models.Podcast{}
-		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords); err != nil {
+		if err := rows.Scan(&p.ID, &p.FeedURL, &p.Title, &p.Description, &p.ImageURL, &p.LastFetchedAt, &p.CreatedAt, &p.IngestionPolicy, &p.IngestionIncludeKeywords, &p.IngestionExcludeKeywords, &p.ProcessingDepth); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -286,4 +286,23 @@ func (s *Store) ListEpisodesPaginated(ctx context.Context, podcastID string, pag
 		out = append(out, e)
 	}
 	return out, total, rows.Err()
+}
+
+// SetPodcastProcessingDepth 设置订阅处理深度（B05，ADR-0024 §2）。
+// 只影响之后入队的新意图；深度不是布尔开关，非法值显式拒绝。
+// 不因启用 knowledge_dj 批量重跑旧集：历史补处理需 Owner 单独发起意图。
+func (s *Store) SetPodcastProcessingDepth(ctx context.Context, id string, depth models.ProcessingDepth) error {
+	switch depth {
+	case models.DepthKnowledge, models.DepthKnowledgeDJ:
+	default:
+		return fmt.Errorf("%w: 非法处理深度 %q", ErrInvalidEditorialState, depth)
+	}
+	res, err := s.DB.ExecContext(ctx, `UPDATE podcasts SET processing_depth=? WHERE id=?`, string(depth), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

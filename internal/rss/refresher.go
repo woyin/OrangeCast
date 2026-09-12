@@ -5,6 +5,7 @@ package rss
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strings"
 
@@ -87,7 +88,15 @@ func (r *Refresher) refreshOne(ctx context.Context, p *models.Podcast) error {
 			if p.IngestionPolicy == string(models.IngestionFiltered) && !matchesIngestionFilter(episode, p.IngestionIncludeKeywords, p.IngestionExcludeKeywords) {
 				continue
 			}
-			if _, err := r.store.EnqueueIngestionJob(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe); err != nil {
+			// B05：入队时冻结处理深度与策略快照；已排队任务不随设置漂移。
+			snapshot, err := json.Marshal(map[string]string{
+				"processing_depth": p.ProcessingDepth,
+				"ingestion_policy": p.IngestionPolicy,
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := r.store.EnqueueIngestionJobWithSnapshot(ctx, models.SourceEpisode, episode.ID, models.JobTranscribe, string(snapshot)); err != nil {
 				return err
 			}
 		}

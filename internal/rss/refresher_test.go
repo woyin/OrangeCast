@@ -3,6 +3,7 @@ package rss
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -251,5 +252,54 @@ func TestMatchesIngestionFilter(t *testing.T) {
 		if got := matchesIngestionFilter(episode, tc.include, tc.exc); got != tc.want {
 			t.Fatalf("%s: matchesIngestionFilter(%q, %q) = %v, want %v", tc.name, tc.include, tc.exc, got, tc.want)
 		}
+	}
+}
+
+// TestRefreshAll_SnapshotsProcessingDepth B05：入队时冻结处理深度快照；
+// 入队后修改深度不影响已排队任务的快照。
+func TestRefreshAll_SnapshotsProcessingDepth(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	p, err := s.CreatePodcast(ctx, "https://feed.example.com/depth.xml", "深度播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastIngestionPolicy(ctx, p.ID, models.IngestionAllNew); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPodcastProcessingDepth(ctx, p.ID, models.DepthKnowledgeDJ); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRefresher(s)
+	r.fetchFeed = func(feedURL string) (*models.Podcast, []models.Episode, error) {
+		// fetchFeed 返回的 Podcast 带 Owner 当前设置的深度。
+		pod := &models.Podcast{FeedURL: feedURL, IngestionPolicy: string(models.IngestionAllNew), ProcessingDepth: string(models.DepthKnowledgeDJ)}
+		return pod, []models.Episode{{GUID: "depth-1", Title: "深度单集", AudioURL: "https://cdn.example.com/d.mp3"}}, nil
+	}
+	if err := r.RefreshAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := s.ListQueuedOrRunning(ctx)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("应入队一个任务: %v", err)
+	}
+	exec, err := s.GetJobExecution(ctx, jobs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(exec.InputSnapshotJSON, `"processing_depth":"knowledge_dj"`) {
+		t.Fatalf("入队快照应冻结处理深度: %s", exec.InputSnapshotJSON)
+	}
+	// 入队后把深度改回 knowledge：已排队任务的快照不变。
+	if err := s.SetPodcastProcessingDepth(ctx, p.ID, models.DepthKnowledge); err != nil {
+		t.Fatal(err)
+	}
+	exec, _ = s.GetJobExecution(ctx, jobs[0].ID)
+	if !strings.Contains(exec.InputSnapshotJSON, `"processing_depth":"knowledge_dj"`) {
+		t.Fatalf("已排队任务快照不应随设置漂移: %s", exec.InputSnapshotJSON)
+	}
+	pod, _ := s.GetPodcastByID(ctx, p.ID)
+	if pod.ProcessingDepth != string(models.DepthKnowledge) {
+		t.Fatalf("订阅深度应已更新: %+v", pod)
 	}
 }

@@ -127,3 +127,25 @@ func (s *Store) SaveJobResult(ctx context.Context, jobID, resultJSON, state stri
 func isUniqueConstraintErr(err error) bool {
 	return err != nil && strings.Contains(strings.ToUpper(err.Error()), "UNIQUE CONSTRAINT")
 }
+
+// EnqueueIngestionJobWithSnapshot 以输入快照入队订阅自动任务（B05）：
+// 快照在入队时冻结处理深度与策略，已排队任务不随后续设置变化漂移。
+func (s *Store) EnqueueIngestionJobWithSnapshot(ctx context.Context, sourceType models.SourceType, sourceID string, jobType models.JobType, inputSnapshotJSON string) (*models.ProcessingJob, error) {
+	return s.enqueueJobWithSnapshot(ctx, sourceType, sourceID, jobType, true, inputSnapshotJSON)
+}
+
+// enqueueJobWithSnapshot 是 enqueueJob 的快照扩展；旧 enqueueJob 走空快照保持兼容。
+func (s *Store) enqueueJobWithSnapshot(ctx context.Context, sourceType models.SourceType, sourceID string, jobType models.JobType, automated bool, inputSnapshotJSON string) (*models.ProcessingJob, error) {
+	job, err := s.enqueueJob(ctx, sourceType, sourceID, jobType, automated)
+	if err != nil || job == nil {
+		return job, err
+	}
+	if inputSnapshotJSON != "" {
+		if _, err := s.DB.ExecContext(ctx,
+			`UPDATE processing_jobs SET input_snapshot_json = ?, intent_id = ? WHERE id = ? AND intent_id = ''`,
+			inputSnapshotJSON, "ingest:"+job.ID, job.ID); err != nil {
+			return job, err
+		}
+	}
+	return job, nil
+}
