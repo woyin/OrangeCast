@@ -1144,3 +1144,14 @@ func (s *Store) GetArticleSource(ctx context.Context, draftID string) (string, s
 	}
 	return sourceType, sourceID, err
 }
+
+// GetArticleMarkdown 读取一个修订的 Markdown 正文（审校输入）。
+func (s *Store) GetArticleMarkdown(ctx context.Context, revisionID string) (string, error) {
+	var markdown string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT markdown FROM article_revisions WHERE id=?`, revisionID).Scan(&markdown)
+	if err == sql.ErrNoRows {
+		return "", ErrNotFound
+	}
+	return markdown, err
+}

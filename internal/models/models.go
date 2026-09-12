@@ -41,6 +41,8 @@ const (
 	JobIdeationDiagnosis JobType = "ideation_diagnosis"
 	// JobClaimWriting v2 写作任务（C10）：确认 Brief 后生成带 ClaimMap 的文章。
 	JobClaimWriting JobType = "claim_writing"
+	// JobClaimReview 独立语义审校任务（C11）：检查主张归因与授权。
+	JobClaimReview JobType = "claim_review"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

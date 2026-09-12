@@ -187,6 +187,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 60_000, 10_000
 	case "keypoint_quality":
 		return 40_000, 8_000
+	case "claim_review":
+		return 50_000, 10_000
 	case "digest_rewrite":
 		return 30_000, 6_000
 	default:
@@ -197,7 +199,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview:
 	default:
 		return nil
 	}
@@ -287,6 +289,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doDJPlanJob(ctx, job, bundle)
 	case models.JobIdeationDiagnosis:
 		return w.doIdeationDiagnosisJob(ctx, job, bundle)
+	case models.JobClaimReview:
+		return w.doClaimReviewJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}
