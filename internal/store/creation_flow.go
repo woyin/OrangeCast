@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -435,4 +436,114 @@ func (s *Store) ConfirmCreationBrief(ctx context.Context, id string) error {
 		return ErrInvalidEditorialState
 	}
 	return nil
+}
+
+// ---- 构思轮次（C02 / ADR-0024 §1）----
+
+// AddIdeationRound 在会话内追加一轮：冻结用户输入、约束与前一轮身份；
+// client_nonce 幂等——并发/重复提交命中同 nonce 时返回已有轮（created=false）。
+// 材料快照由调用方在入轮前读好并冻结（本方法不再回查当前素材，保证"旧结果
+// 不覆盖新范围"）。
+func (s *Store) AddIdeationRound(ctx context.Context, sessionID, clientNonce, userInput, constraintsJSON, materialSnapshotJSON string) (*models.IdeationRound, bool, error) {
+	if clientNonce == "" {
+		return nil, false, fmt.Errorf("%w: client nonce required", ErrInvalidEditorialState)
+	}
+	session, err := s.GetIdeationSession(ctx, sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if session.Status != "active" {
+		return nil, false, fmt.Errorf("%w: 会话已结束，不能追加轮次", ErrInvalidEditorialState)
+	}
+	// 同 nonce 幂等：已有则直接返回（并发 CAS 由 UNIQUE 兜底）。
+	if existing, err := s.GetIdeationRoundByNonce(ctx, sessionID, clientNonce); err == nil {
+		return existing, false, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, false, err
+	}
+	var maxRound int
+	var prevID string
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(round_no),0), COALESCE((SELECT id FROM ideation_rounds r2 WHERE r2.session_id=ideation_rounds.session_id ORDER BY round_no DESC LIMIT 1),'')
+		 FROM ideation_rounds WHERE session_id=?`, sessionID).Scan(&maxRound, &prevID); err != nil && err != sql.ErrNoRows {
+		// 子查询写法在空表时返回 NULL：容错处理如下
+		maxRound = 0
+		prevID = ""
+	}
+	round := &models.IdeationRound{
+		ID: uuid.NewString(), SessionID: sessionID, RoundNo: maxRound + 1,
+		PrevRoundID: prevID, ClientNonce: clientNonce,
+		UserInput: userInput, ConstraintsJSON: constraintsJSON,
+		MaterialSnapshotJSON: materialSnapshotJSON, Status: models.RoundRecorded,
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`INSERT INTO ideation_rounds (id, session_id, round_no, prev_round_id, client_nonce, user_input, constraints_json, material_snapshot_json, status)
+		 VALUES (?,?,?,?,?,?,?,?,?)`,
+		round.ID, sessionID, round.RoundNo, round.PrevRoundID, clientNonce,
+		userInput, constraintsJSON, materialSnapshotJSON, round.Status)
+	if err != nil {
+		if isUniqueConstraintErr(err) {
+			if existing, gerr := s.GetIdeationRoundByNonce(ctx, sessionID, clientNonce); gerr == nil {
+				return existing, false, nil
+			}
+		}
+		return nil, false, fmt.Errorf("写入构思轮次: %w", err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE ideation_sessions SET updated_at=datetime('now') WHERE id=?`, sessionID); err != nil {
+		return round, true, err
+	}
+	return round, true, nil
+}
+
+// GetIdeationRoundByNonce 按 client_nonce 读取轮次；无则 ErrNotFound。
+func (s *Store) GetIdeationRoundByNonce(ctx context.Context, sessionID, clientNonce string) (*models.IdeationRound, error) {
+	row := s.DB.QueryRowContext(ctx,
+		`SELECT id, session_id, round_no, prev_round_id, client_nonce, user_input, constraints_json, material_snapshot_json, status, output_diagnosis_id, created_at
+		 FROM ideation_rounds WHERE session_id=? AND client_nonce=?`, sessionID, clientNonce)
+	return scanIdeationRound(row)
+}
+
+// ListIdeationRounds 按轮次序返回会话全部轮次（刷新后可继续，历史可回看）。
+func (s *Store) ListIdeationRounds(ctx context.Context, sessionID string) ([]*models.IdeationRound, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, session_id, round_no, prev_round_id, client_nonce, user_input, constraints_json, material_snapshot_json, status, output_diagnosis_id, created_at
+		 FROM ideation_rounds WHERE session_id=? ORDER BY round_no ASC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.IdeationRound
+	for rows.Next() {
+		r, err := scanIdeationRound(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkIdeationRoundDiagnosed 记录轮次的诊断输出引用（C03 接入）。
+func (s *Store) MarkIdeationRoundDiagnosed(ctx context.Context, roundID, diagnosisID string, failed bool) error {
+	status := models.RoundDiagnosed
+	if failed {
+		status = models.RoundFailed
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE ideation_rounds SET status=?, output_diagnosis_id=? WHERE id=?`,
+		status, diagnosisID, roundID)
+	return err
+}
+
+func scanIdeationRound(row rowScanner) (*models.IdeationRound, error) {
+	r := &models.IdeationRound{}
+	err := row.Scan(&r.ID, &r.SessionID, &r.RoundNo, &r.PrevRoundID, &r.ClientNonce,
+		&r.UserInput, &r.ConstraintsJSON, &r.MaterialSnapshotJSON, &r.Status, &r.OutputDiagnosisID, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }

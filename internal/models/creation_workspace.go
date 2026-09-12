@@ -141,3 +141,27 @@ type CreationSelectionExclusion struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason"`
 }
+
+// IdeationRound 构思会话的一轮（C02）：冻结用户输入、约束与材料快照；
+// prev_round_id 链接前轮；client_nonce 幂等（并发/重复提交只产生一轮）。
+// status=recorded 表示仅持久化输入（真实 AI 诊断由 C03 接入），不假装已有诊断。
+type IdeationRound struct {
+	ID                   string
+	SessionID            string
+	RoundNo              int
+	PrevRoundID          string
+	ClientNonce          string
+	UserInput            string
+	ConstraintsJSON      string
+	MaterialSnapshotJSON string
+	Status               string
+	OutputDiagnosisID    string
+	CreatedAt            string
+}
+
+// IdeationRoundStatus 轮次状态。
+const (
+	RoundRecorded  = "recorded"
+	RoundDiagnosed = "diagnosed"
+	RoundFailed    = "failed"
+)

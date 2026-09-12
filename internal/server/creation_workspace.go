@@ -1,10 +1,14 @@
 package server
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
 )
 
@@ -155,4 +159,77 @@ func (srv *Server) handleCreationBriefConfirm(w http.ResponseWriter, r *http.Req
 		return
 	}
 	http.Redirect(w, r, "/workbench?profile="+proposal.EditorialProfileID, http.StatusSeeOther)
+}
+
+// handleIdeationRoundCreate 追加构思轮次（C02）：冻结用户输入、约束与材料快照；
+// nonce 幂等（重复提交/刷新只产生一轮）。本端点只持久化真实输入，
+// 不假装已产生 AI 诊断（C03 接入实际诊断）。
+func (srv *Server) handleIdeationRoundCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	userInput := strings.TrimSpace(r.FormValue("input"))
+	nonce := strings.TrimSpace(r.FormValue("nonce"))
+	constraints := strings.TrimSpace(r.FormValue("constraints_json"))
+	if constraints == "" {
+		constraints = "{}"
+	}
+	if userInput == "" {
+		http.Error(w, "补充问题不能为空", http.StatusBadRequest)
+		return
+	}
+	if nonce == "" {
+		nonce = fmt.Sprintf("auto:%d", time.Now().UnixNano())
+	}
+	// 冻结材料快照：所选关键观点的当前内容与引用（只读，不付费）。
+	var materialSnap []map[string]string
+	for _, raw := range strings.FieldsFunc(r.FormValue("material_ids"), func(c rune) bool { return c == '\n' || c == ',' }) {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if kp, err := srv.store.GetKeyPoint(r.Context(), id); err == nil {
+			materialSnap = append(materialSnap, map[string]string{
+				"id": kp.ID, "content": kp.Content, "citations": kp.CitationsJSON,
+			})
+		} else {
+			materialSnap = append(materialSnap, map[string]string{"id": id, "content": "", "error": "材料不存在"})
+		}
+	}
+	snapJSON, _ := json.Marshal(materialSnap)
+	round, created, err := srv.store.AddIdeationRound(r.Context(), sessionID, nonce, userInput, constraints, string(snapJSON))
+	if err != nil {
+		http.Error(w, "追加构思轮次失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"round_id": round.ID, "round_no": round.RoundNo, "created": created,
+	})
+}
+
+// handleIdeationRoundsDetail 会话轮次详情（C02：刷新后可继续，历史可回看）。
+func (srv *Server) handleIdeationRoundsDetail(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		http.Error(w, "缺少会话 ID", http.StatusBadRequest)
+		return
+	}
+	session, err := srv.store.GetIdeationSession(r.Context(), sessionID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	rounds, err := srv.store.ListIdeationRounds(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "读取轮次失败", http.StatusInternalServerError)
+		return
+	}
+	srv.tmpl.Render(w, "ideation_rounds.html", map[string]any{
+		"Session": session,
+		"Rounds":  rounds,
+		"CSRF":    auth.CSRFValue(r),
+	})
 }

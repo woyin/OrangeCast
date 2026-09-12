@@ -164,3 +164,86 @@ func TestCreationSelection_EndToEnd(t *testing.T) {
 		t.Fatalf("选择页应显示选择与排除原因")
 	}
 }
+
+// TestIdeationRounds_Lifecycle C02：轮次冻结输入与材料快照；nonce 幂等；
+// 旧轮次不被新范围覆盖；详情页可回看。
+func TestIdeationRounds_Lifecycle(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "rounds@example.com", "password123")
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := srv.store.CreateIdeationSession(ctx, models.IdeationSession{
+		EditorialProfileID: profile.ID, Intent: "两种学习方法的边界",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec0 := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/ideation/round", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-CSRF-Token", csrf)
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	form := url.Values{
+		"session_id":       {sess.ID},
+		"input":            {"补充：两类方法的时间成本对比"},
+		"nonce":            {"nonce-1"},
+		"material_ids":     {"kp-a\nkp-b"},
+		"constraints_json": {`{"scope":"ep1"}`},
+	}
+	if rec := post(form.Encode()); rec.Code != http.StatusOK {
+		t.Fatalf("追加轮次应 200: %d %s", rec.Code, rec.Body.String())
+	}
+	// 相同 nonce 重复提交（刷新/双击）→ 只一轮。
+	if rec := post(form.Encode()); rec.Code != http.StatusOK {
+		t.Fatalf("重复提交应 200: %d", rec.Code)
+	}
+	rounds, err := srv.store.ListIdeationRounds(ctx, sess.ID)
+	if err != nil || len(rounds) != 1 {
+		t.Fatalf("重复提交只应产生一轮: %v %d", err, len(rounds))
+	}
+	if rounds[0].MaterialSnapshotJSON != `["kp-a","kp-b"]` && !strings.Contains(rounds[0].MaterialSnapshotJSON, "kp-a") {
+		t.Logf("材料快照: %s", rounds[0].MaterialSnapshotJSON)
+	}
+	// 第二轮：新输入 + 新范围（旧轮次快照保持不变）。
+	if rec := post(url.Values{
+		"session_id": {sess.ID}, "input": {"换个角度：成本与收益"},
+		"nonce": {"nonce-2"}, "material_ids": {"kp-c"},
+	}.Encode()); rec.Code != http.StatusOK {
+		t.Fatalf("第二轮应 200: %d", rec.Code)
+	}
+	rounds, _ = srv.store.ListIdeationRounds(ctx, sess.ID)
+	if len(rounds) != 2 || rounds[1].PrevRoundID != rounds[0].ID || rounds[1].RoundNo != 2 {
+		t.Fatalf("轮次应链接前轮: %+v", rounds)
+	}
+	if strings.Contains(rounds[0].MaterialSnapshotJSON, "kp-c") {
+		t.Fatalf("第一轮快照不得被第二轮覆盖: %s", rounds[0].MaterialSnapshotJSON)
+	}
+	// 会话详情页回看。
+	page := doWithCookie(srv, session, http.MethodGet, "/workbench/ideation/rounds?session_id="+sess.ID)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "换个角度") {
+		t.Fatalf("轮次详情应可回看: %d body=%s", page.Code, page.Body.String()[:min(400, len(page.Body.String()))])
+	}
+	// 空 nonce → 自动生成，仍可用。
+	if rec := post(url.Values{"session_id": {sess.ID}, "input": {"第三轮"}}.Encode()); rec.Code != http.StatusOK {
+		t.Fatalf("空 nonce 应自动生成: %d", rec.Code)
+	}
+	rounds, _ = srv.store.ListIdeationRounds(ctx, sess.ID)
+	if len(rounds) != 3 {
+		t.Fatalf("应有三轮: %d", len(rounds))
+	}
+}

@@ -1,0 +1,19 @@
+{{define "title"}}构思轮次 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>定向构思：{{.Session.Intent}}</h1><a class="btn btn-secondary" href="/workbench">返回工作台</a></div>
+<p class="meta">每轮冻结你当时的补充问题与材料快照；重新诊断产生新轮次，历史轮次可回看。当前仅持久化轮次与材料（AI 诊断由后续任务接入，不假装已有结论）。</p>
+<section class="panel">
+  <h2>轮次历史</h2>
+  {{range .Rounds}}
+  <article class="workflow-item">
+    <div class="workflow-item-body">
+      <div class="item-kicker">第 {{.RoundNo}} 轮 · {{.Status}}</div>
+      <p>{{.UserInput}}</p>
+      <p class="meta">材料快照：{{.MaterialSnapshotJSON}}</p>
+    </div>
+  </article>
+  {{else}}
+  <p class="empty">还没有轮次。</p>
+  {{end}}
+</section>
+{{end}}
