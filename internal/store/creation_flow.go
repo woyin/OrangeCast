@@ -640,14 +640,14 @@ func (s *Store) SaveClaimMap(ctx context.Context, draftID, revisionID string, en
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_maps WHERE draft_id=? AND revision_id=?`, draftID, revisionID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_map_entries WHERE draft_id=? AND revision_id=?`, draftID, revisionID); err != nil {
 		return err
 	}
 	for _, e := range entries {
 		materialsJSON, _ := json.Marshal(e.MaterialIDs)
 		citationsJSON, _ := json.Marshal(e.CitationRefs)
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO claim_maps (id, draft_id, revision_id, excerpt, claim_kind, material_ids_json, source_title, citation_refs_json)
+			`INSERT INTO claim_map_entries (id, draft_id, revision_id, excerpt, claim_kind, material_ids_json, source_title, citation_refs_json)
 			 VALUES (?,?,?,?,?,?,?,?)`,
 			uuid.NewString(), draftID, revisionID, e.Excerpt, e.ClaimKind,
 			string(materialsJSON), e.SourceTitle, string(citationsJSON)); err != nil {
@@ -661,7 +661,7 @@ func (s *Store) SaveClaimMap(ctx context.Context, draftID, revisionID string, en
 func (s *Store) ListClaimMap(ctx context.Context, draftID, revisionID string) ([]models.ClaimMapEntry, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT excerpt, claim_kind, material_ids_json, source_title, citation_refs_json
-		 FROM claim_maps WHERE draft_id=? AND revision_id=? ORDER BY created_at`, draftID, revisionID)
+		 FROM claim_map_entries WHERE draft_id=? AND revision_id=? ORDER BY created_at`, draftID, revisionID)
 	if err != nil {
 		return nil, err
 	}

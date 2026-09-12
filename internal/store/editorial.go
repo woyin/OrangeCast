@@ -1133,3 +1133,14 @@ func validJSON(value, fallback string) bool {
 	var target any
 	return json.Unmarshal([]byte(value), &target) == nil
 }
+
+// GetArticleSource 返回文章草稿的来源信息。
+func (s *Store) GetArticleSource(ctx context.Context, draftID string) (string, string, error) {
+	var sourceType, sourceID string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT source_type, source_id FROM article_drafts WHERE id=?`, draftID).Scan(&sourceType, &sourceID)
+	if err == sql.ErrNoRows {
+		return "", "", ErrNotFound
+	}
+	return sourceType, sourceID, err
+}
