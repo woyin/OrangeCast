@@ -27,6 +27,8 @@ const (
 	JobAnalyze JobType = "analyze"
 	// JobDigest 处理任务类型：生成 EpisodeDigest 单集精读文（ADR-0023）。
 	JobDigest JobType = "episode_digest"
+	// JobHighlight 高光独立任务（B06）：从冻结的 Transcript 版本生成 HighlightSet。
+	JobHighlight JobType = "highlight"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

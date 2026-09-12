@@ -9,6 +9,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -146,6 +147,38 @@ func (s *Store) enqueueJobWithSnapshot(ctx context.Context, sourceType models.So
 			inputSnapshotJSON, "ingest:"+job.ID, job.ID); err != nil {
 			return job, err
 		}
+	}
+	return job, nil
+}
+
+// EnqueueHighlightJob 入队高光独立任务（B06）：入队时冻结当前 Transcript 版本
+// 到输入快照；同 (source, version) 意图在活跃期幂等去重。失败后同版本重试
+// 重新入队（快照重新冻结为同一版本，不漂移到新 current）。
+func (s *Store) EnqueueHighlightJob(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.ProcessingJob, error) {
+	av, err := s.GetCurrentVersion(ctx, sourceType, sourceID, KindTranscript)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("%w: 尚未完成转录，无法生成高光", ErrInvalidEditorialState)
+		}
+		return nil, err
+	}
+	snapshot, err := json.Marshal(map[string]any{
+		"transcript_version":    av.Version,
+		"transcript_version_id": av.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	job, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: sourceType, SourceID: sourceID, JobType: models.JobHighlight,
+		IntentID:          fmt.Sprintf("highlight:%s:%s:v%d", sourceType, sourceID, av.Version),
+		InputSnapshotJSON: string(snapshot),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, nil
 	}
 	return job, nil
 }

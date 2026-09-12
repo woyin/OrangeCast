@@ -77,6 +77,9 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobDigest:
 			// 精读文写作复用 Writer 角色配置（ADR-0023：与文章写作同池计费治理）
 			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
+		case models.JobHighlight:
+			// 高光独立任务（B06）使用高光角色配置
+			tc = provider.TaskConfig{Provider: ptrStr(st.HighlightProvider), Model: ptrStr(st.HighlightModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -171,6 +174,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 100_000, 20_000
 	case "episode_digest":
 		return 120_000, 30_000
+	case "highlight":
+		return 60_000, 10_000
 	default:
 		return 0, 0
 	}
@@ -179,7 +184,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight:
 	default:
 		return nil
 	}
@@ -257,6 +262,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doAnalyze(ctx, job, bundle)
 	case models.JobDigest:
 		return w.doDigest(ctx, job, bundle)
+	case models.JobHighlight:
+		return w.doHighlightJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}
