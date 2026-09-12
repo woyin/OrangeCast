@@ -35,6 +35,8 @@ const (
 	JobKeypointQuality JobType = "keypoint_quality"
 	// JobDigestRewrite 渠道改写独立任务（G06）：输入为指定精读修订与渠道。
 	JobDigestRewrite JobType = "digest_rewrite"
+	// JobDJPlan DJ 播放清单编排任务（D02）：输入为冻结的高光版本与目标时长。
+	JobDJPlan JobType = "dj_plan"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

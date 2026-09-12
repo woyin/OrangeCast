@@ -283,6 +283,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doKeypointQualityJob(ctx, job, bundle)
 	case models.JobDigestRewrite:
 		return w.doDigestRewriteJob(ctx, job, bundle)
+	case models.JobDJPlan:
+		return w.doDJPlanJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}
