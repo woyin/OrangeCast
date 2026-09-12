@@ -125,6 +125,12 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 // processClaimed 处理已领取的任务：心跳续约 + 执行 + 终态。
 func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) error {
+	// B02：结果已持久化的任务（进程在结果落库后、终态写入前中断）恢复时直接复用，
+	// 不重放远端模型调用；"结果写入后中断再执行不新增版本"由此保证。
+	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.ResultState == models.JobResultComplete {
+		log.Printf("任务 %s 命中已持久化结果，恢复时直接复用", job.ID)
+		return w.store.MarkJobSucceeded(ctx, job.ID)
+	}
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	defer hbCancel()
 	go w.heartbeatLoop(hbCtx, job.ID)

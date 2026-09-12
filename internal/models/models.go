@@ -199,6 +199,28 @@ type ProcessingJob struct {
 	UpdatedAt string
 }
 
+// JobResultState 任务结果的已知性（B02）：complete 表示结果已持久化可复用；
+// unknown 表示远端可能已完成但本地没有可用结果（不承诺 exactly-once，不无限重试）。
+const (
+	// JobResultComplete 结果已持久化：恢复时直接复用，不重新执行。
+	JobResultComplete = "complete"
+	// JobResultUnknown 远端结果未知：显示"结果未知"，重试策略由任务类型决定。
+	JobResultUnknown = "unknown"
+)
+
+// ProcessingJobExecution 任务的执行契约数据（B02）：意图、冻结输入、断点与结果。
+// 与 ProcessingJob 分开读取，旧路径与旧任务不受影响。
+type ProcessingJobExecution struct {
+	IntentID           string // 幂等意图 ID；显式重新生成使用新意图
+	InputSnapshotJSON  string // 入队时冻结的输入（版本、素材身份、设置）
+	ConfigVersion      string // 处理配置版本
+	ConfiguredProvider string
+	ConfiguredModel    string
+	CheckpointJSON     string // 步骤断点
+	ResultJSON         string // 结果与产物身份
+	ResultState        string // '' | complete | unknown
+}
+
 // ArtifactVersion 不可变产物版本（ADR-0011）：Transcript 或 KnowledgeCard。
 // 重新处理不覆盖历史版本；Source 显式指向当前采用的版本。
 type ArtifactVersion struct {
