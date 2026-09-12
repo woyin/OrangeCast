@@ -6,6 +6,9 @@
     修订 v{{.Digest.Version}} · {{.Digest.Provider}} · {{.Digest.CreatedAt}}
     {{if .Digest.Degraded}} · <span class="error">联网补充不可用（降级生成）</span>{{end}}
   </p>
+  {{with .Readiness}}
+  <p class="meta" style="margin-top:0.5rem"><strong>{{if .Deliverable}}✅ {{else}}⚠️ {{end}}{{.Summary}}</strong></p>
+  {{end}}
   <div style="margin-top:0.75rem">
     <a class="btn" href="/digest/{{.Digest.ID}}/markdown">下载 Markdown</a>
     <button class="btn btn-secondary" id="copy-md-btn" type="button">复制 Markdown</button>

@@ -367,3 +367,72 @@ func TestDigestDetail_StaleSnapshotNoFakeLink(t *testing.T) {
 		t.Fatal("失效依据不得生成伪快照链接")
 	}
 }
+
+// TestDigestReadinessFlow G05：pending 落源/失效依据不可交付；确认后通过；
+// 导出携带状态行且不创建发布历史。
+func TestDigestReadinessFlow(t *testing.T) {
+	srv, session, csrf, epID := seedDigestEpisode(t)
+	ctx := t.Context()
+	snap, err := srv.store.FreezeSourceSnapshot(ctx, models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "就绪检查",
+		Provider: "p", Model: "m", PromptVersion: "v", SourceSnapshotID: snap.ID,
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "转述", Citations: []string{"seg-0001"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 未确认落源 → 不可交付
+	if err := srv.store.AddDigestSearchSources(ctx, d.ID, []models.DigestSearchSource{
+		{Query: "q", URL: "https://ex.com/x", Title: "T", DocumentID: "doc-x", Status: "pending"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	readiness, err := srv.store.EvaluateDigestReadiness(ctx, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readiness.Deliverable {
+		t.Fatalf("pending 落源应不可交付: %+v", readiness)
+	}
+	// 页面显示问题
+	rec := doWithCookie(srv, session, http.MethodGet, "/digest/"+d.ID)
+	if !strings.Contains(rec.Body.String(), "不可交付") {
+		t.Fatalf("页面应显示草稿标记")
+	}
+	// 确认后 → 可交付
+	rows, _ := srv.store.ListDigestSearchSources(ctx, d.ID)
+	if err := srv.store.SetDigestSearchSourceStatus(ctx, rows[0].ID, "confirmed"); err != nil {
+		t.Fatal(err)
+	}
+	readiness, _ = srv.store.EvaluateDigestReadiness(ctx, d.ID)
+	if !readiness.Deliverable {
+		t.Fatalf("确认后应可交付: %+v", readiness)
+	}
+	// 导出携带可交付状态行；导出不创建发布历史
+	before := historyCount(t, srv)
+	rec = doWithCookie(srv, session, http.MethodGet, "/digest/"+d.ID+"/markdown")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("草稿导出应允许: %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "状态：可交付") {
+		t.Fatalf("导出应携带就绪状态行: %s", rec.Body.String()[:200])
+	}
+	if historyCount(t, srv) != before {
+		t.Fatal("导出不得创建发布历史")
+	}
+	_ = csrf
+}
+
+func historyCount(t *testing.T, srv *Server) int {
+	t.Helper()
+	var n int
+	if err := srv.store.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM creation_history`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}

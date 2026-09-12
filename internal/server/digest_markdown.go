@@ -27,9 +27,18 @@ func (srv *Server) handleDigestMarkdown(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// G05：交付导出时重新检查就绪状态（不只相信生成时状态）；
+	// 草稿允许导出但显式携带草稿标记；导出不创建发布历史。
+	readiness, err := srv.store.EvaluateDigestReadiness(r.Context(), d.ID)
+	if err != nil {
+		http.Error(w, "就绪检查失败", http.StatusInternalServerError)
+		return
+	}
+
 	var sb strings.Builder
 	sb.WriteString("# " + d.Title + "\n\n")
-	sb.WriteString(fmt.Sprintf("> 来源：%s/%s · 修订 v%d · %s\n\n", d.SourceType, d.SourceID, d.Version, d.CreatedAt))
+	sb.WriteString(fmt.Sprintf("> 来源：%s/%s · 修订 v%d · %s\n", d.SourceType, d.SourceID, d.Version, d.CreatedAt))
+	sb.WriteString("> 状态：" + readiness.Summary() + "\n\n")
 
 	// G04：共享引用解析逻辑——导出与页面一致显示来源名称与冻结快照定位。
 	views := map[string][]digestCitationView{}

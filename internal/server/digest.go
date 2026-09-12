@@ -95,9 +95,13 @@ func (srv *Server) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
 		blockViews[b.ID] = srv.digestCitationViews(r.Context(), d, b.Citations)
 	}
 
+	// G05：只读就绪检查，页面显示状态与具体问题（预览不触发确认）。
+	readiness, rerr := srv.store.EvaluateDigestReadiness(r.Context(), d.ID)
+
 	if err := srv.tmpl.Render(w, "digest.html", map[string]any{
 		"Digest": d, "Blocks": blocks, "SearchSources": searchSources, "FactGaps": gaps,
 		"Rewrite": rewrite, "CSRF": auth.CSRFValue(r), "CitationViews": blockViews,
+		"Readiness": readiness, "ReadinessError": rerr != nil,
 	}); err != nil {
 		http.Error(w, "渲染失败", http.StatusInternalServerError)
 	}
