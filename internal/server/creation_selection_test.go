@@ -644,13 +644,16 @@ func TestArticleHistory_ExportDoesNotPublish(t *testing.T) {
 
 // TestFindUsageByKeyPoint U02：重点被精读文/文章采用时，反查返回正确使用记录。
 func TestFindUsageByKeyPoint(t *testing.T) {
-	s, _ := newTestWorker(t)
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "u02@example.com", "password123")
 	ctx := t.Context()
-	sourceID := seedEpisode(t, s)
-	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+	podcast, _ := srv.store.CreatePodcast(ctx, "https://feed.example.com/u02.xml", "U02", "", "")
+	srv.store.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "u02-1", Title: "U02 单集", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, podcast.ID)
+	sourceID := eps[0].ID
+	seedHighlightAndNarration(t, srv, sourceID)
 
-	// 创建精读文（引用 seg-0001）。
-	d, err := s.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
 		SourceType: models.SourceEpisode, SourceID: sourceID, Title: "使用该重点的精读",
 		Provider: "p", Model: "m", PromptVersion: "v",
 	}, []models.DigestBlock{
@@ -660,7 +663,7 @@ func TestFindUsageByKeyPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 用 keypointID 反查——这里用 sourceID 代入（keypoint_id 参数实际匹配 segment/content）。
-	usages, err := s.FindUsageByKeyPoint(ctx, sourceID)
+	usages, err := srv.store.FindUsageByKeyPoint(ctx, sourceID)
 	if err != nil {
 		t.Fatal(err)
 	}
