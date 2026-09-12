@@ -423,3 +423,96 @@ func TestDoDigest_DocumentTooLongExplicit(t *testing.T) {
 		t.Fatalf("过长文档应显式失败: %+v", got)
 	}
 }
+
+// TestDoDigest_ComposeCheckpointReuse G02：compose 断点复用——重试零模型调用，
+// 修订原子落库（含落源与缺口）。
+func TestDoDigest_ComposeCheckpointReuse(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	calls := 0
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &countingDigestWriter{
+				inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "断点复用", Blocks: validDraftBlocks()}},
+				count: &calls,
+			},
+			DigestRewriter: &fakeDigestRewriter{text: "渠道"},
+		}, nil
+	}
+	job, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobDigest,
+		IntentID: "digest:ckpt", InputSnapshotJSON: `{"snapshot_id":""}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 注入"已 compose"断点，模拟 compose 成功后、发布前进程中断。
+	draft := &provider.DigestWritingResult{Title: "断点复用", Blocks: validDraftBlocks()}
+	cpData, _ := json.Marshal(digestCheckpoint{Stage: "composed", Draft: draft})
+	if _, err := s.MarkJobRunning(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveJobCheckpoint(ctx, job.ID, string(cpData)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetRunningOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("断点重试失败: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("断点复用不得重复 compose: %d", calls)
+	}
+	d, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if err != nil || d.Title != "断点复用" {
+		t.Fatalf("修订应原子落库: %v %+v", err, d)
+	}
+}
+
+// countingDigestWriter 统计 compose 调用次数。
+type countingDigestWriter struct {
+	inner provider.DigestWriterProvider
+	count *int
+}
+
+func (c *countingDigestWriter) ComposeDigest(ctx context.Context, req provider.DigestWritingRequest) (*provider.DigestWritingResult, error) {
+	*c.count++
+	return c.inner.ComposeDigest(ctx, req)
+}
+func (c *countingDigestWriter) WeaveDigestFacts(ctx context.Context, req provider.DigestWeaveRequest) (*provider.DigestWeaveResult, error) {
+	return c.inner.WeaveDigestFacts(ctx, req)
+}
+func (c *countingDigestWriter) Name() string { return "counting" }
+
+// TestPublishEpisodeDigest_AtomicWithSourcesAndGaps 原子发布：检索落源与缺口随修订同事务可见。
+func TestPublishEpisodeDigest_AtomicWithSourcesAndGaps(t *testing.T) {
+	s, _ := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	d, err := s.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: sourceID, Title: "原子", Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "正文", Citations: []string{"seg-0001"}},
+	}, []models.DigestSearchSource{
+		{Query: "q", URL: "https://ex.com/a", Title: "来源A", DocumentID: "doc-a", Status: "pending"},
+	}, []models.DigestFactGap{
+		{Text: "缺口1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.ListDigestSearchSources(ctx, d.ID)
+	gaps, _ := s.ListDigestFactGaps(ctx, d.ID)
+	if len(rows) != 1 || len(gaps) != 1 {
+		t.Fatalf("落源与缺口应随修订原子可见: %+v %+v", rows, gaps)
+	}
+	// current 可立即读取完整修订
+	cur, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if err != nil || cur.ID != d.ID {
+		t.Fatalf("current 应为该修订: %v", err)
+	}
+}

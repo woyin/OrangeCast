@@ -45,7 +45,9 @@ func scanDigestBlock(row interface{ Scan(...any) error }) (*models.DigestBlock, 
 
 // CreateEpisodeDigest 写入一次不可变精读文修订（含全部内容块），版本 = 该 Source 已有最大版本 + 1。
 // 版本空间与 narrations 同构（ADR-0023 §1）：并发下由 UNIQUE(source_type,source_id,version) 兜底。
-func (s *Store) CreateEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock) (*models.EpisodeDigest, error) {
+// PublishEpisodeDigest 原子发布一份完整修订（G02）：正文、块、检索落源、缺口
+// 在单个事务内写入——不存在"半份修订成为 current"的中间状态；失败整体回滚可重试。
+func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock, searchRows []models.DigestSearchSource, factGaps []models.DigestFactGap) (*models.EpisodeDigest, error) {
 	if d == nil || d.SourceID == "" || d.Title == "" {
 		return nil, fmt.Errorf("%w: digest requires source and title", ErrInvalidEditorialState)
 	}
@@ -77,19 +79,44 @@ func (s *Store) CreateEpisodeDigest(ctx context.Context, d *models.EpisodeDigest
 		return nil, fmt.Errorf("写入精读文: %w", err)
 	}
 	for i := range blocks {
-		b := blocks[i]
-		citations, _ := json.Marshal(b.Citations)
+		b := &blocks[i]
+		if b.ID == "" {
+			b.ID = uuid.NewString()
+		}
+		b.DigestID = d.ID
+		b.Position = i + 1
+		cites, _ := json.Marshal(b.Citations)
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO digest_blocks (id,digest_id,position,block_type,text,citations_json,target_source_id,note_id)
 			 VALUES (?,?,?,?,?,?,?,?)`,
-			uuid.NewString(), d.ID, i, string(b.Type), b.Text, string(citations), b.TargetSourceID, b.NoteID); err != nil {
-			return nil, fmt.Errorf("写入精读文内容块: %w", err)
+			b.ID, b.DigestID, b.Position, string(b.Type), b.Text, string(cites), b.TargetSourceID, b.NoteID); err != nil {
+			return nil, fmt.Errorf("写入内容块: %w", err)
+		}
+	}
+	for _, row := range searchRows {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO digest_search_sources (id,digest_id,query,url,title,document_id,status)
+			 VALUES (?,?,?,?,?,?,?)`,
+			uuid.NewString(), d.ID, row.Query, row.URL, row.Title, row.DocumentID, row.Status); err != nil {
+			return nil, fmt.Errorf("写入检索落源: %w", err)
+		}
+	}
+	for _, gap := range factGaps {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO digest_fact_gaps (id,digest_id,text,document_id) VALUES (?,?,?,?)`,
+			uuid.NewString(), d.ID, gap.Text, gap.DocumentID); err != nil {
+			return nil, fmt.Errorf("写入事实缺口: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return d, nil
+	return s.GetEpisodeDigest(ctx, d.ID)
+}
+
+// CreateEpisodeDigest 兼容入口：无落源与缺口的原子发布。
+func (s *Store) CreateEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock) (*models.EpisodeDigest, error) {
+	return s.PublishEpisodeDigest(ctx, d, blocks, nil, nil)
 }
 
 // GetCurrentEpisodeDigest 返回该 Source 当前采用的精读文修订（MAX(version)）；无版本返回 ErrNotFound。

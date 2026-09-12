@@ -40,29 +40,43 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 		return err
 	}
 	var frozenNoteIDs []string
-	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.InputSnapshotJSON != "" {
+	exec, execErr := w.store.GetJobExecution(ctx, job.ID)
+	if execErr == nil && exec.InputSnapshotJSON != "" {
 		var snap digestInputSnapshot
 		_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
 		frozenNoteIDs = snap.NoteIDs
+	}
+	// G02：读取任务断点——composed/composed_validated 阶段保存完整初稿，
+	// 重试直接复用，不重复调用上游模型。
+	var cp digestCheckpoint
+	if exec != nil && exec.CheckpointJSON != "" {
+		_ = json.Unmarshal([]byte(exec.CheckpointJSON), &cp)
 	}
 	notes, err := w.digestOwnerNotes(ctx, job, frozenNoteIDs)
 	if err != nil {
 		return err
 	}
 
-	// 2) 长文初稿
-	draft, err := bundle.DigestWriter.ComposeDigest(ctx, provider.DigestWritingRequest{
-		SourceTitle:       title,
-		SourceSummary:     summary,
-		Segments:          segments,
-		Notes:             notes,
-		FactGapBudget:     digestFactGapBudget,
-		TargetLengthChars: digestTargetLength,
-	})
-	if err != nil {
-		return fmt.Errorf("精读文初稿: %w", err)
+	var draft *provider.DigestWritingResult
+	if cp.Draft != nil {
+		draft = cp.Draft
+	} else {
+		draft, err = bundle.DigestWriter.ComposeDigest(ctx, provider.DigestWritingRequest{
+			SourceTitle:       title,
+			SourceSummary:     summary,
+			Segments:          segments,
+			Notes:             notes,
+			FactGapBudget:     digestFactGapBudget,
+			TargetLengthChars: digestTargetLength,
+		})
+		if err != nil {
+			return fmt.Errorf("精读文初稿: %w", err)
+		}
+		_ = w.recordDigestUsage(ctx, job, "digest_compose", digestProviderName(bundle.DigestWriter), provider.DigestWriterPromptVersion, draft.Usage)
+		if err := w.saveDigestCheckpoint(ctx, job.ID, digestCheckpoint{Stage: "composed", Draft: draft}); err != nil {
+			return err
+		}
 	}
-	_ = w.recordDigestUsage(ctx, job, "digest_compose", digestProviderName(bundle.DigestWriter), provider.DigestWriterPromptVersion, draft.Usage)
 
 	// 3) G2 初审：引语截断 → 复检；复检不过 = 生成失败（不静默降级正文不变量）
 	blocks := digestTruncateQuotes(draft.Blocks)
@@ -96,22 +110,13 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 			log.Printf("任务 %s SourceSearch 不可用，降级生成（缺口 %d 条留档）", job.ID, len(draft.FactGaps))
 		}
 	}
-	digest, err := w.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+	// G02：原子发布完整修订（正文+块+落源+缺口同一事务）。
+	digest, err := w.store.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
 		SourceType: job.SourceType, SourceID: job.SourceID, Title: draft.Title, Degraded: degraded,
 		Provider: digestProviderName(bundle.DigestWriter), Model: digestProviderName(bundle.DigestWriter), PromptVersion: provider.DigestWriterPromptVersion,
-	}, digestModelsBlocks(blocks))
+	}, digestModelsBlocks(blocks), searchRows, unresolvedGaps)
 	if err != nil {
 		return fmt.Errorf("保存精读文: %w", err)
-	}
-	if len(searchRows) > 0 {
-		if err := w.store.AddDigestSearchSources(ctx, digest.ID, searchRows); err != nil {
-			return err
-		}
-	}
-	if len(unresolvedGaps) > 0 {
-		if err := w.store.AddDigestFactGaps(ctx, digest.ID, unresolvedGaps); err != nil {
-			return err
-		}
 	}
 
 	// 6) 渠道改写（失败不阻塞长文版；Owner 可在页面重试）
@@ -530,3 +535,14 @@ var (
 	htmlRe  = regexp.MustCompile(`<[^>]+>`)
 	scripts = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`)
 )
+
+// digestCheckpoint 精读任务断点（G02）：composed 保存完整初稿，重试不重跑 compose。
+type digestCheckpoint struct {
+	Stage string                        `json:"stage"` // composed | composed_validated
+	Draft *provider.DigestWritingResult `json:"draft,omitempty"`
+}
+
+func (w *Worker) saveDigestCheckpoint(ctx context.Context, jobID string, cp digestCheckpoint) error {
+	data, _ := json.Marshal(cp)
+	return w.store.SaveJobCheckpoint(ctx, jobID, string(data))
+}

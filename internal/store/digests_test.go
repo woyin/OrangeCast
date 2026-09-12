@@ -96,7 +96,7 @@ func TestDigestSearchSources_UpsertAndStatus(t *testing.T) {
 
 	// 直接写一个 cited_fact 块以便验证剔除联动
 	if _, err := s.DB.ExecContext(ctx,
-		`INSERT INTO digest_blocks (id,digest_id,position,block_type,text,citations_json,target_source_id) VALUES ('blk-x',?,2,'cited_fact','引用事实','["doc-seg-1"]','doc-77')`,
+		`INSERT INTO digest_blocks (id,digest_id,position,block_type,text,citations_json,target_source_id) VALUES ('blk-x',?,3,'cited_fact','引用事实','["doc-seg-1"]','doc-77')`,
 		d.ID); err != nil {
 		t.Fatal(err)
 	}
