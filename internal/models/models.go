@@ -31,6 +31,8 @@ const (
 	JobHighlight JobType = "highlight"
 	// JobNarration 解说独立任务（B07）：从冻结的高光版本合成解说音轨。
 	JobNarration JobType = "narration"
+	// JobKeypointQuality 重点质量判定任务（K02）：对指定卡片版本的重点执行可解释判定。
+	JobKeypointQuality JobType = "keypoint_quality"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
@@ -572,3 +574,30 @@ const (
 	BudgetReleasedNoCall  = "released_no_call"
 	BudgetReleasedUnknown = "released_unknown"
 )
+
+// KeypointQualityDecision 重点质量判定结论（K02）。
+const (
+	// KPQualityReady 程序检查与独立判定均通过：可作为 ready 依据。
+	KPQualityReady = "ready"
+	// KPQualityNeedsReview 不确定或证据不足：保留 needs_review，正常阅读仍可用。
+	KPQualityNeedsReview = "needs_review"
+	// KPQualityInvalid 程序检查直接不通过（空内容、引用不存在、明显重复）。
+	KPQualityInvalid = "invalid"
+)
+
+// KeypointQualityResult 一次重点质量判定的可解释结果（K02）。
+type KeypointQualityResult struct {
+	ID                 string
+	KeyPointID         string
+	SourceType         SourceType
+	SourceID           string
+	CardVersion        int
+	ContentFingerprint string
+	Decision           string
+	Reasons            []string
+	InputSnapshotJSON  string // 判定依据：引用 Segment 原文等
+	Provider           string
+	Model              string
+	JobID              string
+	CreatedAt          string
+}

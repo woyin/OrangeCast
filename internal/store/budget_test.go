@@ -228,3 +228,38 @@ func TestPodcastProcessingDepth_B05(t *testing.T) {
 		t.Fatalf("排队任务快照不应漂移: %s", exec.InputSnapshotJSON)
 	}
 }
+
+// TestKeypointQualityResult_Persistence 质量结果幂等持久化与读取（K02）。
+func TestKeypointQualityResult_Persistence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	r := &models.KeypointQualityResult{
+		KeyPointID: "kp-1", SourceType: models.SourceEpisode, SourceID: "ep-1",
+		CardVersion: 1, ContentFingerprint: "fp-1",
+		Decision: models.KPQualityNeedsReview, Reasons: []string{"证据不足"},
+		InputSnapshotJSON: `{"cited_segments":["[seg-0001] 原文"]}`, Provider: "groq", JobID: "job-1",
+	}
+	if err := s.SaveKeypointQualityResult(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveKeypointQualityResult(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM keypoint_quality_results WHERE keypoint_id='kp-1'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("同指纹应幂等一行: %d", n)
+	}
+	got, err := s.GetKeypointQualityResult(ctx, "kp-1", "fp-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != models.KPQualityNeedsReview || len(got.Reasons) != 1 || got.Reasons[0] != "证据不足" {
+		t.Fatalf("读取结果不符: %+v", got)
+	}
+	// 非法结论拒绝
+	bad := &models.KeypointQualityResult{KeyPointID: "kp-2", CardVersion: 1, ContentFingerprint: "fp-2", Decision: "great"}
+	if err := s.SaveKeypointQualityResult(ctx, bad); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("非法结论应拒绝: %v", err)
+	}
+}

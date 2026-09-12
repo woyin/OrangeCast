@@ -83,6 +83,9 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobNarration:
 			// 解说任务（B07）：本地 TTS 零成本，Provider 路由保持默认
 			tc = provider.TaskConfig{Provider: ptrStr(st.HighlightProvider), Model: ptrStr(st.HighlightModel)}
+		case models.JobKeypointQuality:
+			// 重点质量判定（K02）使用分析角色配置（判定与生成分开提示词）
+			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -179,6 +182,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 120_000, 30_000
 	case "highlight":
 		return 60_000, 10_000
+	case "keypoint_quality":
+		return 40_000, 8_000
 	default:
 		return 0, 0
 	}
@@ -187,7 +192,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality:
 	default:
 		return nil
 	}
@@ -269,6 +274,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doHighlightJob(ctx, job, bundle)
 	case models.JobNarration:
 		return w.doNarrationJob(ctx, job, bundle)
+	case models.JobKeypointQuality:
+		return w.doKeypointQualityJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -229,4 +230,105 @@ func (s *Store) RecordMaterialChange(ctx context.Context, change models.Material
 		return nil, err
 	}
 	return &change, nil
+}
+
+// ---- 重点质量判定结果（K02）----
+
+// SaveKeypointQualityResult 幂等保存一条质量判定结果：同 (keypoint, 指纹) 不产生新行。
+// 本方法只持久化；更新 keypoint_index.quality_status 属于 K03 的消费路径。
+func (s *Store) SaveKeypointQualityResult(ctx context.Context, r *models.KeypointQualityResult) error {
+	if r.KeyPointID == "" || r.ContentFingerprint == "" || r.CardVersion <= 0 {
+		return fmt.Errorf("%w: 质量结果缺少身份", ErrInvalidEditorialState)
+	}
+	switch r.Decision {
+	case models.KPQualityReady, models.KPQualityNeedsReview, models.KPQualityInvalid:
+	default:
+		return fmt.Errorf("%w: 非法质量结论 %q", ErrInvalidEditorialState, r.Decision)
+	}
+	reasonsJSON, err := json.Marshal(r.Reasons)
+	if err != nil {
+		return err
+	}
+	if r.ID == "" {
+		r.ID = uuid.NewString()
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO keypoint_quality_results
+		   (id, keypoint_id, source_type, source_id, card_version, content_fingerprint,
+		    decision, reasons_json, input_snapshot_json, provider, model, job_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.KeyPointID, string(r.SourceType), r.SourceID, r.CardVersion, r.ContentFingerprint,
+		r.Decision, string(reasonsJSON), r.InputSnapshotJSON, r.Provider, r.Model, r.JobID)
+	return err
+}
+
+// GetKeypointQualityResult 读取某重点在指定内容指纹下的判定；无则 ErrNotFound。
+func (s *Store) GetKeypointQualityResult(ctx context.Context, keypointID, fingerprint string) (*models.KeypointQualityResult, error) {
+	return s.scanKeypointQuality(s.DB.QueryRowContext(ctx,
+		`SELECT id, keypoint_id, source_type, source_id, card_version, content_fingerprint,
+		        decision, reasons_json, input_snapshot_json, provider, model, job_id, created_at
+		 FROM keypoint_quality_results WHERE keypoint_id=? AND content_fingerprint=?`, keypointID, fingerprint))
+}
+
+// ListKeypointQualityResults 列出一个来源在指定卡片版本下的全部质量结果。
+func (s *Store) ListKeypointQualityResults(ctx context.Context, sourceType models.SourceType, sourceID string, cardVersion int) ([]*models.KeypointQualityResult, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, keypoint_id, source_type, source_id, card_version, content_fingerprint,
+		        decision, reasons_json, input_snapshot_json, provider, model, job_id, created_at
+		 FROM keypoint_quality_results WHERE source_type=? AND source_id=? AND card_version=? ORDER BY created_at DESC`,
+		string(sourceType), sourceID, cardVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.KeypointQualityResult
+	for rows.Next() {
+		r, err := s.scanKeypointQuality(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+type rowScanner interface{ Scan(...any) error }
+
+func (s *Store) scanKeypointQuality(row rowScanner) (*models.KeypointQualityResult, error) {
+	r := &models.KeypointQualityResult{}
+	var reasons string
+	err := row.Scan(&r.ID, &r.KeyPointID, &r.SourceType, &r.SourceID, &r.CardVersion, &r.ContentFingerprint,
+		&r.Decision, &reasons, &r.InputSnapshotJSON, &r.Provider, &r.Model, &r.JobID, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(reasons), &r.Reasons)
+	if r.Reasons == nil {
+		r.Reasons = []string{}
+	}
+	return r, nil
+}
+
+// ListKeyPointRowsByCardVersion 读取来自指定卡片版本的重点（K02 任务的输入）。
+func (s *Store) ListKeyPointRowsByCardVersion(ctx context.Context, sourceType models.SourceType, sourceID string, cardVersion int) ([]*KeyPointRow, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, source_type, source_id, source_title, content, COALESCE(description,''), citations_json, relation_kind, time_start, time_end, card_version, origin
+		 FROM keypoint_index WHERE source_type=? AND source_id=? AND card_version=?`,
+		string(sourceType), sourceID, cardVersion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*KeyPointRow
+	for rows.Next() {
+		r := &KeyPointRow{}
+		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.SourceTitle, &r.Content, &r.Description, &r.CitationsJSON, &r.RelationKind, &r.TimeStart, &r.TimeEnd, &r.CardVersion, &r.Origin); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
