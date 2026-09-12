@@ -263,3 +263,70 @@ func TestKeypointQualityResult_Persistence(t *testing.T) {
 		t.Fatalf("非法结论应拒绝: %v", err)
 	}
 }
+
+// TestOwnerNote_EditConcurrency_K04 乐观并发：正常编辑版本+1；过期编辑冲突；重复保存不制造冲突。
+func TestOwnerNote_EditConcurrency_K04(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g", Title: "e", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, podcast.ID)
+	seedSnapshotTranscript(t, s, models.SourceEpisode, eps[0].ID, "内容")
+
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: eps[0].ID, Kind: "source_note",
+		Content: "原始记录", CitationsJSON: `["seg-0001"]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note.Revision != 1 {
+		t.Fatalf("新笔记 revision=1: %+v", note)
+	}
+	// 正常编辑：v1 → v2
+	updated, err := s.UpdateOwnerNote(ctx, note.ID, "修订后的记录", `["seg-0001"]`, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 2 || updated.Content != "修订后的记录" {
+		t.Fatalf("编辑应递增版本: %+v", updated)
+	}
+	// 过期编辑（基于 v1）→ 冲突
+	if _, err := s.UpdateOwnerNote(ctx, note.ID, "过期编辑", `["seg-0001"]`, "", 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("过期编辑应冲突: %v", err)
+	}
+	// 重复保存同一最新版本的内容仍需版本匹配（幂等语义下不产生新行）
+	if _, err := s.UpdateOwnerNote(ctx, note.ID, "修订后的记录", `["seg-0001"]`, "", 2); err != nil {
+		t.Fatalf("基于最新版本的重复保存不应冲突: %v", err)
+	}
+}
+
+// TestOwnerNote_ReflectionCitationDiscipline_K04 个人理解不得挂 Citation。
+func TestOwnerNote_ReflectionCitationDiscipline_K04(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	podcast, _ := s.CreatePodcast(ctx, "https://f2.xml", "P2", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g2", Title: "e2", AudioURL: "https://a.mp3"}})
+	eps, _ := s.ListEpisodes(ctx, podcast.ID)
+	seedSnapshotTranscript(t, s, models.SourceEpisode, eps[0].ID, "内容")
+
+	// OwnerReflection 带 Citation → 拒绝
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: eps[0].ID, Kind: "owner_reflection",
+		Content: "我觉得...", CitationsJSON: `["seg-0001"]`,
+	}); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("个人理解挂 Citation 应拒绝: %v", err)
+	}
+	// OwnerReflection 带 Reference（可解析）→ 允许
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: eps[0].ID, Kind: "owner_reflection",
+		Content: "这让我想起自己的经历", ReferencesJSON: `["seg-0001"]`,
+	})
+	if err != nil {
+		t.Fatalf("带可解析 Reference 应允许: %v", err)
+	}
+	// 编辑时试图挂 Citation → 拒绝
+	if _, err := s.UpdateOwnerNote(ctx, note.ID, "改成来源主张？", `["seg-0001"]`, "", note.Revision); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("编辑为 Citation 身份应拒绝: %v", err)
+	}
+}

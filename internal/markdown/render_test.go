@@ -248,3 +248,35 @@ func TestCitationLinks_InvalidCitationSkipped(t *testing.T) {
 		t.Errorf("应跳过无效引用并保留有效引用，实际 %q", got)
 	}
 }
+
+// TestRender_OwnerNoteBlocks K04：两类笔记身份区分、引用/参考跳转保留。
+func TestRender_OwnerNoteBlocks(t *testing.T) {
+	card := &provider.KnowledgeCard{
+		Title:   "T",
+		Summary: provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
+	}
+	segments := []provider.Segment{{ID: "seg-0001", Start: 0, End: 9, Text: "原文一句话"}}
+	out, err := Render(Input{
+		Card: card, Segments: segments,
+		SourceType: "episode", SourceID: "ep-1", Title: "T",
+		BaseURL: "https://x.example",
+		OwnerNoteBlocks: []OwnerNoteBlock{
+			{Kind: "source_note", Body: "原文提到风险略低", Citations: []string{"seg-0001"}, Revision: 2},
+			{Kind: "owner_reflection", Body: "我自己的解读", References: []string{"seg-0001"}, Revision: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Owner 笔记",
+		"原文笔记（SourceNote",
+		"我的理解（OwnerReflection，个人文本，非原文）",
+		"?t=0.0#seg-seg-0001",
+		"?ref=0.0#seg-seg-0001",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("导出缺少 %q", want)
+		}
+	}
+}

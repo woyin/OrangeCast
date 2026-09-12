@@ -37,9 +37,12 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 	if note.ReferencesJSON == "" {
 		note.ReferencesJSON = "[]"
 	}
-	var citations []string
+	var citations, references []string
 	if err := json.Unmarshal([]byte(note.CitationsJSON), &citations); err != nil {
 		return nil, fmt.Errorf("%w: invalid note citations", ErrInvalidEditorialState)
+	}
+	if err := json.Unmarshal([]byte(note.ReferencesJSON), &references); err != nil {
+		return nil, fmt.Errorf("%w: invalid note references", ErrInvalidEditorialState)
 	}
 	if note.Kind == "source_note" {
 		if len(citations) == 0 {
@@ -52,6 +55,20 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 		if !valid {
 			return nil, fmt.Errorf("%w: note citation does not resolve inside source", ErrInvalidEditorialState)
 		}
+	} else {
+		// K04：个人理解不得伪装为 Citation 支持的来源主张；Reference 若提供必须可解析。
+		if len(citations) > 0 {
+			return nil, fmt.Errorf("%w: owner reflection must not claim citations", ErrInvalidEditorialState)
+		}
+		if len(references) > 0 {
+			valid, err := s.ValidateSourceCitations(ctx, models.SourceType(note.SourceType), note.SourceID, references)
+			if err != nil {
+				return nil, err
+			}
+			if !valid {
+				return nil, fmt.Errorf("%w: note reference does not resolve inside source", ErrInvalidEditorialState)
+			}
+		}
 	}
 	if _, err := s.DB.ExecContext(ctx, `INSERT INTO owner_notes (id,source_type,source_id,kind,content,citations_json,references_json) VALUES (?,?,?,?,?,?,?)`, note.ID, note.SourceType, note.SourceID, note.Kind, note.Content, note.CitationsJSON, note.ReferencesJSON); err != nil {
 		return nil, err
@@ -62,7 +79,7 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 // GetOwnerNote retrieves one Owner note by stable identifier.
 func (s *Store) GetOwnerNote(ctx context.Context, id string) (*models.OwnerNote, error) {
 	note := &models.OwnerNote{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,created_at,updated_at FROM owner_notes WHERE id=?`, id).Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.CreatedAt, &note.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at FROM owner_notes WHERE id=?`, id).Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -71,7 +88,7 @@ func (s *Store) GetOwnerNote(ctx context.Context, id string) (*models.OwnerNote,
 
 // ListOwnerNotes lists the durable notes for exactly one Source.
 func (s *Store) ListOwnerNotes(ctx context.Context, sourceType models.SourceType, sourceID string) ([]*models.OwnerNote, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,created_at,updated_at FROM owner_notes WHERE source_type=? AND source_id=? ORDER BY created_at DESC,id DESC`, sourceType, sourceID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at FROM owner_notes WHERE source_type=? AND source_id=? ORDER BY created_at DESC,id DESC`, sourceType, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +96,7 @@ func (s *Store) ListOwnerNotes(ctx context.Context, sourceType models.SourceType
 	var out []*models.OwnerNote
 	for rows.Next() {
 		note := &models.OwnerNote{}
-		if err := rows.Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.CreatedAt, &note.UpdatedAt); err != nil {
+		if err := rows.Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, note)
@@ -123,4 +140,68 @@ func (s *Store) UpsertRightsConstraint(ctx context.Context, sourceType models.So
 	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO rights_constraints (id,source_type,source_id,constraint_kind,details,active) VALUES (?,?,?,?,?,?) ON CONFLICT(source_type,source_id,constraint_kind) DO UPDATE SET details=excluded.details,active=excluded.active`, uuid.NewString(), string(sourceType), sourceID, kind, details, boolToInt(active))
 	return err
+}
+
+// UpdateOwnerNote 编辑笔记（K04）：乐观并发控制——expectedRevision 不匹配返回
+// ErrConflict（过期编辑提示冲突）；kind 纪律与创建一致：SourceNote 只能 Citation、
+// OwnerReflection 只能 Reference（个人理解不伪装为来源主张）。
+func (s *Store) UpdateOwnerNote(ctx context.Context, noteID, content, citationsJSON, referencesJSON string, expectedRevision int) (*models.OwnerNote, error) {
+	content = strings.TrimSpace(content)
+	if content == "" || expectedRevision < 1 {
+		return nil, fmt.Errorf("%w: invalid owner note update", ErrInvalidEditorialState)
+	}
+	current, err := s.GetOwnerNote(ctx, noteID)
+	if err != nil {
+		return nil, err
+	}
+	if citationsJSON == "" {
+		citationsJSON = "[]"
+	}
+	if referencesJSON == "" {
+		referencesJSON = "[]"
+	}
+	var citations, references []string
+	if err := json.Unmarshal([]byte(citationsJSON), &citations); err != nil {
+		return nil, fmt.Errorf("%w: invalid note citations", ErrInvalidEditorialState)
+	}
+	if err := json.Unmarshal([]byte(referencesJSON), &references); err != nil {
+		return nil, fmt.Errorf("%w: invalid note references", ErrInvalidEditorialState)
+	}
+	switch current.Kind {
+	case "source_note":
+		if len(citations) == 0 {
+			return nil, fmt.Errorf("%w: source note needs citations", ErrInvalidEditorialState)
+		}
+		valid, err := s.ValidateSourceCitations(ctx, models.SourceType(current.SourceType), current.SourceID, citations)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("%w: note citation does not resolve inside source", ErrInvalidEditorialState)
+		}
+	case "owner_reflection":
+		if len(citations) > 0 {
+			return nil, fmt.Errorf("%w: owner reflection must not claim citations", ErrInvalidEditorialState)
+		}
+		if len(references) > 0 {
+			valid, err := s.ValidateSourceCitations(ctx, models.SourceType(current.SourceType), current.SourceID, references)
+			if err != nil {
+				return nil, err
+			}
+			if !valid {
+				return nil, fmt.Errorf("%w: note reference does not resolve inside source", ErrInvalidEditorialState)
+			}
+		}
+	}
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE owner_notes SET content=?, citations_json=?, references_json=?, revision=revision+1, updated_at=datetime('now')
+		 WHERE id=? AND revision=?`,
+		content, citationsJSON, referencesJSON, noteID, expectedRevision)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrConflict
+	}
+	return s.GetOwnerNote(ctx, noteID)
 }

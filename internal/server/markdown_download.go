@@ -3,11 +3,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/woyin/orangecast/internal/markdown"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
@@ -45,6 +47,8 @@ func (srv *Server) handleDownloadMarkdown(w http.ResponseWriter, r *http.Request
 	// ADR-0018 R4：Owner 可选下沉 GeneratedDerivative 块（Paraphrase + 手选 StudyChat 回答）。
 	// 默认不包含（遵守"禁止自动写入 KnowledgeNote"）；通过 ?with_generated=1 显式开启。
 	// 下沉的块一律标为 AI 讲解·非原文，挂 Reference（?ref=），与 CitedDerivative（?t=）区分。
+	// K04：导出保留两类 Owner 笔记（来源笔记/个人理解）及引用、参考跳转。
+	noteBlocks, _ := srv.ownerNoteBlocks(r.Context(), sourceType, sourceID, tp.Segments)
 	var genBlocks []markdown.GeneratedBlock
 	if r.URL.Query().Get("with_generated") == "1" {
 		// Paraphrase：Owner 明确触发的重讲，全部纳入（每锚点最近 3 条已由存储淘汰）。
@@ -76,6 +80,7 @@ func (srv *Server) handleDownloadMarkdown(w http.ResponseWriter, r *http.Request
 		Title: title, BaseURL: srv.cfg.PublicURL,
 		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 		GeneratedBlocks: genBlocks,
+		OwnerNoteBlocks: noteBlocks,
 	})
 	if err != nil {
 		http.Error(w, "渲染失败", http.StatusInternalServerError)
@@ -85,4 +90,23 @@ func (srv *Server) handleDownloadMarkdown(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	_, _ = w.Write([]byte(md))
+}
+
+// ownerNoteBlocks 把两类 Owner 笔记转换为导出块（K04）。
+func (srv *Server) ownerNoteBlocks(ctx context.Context, sourceType models.SourceType, sourceID string, segments []provider.Segment) ([]markdown.OwnerNoteBlock, []provider.Segment) {
+	notes, err := srv.store.ListOwnerNotes(ctx, sourceType, sourceID)
+	if err != nil {
+		return nil, segments
+	}
+	blocks := make([]markdown.OwnerNoteBlock, 0, len(notes))
+	for _, n := range notes {
+		var citations, references []string
+		_ = json.Unmarshal([]byte(n.CitationsJSON), &citations)
+		_ = json.Unmarshal([]byte(n.ReferencesJSON), &references)
+		blocks = append(blocks, markdown.OwnerNoteBlock{
+			Kind: n.Kind, Body: n.Content,
+			Citations: citations, References: references, Revision: n.Revision,
+		})
+	}
+	return blocks, segments
 }

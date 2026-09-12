@@ -22,7 +22,10 @@ type MaterialCandidate struct {
 type MaterialChange struct{ ID, KeyPointID, SourceType, SourceID, ChangeKind, SnapshotHash, CreatedAt string }
 
 // OwnerNote separates faithful source notes from personal reflections.
-type OwnerNote struct{ ID, SourceType, SourceID, Kind, Content, CitationsJSON, ReferencesJSON, CreatedAt, UpdatedAt string }
+type OwnerNote struct {
+	ID, SourceType, SourceID, Kind, Content, CitationsJSON, ReferencesJSON, CreatedAt, UpdatedAt string
+	Revision                                                                                     int // 乐观并发版本（K04）：每次编辑 +1
+}
 
 // EditorialRelevance relates reusable material to a profile without granting source permission.
 type EditorialRelevance struct{ EditorialProfileID, KeyPointID, Assessment, OwnerOverride, Rationale, UpdatedAt string }

@@ -32,6 +32,18 @@ type Input struct {
 	BaseURL         string           // 实例公开 URL，用于 Citation/Reference 链接
 	GeneratedAt     string           // 渲染时间（可注入以便 golden test 确定性）
 	GeneratedBlocks []GeneratedBlock // 可选：下沉的 GeneratedDerivative 块（ADR-0018 R4）
+	// OwnerNoteBlocks 可选：Owner 笔记（K04）。来源笔记走 Citation 跳转（?t=），
+	// 个人理解走 Reference 跳转（?ref=）并明确标注为个人文本——不伪装为来源主张。
+	OwnerNoteBlocks []OwnerNoteBlock
+}
+
+// OwnerNoteBlock 一条 Owner 笔记的导出块。
+type OwnerNoteBlock struct {
+	Kind       string // source_note | owner_reflection
+	Body       string
+	Citations  []string
+	References []string
+	Revision   int
 }
 
 // Render 生成 KnowledgeNote Markdown。确定性：字段顺序固定、标签排序、时间格式化固定。
@@ -52,6 +64,7 @@ func Render(in Input) (string, error) {
 	writeQuotes(&b, in)
 	writeTags(&b, tags)
 	writeGeneratedBlocks(&b, in)
+	writeOwnerNoteBlocks(&b, in)
 
 	return b.String(), nil
 }
@@ -146,6 +159,31 @@ func writeTags(b *strings.Builder, tags []string) {
 		fmt.Fprintf(b, "`%s` ", tag)
 	}
 	b.WriteString("\n")
+}
+
+// writeOwnerNoteBlocks 渲染 Owner 笔记（K04）：两类身份分别标注并保留引用/参考
+// 跳转与个人文本，可回溯到来源位置。
+func writeOwnerNoteBlocks(b *strings.Builder, in Input) {
+	if len(in.OwnerNoteBlocks) == 0 {
+		return
+	}
+	b.WriteString("\n## Owner 笔记\n\n")
+	for _, n := range in.OwnerNoteBlocks {
+		if n.Kind == "source_note" {
+			b.WriteString("> [!quote] 原文笔记（SourceNote，带 Citation 可核验）\n")
+			b.WriteString("> " + strings.ReplaceAll(n.Body, "\n", "\n> ") + "\n")
+			if links := citationLinks(in.SourceType, in.SourceID, in.BaseURL, n.Citations, in.Segments); links != "" {
+				b.WriteString("> 引用：" + links + "\n")
+			}
+		} else {
+			b.WriteString("> [!note] 我的理解（OwnerReflection，个人文本，非原文）\n")
+			b.WriteString("> " + strings.ReplaceAll(n.Body, "\n", "\n> ") + "\n")
+			if links := referenceLinks(in.SourceType, in.SourceID, in.BaseURL, n.References, in.Segments); links != "" {
+				b.WriteString("> 参考：" + links + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
 }
 
 func writeGeneratedBlocks(b *strings.Builder, in Input) {
