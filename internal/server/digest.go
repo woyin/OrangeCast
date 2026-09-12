@@ -1,9 +1,10 @@
 // Package server：EpisodeDigest 单集精读文 HTTP 层（ADR-0023）。
-// T1 手动触发：Source 详情页按钮 → /api/digest 入队。
+// T1 手动触发：Source 详情页按钮 → /api/digest 入队；列表批量 → /api/digest/batch 逐集隔离（D1）。
 // 草稿页：/digest/{id} 展示块级正文 + ⑥b 检索落源侧栏（确认/剔除）+ 事实缺口 + 渠道改写。
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -31,8 +32,36 @@ func (srv *Server) handleDigestEnqueue(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
 }
 
+// handleDigestBatch 列表批量：逐集独立入队（D1），失败/跳过单集可见。
+func (srv *Server) handleDigestBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "表单解析失败", http.StatusBadRequest)
+		return
+	}
+	sourceType := models.SourceType(r.FormValue("source_type"))
+	podcastID := r.FormValue("podcast_id")
+	enqueued, skipped := 0, 0
+	for _, sid := range r.Form["source_id"] {
+		job, err := srv.store.EnqueueDigestJob(r.Context(), sourceType, sid)
+		if err != nil || job == nil {
+			skipped++
+			continue
+		}
+		enqueued++
+	}
+	http.Redirect(w, r, fmt.Sprintf("/podcasts/%s?enqueued=%d&skipped=%d", podcastID, enqueued, skipped), http.StatusSeeOther)
+}
+
 // handleDigestDetail 草稿页：当前修订正文（块级）+ ⑥b 侧栏 + 缺口 + 渠道版本。
 func (srv *Server) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/markdown") {
+		srv.handleDigestMarkdown(w, r)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/digest/")
 	if id == "" || strings.Contains(id, "/") {
 		http.NotFound(w, r)

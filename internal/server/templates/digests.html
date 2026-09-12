@@ -1,0 +1,28 @@
+{{define "title"}}单集精读文 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head">
+  <h1>单集精读文</h1>
+  <p class="meta">以单个 Source 为锚点一键生成的结构化精读文与小红书笔记（ADR-0023）。</p>
+</div>
+
+<section class="panel">
+  {{if .Digests}}
+  <div class="list">
+    {{range .Digests}}
+    <article class="list-item">
+      <div class="ep-info">
+        <h3><a href="/digest/{{.ID}}">{{.Title}}</a></h3>
+        <p class="meta">
+          来源：{{.SourceType}}/{{.SourceID}} · 版本 v{{.Version}} · {{.Provider}} · {{.CreatedAt}}
+          {{if .Degraded}} · <span class="error">降级生成</span>{{end}}
+        </p>
+      </div>
+      <a class="btn btn-secondary" href="/digest/{{.ID}}">查看草稿</a>
+    </article>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="meta">暂无已生成的精读文。前往<a href="/podcasts">播客单集</a>或<a href="/documents">文档</a>详情页点击“生成精读文”。</p>
+  {{end}}
+</section>
+{{end}}

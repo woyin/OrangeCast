@@ -44,15 +44,14 @@
 <div class="batch-toolbar" id="batch-toolbar" style="display:none">
   <span id="batch-count">已选 0 集</span>
   <button type="submit" class="btn" id="batch-submit">批量处理选中</button>
+  <button type="submit" class="btn btn-secondary" id="batch-digest-submit" formaction="/api/digest/batch">批量生成精读文</button>
   <button type="button" class="btn btn-secondary" id="select-all-btn">全选当前页</button>
   <button type="button" class="btn btn-secondary" id="clear-all-btn">取消选择</button>
 </div>
 
 {{range .Episodes}}
 <div class="list-item episode-row" id="row-{{.ID}}">
-  {{if or (eq (printf "%s" .ProcessingStatus) "unprocessed") (eq (printf "%s" .ProcessingStatus) "failed")}}
-  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px;flex-shrink:0">
-  {{end}}
+  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px;flex-shrink:0" aria-label="选择单集">
   <div class="ep-info" style="flex:1">
     <h3>{{.Title}}</h3>
     <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：<span class="status-text" data-source-id="{{.ID}}" data-status="{{.ProcessingStatus}}">{{.ProcessingStatus}}</span></p>
