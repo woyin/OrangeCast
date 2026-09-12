@@ -42,3 +42,19 @@ type DJPlanItem struct {
 	ScriptKind string // intro | transition | outro | gist（空 = 无脚本）
 	ScriptText string
 }
+
+// ListeningProgress 听播进度（D07）：Source + 清单版本 + 片段身份 + 片段内位置
+// + 速度。seq 单调递增防旧请求覆盖新状态；与完整播放（原音页）进度语义分开。
+type ListeningProgress struct {
+	ID                string
+	SourceType        SourceType
+	SourceID          string
+	PlanID            string
+	PlanVersion       int
+	ItemPosition      int
+	HighlightID       string
+	ItemOffsetSeconds float64
+	Speed             float64
+	Seq               int64
+	UpdatedAt         string
+}

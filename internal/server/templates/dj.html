@@ -29,7 +29,7 @@
 </div>
 <p class="meta" id="dj-progress" aria-live="polite"></p>
 
-<div id="playlist">
+<div id="playlist" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-plan-version="{{.HighlightVersion}}">
 {{range $i, $h := .Highlights}}
 <div class="dj-item" data-idx="{{$i}}" data-start="{{$h.Start}}" data-end="{{$h.End}}" data-narration="{{$h.NarrationURL}}" data-highlight-id="{{$h.HighlightID}}">
   <div class="dj-gist">
@@ -111,6 +111,103 @@
       items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i)});
     });
     return items;
+  }
+
+  if (pauseBtn) pauseBtn.disabled = true;
+
+  // ---- D07：听播进度保存与“继续听”恢复 ----
+  var pl = document.getElementById('playlist');
+  var sourceType = pl ? pl.dataset.sourceType : '';
+  var sourceId = pl ? pl.dataset.sourceId : '';
+  var csrfToken = '{{.CSRF}}';
+  var planVersion = {{.HighlightVersion}};
+  var planId = 'highlights:v' + planVersion;
+  var seq = Date.now();
+  var saveTimer = null;
+
+  function currentProgressSnapshot() {
+    var pos = player.position();
+    var item = pos.item;
+    if (!item || item.type !== 'evidence') return null; // 解说播放期间以原音位置为准
+    return {
+      source_type: sourceType,
+      source_id: sourceId,
+      plan_id: planId,
+      plan_version: planVersion,
+      item_position: pos.index + 1,
+      highlight_id: item.highlightId || '',
+      item_offset_seconds: evidence.currentTime,
+      speed: player.getRate(),
+      seq: ++seq
+    };
+  }
+  function saveProgress() {
+    var snap = currentProgressSnapshot();
+    if (!snap) return;
+    fetch('/api/listening-progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify(snap)
+    }).catch(function () { /* 保存失败不阻塞收听 */ });
+  }
+  // 节流：播放中每 5 秒保存；暂停/停止/离开页面时补存。
+  evidence.addEventListener('timeupdate', function () {
+    if (saveTimer) return;
+    saveTimer = setTimeout(function () { saveTimer = null; saveProgress(); }, 5000);
+  });
+  evidence.addEventListener('pause', saveProgress);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) saveProgress();
+  });
+  window.addEventListener('pagehide', saveProgress);
+
+  // 恢复提示：重新打开显示“继续听”，等用户点击（自动播放只由用户动作启动）。
+  fetch('/api/listening-progress?source_type=' + encodeURIComponent(sourceType) + '&source_id=' + encodeURIComponent(sourceId))
+    .then(function (r) { return r.json(); })
+    .then(function (saved) {
+      if (!saved || !saved.plan_id) return;
+      if (saved.plan_id !== planId) {
+        if (statusEl) statusEl.textContent = '高光已更新，上次进度无法精确恢复。';
+        return;
+      }
+      var btn = document.createElement('button');
+      btn.className = 'btn btn-secondary';
+      btn.type = 'button';
+      btn.textContent = '▶ 继续听（上次位置）';
+      btn.addEventListener('click', function () {
+        var items = buildItems();
+        var posIdx = Math.max(0, (saved.item_position || 1) - 1);
+        var target = items.filter(function (it) { return it.type === 'evidence'; })[saved.item_position - 1] || items[0];
+        if (!target) return;
+        target.start = saved.item_offset_seconds || target.start; // 从片段内位置恢复
+        player.load(items);
+        player.playItems([target]);
+        // 从目标位置继续连播其后的条目
+        var restIdx = items.indexOf(target) + 1;
+        if (restIdx < items.length) {
+          var rest = items.slice(restIdx);
+          setTimeout(function () { player.playItems([target].concat(rest)); }, 0);
+        }
+        void posIdx;
+        btn.remove();
+      });
+      var bar = autoplayBtn.parentNode;
+      if (bar) bar.insertBefore(btn, autoplayBtn.nextSibling);
+    })
+    .catch(function () { /* 恢复检查失败不阻塞 */ });
+
+  // Media Session（D07）：按浏览器支持接入播放/暂停/跳段。
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'AI DJ · ' + (document.querySelector('h1') ? document.querySelector('h1').textContent.replace('AI DJ：', '') : ''),
+        artist: 'CloudWisePod AI 解说 + 原音'
+      });
+      navigator.mediaSession.setActionHandler('play', function () { player.play(); });
+      navigator.mediaSession.setActionHandler('pause', function () { player.pause(); });
+      navigator.mediaSession.setActionHandler('previoustrack', function () { player.prev(); });
+      navigator.mediaSession.setActionHandler('nexttrack', function () { player.next(); });
+    } catch (e) { /* 浏览器不支持的动作忽略 */ }
   }
 
   if (autoplayBtn) autoplayBtn.addEventListener('click', function() {

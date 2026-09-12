@@ -330,3 +330,22 @@ func TestOwnerNote_ReflectionCitationDiscipline_K04(t *testing.T) {
 		t.Fatalf("编辑为 Citation 身份应拒绝: %v", err)
 	}
 }
+
+// TestListeningProgress_PurgeCascade D07：来源删除时听播进度一并删除。
+func TestListeningProgress_PurgeCascade(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	epID := seedIntentEpisode(t, s, "listen-purge")
+	if err := s.SaveListeningProgress(ctx, &models.ListeningProgress{
+		SourceType: models.SourceEpisode, SourceID: epID,
+		PlanID: "highlights:v1", PlanVersion: 1, ItemPosition: 1, ItemOffsetSeconds: 9, Speed: 1, Seq: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSourceRows(ctx, models.SourceEpisode, epID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetListeningProgress(ctx, models.SourceEpisode, epID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("来源删除后进度应删除: %v", err)
+	}
+}

@@ -349,7 +349,9 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		"Highlights": highlights,
 		"KeyPoints":  card.KeyPoints,
 		"AudioURL":   audioURL,
-		"CSRF":       auth.CSRFValue(r),
+		// D07：高光版本作为 DJ 清单身份（进度恢复只在版本可映射时迁移位置）。
+		"HighlightVersion": hv.Version,
+		"CSRF":             auth.CSRFValue(r),
 	})
 }
 
