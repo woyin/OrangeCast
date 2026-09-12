@@ -437,6 +437,9 @@ func (s *Store) CreateCreationBriefDraftFromProposal(ctx context.Context, propos
 }
 
 // ConfirmCreationBrief records the explicit work-generation authorization.
+// ConfirmCreationBrief Owner 确认 Brief（C07 / ADR-0024 §1）：
+// 确认前重查——blocking research、材料质量/陈旧/排除、Provider 策略；
+// 材料变化后必须通过新校验才可确认（不可沿用旧校验结果）。
 func (s *Store) ConfirmCreationBrief(ctx context.Context, id string) error {
 	var proposalID string
 	if err := s.DB.QueryRowContext(ctx, `SELECT creation_proposal_id FROM creation_briefs WHERE id=?`, id).Scan(&proposalID); err == sql.ErrNoRows {
@@ -450,6 +453,10 @@ func (s *Store) ConfirmCreationBrief(ctx context.Context, id string) error {
 	}
 	if blocked {
 		return fmt.Errorf("%w: blocking research need unresolved", ErrInvalidEditorialState)
+	}
+	// C07：确认前逐项校验材料资格（不沿用生成时的状态）。
+	if err := s.recheckBriefMaterials(ctx, proposalID); err != nil {
+		return err
 	}
 	r, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND status='draft'`, id)
 	if err != nil {
@@ -596,4 +603,30 @@ func (s *Store) CreateMaterialDiagnosisForRound(ctx context.Context, sessionID, 
 		return nil, err
 	}
 	return md, nil
+}
+
+// recheckBriefMaterials 确认前逐项校验 Brief 材料的当前资格（C07）：
+// 材料关键观点必须是 ready/owner_confirmed、非 stale、未被 Owner 排除。
+// 材料变化/缺口/陈旧都阻止确认。
+func (s *Store) recheckBriefMaterials(ctx context.Context, proposalID string) error {
+	proposal, err := s.GetCreationProposal(ctx, proposalID)
+	if err != nil {
+		return err
+	}
+	var materialIDs []string
+	if err := json.Unmarshal([]byte(proposal.MaterialIDsJSON), &materialIDs); err != nil {
+		return nil // 无材料 ID 列表的旧数据跳过校验
+	}
+	for _, id := range materialIDs {
+		// C07：旧数据可能引用已不存在的 KeyPoint——跳过不阻断（与 C01 不同，
+		// C01 选择时显式排除）。此处只检查仍存在的重点的质量/stale/排除状态。
+		if _, err := s.GetKeyPoint(ctx, id); errors.Is(err, ErrNotFound) {
+			continue
+		}
+		el := s.checkMaterialEligibility(ctx, id, "")
+		if !el.Eligible {
+			return fmt.Errorf("%w: 材料资格确认失败——%s", ErrInvalidEditorialState, el.Reason)
+		}
+	}
+	return nil
 }
