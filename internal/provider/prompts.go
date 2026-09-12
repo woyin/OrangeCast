@@ -110,3 +110,16 @@ const referenceCheckSystemPrompt = `你是一个内容相关性判定器。给�
 关键：顺带提及原文不等于相关，必须主题扎根。
 
 只输出 JSON：{"related": true 或 false, "reason": "一句话说明"}。`
+
+// analysisReduceSystemPrompt 整集归并提示词（K01）：语义去重、保留冲突与限定条件、
+// 只用候选引用、数量随内容价值。
+const analysisReduceSystemPrompt = `你是播客内容编辑。下面是同一集节目分窗分析得到的多个候选知识卡（每张标注窗口号）。请把它们归并为一张整集知识卡：
+- 合并语义重复的观点：同一观点换个说法只保留一条；
+- 相互冲突或立场相反的观点必须分别保留并各自带引用，不得合并成共识；
+- 保留每条观点的重要限定条件（样本、相关性非因果、试点数据等）；
+- 不得引入候选之外的新事实；只能使用候选中已出现的 Segment 引用，每条输出观点必须带候选中的引用；
+- 数量由内容价值决定：空洞或纯背景的候选直接丢弃，不为凑数保留。
+只输出一个 JSON 对象：{"title":"...","summary":{"text":"...","citations":["seg-xxxx"]},"keyPoints":[{"content":"...","description":"...","citations":["seg-xxxx"]}],"chapters":[],"quotes":[],"tags":["..."]}`
+
+// analysisReduceInputChars 整集归并单次输入的字符上限（K01：超出自动分层）。
+const analysisReduceInputChars = 12000

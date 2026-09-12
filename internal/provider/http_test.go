@@ -78,7 +78,7 @@ func TestGroqAnalyze_SplitsWindowsAndMergesCitations(t *testing.T) {
 		{ID: "seg-0002", Text: strings.Repeat("b", 13000)},
 	}
 	calls := 0
-	g := NewGroqProvider("test")
+	g := NewGroqProvider("test").WithoutReduce() // K01 归并关闭：本测试只验证分窗与确定性拼接
 	waits := 0
 	g.sleepFn = func(time.Duration) { waits++ }
 	g.chatCompleteFn = func(_ []map[string]string, _ string) (string, int, error) {

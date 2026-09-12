@@ -249,6 +249,8 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 }
 
 // Analyze 走 /chat/completions，schema 以文本随提示词下发（兼容官方与 OpenAI 兼容端点）。
+// OpenAI 路径为单次整集调用，不存在分窗候选，因此不执行 K01 跨窗归并；
+// 归并契约（ReduceKnowledgeCards/ValidateReducedCard）由 Groq 分窗路径与共享测试覆盖。
 func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*AnalyzeResult, error) {
 	var sb strings.Builder
 	for _, seg := range segments {

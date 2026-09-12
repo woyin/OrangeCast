@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -24,6 +25,8 @@ const (
 // GroqProvider Groq 全套实现（方案 B 主力）。
 // 转录走 /audio/transcriptions（multipart file），分析/QA 走 /chat/completions。
 type GroqProvider struct {
+	disableReduce  bool
+	reduceFn       AnalysisReduceFunc
 	apiKey         string
 	baseURL        string // 空则用默认 groqBaseURL
 	model          string // 空则用默认 groqAnalysisModel
@@ -56,7 +59,7 @@ func (g *GroqProvider) WithBaseURL(url string) *GroqProvider {
 
 // WithModel 返回使用指定分析模型的新实例（转录模型不变）。
 func (g *GroqProvider) WithModel(model string) *GroqProvider {
-	return &GroqProvider{apiKey: g.apiKey, baseURL: g.baseURL, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
+	return &GroqProvider{apiKey: g.apiKey, baseURL: g.baseURL, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn, disableReduce: g.disableReduce, reduceFn: g.reduceFn}
 }
 
 // Transcribe 转录：Groq 要求上传文件本体（不支持服务端 fetch URL）。
@@ -238,12 +241,51 @@ func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*AnalyzeR
 		if windowModel != "" {
 			model = windowModel
 		}
-		// 归并（mergeKnowledgeCards）是本地纯计算，不产生额外调用费；分窗用量合计。
+		// 分窗用量合计；整集归并的用量在下方叠加。
 		usage.InputUnits += windowUsage.InputUnits
 		usage.OutputUnits += windowUsage.OutputUnits
 		usage.RetryCount += windowUsage.RetryCount
 	}
-	return &AnalyzeResult{Card: mergeKnowledgeCards(cards), Model: model, Usage: usage}, nil
+
+	// K01：多窗时执行整集归并（语义去重、保留冲突与限定、有输入上限、失败可见）。
+	final := mergeKnowledgeCards(cards)
+	if len(cards) > 1 && !g.disableReduce {
+		reduced, rUsage, err := ReduceKnowledgeCards(context.Background(), cards, g.reduceReducer(), ReduceOptions{MaxInputChars: analysisReduceInputChars})
+		if err != nil {
+			return nil, fmt.Errorf("整集归并: %w", err)
+		}
+		usage.InputUnits += rUsage.InputUnits
+		usage.OutputUnits += rUsage.OutputUnits
+		usage.RetryCount += rUsage.RetryCount
+		if reduced != nil {
+			if verrs := ValidateReducedCard(reduced, cards); len(verrs) > 0 {
+				return nil, fmt.Errorf("整集归并校验失败: %w", errors.Join(verrs...))
+			}
+			final = reduced
+		}
+	}
+	return &AnalyzeResult{Card: final, Model: model, Usage: usage}, nil
+}
+
+// reduceReducer 返回基于 chat 的归并 reducer（可用 reduceFn 注入替换）。
+func (g *GroqProvider) reduceReducer() AnalysisReduceFunc {
+	if g.reduceFn != nil {
+		return g.reduceFn
+	}
+	return func(ctx context.Context, candidatesText string) (*KnowledgeCard, TaskUsage, error) {
+		content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+			{"role": "system", "content": analysisReduceSystemPrompt + "\n\n必须只输出一个 JSON 对象。"},
+			{"role": "user", "content": "请归并以下候选知识卡：\n\n" + candidatesText},
+		}, "object")
+		if err != nil {
+			return nil, usage, err
+		}
+		card := &KnowledgeCard{}
+		if err := parseJSONLoose(content, card); err != nil {
+			return nil, usage, fmt.Errorf("解析归并结果失败（原始输出: %s）: %w", truncate(content, 200), err)
+		}
+		return card, usage, nil
+	}
 }
 
 func (g *GroqProvider) waitBetweenAnalysisWindows() {
@@ -559,4 +601,16 @@ func firstNonZero(vals ...int) int {
 		}
 	}
 	return 0
+}
+
+// WithReduceFunc 注入归并 reducer（测试用）。
+func (g *GroqProvider) WithReduceFunc(fn AnalysisReduceFunc) *GroqProvider {
+	g.reduceFn = fn
+	return g
+}
+
+// WithoutReduce 关闭整集归并（兼容旧确定性拼接语义/测试）。
+func (g *GroqProvider) WithoutReduce() *GroqProvider {
+	g.disableReduce = true
+	return g
 }
