@@ -645,7 +645,6 @@ func TestArticleHistory_ExportDoesNotPublish(t *testing.T) {
 // TestFindUsageByKeyPoint U02：重点被精读文/文章采用时，反查返回正确使用记录。
 func TestFindUsageByKeyPoint(t *testing.T) {
 	srv := newTestServer(t)
-	session := claimOwnerAndLogin(t, srv, "u02@example.com", "password123")
 	ctx := t.Context()
 	podcast, _ := srv.store.CreatePodcast(ctx, "https://feed.example.com/u02.xml", "U02", "", "")
 	srv.store.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "u02-1", Title: "U02 单集", AudioURL: "https://a.mp3"}})
