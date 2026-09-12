@@ -85,12 +85,12 @@ func TestGroq_Analyze(t *testing.T) {
 	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
 		return `{"title":"通胀","summary":{"text":"概览","citations":["seg-0001"]},"keyPoints":[{"content":"要点","description":"d","citations":["seg-0001"]}],"chapters":[],"quotes":[],"tags":["经济"],"suggestedQuestions":[]}`, 200, nil
 	}
-	card, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	res, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if card.Title != "通胀" || len(card.KeyPoints) != 1 {
-		t.Errorf("卡片解析错误: %+v", card)
+	if res.Card.Title != "通胀" || len(res.Card.KeyPoints) != 1 {
+		t.Errorf("卡片解析错误: %+v", res.Card)
 	}
 }
 
@@ -107,12 +107,12 @@ func TestGroq_ChatComplete_SchemaModeHTTP(t *testing.T) {
 	defer srv.Close()
 
 	g := NewGroqProvider("key").WithBaseURL(srv.URL)
-	card, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
+	res, err := g.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀是物价上升"}})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if card.Title != "通胀" {
-		t.Errorf("卡片标题错误: %q", card.Title)
+	if res.Card.Title != "通胀" {
+		t.Errorf("卡片标题错误: %q", res.Card.Title)
 	}
 }
 
@@ -498,7 +498,7 @@ func TestGroq_AnalyzeWindowParseError(t *testing.T) {
 	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
 		return "not json", 200, nil
 	}
-	_, err := g.analyzeWindow([]Segment{{ID: "s1", Start: 0, End: 5, Text: "x"}})
+	_, _, _, err := g.analyzeWindow([]Segment{{ID: "s1", Start: 0, End: 5, Text: "x"}})
 	if err == nil {
 		t.Fatal("非 JSON 输出应报错")
 	}

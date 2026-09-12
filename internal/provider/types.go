@@ -16,6 +16,10 @@ type TranscriptResult struct {
 	Language string    `json:"language"`
 	Text     string    `json:"text"`
 	Segments []Segment `json:"segments"`
+	// Model 是响应报告的实际转录模型（B03）；Provider 未报告时为空，不得冒充配置值。
+	Model string `json:"-"`
+	// Usage 是响应报告的实际计量单位；未知保持零值，由调用方记为未知而非免费。
+	Usage TaskUsage `json:"-"`
 }
 
 // CitedText 带 Citation 的文本（摘要等）。
@@ -79,7 +83,7 @@ type TranscriptionProvider interface {
 // AnalysisProvider 内容分析接口，生成 KnowledgeCard。
 // segments 提供稳定 Segment.ID，模型必须用 ID 表达 Citation（不能自行估算时间戳）。
 type AnalysisProvider interface {
-	Analyze(transcript string, segments []Segment) (*KnowledgeCard, error)
+	Analyze(transcript string, segments []Segment) (*AnalyzeResult, error)
 	Name() string
 }
 
@@ -297,6 +301,18 @@ type Highlight struct {
 // HighlightSet 一个 Source 的全部高光片段。
 type HighlightSet struct {
 	Highlights []Highlight `json:"highlights"`
+	// Model/Usage 运行期字段（不进入持久化 payload）：实际模型与调用计量（B03）。
+	Model string    `json:"-"`
+	Usage TaskUsage `json:"-"`
+}
+
+// AnalyzeResult 分析产物与实际调用身份（B03）。
+type AnalyzeResult struct {
+	Card *KnowledgeCard
+	// Model 是响应报告的实际模型（多窗路径取窗口响应报告值）；未知为空。
+	Model string
+	// Usage 是全部窗口调用的计量合计。
+	Usage TaskUsage
 }
 
 // ParaphraseResult 复述讲解输出（GeneratedDerivative，ADR-0018）。

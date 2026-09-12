@@ -216,3 +216,69 @@ func TestEnqueueJobIdempotent_RejectsEmptyIntent(t *testing.T) {
 		t.Fatalf("空意图应显式拒绝: %v", err)
 	}
 }
+
+// TestUsageReceipt_DedupAndUnknownPrice 同一 receipt 重放不重复累计；未知价格记 NULL 不冒充免费。
+func TestUsageReceipt_DedupAndUnknownPrice(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	r := models.UsageReceipt{
+		ReceiptID: "job-1:analysis", AttemptID: "job-1:0", Operation: "analysis",
+		Provider: "groq", Model: "llama-test", InputUnits: 100, OutputUnits: 40,
+		CostKnown: true, CostCents: 7,
+	}
+	if err := s.RecordUsageReceipt(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordUsageReceipt(ctx, r); err != nil {
+		t.Fatalf("重放不应报错: %v", err)
+	}
+	var n int
+	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_records WHERE receipt_id=?`, r.ReceiptID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("同一 receipt 只应有一行，实际 %d", n)
+	}
+	var cost *float64
+	if err := s.DB.QueryRowContext(ctx, `SELECT estimated_cost FROM usage_records WHERE receipt_id=?`, r.ReceiptID).Scan(&cost); err != nil {
+		t.Fatal(err)
+	}
+	if cost == nil || *cost != 7 {
+		t.Fatalf("已知费用应为 7 分，实际 %v", cost)
+	}
+
+	// 未知价格：estimated_cost NULL
+	unknown := r
+	unknown.ReceiptID = "job-2:analysis"
+	unknown.CostKnown = false
+	if err := s.RecordUsageReceipt(ctx, unknown); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `SELECT estimated_cost FROM usage_records WHERE receipt_id=?`, unknown.ReceiptID).Scan(&cost); err != nil {
+		t.Fatal(err)
+	}
+	if cost != nil {
+		t.Fatalf("未知价格不得记为数值（不冒充免费）: %v", *cost)
+	}
+}
+
+// TestResolveUsageCost 双零=确定零成本；有价格按计算；无价格 unknown。
+func TestResolveUsageCost(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	cents, known, err := s.ResolveUsageCost(ctx, "groq", "m0", 0, 0)
+	if err != nil || !known || cents != 0 {
+		t.Fatalf("零单位应为确定零成本: %d %v %v", cents, known, err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "priced", InputCentsPerMillion: 50, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	cents, known, err = s.ResolveUsageCost(ctx, "groq", "priced", 2_000_000, 0)
+	if err != nil || !known || cents != 100 {
+		t.Fatalf("已知价格应计算费用（向上取整）: %d %v %v", cents, known, err)
+	}
+	_, known, err = s.ResolveUsageCost(ctx, "groq", "unpriced", 10, 10)
+	if err != nil || known {
+		t.Fatalf("未配置价格应 unknown: %v %v", known, err)
+	}
+}

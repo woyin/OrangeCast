@@ -80,7 +80,7 @@ func (g *GroqProvider) ComposeDigest(ctx context.Context, req DigestWritingReque
 	if req.TargetLengthChars > 0 {
 		sys += fmt.Sprintf("\n目标正文长度约 %d 字。", req.TargetLengthChars)
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": sys},
 		{"role": "user", "content": "生成精读文：\n\n" + sb.String()},
 	}, "object")
@@ -122,7 +122,7 @@ func (g *GroqProvider) WeaveDigestFacts(ctx context.Context, req DigestWeaveRequ
 	for _, b := range req.Blocks {
 		existing.WriteString(fmt.Sprintf("- (%s) %s\n", b.Type, b.Text))
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": digestWeaveSystemPrompt},
 		{"role": "user", "content": "已有内容块（不可改动）：\n" + existing.String() + "\n" + sb.String()},
 	}, "object")
@@ -156,7 +156,7 @@ func (g *GroqProvider) RewriteDigest(ctx context.Context, req DigestRewriteReque
 		sb.WriteString(fmt.Sprintf("(%s) %s\n", b.Type, b.Text))
 	}
 	sys := fmt.Sprintf(digestRewriteSystemPrompt, maxTags, maxChars)
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": sys},
 		{"role": "user", "content": "改写为小红书笔记版：\n\n" + sb.String()},
 	}, "object")

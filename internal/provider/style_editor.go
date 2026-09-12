@@ -19,7 +19,7 @@ func (g *GroqProvider) ReviewStyle(ctx context.Context, request StyleReviewReque
 	if err != nil {
 		return nil, err
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": styleEditorSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": styleEditorSystemPrompt + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
 	if err != nil {
 		return nil, err
 	}

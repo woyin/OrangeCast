@@ -88,7 +88,7 @@ func TestGroqAnalyze_SplitsWindowsAndMergesCitations(t *testing.T) {
 		}
 		return `{"title":"Second","summary":{"text":"summary two","citations":["seg-0002"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":["python","ai"],"suggestedQuestions":[]}`, 200, nil
 	}
-	card, err := g.Analyze("ignored", segments)
+	res, err := g.Analyze("ignored", segments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestGroqAnalyze_SplitsWindowsAndMergesCitations(t *testing.T) {
 	if waits != 1 {
 		t.Fatalf("analysis windows should be rate paced, got %d waits", waits)
 	}
-	if card.Title != "First" || card.Summary.Text != "summary one\n\nsummary two" {
-		t.Errorf("merged card mismatch: %+v", card)
+	if res.Card.Title != "First" || res.Card.Summary.Text != "summary one\n\nsummary two" {
+		t.Errorf("merged card mismatch: %+v", res.Card)
 	}
-	if len(card.Summary.Citations) != 2 || card.Summary.Citations[0] != "seg-0001" || card.Summary.Citations[1] != "seg-0002" {
-		t.Errorf("summary citations must preserve both windows: %+v", card.Summary.Citations)
+	if len(res.Card.Summary.Citations) != 2 || res.Card.Summary.Citations[0] != "seg-0001" || res.Card.Summary.Citations[1] != "seg-0002" {
+		t.Errorf("summary citations must preserve both windows: %+v", res.Card.Summary.Citations)
 	}
-	if len(card.Tags) != 2 || card.Tags[0] != "python" || card.Tags[1] != "ai" {
-		t.Errorf("tags should be stable and deduplicated: %+v", card.Tags)
+	if len(res.Card.Tags) != 2 || res.Card.Tags[0] != "python" || res.Card.Tags[1] != "ai" {
+		t.Errorf("tags should be stable and deduplicated: %+v", res.Card.Tags)
 	}
 }
 

@@ -77,8 +77,15 @@ func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 		return nil, fmt.Errorf("groq 转录失败 HTTP %d: %s", code, string(data))
 	}
 	var raw struct {
+		Model    string `json:"model"`
 		Text     string `json:"text"`
 		Language string `json:"language"`
+		Usage    struct {
+			InputTokens      int `json:"input_tokens"`
+			PromptTokens     int `json:"prompt_tokens"`
+			OutputTokens     int `json:"output_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 		Segments []struct {
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
@@ -88,7 +95,15 @@ func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("解析 groq 转录响应: %w", err)
 	}
-	res := &TranscriptResult{Language: raw.Language, Text: strings.TrimSpace(raw.Text)}
+	res := &TranscriptResult{
+		Language: raw.Language,
+		Text:     strings.TrimSpace(raw.Text),
+		Model:    raw.Model,
+		Usage: TaskUsage{
+			InputUnits:  firstNonZero(raw.Usage.InputTokens, raw.Usage.PromptTokens),
+			OutputUnits: firstNonZero(raw.Usage.OutputTokens, raw.Usage.CompletionTokens),
+		},
+	}
 	for i, s := range raw.Segments {
 		// 稳定 Segment ID（ADR-0008）：程序分配，模型只引用 ID，不估算时间戳。
 		res.Segments = append(res.Segments, Segment{
@@ -152,14 +167,14 @@ func (g *GroqProvider) complete(messages []map[string]string, jsonMode string) (
 
 // completeContext keeps long-running editorial calls bound to their owning task.
 func (g *GroqProvider) completeContext(ctx context.Context, messages []map[string]string, jsonMode string) (string, int, error) {
-	content, code, _, err := g.completeContextWithUsage(ctx, messages, jsonMode)
+	content, code, _, _, err := g.completeContextWithUsage(ctx, messages, jsonMode)
 	return content, code, err
 }
 
-func (g *GroqProvider) completeContextWithUsage(ctx context.Context, messages []map[string]string, jsonMode string) (string, int, TaskUsage, error) {
+func (g *GroqProvider) completeContextWithUsage(ctx context.Context, messages []map[string]string, jsonMode string) (string, int, string, TaskUsage, error) {
 	if g.chatCompleteFn != nil {
 		content, code, err := g.chatCompleteFn(messages, jsonMode)
-		return content, code, TaskUsage{}, err
+		return content, code, "", TaskUsage{}, err
 	}
 	model := g.model
 	if model == "" {
@@ -174,12 +189,13 @@ func (g *GroqProvider) completeContextWithUsage(ctx context.Context, messages []
 	}
 	data, code, retries, err := postJSONWithMeta(ctx, g.base()+"/chat/completions", g.apiKey, payload)
 	if err != nil {
-		return "", code, TaskUsage{}, err
+		return "", code, "", TaskUsage{}, err
 	}
 	if code != http.StatusOK {
-		return "", code, TaskUsage{}, fmt.Errorf("groq chat 失败 HTTP %d: %s", code, string(data))
+		return "", code, "", TaskUsage{}, fmt.Errorf("groq chat 失败 HTTP %d: %s", code, string(data))
 	}
 	var response struct {
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
@@ -191,34 +207,43 @@ func (g *GroqProvider) completeContextWithUsage(ctx context.Context, messages []
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
-		return "", code, TaskUsage{}, fmt.Errorf("解析 groq chat 响应: %w", err)
+		return "", code, "", TaskUsage{}, fmt.Errorf("解析 groq chat 响应: %w", err)
 	}
 	if len(response.Choices) == 0 {
-		return "", code, TaskUsage{}, fmt.Errorf("groq 返回空 choices")
+		return "", code, "", TaskUsage{}, fmt.Errorf("groq 返回空 choices")
 	}
-	return response.Choices[0].Message.Content, code, TaskUsage{InputUnits: response.Usage.PromptTokens, OutputUnits: response.Usage.CompletionTokens, RetryCount: retries}, nil
+	return response.Choices[0].Message.Content, code, response.Model, TaskUsage{InputUnits: response.Usage.PromptTokens, OutputUnits: response.Usage.CompletionTokens, RetryCount: retries}, nil
 }
 
 // Analyze 生成 KnowledgeCard（Evidence-first）。用 json_object + prompt 约束 + 容错解析，
 // 再由调用方（CitationValidator）强校验：Citation 必须引用真实 Segment.ID，金句必须逐字匹配。
-func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*AnalyzeResult, error) {
 	_ = transcript // Segment 才是可引用的最小证据单位。
 	windows := splitAnalysisWindows(segments, analysisWindowCharBudget)
 	if len(windows) == 0 {
 		return nil, fmt.Errorf("无法分析空转录稿")
 	}
 	cards := make([]*KnowledgeCard, 0, len(windows))
+	model := ""
+	usage := TaskUsage{}
 	for i, window := range windows {
 		if i > 0 {
 			g.waitBetweenAnalysisWindows()
 		}
-		card, err := g.analyzeWindow(window)
+		card, windowModel, windowUsage, err := g.analyzeWindow(window)
 		if err != nil {
 			return nil, err
 		}
 		cards = append(cards, card)
+		if windowModel != "" {
+			model = windowModel
+		}
+		// 归并（mergeKnowledgeCards）是本地纯计算，不产生额外调用费；分窗用量合计。
+		usage.InputUnits += windowUsage.InputUnits
+		usage.OutputUnits += windowUsage.OutputUnits
+		usage.RetryCount += windowUsage.RetryCount
 	}
-	return mergeKnowledgeCards(cards), nil
+	return &AnalyzeResult{Card: mergeKnowledgeCards(cards), Model: model, Usage: usage}, nil
 }
 
 func (g *GroqProvider) waitBetweenAnalysisWindows() {
@@ -229,23 +254,23 @@ func (g *GroqProvider) waitBetweenAnalysisWindows() {
 	time.Sleep(analysisWindowMinInterval)
 }
 
-func (g *GroqProvider) analyzeWindow(segments []Segment) (*KnowledgeCard, error) {
+func (g *GroqProvider) analyzeWindow(segments []Segment) (*KnowledgeCard, string, TaskUsage, error) {
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
-	content, _, err := g.complete([]map[string]string{
+	content, _, model, usage, err := g.completeContextWithUsage(context.Background(), []map[string]string{
 		{"role": "system", "content": analysisSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
 		{"role": "user", "content": "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String()},
 	}, "object")
 	if err != nil {
-		return nil, err
+		return nil, "", TaskUsage{}, err
 	}
 	card := &KnowledgeCard{}
 	if err := parseJSONLoose(content, card); err != nil {
-		return nil, fmt.Errorf("解析 KnowledgeCard 失败（原始输出: %s）: %w", truncate(content, 200), err)
+		return nil, "", TaskUsage{}, fmt.Errorf("解析 KnowledgeCard 失败（原始输出: %s）: %w", truncate(content, 200), err)
 	}
-	return card, nil
+	return card, model, usage, nil
 }
 
 // splitAnalysisWindows 保持 Segment 完整，避免 Citation 横跨被截断的文本。
@@ -372,7 +397,7 @@ func (g *GroqProvider) GenerateHighlights(segments []Segment) (*HighlightSet, er
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
-	content, _, err := g.complete([]map[string]string{
+	content, _, model, usage, err := g.completeContextWithUsage(context.Background(), []map[string]string{
 		{"role": "system", "content": highlightSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
 		{"role": "user", "content": "请基于以下全部带编号片段的播客转录稿，选出最值得听的高光区间：\n\n" + sb.String()},
 	}, "object")
@@ -383,6 +408,7 @@ func (g *GroqProvider) GenerateHighlights(segments []Segment) (*HighlightSet, er
 	if err := parseJSONLoose(content, hs); err != nil {
 		return nil, fmt.Errorf("解析高光片段失败（原始输出: %s）: %w", truncate(content, 200), err)
 	}
+	hs.Model, hs.Usage = model, usage
 	return hs, nil
 }
 
@@ -523,4 +549,14 @@ func validReferenceIDs(ids []string, retrieved []Chunk) []string {
 		}
 	}
 	return out
+}
+
+// firstNonZero 返回第一个非零值（兼容不同 Provider 对转录用量的字段命名）。
+func firstNonZero(vals ...int) int {
+	for _, v := range vals {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }

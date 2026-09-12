@@ -102,3 +102,70 @@ func TestWorker_UnknownResultReexecutes(t *testing.T) {
 		t.Fatalf("重执行应正常落库: %v %+v", err, d)
 	}
 }
+
+// TestWorker_RecordsActualModelAndUsage B03：产物血缘记录实际模型；用量以 receipt 记账；
+// 重复记账（重放）不产生第二行。
+func TestWorker_RecordsActualModelAndUsage(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	up, err := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			Transcription: &fakeTranscriber{},
+			Analysis:      &fakeAnalyzer{},
+			QA:            &fakeQA{},
+			Highlight:     &fakeHighlight{},
+		}, nil
+	}
+	if _, err := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe); err != nil {
+		t.Fatal(err)
+	}
+	// 转录完成后自动衔接分析；两步各消费一个任务。
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("transcribe: %v", err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	// 产物模型 = 响应报告的实际模型，而非固定字符串。
+	var cardModel string
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT model FROM artifact_versions WHERE source_id=? AND kind='knowledge_card'`, up.ID).Scan(&cardModel); err != nil {
+		t.Fatal(err)
+	}
+	if cardModel != "fake-analysis-model" {
+		t.Fatalf("卡片版本应记录实际模型，实际 %q", cardModel)
+	}
+
+	// 用量记账：模型/单位来自 fake 报告值。
+	var opModel string
+	var inUnits, outUnits int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT model, input_units, output_units FROM usage_records WHERE operation='analysis'`).
+		Scan(&opModel, &inUnits, &outUnits); err != nil {
+		t.Fatalf("analysis 用量行缺失: %v", err)
+	}
+	if opModel != "fake-analysis-model" || inUnits != 10 || outUnits != 5 {
+		t.Fatalf("用量记录不符: %s %d/%d", opModel, inUnits, outUnits)
+	}
+
+	// 同 receipt 重放不重复累计。
+	var n int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_records WHERE operation='analysis'`).Scan(&n)
+	jobID := ""
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT substr(receipt_id,1,instr(receipt_id,':analysis')-1) FROM usage_records WHERE operation='analysis'`).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	w.recordCallUsage(ctx, &models.ProcessingJob{ID: jobID, AttemptCount: 0}, "analysis", "fake", "fake-analysis-model", provider.TaskUsage{InputUnits: 10, OutputUnits: 5})
+	var n2 int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_records WHERE operation='analysis'`).Scan(&n2)
+	if n != n2 {
+		t.Fatalf("重放记账不得新增行: %d → %d", n, n2)
+	}
+}

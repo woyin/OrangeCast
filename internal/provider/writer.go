@@ -19,7 +19,7 @@ func (g *GroqProvider) WriteArticle(ctx context.Context, request ArticleWritingR
 	if err != nil {
 		return nil, err
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": articleWriterSystemPrompt + "\n必须只输出一个 JSON 对象。"},
 		{"role": "user", "content": input},
 	}, "object")

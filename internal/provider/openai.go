@@ -115,6 +115,7 @@ func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[s
 	}
 	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
 	var chat struct {
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
 				Content string `json:"content"`
@@ -134,6 +135,7 @@ func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[s
 	}
 	synth, _ := json.Marshal(map[string]any{
 		"output_text": content,
+		"model":       chat.Model,
 		"usage":       map[string]any{"input_tokens": chat.Usage.PromptTokens, "output_tokens": chat.Usage.CompletionTokens},
 	})
 	return synth, retries, nil
@@ -146,6 +148,15 @@ func (o *OpenAIProvider) effectiveAnalysisModel() string {
 		return o.analysisModel
 	}
 	return openaiAnalysisModel
+}
+
+// chatReportedModel 从 chatCompleteWithMeta 合成的响应体提取响应报告的实际模型（B03）。
+func chatReportedModel(data []byte) string {
+	var response struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(data, &response)
+	return response.Model
 }
 
 // chatUsage 从 chatCompleteWithMeta 合成的响应体提取用量（input/output tokens 与重试次数）。
@@ -202,8 +213,14 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 		return nil, fmt.Errorf("openai 转录失败 HTTP %d: %s", resp.StatusCode, string(data))
 	}
 	var raw struct {
+		Model    string `json:"model"`
 		Text     string `json:"text"`
 		Language string `json:"language"`
+		Usage    struct {
+			InputTokens  int `json:"input_tokens"`
+			PromptTokens int `json:"prompt_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 		Segments []struct {
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
@@ -213,7 +230,15 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("解析 openai 转录响应: %w", err)
 	}
-	res := &TranscriptResult{Language: raw.Language, Text: raw.Text}
+	res := &TranscriptResult{
+		Language: raw.Language,
+		Text:     raw.Text,
+		Model:    raw.Model,
+		Usage: TaskUsage{
+			InputUnits:  firstNonZero(raw.Usage.InputTokens, raw.Usage.PromptTokens),
+			OutputUnits: raw.Usage.OutputTokens,
+		},
+	}
 	for i, s := range raw.Segments {
 		res.Segments = append(res.Segments, Segment{
 			ID:    fmt.Sprintf("seg-%04d", i+1),
@@ -224,7 +249,7 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 }
 
 // Analyze 走 /chat/completions，schema 以文本随提示词下发（兼容官方与 OpenAI 兼容端点）。
-func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*KnowledgeCard, error) {
+func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*AnalyzeResult, error) {
 	var sb strings.Builder
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
@@ -243,7 +268,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 			},
 		},
 	}
-	data, err := o.chatComplete(context.Background(), payload, "分析")
+	data, meta, err := o.chatCompleteWithMeta(context.Background(), payload, "分析")
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +280,7 @@ func (o *OpenAIProvider) Analyze(transcript string, segments []Segment) (*Knowle
 	if err := parseJSONLoose(r.OutputText, card); err != nil {
 		return nil, fmt.Errorf("解析 openai KnowledgeCard: %w", err)
 	}
-	return card, nil
+	return &AnalyzeResult{Card: card, Model: chatReportedModel(data), Usage: chatUsage(data, meta)}, nil
 }
 
 // Answer 检索相关 Segment 并基于证据回答查证型问题。
@@ -360,7 +385,7 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 			},
 		},
 	}
-	data, err := o.chatComplete(context.Background(), payload, "高光")
+	data, meta, err := o.chatCompleteWithMeta(context.Background(), payload, "高光")
 	if err != nil {
 		return nil, err
 	}
@@ -372,6 +397,7 @@ func (o *OpenAIProvider) GenerateHighlights(segments []Segment) (*HighlightSet, 
 	if err := parseJSONLoose(r.OutputText, hs); err != nil {
 		return nil, fmt.Errorf("解析 openai 高光: %w", err)
 	}
+	hs.Model, hs.Usage = chatReportedModel(data), chatUsage(data, meta)
 	return hs, nil
 }
 

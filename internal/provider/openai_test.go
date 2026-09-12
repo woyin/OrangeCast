@@ -39,12 +39,12 @@ func TestOpenAI_Analyze(t *testing.T) {
 	defer srv.Close()
 
 	o := NewOpenAIProvider("key").WithBaseURL(srv.URL)
-	card, err := o.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
+	res, err := o.Analyze("", []Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "通胀"}})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if card.Title != "通胀" || len(card.KeyPoints) != 1 {
-		t.Errorf("卡片解析错误: %+v", card)
+	if res.Card.Title != "通胀" || len(res.Card.KeyPoints) != 1 {
+		t.Errorf("卡片解析错误: %+v", res.Card)
 	}
 }
 

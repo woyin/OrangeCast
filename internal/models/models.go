@@ -516,3 +516,18 @@ const (
 	// KeyPointDismissed is intentionally excluded from content production.
 	KeyPointDismissed KeyPointProductionStatus = "dismissed"
 )
+
+// UsageReceipt 一次远端模型调用的记账身份（B03）。
+// ReceiptID 唯一：同一调用的重复写入不重复累计；CostKnown=false 表示价格未知
+// （estimated_cost 记 NULL，不显示为免费）；本地 TTS 等确定零成本写 CostCents=0。
+type UsageReceipt struct {
+	ReceiptID   string
+	AttemptID   string // 任务 attempt 身份（jobID + attempt）
+	Operation   string
+	Provider    string
+	Model       string // 实际模型；未知为空字符串
+	InputUnits  int
+	OutputUnits int
+	CostCents   int64
+	CostKnown   bool
+}

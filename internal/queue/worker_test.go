@@ -517,7 +517,7 @@ func (f *fakeTranscriber) Name() string { return "fake" }
 
 type fakeAnalyzer struct{ err error }
 
-func (f *fakeAnalyzer) Analyze(transcript string, segments []provider.Segment) (*provider.KnowledgeCard, error) {
+func (f *fakeAnalyzer) Analyze(transcript string, segments []provider.Segment) (*provider.AnalyzeResult, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -530,14 +530,15 @@ func (f *fakeAnalyzer) Analyze(transcript string, segments []provider.Segment) (
 	if len(segments) > 0 {
 		quoteText = segments[0].Text
 	}
-	return &provider.KnowledgeCard{
+	card := &provider.KnowledgeCard{
 		Title:     "T",
 		Summary:   provider.CitedText{Text: "S", Citations: cites},
 		KeyPoints: []provider.KeyPoint{{Content: "KP", Description: "D", Citations: cites}},
 		Chapters:  []provider.Chapter{{Title: "CH", Gist: "G", Citations: cites}},
 		Quotes:    []provider.Quote{{Text: quoteText, Citations: cites}},
 		Tags:      []string{"t"},
-	}, nil
+	}
+	return &provider.AnalyzeResult{Card: card, Model: "fake-analysis-model", Usage: provider.TaskUsage{InputUnits: 10, OutputUnits: 5}}, nil
 }
 func (f *fakeAnalyzer) Name() string { return "fake" }
 
@@ -1098,13 +1099,13 @@ func TestDoAnalyze_ValidationFails(t *testing.T) {
 // fakeAnalyzerBadCitations 返回引用不存在 Segment 的卡片（触发 ValidateCard 拒绝）。
 type fakeAnalyzerBadCitations struct{}
 
-func (f *fakeAnalyzerBadCitations) Analyze(transcript string, segments []provider.Segment) (*provider.KnowledgeCard, error) {
-	return &provider.KnowledgeCard{
+func (f *fakeAnalyzerBadCitations) Analyze(transcript string, segments []provider.Segment) (*provider.AnalyzeResult, error) {
+	return &provider.AnalyzeResult{Card: &provider.KnowledgeCard{
 		Title:     "T",
 		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-9999"}}, // 不存在
 		KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-9999"}}},
 		Chapters:  []provider.Chapter{{Title: "CH", Citations: []string{"seg-9999"}}},
-	}, nil
+	}}, nil
 }
 func (f *fakeAnalyzerBadCitations) Name() string { return "fake-bad" }
 

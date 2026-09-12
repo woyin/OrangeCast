@@ -46,7 +46,7 @@ func (g *GroqProvider) Curate(ctx context.Context, request CuratorRequest) (*Cur
 	if err != nil {
 		return nil, err
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": curatorSystemPrompt + "\n必须只输出 JSON。"}, {"role": "user", "content": input}}, "object")
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": curatorSystemPrompt + "\n必须只输出 JSON。"}, {"role": "user", "content": input}}, "object")
 	if err != nil {
 		return nil, err
 	}

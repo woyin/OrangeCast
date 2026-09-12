@@ -34,7 +34,7 @@ func (g *GroqProvider) Scout(ctx context.Context, request ScoutRequest) (*ScoutR
 	if err != nil {
 		return nil, err
 	}
-	content, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": scoutPrompt(request) + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
+	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{{"role": "system", "content": scoutPrompt(request) + "\n必须只输出一个 JSON 对象。"}, {"role": "user", "content": input}}, "object")
 	if err != nil {
 		return nil, err
 	}

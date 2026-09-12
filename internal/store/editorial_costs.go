@@ -156,3 +156,57 @@ func (s *Store) CheckEditorialBudget(ctx context.Context, profileID string, draf
 	}
 	return nil
 }
+
+// ResolveUsageCost 解析一次调用的费用与已知性（B03）：
+// 双侧单位都为 0 视为确定零成本；已配置价格按单价计算（不足一分向上取整）；
+// 未配置价格返回 known=false——调用方以 NULL 记账，不把未知价格显示为免费。
+func (s *Store) ResolveUsageCost(ctx context.Context, providerName, model string, inputUnits, outputUnits int) (int64, bool, error) {
+	if inputUnits == 0 && outputUnits == 0 {
+		return 0, true, nil
+	}
+	price, err := s.GetModelPrice(ctx, providerName, model)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	numerator := int64(inputUnits)*price.InputCentsPerMillion + int64(outputUnits)*price.OutputCentsPerMillion
+	if numerator == 0 {
+		return 0, true, nil
+	}
+	return (numerator + 999999) / 1000000, true, nil
+}
+
+// RecordUsageReceipt 以远端调用身份幂等记账（B03）：同一 receipt 重复写入被忽略，
+// 不把重复写账等同于一次远端调用；CostKnown=false 时 estimated_cost 记 NULL。
+func (s *Store) RecordUsageReceipt(ctx context.Context, r models.UsageReceipt) error {
+	if r.ReceiptID == "" {
+		return fmt.Errorf("%w: usage receipt requires a receipt id", ErrInvalidEditorialState)
+	}
+	var cost any
+	if r.CostKnown {
+		cost = float64(r.CostCents)
+	}
+	res, err := s.DB.ExecContext(ctx,
+		`INSERT OR IGNORE INTO usage_records (id, operation, provider, model, input_units, output_units, estimated_cost, receipt_id, attempt_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.NewString(), r.Operation, r.Provider, r.Model, r.InputUnits, r.OutputUnits, cost, r.ReceiptID, r.AttemptID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// 重放：同一次远端调用的重复记账被忽略。
+		return nil
+	}
+	return nil
+}
+
+// UpdateUsageCost 在记账行上补写已知费用（同 receipt 幂等；未知不改写为 0）。
+func (s *Store) UpdateUsageCost(ctx context.Context, receiptID string, costCents int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE usage_records SET estimated_cost = ? WHERE receipt_id = ?`,
+		float64(costCents), receiptID)
+	return err
+}

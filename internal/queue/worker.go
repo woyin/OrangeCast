@@ -206,8 +206,13 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 		Text:     result.Text,
 		Segments: result.Segments,
 	})
+	// B03：产物血缘记录响应报告的实际模型；未报告时不冒充配置值，记 unknown。
+	transcribeModel := result.Model
+	if transcribeModel == "" {
+		transcribeModel = "unknown"
+	}
 	version, err := w.store.CreateArtifactVersion(ctx, job.SourceType, job.SourceID,
-		store.KindTranscript, bundle.Transcription.Name(), "whisper-large-v3", "1", job.ID, string(payload))
+		store.KindTranscript, bundle.Transcription.Name(), transcribeModel, "1", job.ID, string(payload))
 	if err != nil {
 		return fmt.Errorf("创建转录版本: %w", err)
 	}
@@ -216,7 +221,7 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 	}
 	w.setSourceStatus(ctx, job, models.StatusTranscribed)
 
-	_ = w.store.RecordUsage(ctx, "transcription", bundle.Transcription.Name(), "", 0, 0, 0)
+	w.recordCallUsage(ctx, job, "transcription", bundle.Transcription.Name(), transcribeModel, result.Usage)
 
 	// 4) 入队分析任务（已有进行中 analyze 则不重复创建）
 	if _, err := w.store.EnqueueAnalyzeForIngestion(ctx, job.SourceType, job.SourceID, job.Automated); err != nil {
@@ -240,18 +245,22 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	}
 
 	// 模型只引用 Segment.ID；程序负责时间范围解析与证据校验（ADR-0008）
-	card, err := bundle.Analysis.Analyze(payload.Text, payload.Segments)
+	analysis, err := bundle.Analysis.Analyze(payload.Text, payload.Segments)
 	if err != nil {
 		return fmt.Errorf("分析: %w", err)
 	}
-	validated, err := provider.ValidateCard(card, payload.Segments)
+	validated, err := provider.ValidateCard(analysis.Card, payload.Segments)
 	if err != nil {
 		return fmt.Errorf("证据校验: %w", err)
 	}
 
 	contentJSON, _ := json.Marshal(validated)
+	analysisModel := analysis.Model
+	if analysisModel == "" {
+		analysisModel = "unknown"
+	}
 	version, err := w.store.CreateArtifactVersion(ctx, job.SourceType, job.SourceID,
-		store.KindKnowledgeCard, bundle.Analysis.Name(), "llama-3.3-70b-versatile", "1", job.ID, string(contentJSON))
+		store.KindKnowledgeCard, bundle.Analysis.Name(), analysisModel, "1", job.ID, string(contentJSON))
 	if err != nil {
 		return fmt.Errorf("创建卡片版本: %w", err)
 	}
@@ -274,7 +283,7 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 		log.Printf("任务 %s KeyPoint 索引刷新失败（不阻塞）: %v", job.ID, err)
 	}
 
-	_ = w.store.RecordUsage(ctx, "analysis", bundle.Analysis.Name(), "", 0, 0, 0)
+	w.recordCallUsage(ctx, job, "analysis", bundle.Analysis.Name(), analysisModel, analysis.Usage)
 
 	if !job.Automated {
 		// Owner 触发的处理才自动附带可选衍生产物；订阅自动采集止于 KeyPoint。
@@ -302,12 +311,17 @@ func (w *Worker) doHighlight(ctx context.Context, job *models.ProcessingJob, bun
 	if err != nil {
 		return fmt.Errorf("高光校验: %w", err)
 	}
+	highlightModel := raw.Model
+	if highlightModel == "" {
+		highlightModel = "unknown"
+	}
 	contentJSON, _ := json.Marshal(validated)
 	version, err := w.store.CreateArtifactVersion(ctx, job.SourceType, job.SourceID,
-		store.KindHighlight, bundle.Highlight.Name(), "llama-3.3-70b-versatile", "1", job.ID, string(contentJSON))
+		store.KindHighlight, bundle.Highlight.Name(), highlightModel, "1", job.ID, string(contentJSON))
 	if err != nil {
 		return fmt.Errorf("创建高光版本: %w", err)
 	}
+	w.recordCallUsage(ctx, job, "highlight", bundle.Highlight.Name(), highlightModel, raw.Usage)
 	return w.store.SetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindHighlight, version)
 }
 
@@ -598,6 +612,17 @@ func (w *Worker) narrateHighlight(ctx context.Context, job *models.ProcessingJob
 	if _, err := w.store.CreateNarration(ctx, job.SourceType, job.SourceID, highlight.ID, result.Voice, result.Model, relPath, duration, result.CharCount, providerName); err != nil {
 		log.Printf("任务 %s Highlight %s 的 Narration 写库失败（音频已合成）: %v", job.ID, highlight.ID, err)
 	}
+	// B03：本地 TTS 是确定零成本调用（无远端计费单位），按合成字符计量、费用记 0。
+	_ = w.store.RecordUsageReceipt(ctx, models.UsageReceipt{
+		ReceiptID:   fmt.Sprintf("%s:narration:%s", job.ID, highlight.ID),
+		AttemptID:   fmt.Sprintf("%s:%d", job.ID, job.AttemptCount),
+		Operation:   "narration",
+		Provider:    providerName,
+		Model:       result.Model,
+		InputUnits:  result.CharCount,
+		OutputUnits: int(duration),
+		CostKnown:   true,
+	})
 	return nil
 }
 
@@ -611,4 +636,30 @@ func (w *Worker) nextNarrationVersion(ctx context.Context, sourceType models.Sou
 		return 1
 	}
 	return cur.Version + 1
+}
+
+// recordCallUsage 以任务 attempt + 远端调用身份记账（B03）。
+// receipt 唯一：同一任务同一阶段的重复记账（重放/恢复）不重复累计；
+// 价格未知时记 NULL（不显示为免费），本地零成本调用记确定 0。
+func (w *Worker) recordCallUsage(ctx context.Context, job *models.ProcessingJob, operation, providerName, model string, usage provider.TaskUsage) {
+	receipt := fmt.Sprintf("%s:%s", job.ID, operation)
+	receiptErr := w.store.RecordUsageReceipt(ctx, models.UsageReceipt{
+		ReceiptID:   receipt,
+		AttemptID:   fmt.Sprintf("%s:%d", job.ID, job.AttemptCount),
+		Operation:   operation,
+		Provider:    providerName,
+		Model:       model,
+		InputUnits:  usage.InputUnits,
+		OutputUnits: usage.OutputUnits,
+	})
+	if receiptErr == nil && (usage.InputUnits > 0 || usage.OutputUnits > 0) {
+		costCents, known, err := w.store.ResolveUsageCost(ctx, providerName, model, usage.InputUnits, usage.OutputUnits)
+		if err == nil && known {
+			// 已知价格：补写费用到同一 receipt 行（幂等更新，非第二次调用）。
+			_ = w.store.UpdateUsageCost(ctx, receipt, costCents)
+		}
+	}
+	if receiptErr != nil {
+		log.Printf("任务 %s 记账失败（operation=%s）: %v", job.ID, operation, receiptErr)
+	}
 }
