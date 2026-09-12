@@ -420,3 +420,62 @@ func TestProposalDecisionLifecycle(t *testing.T) {
 		t.Fatalf("暂存后应为 saved: %+v", got2)
 	}
 }
+
+// TestCreationArticleBridge C08：确认后桥接幂等；旧文章可读；未确认不桥接。
+func TestCreationArticleBridge(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, Status: "proposed", WorkingTitle: "桥接方向",
+		ProposedClaim: "桥接主张", CreationForm: "article",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.AcceptCreationProposal(ctx, proposal.ID, "Owner 主张"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateCreationBrief(ctx, models.CreationBrief{
+		CreationProposalID: proposal.ID, OwnerClaim: "Owner 主张",
+		MaterialPlanJSON: `["kp-1"]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 未确认 Brief → 桥接拒绝。
+	if _, err := srv.store.EnsureCreationArticleLink(ctx, proposal.ID, brief.ID, "v2"); err == nil {
+		t.Fatal("未确认 Brief 不得桥接")
+	}
+	// 确认 Brief → 桥接成功。
+	if err := srv.store.ConfirmCreationBrief(ctx, brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	link1, err := srv.store.EnsureCreationArticleLink(ctx, proposal.ID, brief.ID, "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 幂等：重复桥接只产生一组映射。
+	link2, err := srv.store.EnsureCreationArticleLink(ctx, proposal.ID, brief.ID, "v2")
+	if err != nil || link2.ArticleProposalID != link1.ArticleProposalID {
+		t.Fatalf("重复桥接应幂等: %+v %+v", link1, link2)
+	}
+	// 旧 Article 可读。
+	ap, err := srv.store.GetArticleProposal(ctx, link1.ArticleProposalID)
+	if err != nil || ap.Title != "桥接方向" {
+		t.Fatalf("旧 ArticleProposal 应可读: %+v %v", ap, err)
+	}
+	ab, err := srv.store.GetArticleBrief(ctx, link1.ArticleBriefID)
+	if err != nil || ab.Status != "confirmed" {
+		t.Fatalf("旧 ArticleBrief 应可读: %+v %v", ab, err)
+	}
+	// 反向查询。
+	revLink, err := srv.store.GetCreationArticleLinkByArticleProposal(ctx, link1.ArticleProposalID)
+	if err != nil || revLink.CreationProposalID != proposal.ID {
+		t.Fatalf("反向查询应有效: %+v %v", revLink, err)
+	}
+}
