@@ -40,11 +40,13 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 		return err
 	}
 	var frozenNoteIDs []string
+	var frozenSnapshotID string
 	exec, execErr := w.store.GetJobExecution(ctx, job.ID)
 	if execErr == nil && exec.InputSnapshotJSON != "" {
 		var snap digestInputSnapshot
 		_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
 		frozenNoteIDs = snap.NoteIDs
+		frozenSnapshotID = snap.SnapshotID
 	}
 	// G02：读取任务断点——composed/composed_validated 阶段保存完整初稿，
 	// 重试直接复用，不重复调用上游模型。
@@ -114,6 +116,7 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	digest, err := w.store.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
 		SourceType: job.SourceType, SourceID: job.SourceID, Title: draft.Title, Degraded: degraded,
 		Provider: digestProviderName(bundle.DigestWriter), Model: digestProviderName(bundle.DigestWriter), PromptVersion: provider.DigestWriterPromptVersion,
+		SourceSnapshotID: frozenSnapshotID,
 	}, digestModelsBlocks(blocks), searchRows, unresolvedGaps)
 	if err != nil {
 		return fmt.Errorf("保存精读文: %w", err)

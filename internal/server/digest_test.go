@@ -289,3 +289,81 @@ func TestDigestEdit_DerivesRevision(t *testing.T) {
 		t.Fatalf("重复提交应 409: %d", rec.Code)
 	}
 }
+
+// TestDigestDetail_CitationViewsAndCopy G04：草稿页引用显示名称+冻结定位；
+// 复制/下载输出与页面共享同一解析逻辑。
+func TestDigestDetail_CitationViewsAndCopy(t *testing.T) {
+	srv, session, csrf, epID := seedDigestEpisode(t)
+	ctx := t.Context()
+	// 冻结来源快照（B01）
+	snap, err := srv.store.FreezeSourceSnapshot(ctx, models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "引用定位",
+		Provider: "p", Model: "m", PromptVersion: "v", SourceSnapshotID: snap.ID,
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "带依据的转述", Citations: []string{"seg-0001"}},
+		{Type: models.DigestBlockAIExpansion, Text: "AI 展开\\n多行内容"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 页面：引用渲染为可点击冻结定位（含名称），而非裸 seg 字符串
+	rec := doWithCookie(srv, session, http.MethodGet, "/digest/"+d.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("页面应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"依据：", "/api/source-snapshots/" + snap.ID, "精读单集", "copy-md-btn"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("页面缺少 %q", want)
+		}
+	}
+	// Markdown 导出与页面同一解析：含来源名称与快照链接，多行 AI 块转义正确
+	rec = doWithCookie(srv, session, http.MethodGet, "/digest/"+d.ID+"/markdown")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("导出应 200: %d", rec.Code)
+	}
+	md := rec.Body.String()
+	for _, want := range []string{"依据：", "/api/source-snapshots/" + snap.ID, "[!ai-generated]", "多行内容"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("导出缺少 %q：%s", want, md)
+		}
+	}
+	_ = csrf
+}
+
+// TestDigestDetail_StaleSnapshotNoFakeLink G04：依据失效显示明确状态，不生成伪链接。
+func TestDigestDetail_StaleSnapshotNoFakeLink(t *testing.T) {
+	srv, session, epID := seedSnapshotSource(t)
+	snap, err := srv.store.FreezeSourceSnapshot(t.Context(), models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := srv.store.CreateEpisodeDigest(t.Context(), &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "失效依据",
+		Provider: "p", Model: "m", PromptVersion: "v", SourceSnapshotID: snap.ID,
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "转述", Citations: []string{"seg-0001"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Purge 来源 → 快照失效
+	if err := srv.store.MarkSourceSnapshotsPurged(t.Context(), models.SourceEpisode, epID); err != nil {
+		t.Fatal(err)
+	}
+	rec := doWithCookie(srv, session, http.MethodGet, "/digest/"+d.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("页面应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "依据已失效") {
+		t.Fatalf("应显示失效状态: %s", body)
+	}
+	if strings.Contains(body, "/api/source-snapshots/") {
+		t.Fatal("失效依据不得生成伪快照链接")
+	}
+}

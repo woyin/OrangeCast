@@ -74,9 +74,9 @@ func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDiges
 		degraded = 1
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO episode_digests (id,source_type,source_id,version,title,degraded,provider,model,prompt_version,parent_digest_id,reason)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		d.ID, string(d.SourceType), d.SourceID, d.Version, d.Title, degraded, d.Provider, d.Model, d.PromptVersion, d.ParentDigestID, d.Reason); err != nil {
+		`INSERT INTO episode_digests (id,source_type,source_id,version,title,degraded,provider,model,prompt_version,parent_digest_id,reason,source_snapshot_id)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, string(d.SourceType), d.SourceID, d.Version, d.Title, degraded, d.Provider, d.Model, d.PromptVersion, d.ParentDigestID, d.Reason, d.SourceSnapshotID); err != nil {
 		return nil, fmt.Errorf("写入精读文: %w", err)
 	}
 	for i := range blocks {

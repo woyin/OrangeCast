@@ -8,6 +8,8 @@
   </p>
   <div style="margin-top:0.75rem">
     <a class="btn" href="/digest/{{.Digest.ID}}/markdown">下载 Markdown</a>
+    <button class="btn btn-secondary" id="copy-md-btn" type="button">复制 Markdown</button>
+    <span id="copy-md-feedback" class="meta" aria-live="polite"></span>
     <a class="btn btn-secondary" href="/digests">返回列表</a>
   </div>
 </section>
@@ -22,9 +24,15 @@
     {{else}}<p class="tag tag-cited">本集转述</p>{{end}}
     <p>{{.Text}}</p>
     {{if .Citations}}
+    {{range .Citations}}
+    {{end}}
+    {{end}}
+    {{with index $.CitationViews .ID}}
     <p class="meta">
-      {{if .TargetSourceID}}来源文档：{{.TargetSourceID}} · {{else}}本集 · {{end}}
-      {{range $i, $c := .Citations}}{{if $i}} {{end}}{{$c}}{{end}}
+      依据：
+      {{range $i, $cv := .}}{{if $i}} · {{end}}
+      {{if $cv.Frozen}}<a href="{{$cv.URL}}">{{$cv.Label}}</a>{{else}}{{$cv.Label}}{{end}}
+      {{end}}
     </p>
     {{end}}
     {{if or (eq .Type "paraphrase") (eq .Type "ai_expansion")}}
@@ -108,3 +116,27 @@
   {{end}}
 </section>
 {{end}}
+
+<script>
+(function() {
+  var btn = document.getElementById('copy-md-btn');
+  var feedback = document.getElementById('copy-md-feedback');
+  if (!btn || !feedback) return;
+  btn.addEventListener('click', function() {
+    var path = window.location.pathname.replace(/\/+$/, '') + '/markdown';
+    fetch(path).then(function(resp) {
+      if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+      return resp.text();
+    }).then(function(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      throw new Error('剪贴板不可用');
+    }).then(function() {
+      feedback.textContent = '已复制（与下载内容一致）';
+    }).catch(function(err) {
+      feedback.textContent = '复制失败：' + err.message + '，请改用下载';
+    });
+  });
+})();
+</script>

@@ -12,6 +12,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -88,9 +89,15 @@ func (srv *Server) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
 	gaps, _ := srv.store.ListDigestFactGaps(r.Context(), d.ID)
 	rewrite, _ := srv.store.GetDigestRewrite(r.Context(), d.ID, models.DigestChannelXiaohongshu)
 
+	// G04：解析每条引用为可点击的冻结快照定位（名称 + 时间/位置）。
+	blockViews := map[string][]digestCitationView{}
+	for _, b := range blocks {
+		blockViews[b.ID] = srv.digestCitationViews(r.Context(), d, b.Citations)
+	}
+
 	if err := srv.tmpl.Render(w, "digest.html", map[string]any{
 		"Digest": d, "Blocks": blocks, "SearchSources": searchSources, "FactGaps": gaps,
-		"Rewrite": rewrite, "CSRF": auth.CSRFValue(r),
+		"Rewrite": rewrite, "CSRF": auth.CSRFValue(r), "CitationViews": blockViews,
 	}); err != nil {
 		http.Error(w, "渲染失败", http.StatusInternalServerError)
 	}
@@ -251,4 +258,69 @@ func (srv *Server) handleDigestRewriteRetry(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	http.Redirect(w, r, "/digest/"+digestID, http.StatusSeeOther)
+}
+
+// digestCitationView 单条引用的展示视图（G04）：节目/文档名 + 时间/位置，
+// 链接指向冻结的确切来源快照；依据不可用时显式标注，不生成伪替代链接。
+type digestCitationView struct {
+	Raw    string
+	Label  string
+	URL    string
+	Frozen bool
+}
+
+// digestCitationViews 解析一个精读修订的引用：优先经修订记录的来源快照读取
+// 冻结内容；无快照的旧修订只给标签不给链接（不指向当前版本冒充依据）。
+func (srv *Server) digestCitationViews(ctx context.Context, d *models.EpisodeDigest, citations []string) []digestCitationView {
+	views := make([]digestCitationView, 0, len(citations))
+	if d.SourceSnapshotID == "" {
+		for _, c := range citations {
+			views = append(views, digestCitationView{Raw: c, Label: c + "（旧修订：未绑定快照）"})
+		}
+		return views
+	}
+	snapshot, audioSegs, docSegs, err := srv.store.SnapshotContent(ctx, d.SourceSnapshotID)
+	if err != nil {
+		for _, c := range citations {
+			views = append(views, digestCitationView{Raw: c, Label: c + "（依据已失效）"})
+		}
+		return views
+	}
+	sourceTitle := snapshot.Title
+	if snapshot.Kind == models.SnapshotKindAudio {
+		segMap := map[string]provider.Segment{}
+		for _, seg := range audioSegs {
+			segMap[seg.ID] = seg
+		}
+		for _, c := range citations {
+			seg, ok := segMap[c]
+			if !ok {
+				views = append(views, digestCitationView{Raw: c, Label: c + "（引用不存在）"})
+				continue
+			}
+			views = append(views, digestCitationView{
+				Raw: c, Frozen: true,
+				Label: fmt.Sprintf("%s · %.0f:%02d–%.0f:%02d", sourceTitle, seg.Start/60, int(seg.Start)%60, seg.End/60, int(seg.End)%60),
+				URL:   fmt.Sprintf("/api/source-snapshots/%s?t=%.1f", d.SourceSnapshotID, seg.Start),
+			})
+		}
+		return views
+	}
+	posMap := map[string]models.DocumentSegment{}
+	for _, ds := range docSegs {
+		posMap[ds.ID] = ds
+	}
+	for _, c := range citations {
+		ds, ok := posMap[c]
+		if !ok {
+			views = append(views, digestCitationView{Raw: c, Label: c + "（引用不存在）"})
+			continue
+		}
+		views = append(views, digestCitationView{
+			Raw: c, Frozen: true,
+			Label: fmt.Sprintf("%s · 第 %d 段", sourceTitle, ds.Position),
+			URL:   fmt.Sprintf("/api/source-snapshots/%s?position=%d", d.SourceSnapshotID, ds.Position),
+		})
+	}
+	return views
 }

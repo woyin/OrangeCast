@@ -31,16 +31,33 @@ func (srv *Server) handleDigestMarkdown(w http.ResponseWriter, r *http.Request) 
 	sb.WriteString("# " + d.Title + "\n\n")
 	sb.WriteString(fmt.Sprintf("> 来源：%s/%s · 修订 v%d · %s\n\n", d.SourceType, d.SourceID, d.Version, d.CreatedAt))
 
+	// G04：共享引用解析逻辑——导出与页面一致显示来源名称与冻结快照定位。
+	views := map[string][]digestCitationView{}
+	for _, b := range blocks {
+		views[b.ID] = srv.digestCitationViews(r.Context(), d, b.Citations)
+	}
+
 	for _, b := range blocks {
 		switch b.Type {
 		case models.DigestBlockParaphrase:
 			sb.WriteString(b.Text + "\n\n")
 		case models.DigestBlockAIExpansion:
-			sb.WriteString("> [!ai-generated] " + b.Text + "\n\n")
+			sb.WriteString("> [!ai-generated] " + strings.ReplaceAll(b.Text, "\n", "\n> ") + "\n\n")
 		case models.DigestBlockNote:
-			sb.WriteString("> [!note] Owner 笔记\n> " + b.Text + "\n\n")
+			sb.WriteString("> [!note] Owner 笔记\n> " + strings.ReplaceAll(b.Text, "\n", "\n> ") + "\n\n")
 		case models.DigestBlockCitedFact:
 			sb.WriteString(b.Text + "\n\n")
+		}
+		if cvs := views[b.ID]; len(cvs) > 0 {
+			var links []string
+			for _, cv := range cvs {
+				if cv.Frozen {
+					links = append(links, fmt.Sprintf("[%s](%s)", cv.Label, cv.URL))
+				} else {
+					links = append(links, cv.Label)
+				}
+			}
+			sb.WriteString("> 依据：" + strings.Join(links, " · ") + "\n\n")
 		}
 	}
 
