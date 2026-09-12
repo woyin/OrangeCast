@@ -65,6 +65,7 @@ CreationBriefDraft                  Researching
 
 - 保存音频或文档来源、Transcript、Segment 和稳定来源位置；
 - 生成 Summary、Highlight、KnowledgeCard 等学习产物；
+- 提供 DJ 精听：按订阅处理深度自动为新集准备 Highlight、Narration 与播放清单，解说与原音明确可辨（ADR-0024）；
 - 支持 EvidenceQA、StudyChat、Paraphrase、回听与笔记；
 - 区分忠实来源整理的 SourceNote 与个人理解的 OwnerReflection；
 - 从学习产物形成 MaterialCandidate，经 Source 级质量门槛成为 KeyPoint；
@@ -82,6 +83,28 @@ CreationBriefDraft                  Researching
 - Owner 确认 CreationBrief 后才授权作品生成；
 - ClaimReview 确认主张身份、归因、核验和权利边界；
 - PublicationPackage 由 Owner 复制或导出，系统不自动发布。
+
+## 处理深度与自动化边界
+
+学习与创作并重不改变自动化边界（ADR-0024）：
+
+- 订阅策略（IngestionPolicy）决定**哪些新集处理**；处理深度（ProcessingDepth）决定**处理到哪里**：`knowledge`（转录、卡片、重点，默认）或 `knowledge_dj`（另加 Highlight、Narration 与 DJ 播放清单准备）。
+- 自动化只生成 Owner 选择开启的产物；开启 DJ 深度只影响之后入队的新意图，已排队任务使用入队时的快照。
+- 存量订阅回填为 `knowledge` 深度，升级不静默扩大任何订阅的模型调用量，也不批量重跑旧集。
+- DJ 串场（开场、过渡、收尾）允许使用受约束文本与现有 Gist，始终标注为 AI 解说；来源、AI 与个人判断的区分不变。
+- 文章生成由用户发起或确认写作方案触发；发布始终由 Owner 决定。
+
+## EpisodeDigest 单集精读轨道
+
+除 LearningWorkspace 与 CreationWorkspace 外，存在第三条成文轨道（ADR-0023）：以单个 Source 为锚点、Owner 一键生成的单集精读文。
+
+- 正文是四类构造块的封闭集合：本集转述（CitedDerivative）、标注式 AI 展开（GeneratedDerivative，不含硬事实）、Owner 既有笔记、引用事实（挂 Citation）；
+- EpisodeDigest 不是 CreationWorkspace 作品，不承担 OwnerClaim，不适用 Brief 确认与 ClaimReview——以构造时打标加程序化门禁替代主张审校；
+- 事实缺口（FactGap）经 SourceSearch 消解：检索结果必须先落为 Document Source 才能以引用事实入文，搜索摘要永不直接入文，落源发布前逐条确认；
+- 触发为手动单集或列表批量，逐集隔离失败；不做转录完成自动生成；
+- 公众号长文版是唯一事实源，小红书笔记版由受约束改写（DigestRewrite）生成并过同一门禁；
+- 已发布精读文进入 CreationHistory，参与 HardDuplicate 去重；成本计入现有月度预算池。
+
 
 ## 学习成果与可写素材
 
@@ -191,7 +214,7 @@ OwnerClaim 可以不被 Source 直接支持，但不得伪装成来源观点；�
 - EnhancementNeed 只表示补充后更好，不必阻断；
 - Owner 可以补充 Source、补选已有材料、缩小主张、改为明确归因或放弃。
 
-未来联网研究必须先形成 ResearchPlan，并经 Owner 授权。采用的研究结果必须保存为 Source，再经过 LearningWorkspace 形成 KeyPoint；临时搜索摘要不能直接进入作品。V1 只支持 Owner 手动导入 Source。
+未来联网研究必须先形成 ResearchPlan，并经 Owner 授权。采用的研究结果必须保存为 Source，再经过 LearningWorkspace 形成 KeyPoint；临时搜索摘要不能直接进入作品。V1 只支持 Owner 手动导入 Source；EpisodeDigest 的 SourceSearch 是唯一例外（见 ADR-0023），其边界是：仅用于单集精读文的事实缺口补齐，检索落源可见可剔除。
 
 ### CreationBrief
 
@@ -326,16 +349,16 @@ Owner 纳入 CloudWisePod 的所有 Source 默认可以参与学习与创作。�
 - 要求 Owner 为每个 Source 或 EditorialProfile 逐项授权创作素材；
 - 把 Theme 恢复成 AutomaticDiscovery 的审批门禁；
 - 静默修改 EditorialProfile、OwnerClaim、作品修订或已发布历史；
-- V1 中实现 Article 之外的 CreationForm、联网 ResearchPlan 执行、团队协作或自动发布。
+- V1 中实现 Article 之外的 CreationForm、联网 ResearchPlan 执行、团队协作或自动发布。EpisodeDigest 的 SourceSearch 与 DigestRewrite 不属于此列（ADR-0023）。
 
 ## 文档优先级
 
 如文档冲突，按以下顺序判断：
 
 1. 本文与 [`CONTEXT.md`](../CONTEXT.md)；
-2. [ADR-0022](adr/0022-learning-creation-workspaces.md)；
-3. 未被 ADR-0022 修订的历史 ADR；
+2. [ADR-0022](adr/0022-learning-creation-workspaces.md) 与 [ADR-0023](adr/0023-episode-digest-one-click-article.md)、[ADR-0024](adr/0024-learning-dj-creation-contracts.md)；
+3. 未被上述 ADR 修订的历史 ADR；
 4. [`implementation-roadmap.md`](implementation-roadmap.md)；
 5. README 中对当前实现的说明。
 
-ADR-0021 保留为从学习工具转向内容生产的历史决策；产品形态、发现模型、素材权限和主张审校以 ADR-0022 为准。
+ADR-0021 保留为从学习工具转向内容生产的历史决策；产品形态、发现模型、素材权限和主张审校以 ADR-0022 为准。学习 DJ、精读修订、来源快照与新旧创作契约的连接以 ADR-0024 为准；当轮实施顺序与任务粒度见[原子提交实施计划](superpowers/plans/2026-09-12-learning-dj-creation-atomic-plan.md)，实施路线图与迁移差距表只作历史线索，不据其状态标签推断实现情况。

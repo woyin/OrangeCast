@@ -4,6 +4,8 @@
 目标：实现 [`product-goal.md`](product-goal.md) 与 [ADR-0022](adr/0022-learning-creation-workspaces.md) 定义的学习与创作闭环
 状态：产品模型已确认，代码处于兼容迁移期
 
+> **历史定位（2026-09-12）**：当轮实施顺序与任务粒度以 [ADR-0024](adr/0024-learning-dj-creation-contracts.md) 与[原子提交实施计划](superpowers/plans/2026-09-12-learning-dj-creation-atomic-plan.md)为准。本路线图 Phase 0–3 已落地的部分（MaterialCandidate 与质量状态字段、ProposalBatch 存储、EditorialRelevance、工作空间 HTTP 接线、放宽"恰好五条"契约）成为既有基线，不再在此逐项勾选；[迁移差距表](learning-creation-migration-gap.md)同属历史线索。据本文件状态标签推断实现情况没有效力，以代码与任务记录为准。
+
 ## 当前实施基线
 
 现有代码已经具备：
