@@ -652,6 +652,28 @@ func TestFindUsageByKeyPoint(t *testing.T) {
 	sourceID := eps[0].ID
 	seedHighlightAndNarration(t, srv, sourceID)
 
+	// 创建一个 ready 关键观点引用 seg-0001。
+	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{
+		{Content: "关键观点U02", Citations: []string{"seg-0001"}},
+	}}
+	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "内容"}}
+	job, _, _ := srv.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "u02-kp",
+	})
+	version, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, "t", "t", "1", job.ID, `{"segments":[]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, version)
+	kps, _, _ := srv.store.ListKeyPoints(ctx, 1, 10)
+	if len(kps) == 0 {
+		srv.store.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "U02", 1, card, segs)
+		kps, _, _ = srv.store.ListKeyPoints(ctx, 1, 10)
+	}
+	var keypointID string
+	for _, kp := range kps {
+		if kp.Content == "关键观点U02" {
+			keypointID = kp.ID
+		}
+	}
+
 	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
 		SourceType: models.SourceEpisode, SourceID: sourceID, Title: "使用该重点的精读",
 		Provider: "p", Model: "m", PromptVersion: "v",
@@ -662,7 +684,10 @@ func TestFindUsageByKeyPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 用 keypointID 反查——这里用 sourceID 代入（keypoint_id 参数实际匹配 segment/content）。
-	usages, err := srv.store.FindUsageByKeyPoint(ctx, sourceID)
+	if keypointID == "" {
+		t.Fatal("未找到关键观点")
+	}
+	usages, err := srv.store.FindUsageByKeyPoint(ctx, keypointID)
 	if err != nil {
 		t.Fatal(err)
 	}

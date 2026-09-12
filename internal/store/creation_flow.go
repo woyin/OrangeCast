@@ -719,12 +719,38 @@ type MaterialUsage struct {
 	Link   string `json:"link"`
 }
 
-// FindUsageByKeyPoint 反查一个 KeyPoint 被哪些精读文/文章修订采用。
-// 数据来源：claim_map_entries.material_ids_json（文章）和 digest_blocks（引用事实）。
+// FindUsageByKeyPoint 反查一个 KeyPoint 被哪些精读文/文章修订采用（U02）。
+// 通过该重点的引用 Segment ID 在精读文块和文章 ClaimMap 中搜索。
 func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]MaterialUsage, error) {
+	kp, err := s.GetKeyPoint(ctx, keypointID)
+	if err != nil {
+		return nil, err
+	}
+	var citations []string
+	if err := json.Unmarshal([]byte(kp.CitationsJSON), &citations); err != nil || len(citations) == 0 {
+		return nil, nil
+	}
 	var out []MaterialUsage
-	// 1) 精读文中的引用（digest_blocks.citations_json 含 keypoint 引用的 Segment 不直接对齐——
-	//    用 claim_map_entries 匹配文章修订；精读文块只匹配 target_source_id 或 citations_json）。
+	// 1) 精读文：digest_blocks 引用该重点的 Segment ID。
+	digestRows, err := s.DB.QueryContext(ctx,
+		`SELECT ed.id, ed.title, MAX(ed.version)
+		 FROM episode_digests ed
+		 JOIN digest_blocks db ON db.digest_id = ed.id
+		 WHERE db.citations_json LIKE ?
+		 GROUP BY ed.id, ed.title
+		 ORDER BY MAX(ed.version) DESC`,
+		"%"+citations[0]+"%")
+	if err == nil {
+		defer digestRows.Close()
+		for digestRows.Next() {
+			var id, title string
+			var version int
+			if err := digestRows.Scan(&id, &title, &version); err == nil {
+				out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+			}
+		}
+	}
+	// 2) 文章：claim_map_entries 的 material_ids_json 包含该 KeyPoint ID。
 	articleRows, err := s.DB.QueryContext(ctx,
 		`SELECT cme.revision_id, ad.title
 		 FROM claim_map_entries cme
@@ -736,27 +762,7 @@ func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]M
 		for articleRows.Next() {
 			var revID, title string
 			if err := articleRows.Scan(&revID, &title); err == nil {
-				out = append(out, MaterialUsage{Kind: "article", Title: title, Detail: "文章修订 " + revID, Link: "/workbench"})
-			}
-		}
-	}
-	// 2) 精读文（episode_digests 通过 creation_history 关联）。
-	digestRows, err := s.DB.QueryContext(ctx,
-		`SELECT ed.id, ed.title, ed.version
-		 FROM episode_digests ed
-		 JOIN digest_blocks db ON db.digest_id = ed.id
-		 WHERE ed.id IN (SELECT digest_id FROM digest_blocks WHERE citations_json LIKE ? OR target_source_id = ?)
-		 ORDER BY ed.version DESC`,
-		"%"+keypointID+"%", keypointID)
-	if err == nil {
-		defer digestRows.Close()
-		seenDigest := map[string]bool{}
-		for digestRows.Next() {
-			var id, title string
-			var version int
-			if err := digestRows.Scan(&id, &title, &version); err == nil && !seenDigest[id] {
-				seenDigest[id] = true
-				out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+				out = append(out, MaterialUsage{Kind: "article", Title: title, Detail: "文章修订", Link: "/workbench"})
 			}
 		}
 	}
