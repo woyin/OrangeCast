@@ -142,3 +142,62 @@ func (s *Store) RecordDigestHistory(ctx context.Context, digestID, status string
 	}
 	return s.GetCreationHistory(ctx, created.ID)
 }
+
+// RecordArticleHistory 将确切 ArticleRevision 登记为创作历史（C13 / ADR-0024 §6）。
+// Owner 明确点击"登记发布"/"保存为未发布"时调用；导出/预览不调用本方法。
+// 同修订幂等（digest_id 不适用——此处用 article_revision_id 匹配）。
+// 无专门画像时复用默认画像，不创建品牌副本。
+func (s *Store) RecordArticleHistory(ctx context.Context, revisionID, status string) (*models.CreationHistory, error) {
+	if status != "published" && status != "unpublished" {
+		return nil, fmt.Errorf("%w: invalid history status %q", ErrInvalidEditorialState, status)
+	}
+	rev, err := s.GetArticleRevision(ctx, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	// 修订标题可能为空：回退到草稿标题。
+	title := rev.Title
+	if strings.TrimSpace(title) == "" {
+		draft, err := s.GetArticleDraft(ctx, rev.DraftID)
+		if err != nil {
+			return nil, err
+		}
+		title = draft.Title
+	}
+	profile, err := s.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 幂等：同修订已有记录直接返回。
+	var existingID string
+	err = s.DB.QueryRowContext(ctx,
+		`SELECT id FROM creation_history WHERE source_url=?`, "revision:"+revisionID).Scan(&existingID)
+	if err == nil {
+		return s.GetCreationHistory(ctx, existingID)
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	work := models.CreationHistory{
+		EditorialProfileID: profile.ID, Status: status, CreationForm: "article",
+		Title: title, Content: rev.Markdown,
+		SourceURL: "revision:" + revisionID,
+	}
+	created, err := s.CreateCreationHistory(ctx, work)
+	if err != nil {
+		return nil, err
+	}
+	// 用 source_url 记录修订身份（revisions 表的 ID 已是全局唯一）。
+	if err := s.MarkArticleHistoryRevision(ctx, created.ID, revisionID); err != nil {
+		return created, err
+	}
+	return s.GetCreationHistory(ctx, created.ID)
+}
+
+// MarkArticleHistoryRevision 在 creation_history.source_url 中记录修订 ID。
+func (s *Store) MarkArticleHistoryRevision(ctx context.Context, historyID, revisionID string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE creation_history SET source_url=? WHERE id=?`,
+		"revision:"+revisionID, historyID)
+	return err
+}

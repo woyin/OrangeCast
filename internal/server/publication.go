@@ -252,3 +252,24 @@ func wechatRichText(markdown string) string {
 	closeList()
 	return b.String()
 }
+
+// handleRecordArticleHistory Owner 显式登记创作历史（C13）：
+// published（已在外部渠道发布）或 unpublished（已写作未发布）。
+// 导出/预览/内容包生成不调用本方法——导出不等于发布。
+func (srv *Server) handleRecordArticleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	revisionID := strings.TrimSpace(r.FormValue("revision_id"))
+	status := strings.TrimSpace(r.FormValue("status"))
+	if revisionID == "" || (status != "published" && status != "unpublished") {
+		http.Error(w, "参数非法", http.StatusBadRequest)
+		return
+	}
+	if _, err := srv.store.RecordArticleHistory(r.Context(), revisionID, status); err != nil {
+		http.Error(w, "登记创作历史失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/workbench", http.StatusSeeOther)
+}

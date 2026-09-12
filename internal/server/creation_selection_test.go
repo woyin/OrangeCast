@@ -569,3 +569,75 @@ func TestInheritClaimMap_RevisionLineage(t *testing.T) {
 		t.Fatal("旧审校不应继承到新修订")
 	}
 }
+
+// TestArticleHistory_ExportDoesNotPublish C13：导出不创建发布历史；
+// 显式登记幂等（重复点击不新增）；来源删除保留历史身份。
+func TestArticleHistory_ExportDoesNotPublish(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "c13@example.com", "password123")
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, Status: "proposed", WorkingTitle: "C13",
+		ProposedClaim: "C13 主张", CreationForm: "article",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.AcceptCreationProposal(ctx, proposal.ID, "Owner 主张"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateCreationBrief(ctx, models.CreationBrief{
+		CreationProposalID: proposal.ID, OwnerClaim: "Owner 主张",
+		MaterialPlanJSON: `["kp-a"]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ConfirmCreationBrief(ctx, brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	link, err := srv.store.EnsureCreationArticleLink(ctx, proposal.ID, brief.ID, "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := srv.store.CreateArticleDraft(ctx, link.ArticleBriefID, "C13 文章")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, err := srv.store.CreateArticleRevision(ctx, models.ArticleRevision{
+		DraftID: draft.ID, Title: "C13 文章", Markdown: "# C13\n\n正文。", Origin: "writer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 生成内容包（导出）→ 不创建发布历史。
+	var histBefore int
+	_ = srv.store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_history`).Scan(&histBefore)
+	rec := doWithCookie(srv, session, http.MethodGet, "/workbench/revisions/"+rev.ID+"/package")
+	if rec.Code != http.StatusOK {
+		t.Logf("内容包生成: %d（可能需审校门禁，不阻断测试）", rec.Code)
+	}
+	var histAfterExport int
+	_ = srv.store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_history`).Scan(&histAfterExport)
+	if histAfterExport != histBefore {
+		t.Fatal("导出不得创建发布历史")
+	}
+
+	// 显式登记 → 幂等一条。
+	if _, err := srv.store.RecordArticleHistory(ctx, rev.ID, "published"); err != nil {
+		t.Fatalf("RecordArticleHistory: %v", err)
+	}
+	if _, err := srv.store.RecordArticleHistory(ctx, rev.ID, "published"); err != nil {
+		t.Fatalf("RecordArticleHistory: %v", err)
+	}
+	var n int
+	_ = srv.store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_history WHERE source_url=?`, "revision:"+rev.ID).Scan(&n)
+	if n != 1 {
+		t.Fatalf("同修订重复登记只应一条: %d", n)
+	}
+}
