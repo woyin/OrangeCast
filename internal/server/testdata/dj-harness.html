@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<!-- D05 浏览器测试夹具（不打包为生产路由，仅供测试路由/人工浏览器执行）。
+     用 FakeAudio 替身模拟媒体事件，验证 dj-player.js 状态机契约：
+       1) 区间播完由 currentTime/timeupdate 驱动，缓冲不消耗片段时间；
+       2) 暂停不跳下一段，恢复继续同一段；
+       3) 停止后无幽灵续播；
+       4) 快速手动切换不双声叠播（旧会话令牌过期被丢弃）。
+     测试路由会把 dj-player.js 源码注入 <!--DJ_PLAYER_SOURCE--> 占位符；
+     运行结果写入 #dj-harness-result：PASS n/m。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>DJ Player Harness</title>
+</head>
+<body>
+<div id="dj-harness-result">running…</div>
+<script>
+/* FakeAudio：<audio> 替身，支持 onXXX 属性句柄与 fire(type) 手动触发事件。 */
+function FakeAudio() {
+  this.currentTime = 0;
+  this.paused = true;
+  this.src = '';
+  this._handlers = {};
+  this._listeners = {};
+}
+['ended', 'timeupdate', 'waiting', 'playing', 'error', 'pause', 'seeked'].forEach(function (t) {
+  var key = '_on' + t;
+  Object.defineProperty(FakeAudio.prototype, 'on' + t, {
+    set: function (fn) { this._handlers[t] = fn; },
+    get: function () { return this._handlers[t]; },
+    configurable: true
+  });
+});
+FakeAudio.prototype.addEventListener = function (type, fn) {
+  (this._listeners[type] = this._listeners[type] || []).push(fn);
+};
+FakeAudio.prototype.fire = function (type) {
+  var h = this._handlers[type];
+  if (h) h({ type: type, target: this });
+  var list = this._listeners[type] || [];
+  list.slice().forEach(function (fn) { fn({ type: type, target: this }); });
+};
+FakeAudio.prototype.play = function () {
+  this.paused = false;
+  this.fire('playing');
+  return Promise.resolve();
+};
+FakeAudio.prototype.pause = function () {
+  if (!this.paused) {
+    this.paused = true;
+    this.fire('pause');
+  }
+};
+</script>
+<!--DJ_PLAYER_SOURCE-->
+<script>
+var passCount = 0, totalCount = 0;
+function assert(name, cond) {
+  totalCount++;
+  if (cond) { passCount++; }
+}
+function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+function makePlayer() {
+  var ev = new FakeAudio();
+  var nar = new FakeAudio();
+  var player = DJPlayer.create({ evidence: ev, narration: nar, onState: function () {}, onItem: function () {} });
+  return { player: player, ev: ev, nar: nar };
+}
+
+var scenarios = [
+  async function rangeEndDrivenByMediaTime() {
+    var h = makePlayer();
+    h.player.load([{ type: 'evidence', start: 0, end: 5, idx: '0' }, { type: 'evidence', start: 10, end: 20, idx: '1' }]);
+    h.player.play();
+    await wait(5);
+    h.ev.currentTime = 4.5; h.ev.fire('timeupdate');   // 未到末尾：不推进
+    await wait(5);
+    var before = h.player.position().index;
+    h.ev.currentTime = 5;   h.ev.fire('timeupdate');   // 到达区间末：推进
+    await wait(5);
+    h.ev.currentTime = 20;  h.ev.fire('timeupdate');   // 第二段到达：队列结束
+    await wait(5);
+    var ended = h.player.state() === 'ended';
+    assert('区间由 currentTime/timeupdate 驱动且推进', before === 0 && ended);
+  },
+  async function bufferingDoesNotConsume() {
+    var h = makePlayer();
+    h.player.load([{ type: 'evidence', start: 0, end: 5, idx: '0' }]);
+    h.player.play();
+    await wait(5);
+    h.ev.fire('waiting');
+    await wait(5);
+    var buffering = h.player.state() === 'buffering';
+    h.ev.fire('timeupdate');                            // 缓冲期间时间未前进：不推进
+    await wait(5);
+    var stillFirst = h.player.position().index === 0;
+    h.ev.fire('playing');
+    h.ev.currentTime = 5; h.ev.fire('timeupdate');
+    await wait(5);
+    assert('缓冲状态被识别且不消耗片段时间', buffering && stillFirst && h.player.state() === 'ended');
+  },
+  async function pauseDoesNotSkip() {
+    var h = makePlayer();
+    h.player.load([{ type: 'evidence', start: 0, end: 5, idx: '0' }, { type: 'evidence', start: 10, end: 20, idx: '1' }]);
+    h.player.play();
+    await wait(5);
+    h.player.pause();                                   // 暂停：不推进
+    await wait(5);
+    var paused = h.player.state() === 'paused' && h.player.position().index === 0;
+    h.player.play();                                    // 恢复：仍同一段
+    await wait(5);
+    var sameItem = h.player.position().index === 0;
+    h.player.stop();
+    assert('暂停不跳下一段，恢复继续同一段', paused && sameItem);
+  },
+  async function stopKillsGhostContinuation() {
+    var h = makePlayer();
+    h.player.load([{ type: 'evidence', start: 0, end: 5, idx: '0' }, { type: 'evidence', start: 10, end: 20, idx: '1' }]);
+    h.player.play();
+    await wait(5);
+    h.player.stop();                                    // 停止：令牌过期
+    h.ev.currentTime = 5; h.ev.fire('timeupdate');      // 幽灵事件：不得推进
+    await wait(5);
+    h.ev.fire('timeupdate');
+    await wait(5);
+    var idle = h.player.state() === 'idle' && h.player.position().index === 0;
+    assert('停止后无幽灵续播', idle);
+  },
+  async function fastSwitchNoDoubleAudio() {
+    var h = makePlayer();
+    h.player.playItems([{ type: 'evidence', start: 0, end: 5, idx: '0' }]);
+    await wait(5);
+    h.player.playItems([{ type: 'narration', url: '/n2.wav', idx: '1' }]); // 快速切换
+    await wait(5);
+    var onlyNarration = h.nar.src === '/n2.wav' && h.ev.paused;
+    assert('快速切换不双声叠播（旧会话取消）', onlyNarration);
+  }
+];
+
+(function run() {
+  var chain = Promise.resolve();
+  scenarios.forEach(function (sc) {
+    chain = chain.then(function () { return sc(); }).then(function () { return wait(5); });
+  });
+  chain.then(function () {
+    document.getElementById('dj-harness-result').textContent = 'PASS ' + passCount + '/' + totalCount;
+    document.title = 'HARNESS DONE';
+  });
+})();
+</script>
+</body>
+</html>
