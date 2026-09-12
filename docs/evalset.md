@@ -46,3 +46,16 @@ StudyChat 的信任根是 ReferenceCheck（主题锚定校验器）。它的误�
 | rc-block-03 | 挡住 | 措辞蹭原文：回答主题是蜂鸟，与通胀无概念联系 |
 
 自动评测入口：`evalset.CheckReferenceSamples(checker)`，返回不符项（空 = 全部正确）。校验器模型/prompt 变更时跑此集合；若虚挂率上升，第一道干预是切换校验模型或引入第二判据，而非调 prompt（ADR-0018 R3）。
+
+## 学习与成文夹具（A04，2026-09-12）
+
+`internal/evalset/learning_creation.go` 提供学习-DJ-创作评测的自建夹具，覆盖：中文长访谈（`zh-long-01`）、英文信息密集（`en-dense-01`）、多主题/重复/广告（`zh-multi-01`）、跨集矛盾观点（`zh-conflict-01` vs `zh-conflict-02`，用例 `cross-coffee-01`）、个人笔记身份（`note-li-01/02`）。
+
+- 每个样本在代码内人工标注：核心观点（Claim）、支持区间（SupportSegments）、重要限定条件（Qualifiers）、不可推出的结论（NotImplied）；广告段与跨窗重复组单独标注。
+- 库内只保存自建（`Source: "self-made"`）可提交片段。真实节目评测时本地运行，样本记录为 `external:<来源>#<本地快照标识>`，片段不入库。
+- 自动校验入口：`evalset.CheckLearningFixtures()`（引用可追溯、结构完备、身份正确）；`evalset.LearningEpisodes()/CrossEpisodeCases()/OwnerNoteCases()` 供 K01/K05/G 组评测复用。
+- 真实模型评分待实际生成后填写到 [learning-creation-baseline.md](acceptance/learning-creation-baseline.md)，不预先给通过结论。
+
+## 学习与成文评测表（记录模型、提示版本与费用）
+
+每项真实评测按样本 × 阶段（分析归并 / 高光 / 精读文 / 个人文章 / 解说）记录一行：模型、提示版本、输入/输出用量与费用、评测人。评分维度与门槛见 acceptance 文档。
