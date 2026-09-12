@@ -9,8 +9,8 @@ import (
 	"fmt"
 
 	"github.com/woyin/orangecast/internal/models"
-	"github.com/woyin/orangecast/internal/store"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 // claimReviewerProvider 独立审校接口。
