@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -47,10 +48,10 @@ func TestBuildDJPlan_DeterministicAndBounded(t *testing.T) {
 		{ID: "h1", Gist: "第一", Citations: []string{"seg-0001"}},
 		{ID: "h3", Gist: "第三", Citations: []string{"seg-0003"}},
 	}}
-	p1 := BuildDJPlan(hs, segs, nil, 1000)
-	p2 := BuildDJPlan(hs, segs, nil, 1000)
-	if len(p1.Items) != 6 || len(p2.Items) != 6 {
-		t.Fatalf("每段产生解说+原音两项（共 6）：%d/%d", len(p1.Items), len(p2.Items))
+	p1 := BuildDJPlan("测试节目", hs, segs, nil, 1000)
+	p2 := BuildDJPlan("测试节目", hs, segs, nil, 1000)
+	if len(p1.Items) != 10 || len(p2.Items) != 10 {
+		t.Fatalf("开场+3×(解说+原音)+2 过渡+收尾=10 项：%d/%d", len(p1.Items), len(p2.Items))
 	}
 	for i := range p1.Items {
 		a, b2 := p1.Items[i], p2.Items[i]
@@ -59,13 +60,24 @@ func TestBuildDJPlan_DeterministicAndBounded(t *testing.T) {
 			t.Fatalf("相同输入应产出相同清单：位置 %d 不一致", i)
 		}
 	}
-	if p1.Items[0].HighlightID != "h1" || p1.Items[2].HighlightID != "h2" || p1.Items[4].HighlightID != "h3" {
-		t.Fatalf("应保持节目原顺序: %+v", p1.Items)
+	// 结构：intro → 解说/原音(h1) → 过渡 → 解说/原音(h2) → 过渡 → 解说/原音(h3) → outro
+	if p1.Items[0].ScriptKind != "intro" {
+		t.Fatalf("首项应为开场解说: %+v", p1.Items[0])
+	}
+	if p1.Items[2].HighlightID != "h1" || p1.Items[5].HighlightID != "h2" || p1.Items[8].HighlightID != "h3" {
+		t.Fatalf("原音应保持节目原顺序: %+v", p1.Items)
+	}
+	if p1.Items[9].ScriptKind != "outro" {
+		t.Fatalf("末项应为收尾解说: %+v", p1.Items[9])
+	}
+	// 过渡脚本指向下一高光且基于其 Gist（不重复朗读原音）。
+	if p1.Items[3].ScriptKind != "transition" || !strings.Contains(p1.Items[3].ScriptText, "第二") {
+		t.Fatalf("过渡应预告下一段主题: %+v", p1.Items[3])
 	}
 	if p1.TotalSeconds > 1000 {
 		t.Fatalf("总时长不得超过目标: %f", p1.TotalSeconds)
 	}
-	p3 := BuildDJPlan(hs, segs, nil, 400)
+	p3 := BuildDJPlan("测试节目", hs, segs, nil, 400)
 	if p3.TotalSeconds > 400 {
 		t.Fatalf("目标约束应生效（内容不足允许短于目标）: %f", p3.TotalSeconds)
 	}
@@ -109,10 +121,23 @@ func TestDJPlanJob_PersistAndPreserveOld(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, err := s.GetDJPlan(ctx, planV1.ID)
-	if err != nil || len(old.Items) != len(planV1.Items) || old.Items[0].HighlightID != "h1" {
-		t.Fatalf("旧清单应保持原内容: %+v", old)
+	if err != nil || len(old.Items) != len(planV1.Items) {
+		t.Fatalf("旧清单应保持原内容: %v %+v", err, old)
 	}
-	if planV2.Items[0].HighlightID != "h1v2" {
+	// 旧清单项内容不变（含脚本文本）。
+	for i := range planV1.Items {
+		if old.Items[i].ScriptText != planV1.Items[i].ScriptText || old.Items[i].HighlightID != planV1.Items[i].HighlightID {
+			t.Fatalf("旧清单第 %d 项被改动: %+v", i, old.Items[i])
+		}
+	}
+	// 新清单使用新高光。
+	found := false
+	for _, it := range planV2.Items {
+		if it.HighlightID == "h1v2" {
+			found = true
+		}
+	}
+	if !found {
 		t.Fatalf("新清单应使用新高光: %+v", planV2.Items)
 	}
 }

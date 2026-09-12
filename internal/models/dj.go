@@ -37,4 +37,8 @@ type DJPlanItem struct {
 	Start, End  float64
 	EstSeconds  float64
 	Reason      string // 选择/排序理由（首版：原顺序 + 时长预算）
+
+	// D04：串场解说词（受约束模板生成，随清单持久化，可审计、可重合成）。
+	ScriptKind string // intro | transition | outro | gist（空 = 无脚本）
+	ScriptText string
 }

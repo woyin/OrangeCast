@@ -44,10 +44,10 @@ func (s *Store) CreateDJPlan(ctx context.Context, plan *models.DJPlan) (*models.
 		it.Position = i + 1
 		segIDs, _ := json.Marshal(it.SegmentIDs)
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO dj_plan_items (id, plan_id, position, kind, highlight_id, narration_id, segment_ids_json, start_seconds, end_seconds, est_seconds, reason)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			`INSERT INTO dj_plan_items (id, plan_id, position, kind, highlight_id, narration_id, segment_ids_json, start_seconds, end_seconds, est_seconds, reason, script_kind, script_text)
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			uuid.NewString(), plan.ID, it.Position, it.Kind, it.HighlightID, it.NarrationID,
-			string(segIDs), it.Start, it.End, it.EstSeconds, it.Reason); err != nil {
+			string(segIDs), it.Start, it.End, it.EstSeconds, it.Reason, it.ScriptKind, it.ScriptText); err != nil {
 			return nil, fmt.Errorf("写入 DJ 清单项: %w", err)
 		}
 	}
@@ -87,7 +87,7 @@ func (s *Store) GetDJPlan(ctx context.Context, id string) (*models.DJPlan, error
 		return nil, err
 	}
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT position, kind, highlight_id, narration_id, segment_ids_json, start_seconds, end_seconds, est_seconds, reason
+		`SELECT position, kind, highlight_id, narration_id, segment_ids_json, start_seconds, end_seconds, est_seconds, reason, COALESCE(script_kind,''), COALESCE(script_text,'')
 		 FROM dj_plan_items WHERE plan_id=? ORDER BY position`, id)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (s *Store) GetDJPlan(ctx context.Context, id string) (*models.DJPlan, error
 		it := models.DJPlanItem{}
 		var segIDs string
 		if err := rows.Scan(&it.Position, &it.Kind, &it.HighlightID, &it.NarrationID, &segIDs,
-			&it.Start, &it.End, &it.EstSeconds, &it.Reason); err != nil {
+			&it.Start, &it.End, &it.EstSeconds, &it.Reason, &it.ScriptKind, &it.ScriptText); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(segIDs), &it.SegmentIDs)
