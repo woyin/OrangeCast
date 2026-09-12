@@ -315,3 +315,42 @@ func TestResearchNeed_RequiresProcessedSource(t *testing.T) {
 		t.Fatalf("缺口应已解决并记录来源: %+v", got)
 	}
 }
+
+// TestAutomaticCreationProposalsValidation C05：伪造素材 ID 与跨集不足被拦截，
+// 合法候选保留，同义标题去重。
+func TestAutomaticCreationProposalsValidation(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 构造发送快照：两个 Episode 各一条素材。
+	sentMaterials := []provider.ArticleMaterial{
+		{KeyPointID: "kp-ep1", SourceID: "ep-1", SourceTitle: "第一集", Content: "内容A"},
+		{KeyPointID: "kp-ep2", SourceID: "ep-2", SourceTitle: "第二集", Content: "内容B"},
+	}
+	_ = profile
+
+	result := &provider.ScoutResult{
+		Proposals: []provider.ScoutProposal{
+			{Title: "合法跨集候选", Thesis: "跨集论点", CandidateKeyPointIDs: []string{"kp-ep1", "kp-ep2"}},
+			{Title: "伪造素材候选", Thesis: "编造论点", CandidateKeyPointIDs: []string{"kp-fake"}},
+			{Title: "单集候选", Thesis: "单集论点", CandidateKeyPointIDs: []string{"kp-ep1"}},
+			{Title: "合法跨集候选", Thesis: "跨集论点"}, // 同义重复
+		},
+	}
+	proposals, err := srv.automaticCreationProposals(ctx, profile.ID, "batch-1", result, sentMaterials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposals) != 1 {
+		t.Fatalf("应只保留 1 条合法跨集候选: %d", len(proposals))
+	}
+	if proposals[0].WorkingTitle != "合法跨集候选" {
+		t.Fatalf("保留的应为合法候选: %+v", proposals[0])
+	}
+	if !strings.Contains(proposals[0].MaterialIDsJSON, "kp-ep1") || !strings.Contains(proposals[0].MaterialIDsJSON, "kp-ep2") {
+		t.Fatalf("保留候选应含两集素材: %s", proposals[0].MaterialIDsJSON)
+	}
+}

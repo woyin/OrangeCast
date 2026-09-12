@@ -118,6 +118,7 @@ func (srv *Server) executeAutomaticProposalBatch(ctx context.Context, settings *
 	if err != nil {
 		return srv.failAutomaticProposalBatch(ctx, batch, providerName, modelName, err, nil)
 	}
+	sentMaterials := request.Themes[0].Materials
 	result, err := bundle.Scout.Scout(ctx, request)
 	if err != nil {
 		return srv.failAutomaticProposalBatch(ctx, batch, providerName, modelName, fmt.Errorf("自动发现调用失败: %w", err), nil)
@@ -129,7 +130,7 @@ func (srv *Server) executeAutomaticProposalBatch(ctx context.Context, settings *
 	if settings.BatchBudgetCents != nil && cost != nil && *cost > *settings.BatchBudgetCents {
 		return srv.failAutomaticProposalBatch(ctx, batch, providerName, modelName, fmt.Errorf("实际费用 %d 分超过本批上限 %d 分", *cost, *settings.BatchBudgetCents), cost)
 	}
-	proposals, err := srv.automaticCreationProposals(ctx, profile.ID, batch.ID, result)
+	proposals, err := srv.automaticCreationProposals(ctx, profile.ID, batch.ID, result, sentMaterials)
 	if err != nil {
 		return srv.failAutomaticProposalBatch(ctx, batch, providerName, modelName, err, cost)
 	}
@@ -194,7 +195,12 @@ func (srv *Server) automaticDiscoveryRequest(ctx context.Context, profile *model
 	return provider.ScoutRequest{Audience: profile.TargetAudience, Voice: profile.Voice, Mode: provider.ScoutModeCrossEpisode, ProposalCount: scoutProposalTarget, Themes: []provider.ScoutTheme{{ID: "automatic-discovery", Name: "近期学习变化", Description: "仅使用当前 DiscoveryWindow 中已审学习成果；每条候选必须覆盖至少两个不同 Episode。", Materials: materials}}}, nil
 }
 
-func (srv *Server) automaticCreationProposals(ctx context.Context, profileID, batchID string, result *provider.ScoutResult) ([]models.CreationProposal, error) {
+// automaticCreationProposals 严格校验 Scout 输出（C05）：
+//   - 候选材料 ID 必须属于发送快照（伪造素材 ID 的候选被丢弃并记录）；
+//   - 每个候选至少覆盖两个不同 Episode（跨集要求）；
+//   - 同义标题与相同主张去重；
+//   - 结果不足时保留实际产出数并记录原因（不凑数）。
+func (srv *Server) automaticCreationProposals(ctx context.Context, profileID, batchID string, result *provider.ScoutResult, sentMaterials []provider.ArticleMaterial) ([]models.CreationProposal, error) {
 	existing, err := srv.store.ListCreationProposals(ctx, profileID)
 	if err != nil {
 		return nil, err
@@ -203,12 +209,40 @@ func (srv *Server) automaticCreationProposals(ctx context.Context, profileID, ba
 	if err != nil {
 		return nil, err
 	}
+	// 发送快照 ID 集合与来源映射（跨集校验用）。
+	sentIDs := map[string]bool{}
+	sourceOfMaterial := map[string]string{}
+	for _, m := range sentMaterials {
+		sentIDs[m.KeyPointID] = true
+		sourceOfMaterial[m.KeyPointID] = m.SourceID
+	}
 	seen := map[string]bool{}
 	for _, proposal := range existing {
 		seen[normalizeEditorialTitle(proposal.WorkingTitle)+"\x00"+normalizeEditorialTitle(proposal.ProposedClaim)] = true
 	}
 	out := make([]models.CreationProposal, 0, len(result.Proposals))
 	for _, candidate := range result.Proposals {
+		// C05：伪造素材 ID 的候选直接丢弃（不静默改为空材料集）。
+		fabricated := false
+		for _, id := range candidate.CandidateKeyPointIDs {
+			if !sentIDs[id] {
+				fabricated = true
+				break
+			}
+		}
+		if fabricated || len(candidate.CandidateKeyPointIDs) == 0 {
+			continue
+		}
+		// 跨集要求：候选引用的素材须来自至少两个不同 Episode。
+		srcSet := map[string]bool{}
+		for _, id := range candidate.CandidateKeyPointIDs {
+			if src := sourceOfMaterial[id]; src != "" {
+				srcSet[src] = true
+			}
+		}
+		if len(srcSet) < 2 {
+			continue
+		}
 		key := normalizeEditorialTitle(candidate.Title) + "\x00" + normalizeEditorialTitle(candidate.Thesis)
 		if seen[key] {
 			continue
