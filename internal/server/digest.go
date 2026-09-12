@@ -250,14 +250,10 @@ func (srv *Server) handleDigestRewriteRetry(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	digestID := r.FormValue("digest_id")
-	d, err := srv.store.GetEpisodeDigest(r.Context(), digestID)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	job, err := srv.store.EnqueueDigestJob(r.Context(), d.SourceType, d.SourceID)
+	// G06：渠道改写为独立任务——重试不再整篇重新生成主文。
+	job, err := srv.store.EnqueueDigestRewriteJob(r.Context(), digestID, string(models.DigestChannelXiaohongshu))
 	if err != nil || job == nil {
-		// 不重跑长文（已有修订是资产）；提示稍后再试
+		// 改写任务进行中或不可用；主文修订是资产，不受影响
 		http.Error(w, "暂时无法重试，请稍后再试", http.StatusConflict)
 		return
 	}

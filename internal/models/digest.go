@@ -74,13 +74,15 @@ type DigestFactGap struct {
 
 // DigestRewrite 渠道语气版本（F3）：输入只有已过门禁的长文 DigestBlock 集合。
 type DigestRewrite struct {
-	ID        string
-	DigestID  string
-	Channel   string
-	Text      string
-	Provider  string
-	Model     string
-	CreatedAt string
+	ID            string
+	DigestID      string
+	Channel       string
+	Text          string
+	Provider      string
+	Model         string
+	InputHash     string // 已过门禁块集合的指纹（G06）：主文变化即不沿用
+	DigestVersion int
+	CreatedAt     string
 }
 
 // 渠道常量：V1 支持公众号长文版（digest 本体）与小红书笔记版（rewrite）。

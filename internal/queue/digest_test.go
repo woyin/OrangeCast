@@ -516,3 +516,88 @@ func TestPublishEpisodeDigest_AtomicWithSourcesAndGaps(t *testing.T) {
 		t.Fatalf("current 应为该修订: %v", err)
 	}
 }
+
+// TestDigestRewriteJob_OnlyRewrites G06：重试只执行改写——compose/search 均为零；
+// 同输入复用不重复改写；不同修订不串结果。
+func TestDigestRewriteJob_OnlyRewrites(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	composeCalls, rewriteCalls := 0, 0
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &countingDigestWriter{
+				inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "主文", Blocks: validDraftBlocks()}},
+				count: &composeCalls,
+			},
+			DigestRewriter: &countingRewriter{inner: &fakeDigestRewriter{text: "渠道文案"}, count: &rewriteCalls},
+		}, nil
+	}
+	// 先产出主文修订
+	if _, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composeCalls, rewriteCalls = 0, 0
+
+	// 渠道改写独立任务：compose 必须为零。
+	rw, err := s.EnqueueDigestRewriteJob(ctx, d.ID, string(models.DigestChannelXiaohongshu))
+	if err != nil || rw == nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("改写失败: %v", err)
+	}
+	if composeCalls != 0 {
+		t.Fatalf("渠道重写不得触发 compose: %d", composeCalls)
+	}
+	if rewriteCalls != 1 {
+		t.Fatalf("改写应恰好一次: %d", rewriteCalls)
+	}
+	// 相同输入再次入队 → 输入指纹一致，复用产物（零改写调用）。
+	rw2, err := s.EnqueueDigestRewriteJob(ctx, d.ID, string(models.DigestChannelXiaohongshu))
+	if err != nil || rw2 == nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rewriteCalls != 1 {
+		t.Fatalf("同输入应复用既有改写: %d", rewriteCalls)
+	}
+	// 新修订 → 渠道产物按修订独立存储，不沿用旧渠道结果。
+	if _, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d2, _ := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if d2.ID == d.ID || d2.Version != 2 {
+		t.Fatalf("新修订应独立: %+v", d2)
+	}
+	// v1 的渠道行仍指向 v1（不被改写到 v2）
+	v1rw, err := s.GetDigestRewrite(ctx, d.ID, models.DigestChannelXiaohongshu)
+	if err != nil || v1rw.DigestID != d.ID {
+		t.Fatalf("旧渠道产物应归属旧修订: %+v %v", v1rw, err)
+	}
+}
+
+// countingRewriter 统计改写调用次数。
+type countingRewriter struct {
+	inner provider.DigestRewriteProvider
+	count *int
+}
+
+func (c *countingRewriter) RewriteDigest(ctx context.Context, req provider.DigestRewriteRequest) (*provider.DigestRewriteResult, error) {
+	*c.count++
+	return c.inner.RewriteDigest(ctx, req)
+}

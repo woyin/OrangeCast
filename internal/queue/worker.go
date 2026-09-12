@@ -86,6 +86,9 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobKeypointQuality:
 			// 重点质量判定（K02）使用分析角色配置（判定与生成分开提示词）
 			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
+		case models.JobDigestRewrite:
+			// 渠道改写（G06）复用 Writer 角色配置（与文章同池计费）
+			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -184,6 +187,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 60_000, 10_000
 	case "keypoint_quality":
 		return 40_000, 8_000
+	case "digest_rewrite":
+		return 30_000, 6_000
 	default:
 		return 0, 0
 	}
@@ -192,7 +197,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite:
 	default:
 		return nil
 	}
@@ -276,6 +281,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doNarrationJob(ctx, job, bundle)
 	case models.JobKeypointQuality:
 		return w.doKeypointQualityJob(ctx, job, bundle)
+	case models.JobDigestRewrite:
+		return w.doDigestRewriteJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

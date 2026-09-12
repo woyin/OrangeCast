@@ -33,6 +33,8 @@ const (
 	JobNarration JobType = "narration"
 	// JobKeypointQuality 重点质量判定任务（K02）：对指定卡片版本的重点执行可解释判定。
 	JobKeypointQuality JobType = "keypoint_quality"
+	// JobDigestRewrite 渠道改写独立任务（G06）：输入为指定精读修订与渠道。
+	JobDigestRewrite JobType = "digest_rewrite"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

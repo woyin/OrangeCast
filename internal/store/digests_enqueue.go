@@ -70,3 +70,28 @@ func (s *Store) freezeDigestInput(ctx context.Context, sourceType models.SourceT
 	}
 	return snap, nil
 }
+
+// EnqueueDigestRewriteJob 入队渠道改写独立任务（G06）：
+// 输入冻结指定修订与渠道；同修订同渠道活跃期幂等去重。
+func (s *Store) EnqueueDigestRewriteJob(ctx context.Context, digestID, channel string) (*models.ProcessingJob, error) {
+	d, err := s.GetEpisodeDigest(ctx, digestID)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := json.Marshal(map[string]string{"digest_id": d.ID, "digest_version": fmt.Sprintf("%d", d.Version), "channel": channel})
+	if err != nil {
+		return nil, err
+	}
+	job, created, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: d.SourceType, SourceID: d.SourceID, JobType: models.JobDigestRewrite,
+		IntentID:          fmt.Sprintf("digest_rewrite:%s:%s:v%d", d.ID, channel, d.Version),
+		InputSnapshotJSON: string(snapshot),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		return nil, nil
+	}
+	return job, nil
+}

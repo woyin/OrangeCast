@@ -269,9 +269,9 @@ func (s *Store) UpsertDigestRewrite(ctx context.Context, r *models.DigestRewrite
 	}
 	r.ID = uuid.NewString()
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO digest_rewrites (id,digest_id,channel,text,provider,model) VALUES (?,?,?,?,?,?)
-		 ON CONFLICT(digest_id,channel) DO UPDATE SET text=excluded.text,provider=excluded.provider,model=excluded.model,created_at=datetime('now')`,
-		r.ID, r.DigestID, r.Channel, r.Text, r.Provider, r.Model)
+		`INSERT INTO digest_rewrites (id,digest_id,channel,text,provider,model,input_hash,digest_version) VALUES (?,?,?,?,?,?,?,?)
+		 ON CONFLICT(digest_id,channel) DO UPDATE SET text=excluded.text,provider=excluded.provider,model=excluded.model,input_hash=excluded.input_hash,digest_version=excluded.digest_version,created_at=datetime('now')`,
+		r.ID, r.DigestID, r.Channel, r.Text, r.Provider, r.Model, r.InputHash, r.DigestVersion)
 	if err != nil {
 		return nil, fmt.Errorf("写入渠道改写: %w", err)
 	}
@@ -386,4 +386,14 @@ func (s *Store) CreateDigestRevision(ctx context.Context, in DigestRevisionInput
 		Provider: base.Provider, Model: base.Model, PromptVersion: base.PromptVersion,
 		ParentDigestID: base.ID, Reason: strings.TrimSpace(in.Reason),
 	}, in.Blocks, nil, nil)
+}
+
+// GetDigestRewriteInputHash 读取某修订渠道版本的输入指纹；无记录返回空串。
+func (s *Store) GetDigestRewriteInputHash(ctx context.Context, digestID, channel string) (string, error) {
+	var h string
+	err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(input_hash,'') FROM digest_rewrites WHERE digest_id=? AND channel=?`, digestID, channel).Scan(&h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return h, err
 }

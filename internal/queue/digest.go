@@ -549,3 +549,15 @@ func (w *Worker) saveDigestCheckpoint(ctx context.Context, jobID string, cp dige
 	data, _ := json.Marshal(cp)
 	return w.store.SaveJobCheckpoint(ctx, jobID, string(data))
 }
+
+// BlocksFromModels 修订块 → 改写输入草稿（G06：只读已过门禁的块集合）。
+func BlocksFromModels(blocks []models.DigestBlock) []provider.DigestBlockDraft {
+	out := make([]provider.DigestBlockDraft, 0, len(blocks))
+	for _, b := range blocks {
+		out = append(out, provider.DigestBlockDraft{
+			Type: string(b.Type), Text: b.Text, Citations: b.Citations,
+			TargetSourceID: b.TargetSourceID, NoteID: b.NoteID,
+		})
+	}
+	return out
+}
