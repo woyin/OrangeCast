@@ -4,12 +4,15 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 // handleDigestEnqueue 单集"生成精读文"按钮：入队 episode_digest job（T1 手动触发即单次授权）。
@@ -60,6 +63,10 @@ func (srv *Server) handleDigestBatch(w http.ResponseWriter, r *http.Request) {
 func (srv *Server) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/markdown") {
 		srv.handleDigestMarkdown(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/edit") {
+		srv.handleDigestEdit(w, r)
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/digest/")
@@ -115,10 +122,112 @@ func (srv *Server) handleDigestSearchSourceStatus(w http.ResponseWriter, r *http
 		return
 	}
 	if status == "rejected" {
-		if err := srv.store.DeleteDigestBlocksForTarget(r.Context(), digestID, documentID); err != nil {
-			http.Error(w, "剔除联动失败", http.StatusInternalServerError)
+		// G03：剔除来源派生一份移除相应事实块的新修订；旧版本仍可审计。
+		newID, err := srv.deriveRevisionWithoutSource(r.Context(), digestID, documentID)
+		if err != nil {
+			http.Error(w, "剔除派生修订失败："+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if newID != "" {
+			digestID = newID
+		}
+	}
+	http.Redirect(w, r, "/digest/"+digestID, http.StatusSeeOther)
+}
+
+// deriveRevisionWithoutSource 从当前修订派生移除指定落源 Document 事实块的新修订，
+// 返回新修订 ID（重复提交且已派生过时返回空串）。
+func (srv *Server) deriveRevisionWithoutSource(ctx context.Context, digestID, documentID string) (string, error) {
+	base, err := srv.store.GetEpisodeDigest(ctx, digestID)
+	if err != nil {
+		return "", err
+	}
+	blocks, err := srv.store.ListDigestBlocks(ctx, digestID)
+	if err != nil {
+		return "", err
+	}
+	kept := make([]models.DigestBlock, 0, len(blocks))
+	removed := false
+	for _, b := range blocks {
+		if b.Type == models.DigestBlockCitedFact && b.TargetSourceID == documentID {
+			removed = true
+			continue // 移除引用该来源的事实块
+		}
+		kept = append(kept, *b)
+	}
+	// 重复提交守卫：同一父修订 + 同一剔除原因已派生过 → 不再重复修订。
+	var existing int
+	if err := srv.store.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM episode_digests WHERE parent_digest_id=? AND reason=?`,
+		digestID, "剔除来源 "+documentID).Scan(&existing); err == nil && existing > 0 {
+		return "", nil
+	}
+	reason := "剔除来源 " + documentID
+	if !removed {
+		reason = "剔除来源（无关联事实块）" + documentID
+	}
+	created, err := srv.store.CreateDigestRevision(ctx, store.DigestRevisionInput{
+		Base: base, Reason: reason, Blocks: kept,
+	})
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
+// handleDigestEdit 调整精读正文（G03）：只允许编辑转述/AI 展开块文本或改标题；
+// 笔记块与引用事实块不可在此改写。表单携带 base_version，过期编辑返回冲突；
+// 新修订由 CreateDigestRevision 校验块身份与引用约束，粘贴文本无法变成引用事实。
+func (srv *Server) handleDigestEdit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	digestID := strings.TrimPrefix(r.URL.Path, "/digest/")
+	digestID = strings.TrimSuffix(digestID, "/edit")
+	base, err := srv.store.GetEpisodeDigest(r.Context(), digestID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	baseVersion, _ := strconv.Atoi(r.FormValue("base_version"))
+	blocks, err := srv.store.ListDigestBlocks(r.Context(), digestID)
+	if err != nil {
+		http.Error(w, "加载内容块失败", http.StatusInternalServerError)
+		return
+	}
+	blockID := r.FormValue("block_id")
+	newText := strings.TrimSpace(r.FormValue("text"))
+	newTitle := strings.TrimSpace(r.FormValue("title"))
+	if newTitle == "" {
+		newTitle = base.Title
+	}
+	kept := make([]models.DigestBlock, 0, len(blocks))
+	edited := false
+	for _, b := range blocks {
+		if b.ID == blockID {
+			if b.Type != models.DigestBlockParaphrase && b.Type != models.DigestBlockAIExpansion {
+				http.Error(w, "该块类型不可编辑（笔记回笔记编辑；引用事实受证据约束）", http.StatusBadRequest)
+				return
+			}
+			b.Text = newText
+			edited = true
+		}
+		kept = append(kept, *b)
+	}
+	if blockID != "" && !edited {
+		http.Error(w, "内容块不存在", http.StatusBadRequest)
+		return
+	}
+	if _, err := srv.store.CreateDigestRevision(r.Context(), store.DigestRevisionInput{
+		Base: base, BaseVersionClaimed: baseVersion, Reason: "Owner 编辑", NewTitle: newTitle, Blocks: kept,
+	}); err != nil {
+		if err == store.ErrDigestRevisionConflict {
+			http.Error(w, "修订已被其他操作更新（版本冲突），请刷新后重试", http.StatusConflict)
+			return
+		}
+		http.Error(w, "保存修订失败："+err.Error(), http.StatusBadRequest)
+		return
 	}
 	http.Redirect(w, r, "/digest/"+digestID, http.StatusSeeOther)
 }

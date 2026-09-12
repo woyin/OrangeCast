@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
@@ -13,14 +14,14 @@ import (
 
 // digestCols / digestBlockCols 保持 SELECT 列序与 scanDigest/scanDigestBlock 一致。
 const (
-	digestCols     = `id,source_type,source_id,version,title,degraded,provider,model,prompt_version,created_at`
+	digestCols     = `id,source_type,source_id,version,title,degraded,provider,model,prompt_version,COALESCE(parent_digest_id,''),COALESCE(reason,''),COALESCE(source_snapshot_id,''),created_at`
 	digestBlockCnf = `id,digest_id,position,block_type,text,citations_json,target_source_id,note_id,created_at`
 )
 
 func scanDigest(row interface{ Scan(...any) error }) (*models.EpisodeDigest, error) {
 	d := &models.EpisodeDigest{}
 	var degraded int
-	if err := row.Scan(&d.ID, &d.SourceType, &d.SourceID, &d.Version, &d.Title, &degraded, &d.Provider, &d.Model, &d.PromptVersion, &d.CreatedAt); err != nil {
+	if err := row.Scan(&d.ID, &d.SourceType, &d.SourceID, &d.Version, &d.Title, &degraded, &d.Provider, &d.Model, &d.PromptVersion, &d.ParentDigestID, &d.Reason, &d.SourceSnapshotID, &d.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -73,16 +74,14 @@ func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDiges
 		degraded = 1
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO episode_digests (id,source_type,source_id,version,title,degraded,provider,model,prompt_version)
-		 VALUES (?,?,?,?,?,?,?,?,?)`,
-		d.ID, string(d.SourceType), d.SourceID, d.Version, d.Title, degraded, d.Provider, d.Model, d.PromptVersion); err != nil {
+		`INSERT INTO episode_digests (id,source_type,source_id,version,title,degraded,provider,model,prompt_version,parent_digest_id,reason)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		d.ID, string(d.SourceType), d.SourceID, d.Version, d.Title, degraded, d.Provider, d.Model, d.PromptVersion, d.ParentDigestID, d.Reason); err != nil {
 		return nil, fmt.Errorf("写入精读文: %w", err)
 	}
 	for i := range blocks {
 		b := &blocks[i]
-		if b.ID == "" {
-			b.ID = uuid.NewString()
-		}
+		b.ID = uuid.NewString() // 块身份属于修订（G03）：新修订一律新块 ID
 		b.DigestID = d.ID
 		b.Position = i + 1
 		cites, _ := json.Marshal(b.Citations)
@@ -313,4 +312,78 @@ func (s *Store) GetDocumentByOriginURL(ctx context.Context, originURL string) (*
 		return nil, ErrNotFound
 	}
 	return d, err
+}
+
+// ErrDigestRevisionConflict 编辑携带的基础修订已过期（G03）。
+var ErrDigestRevisionConflict = errors.New("digest revision conflict")
+
+// DigestRevisionInput 派生新修订的输入。
+// BaseVersionClaimed 是编辑表单携带的基准版本：不等于该 Source 当前最大版本时
+// 返回 ErrDigestRevisionConflict（过期编辑）。
+type DigestRevisionInput struct {
+	Base               *models.EpisodeDigest
+	BaseVersionClaimed int
+	Reason             string
+	NewTitle           string               // 空则继承基础标题
+	Blocks             []models.DigestBlock // 调整后的完整块序列
+}
+
+// CreateDigestRevision 从基础修订派生一份新修订（G03）：版本 = MAX+1，
+// 记录父修订与原因；旧版本内容及引用不变。base.Version 不等于当前最大版本时
+// 返回 ErrDigestRevisionConflict（过期编辑）。
+// 约束（块身份不可越权）：转述/引用事实必须保留引用；笔记块必须携带 NoteID
+// 且文本与该笔记当前内容一致（改笔记内容应回 OwnerNote 编辑再显式选用）。
+func (s *Store) CreateDigestRevision(ctx context.Context, in DigestRevisionInput) (*models.EpisodeDigest, error) {
+	if in.Base == nil || in.Base.ID == "" {
+		return nil, fmt.Errorf("%w: 缺少基础修订", ErrInvalidEditorialState)
+	}
+	base, err := s.GetEpisodeDigest(ctx, in.Base.ID)
+	if err != nil {
+		return nil, err
+	}
+	if in.BaseVersionClaimed > 0 {
+		var maxVersion int
+		if err := s.DB.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(version),0) FROM episode_digests WHERE source_type=? AND source_id=?`,
+			string(base.SourceType), base.SourceID).Scan(&maxVersion); err != nil {
+			return nil, err
+		}
+		if in.BaseVersionClaimed != maxVersion {
+			return nil, ErrDigestRevisionConflict
+		}
+	}
+	if len(in.Blocks) == 0 {
+		return nil, fmt.Errorf("%w: 修订不能清空全部内容", ErrInvalidEditorialState)
+	}
+	for _, b := range in.Blocks {
+		if b.Text == "" {
+			return nil, fmt.Errorf("%w: 修订块文本为空", ErrInvalidEditorialState)
+		}
+		switch b.Type {
+		case models.DigestBlockParaphrase, models.DigestBlockCitedFact:
+			if len(b.Citations) == 0 {
+				return nil, fmt.Errorf("%w: 转述/引用事实块必须保留依据引用", ErrInvalidEditorialState)
+			}
+		case models.DigestBlockNote:
+			if b.NoteID == "" {
+				return nil, fmt.Errorf("%w: 笔记块必须关联既有笔记", ErrInvalidEditorialState)
+			}
+			note, err := s.GetOwnerNote(ctx, b.NoteID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: 笔记块引用的笔记不存在", ErrInvalidEditorialState)
+			}
+			if b.Text != note.Content {
+				return nil, fmt.Errorf("%w: 笔记块文本必须与所选笔记一致（请回笔记编辑）", ErrInvalidEditorialState)
+			}
+		}
+	}
+	title := base.Title
+	if in.NewTitle != "" {
+		title = in.NewTitle
+	}
+	return s.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: base.SourceType, SourceID: base.SourceID, Title: title, Degraded: base.Degraded,
+		Provider: base.Provider, Model: base.Model, PromptVersion: base.PromptVersion,
+		ParentDigestID: base.ID, Reason: strings.TrimSpace(in.Reason),
+	}, in.Blocks, nil, nil)
 }

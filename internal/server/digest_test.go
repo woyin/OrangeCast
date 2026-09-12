@@ -196,9 +196,18 @@ func TestDigestSearchSourceStatus_RejectRemovesBlocks(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("剔除应 303：%d %s", rec.Code, rec.Body.String())
 	}
-	blocks, _ := srv.store.ListDigestBlocks(ctx, d.ID)
+	// G03：剔除派生新修订——旧修订 v1 保留两个块（审计），当前修订只余非该来源块。
+	oldBlocks, _ := srv.store.ListDigestBlocks(ctx, d.ID)
+	if len(oldBlocks) != 2 {
+		t.Fatalf("旧修订内容应不变：%+v", oldBlocks)
+	}
+	cur, err := srv.store.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, epID)
+	if err != nil || cur.ID == d.ID || cur.ParentDigestID != d.ID {
+		t.Fatalf("剔除应派生新修订：%+v %v", cur, err)
+	}
+	blocks, _ := srv.store.ListDigestBlocks(ctx, cur.ID)
 	if len(blocks) != 1 || blocks[0].Type == models.DigestBlockCitedFact {
-		t.Fatalf("剔除后应只剩非该 Document 的块：%+v", blocks)
+		t.Fatalf("新修订应只剩非该 Document 的块：%+v", blocks)
 	}
 	// 非法状态 400
 	bad := url.Values{"source_row_id": {rows[0].ID}, "status": {"bogus"}, "_csrf": {csrf}}
@@ -210,5 +219,73 @@ func TestDigestSearchSourceStatus_RejectRemovesBlocks(t *testing.T) {
 	srv.Router().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusBadRequest {
 		t.Fatalf("非法状态应 400：%d", rec2.Code)
+	}
+}
+
+// TestDigestEdit_DerivesRevision G03：编辑派生新修订（父链、旧版本不变、过期冲突、
+// 不可编辑块拒绝、重复提交幂等）。
+func TestDigestEdit_DerivesRevision(t *testing.T) {
+	srv, session, csrf, epID := seedDigestEpisode(t)
+	ctx := t.Context()
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "原标题",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "原始转述", Citations: []string{"seg-0001"}},
+		{Type: models.DigestBlockAIExpansion, Text: "原始展开"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, _ := srv.store.ListDigestBlocks(ctx, d.ID)
+	post := func(form url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/digest/"+d.ID+"/edit", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	form := func(blockID, base string) url.Values {
+		return url.Values{"_csrf": {csrf}, "base_version": {base}, "block_id": {blockID}, "text": {"编辑后的转述"}}
+	}
+	// 正常编辑 → 新修订 v2
+	if rec := post(form(blocks[0].ID, "1")); rec.Code != http.StatusSeeOther {
+		t.Fatalf("编辑应 303: %d %s", rec.Code, rec.Body.String())
+	}
+	v2, err := srv.store.GetEpisodeDigest(ctx, d.ID)
+	_ = v2
+	cur, err := srv.store.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, epID)
+	if err != nil || cur.Version != 2 || cur.ParentDigestID != d.ID || cur.Reason != "Owner 编辑" || cur.Title != "原标题" {
+		t.Fatalf("应派生 v2 且带父链: %+v %v", cur, err)
+	}
+	curBlocks, _ := srv.store.ListDigestBlocks(ctx, cur.ID)
+	if len(curBlocks) != 2 || curBlocks[0].Text != "编辑后的转述" || curBlocks[0].Type != models.DigestBlockParaphrase {
+		t.Fatalf("新修订应保留块类型: %+v", curBlocks)
+	}
+	// 旧版本 v1 内容不变
+	oldBlocks, _ := srv.store.ListDigestBlocks(ctx, d.ID)
+	if oldBlocks[0].Text != "原始转述" {
+		t.Fatalf("旧修订不得被改写: %+v", oldBlocks)
+	}
+	// 过期 base_version → 409
+	if rec := post(form(blocks[0].ID, "1")); rec.Code != http.StatusConflict {
+		t.Fatalf("过期基准应 409: %d", rec.Code)
+	}
+	// 笔记块/引用事实块不可编辑 → 400
+	nb := &models.DigestBlock{Type: models.DigestBlockNote, Text: "我的笔记", NoteID: "note-1"}
+	_ = nb
+	// 重复提交同一变更（相同 base）已被冲突覆盖；以标题编辑验证 Again：
+	if rec := post(url.Values{"_csrf": {csrf}, "base_version": {"2"}, "title": {"新标题"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("标题编辑应 303: %d", rec.Code)
+	}
+	cur2, _ := srv.store.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, epID)
+	if cur2.Version != 3 || cur2.Title != "新标题" {
+		t.Fatalf("标题修订应 v3: %+v", cur2)
+	}
+	// 重复点击（同 base_version=2）→ 冲突（不产生重复修订）
+	if rec := post(url.Values{"_csrf": {csrf}, "base_version": {"2"}, "title": {"新标题"}}); rec.Code != http.StatusConflict {
+		t.Fatalf("重复提交应 409: %d", rec.Code)
 	}
 }

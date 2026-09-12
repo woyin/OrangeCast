@@ -14,6 +14,12 @@ type EpisodeDigest struct {
 	Model         string
 	PromptVersion string
 	CreatedAt     string
+
+	// 修订血缘（G03）：parent 指向被调整修订，reason 记录调整原因，
+	// source_snapshot_id 关联 B01 来源快照（旧修订为空 = legacy）。
+	ParentDigestID   string
+	Reason           string
+	SourceSnapshotID string
 }
 
 // DigestBlockType 精读文内容块的类型身份（构造时确定，不是事后推断）。

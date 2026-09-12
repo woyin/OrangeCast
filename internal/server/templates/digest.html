@@ -27,14 +27,33 @@
       {{range $i, $c := .Citations}}{{if $i}} {{end}}{{$c}}{{end}}
     </p>
     {{end}}
+    {{if or (eq .Type "paraphrase") (eq .Type "ai_expansion")}}
+    <details><summary class="meta">编辑此块（保留原类型与引用约束）</summary>
+      <form method="post" action="/digest/{{$.Digest.ID}}/edit" class="subform">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+        <input type="hidden" name="base_version" value="{{$.Digest.Version}}">
+        <input type="hidden" name="block_id" value="{{.ID}}">
+        <label>文本 <textarea name="text" rows="3" required>{{.Text}}</textarea></label>
+        <button class="btn btn-secondary" type="submit">保存为新修订</button>
+      </form>
+    </details>
+    {{end}}
   </article>
   {{end}}
+  <details><summary class="meta">修改标题</summary>
+    <form method="post" action="/digest/{{.Digest.ID}}/edit" class="subform">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="base_version" value="{{.Digest.Version}}">
+      <label>标题 <input name="title" value="{{.Digest.Title}}" required></label>
+      <button class="btn btn-secondary" type="submit">保存为新修订</button>
+    </form>
+  </details>
 </section>
 
 {{if .SearchSources}}
 <section class="panel">
   <h2>本次联网补充的来源（发布前逐条确认）</h2>
-  <p class="meta">剔除后，引用该来源的事实块会一并删除。</p>
+  <p class="meta">剔除会派生一份移除相应事实块的新修订；旧版本仍可回看。重复提交只会派生一次。</p>
   {{range .SearchSources}}
   <article class="workflow-item">
     <div class="workflow-item-body">
