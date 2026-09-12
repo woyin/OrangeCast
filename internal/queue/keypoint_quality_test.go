@@ -16,6 +16,8 @@ type qualityAnalyzer struct {
 	verdict provider.KeypointQualityVerdict
 	err     error
 	calls   int
+	diag    *provider.IdeationDiagnosis
+	diagErr error
 }
 
 func (f *qualityAnalyzer) Analyze(transcript string, segments []provider.Segment) (*provider.AnalyzeResult, error) {

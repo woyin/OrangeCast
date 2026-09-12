@@ -547,3 +547,26 @@ func scanIdeationRound(row rowScanner) (*models.IdeationRound, error) {
 	}
 	return r, nil
 }
+
+// GetIdeationRoundByID 按 ID 读取轮次。
+func (s *Store) GetIdeationRoundByID(ctx context.Context, roundID string) (*models.IdeationRound, error) {
+	return scanIdeationRound(s.DB.QueryRowContext(ctx,
+		`SELECT id, session_id, round_no, prev_round_id, client_nonce, user_input, constraints_json, material_snapshot_json, status, output_diagnosis_id, created_at
+		 FROM ideation_rounds WHERE id=?`, roundID))
+}
+
+// CreateMaterialDiagnosisForRound 为轮次写入诊断（C03）。
+func (s *Store) CreateMaterialDiagnosisForRound(ctx context.Context, sessionID, roundID, diagnosisJSON, materialSnapshotJSON string) (*models.MaterialDiagnosis, error) {
+	md := &models.MaterialDiagnosis{
+		ID: uuid.NewString(), IdeationSessionID: sessionID,
+		DiagnosisJSON: diagnosisJSON, MaterialSnapshotJSON: materialSnapshotJSON,
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`INSERT INTO material_diagnoses (id, ideation_session_id, ideation_round_id, diagnosis_json, material_snapshot_json)
+		 VALUES (?,?,?,?,?)`,
+		md.ID, sessionID, roundID, diagnosisJSON, materialSnapshotJSON)
+	if err != nil {
+		return nil, err
+	}
+	return md, nil
+}

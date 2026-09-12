@@ -197,7 +197,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis:
 	default:
 		return nil
 	}
@@ -285,6 +285,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doDigestRewriteJob(ctx, job, bundle)
 	case models.JobDJPlan:
 		return w.doDJPlanJob(ctx, job, bundle)
+	case models.JobIdeationDiagnosis:
+		return w.doIdeationDiagnosisJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

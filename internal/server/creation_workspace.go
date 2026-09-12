@@ -10,6 +10,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 // handleDiscoverySettings records the one explicit, profile-scoped authorization
@@ -232,4 +233,34 @@ func (srv *Server) handleIdeationRoundsDetail(w http.ResponseWriter, r *http.Req
 		"Rounds":  rounds,
 		"CSRF":    auth.CSRFValue(r),
 	})
+}
+
+// handleIdeationDiagnose 为轮次入队诊断任务（C03）：HTTP 只保存意图，
+// 实际诊断由后台 worker 执行；同轮重复提交由意图幂等去重。
+func (srv *Server) handleIdeationDiagnose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	roundID := strings.TrimSpace(r.FormValue("round_id"))
+	round, err := srv.store.GetIdeationRoundByID(r.Context(), roundID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if round.SessionID != sessionID {
+		http.Error(w, "轮次不属于该会话", http.StatusBadRequest)
+		return
+	}
+	snapshot, _ := json.Marshal(map[string]string{"session_id": sessionID, "round_id": roundID})
+	if _, _, err := srv.store.EnqueueJobIdempotent(r.Context(), store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sessionID, JobType: models.JobIdeationDiagnosis,
+		IntentID:          "ideation_diag:" + sessionID + ":" + roundID,
+		InputSnapshotJSON: string(snapshot),
+	}); err != nil {
+		http.Error(w, "入队诊断失败："+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/workbench/ideation/rounds?session_id="+sessionID, http.StatusSeeOther)
 }

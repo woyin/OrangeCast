@@ -37,6 +37,8 @@ const (
 	JobDigestRewrite JobType = "digest_rewrite"
 	// JobDJPlan DJ 播放清单编排任务（D02）：输入为冻结的高光版本与目标时长。
 	JobDJPlan JobType = "dj_plan"
+	// JobIdeationDiagnosis 构思诊断任务（C03）：对冻结轮次执行材料诊断。
+	JobIdeationDiagnosis JobType = "ideation_diagnosis"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
