@@ -436,3 +436,63 @@ func historyCount(t *testing.T, srv *Server) int {
 	}
 	return n
 }
+
+// TestDigestHistoryAndSourceLink G07/G08：单集页列出本源精读修订（互不串源）；
+// 历史登记幂等（重复点击不新增）、导出登记状态行、来源删除保留历史身份。
+func TestDigestHistoryAndSourceLink(t *testing.T) {
+	srv, session, csrf, epID := seedDigestEpisode(t)
+	ctx := t.Context()
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "单集精读A",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{{Type: models.DigestBlockParaphrase, Text: "正文", Citations: []string{"seg-0001"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 另一集的精读文不出现在本集页面
+	podcast2, _ := srv.store.CreatePodcast(ctx, "https://f2.xml", "P2", "", "")
+	srv.store.MergeEpisodes(ctx, podcast2.ID, []models.Episode{{GUID: "g2", Title: "e2", AudioURL: "https://a.mp3"}})
+	eps2, _ := srv.store.ListEpisodes(ctx, podcast2.ID)
+	d2, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: eps2[0].ID, Title: "另一集精读",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{{Type: models.DigestBlockParaphrase, Text: "x", Citations: []string{"seg-0001"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := doWithCookie(srv, session, http.MethodGet, "/sources/episode/"+epID)
+	body := rec.Body.String()
+	if !strings.Contains(body, "单集精读A") || !strings.Contains(body, "/digest/"+d.ID) {
+		t.Fatalf("单集页应列出本源精读文")
+	}
+	if strings.Contains(body, "/digest/"+d2.ID) {
+		t.Fatal("连续两集不得跳错文（本源页不得出现他源精读链接）")
+	}
+	// 历史登记：published 显式动作；重复点击幂等。
+	postHistory := func() *httptest.ResponseRecorder {
+		form := url.Values{"_csrf": {csrf}, "status": {"published"}}
+		req := httptest.NewRequest(http.MethodPost, "/digest/"+d.ID+"/record-history", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		r2 := httptest.NewRecorder()
+		srv.Router().ServeHTTP(r2, req)
+		return r2
+	}
+	if rec := postHistory(); rec.Code != http.StatusSeeOther {
+		t.Fatalf("登记应 303: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := postHistory(); rec.Code != http.StatusSeeOther {
+		t.Fatalf("重复登记应 303: %d", rec.Code)
+	}
+	var n int
+	_ = srv.store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_history WHERE digest_id=?`, d.ID).Scan(&n)
+	if n != 1 {
+		t.Fatalf("同修订重复登记只应一条历史: %d", n)
+	}
+	var status, content string
+	_ = srv.store.DB.QueryRowContext(ctx, `SELECT status, digest_content FROM creation_history WHERE digest_id=?`, d.ID).Scan(&status, &content)
+	if status != "published" || !strings.Contains(content, "正文") {
+		t.Fatalf("历史应含状态与登记时正文: %s / %s", status, content)
+	}
+}

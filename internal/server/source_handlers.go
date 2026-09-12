@@ -77,6 +77,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if stages, err := srv.store.SourceStageStatuses(r.Context(), sourceType, sourceID); err == nil {
 		data["Stages"] = stages
 	}
+	// G07：本源的精读修订列表（生成/继续精读入口，持久身份不猜"最近一篇"）。
+	if digests, err := srv.store.ListEpisodeDigestsForSource(r.Context(), sourceType, sourceID); err == nil {
+		data["SourceDigests"] = digests
+	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }
 

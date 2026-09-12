@@ -14,6 +14,17 @@
     <button class="btn btn-secondary" id="copy-md-btn" type="button">复制 Markdown</button>
     <span id="copy-md-feedback" class="meta" aria-live="polite"></span>
     <a class="btn btn-secondary" href="/digests">返回列表</a>
+    <a class="btn btn-secondary" href="/sources/{{.Digest.SourceType}}/{{.Digest.SourceID}}">返回来源与笔记</a>
+    <form method="post" action="/digest/{{.Digest.ID}}/record-history" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="status" value="published">
+      <button class="btn btn-secondary" type="submit">登记为已发布历史</button>
+    </form>
+    <form method="post" action="/digest/{{.Digest.ID}}/record-history" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+      <input type="hidden" name="status" value="unpublished">
+      <button class="btn btn-secondary" type="submit">保存为未发布作品</button>
+    </form>
   </div>
 </section>
 

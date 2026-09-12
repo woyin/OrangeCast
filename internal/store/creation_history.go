@@ -91,3 +91,54 @@ func (s *Store) FindCreationHistoryCandidates(ctx context.Context, profileID, cl
 	}
 	return out, rows.Err()
 }
+
+// RecordDigestHistory 将确切精读修订登记为创作历史（G08 / ADR-0024 §5）：
+//   - 无专门画像时复用默认画像，不创建品牌副本；
+//   - status 只能是 published（Owner 明确登记发布）或 unpublished；
+//   - digest_id 唯一：同修订重复登记幂等返回既有记录（导出/预览不调用本方法）；
+//   - digest_content 复制登记时正文——来源删除后历史身份与已登记文本仍可审计
+//     （依据有效性由来源快照的审计状态说明，不私存被删原文）。
+func (s *Store) RecordDigestHistory(ctx context.Context, digestID, status string) (*models.CreationHistory, error) {
+	if status != "published" && status != "unpublished" {
+		return nil, fmt.Errorf("%w: invalid history status %q", ErrInvalidEditorialState, status)
+	}
+	d, err := s.GetEpisodeDigest(ctx, digestID)
+	if err != nil {
+		return nil, err
+	}
+	profile, err := s.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 幂等：同修订已有记录直接返回。
+	var existingID string
+	err = s.DB.QueryRowContext(ctx,
+		`SELECT id FROM creation_history WHERE digest_id=?`, digestID).Scan(&existingID)
+	if err == nil {
+		return s.GetCreationHistory(ctx, existingID)
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	blocks, err := s.ListDigestBlocks(ctx, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	var body strings.Builder
+	for _, b := range blocks {
+		body.WriteString(b.Text + "\n\n")
+	}
+	work := models.CreationHistory{
+		EditorialProfileID: profile.ID, Status: status, CreationForm: "episode_digest",
+		Title: d.Title, Content: body.String(),
+	}
+	created, err := s.CreateCreationHistory(ctx, work)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE creation_history SET digest_id=?, digest_content=? WHERE id=?`,
+		d.ID, body.String(), created.ID); err != nil {
+		return nil, err
+	}
+	return s.GetCreationHistory(ctx, created.ID)
+}

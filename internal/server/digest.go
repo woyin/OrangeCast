@@ -70,6 +70,10 @@ func (srv *Server) handleDigestDetail(w http.ResponseWriter, r *http.Request) {
 		srv.handleDigestEdit(w, r)
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, "/record-history") {
+		srv.handleDigestRecordHistory(w, r)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/digest/")
 	if id == "" || strings.Contains(id, "/") {
 		http.NotFound(w, r)
@@ -323,4 +327,24 @@ func (srv *Server) digestCitationViews(ctx context.Context, d *models.EpisodeDig
 		})
 	}
 	return views
+}
+
+// handleDigestRecordHistory 明确登记创作历史（G08）：published/unpublished 由
+// Owner 显式点击；下载、复制与预览不调用本方法（导出不等于发布）。
+// 同修订重复登记幂等返回既有历史。
+func (srv *Server) handleDigestRecordHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	digestID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/digest/"), "/record-history")
+	if digestID == "" || strings.Contains(digestID, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := srv.store.RecordDigestHistory(r.Context(), digestID, r.FormValue("status")); err != nil {
+		http.Error(w, "登记创作历史失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/digest/"+digestID, http.StatusSeeOther)
 }

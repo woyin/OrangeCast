@@ -397,3 +397,23 @@ func (s *Store) GetDigestRewriteInputHash(ctx context.Context, digestID, channel
 	}
 	return h, err
 }
+
+// ListEpisodeDigestsForSource 列出一个 Source 的精读修订（新→旧，G07 单集页衔接）。
+func (s *Store) ListEpisodeDigestsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) ([]*models.EpisodeDigest, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT `+digestCols+` FROM episode_digests WHERE source_type=? AND source_id=? ORDER BY version DESC`,
+		string(sourceType), sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.EpisodeDigest
+	for rows.Next() {
+		d, err := scanDigest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
