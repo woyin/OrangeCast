@@ -1,13 +1,64 @@
-{{define "title"}}仪表盘 · CloudWisePod{{end}}
+{{define "title"}}CloudWisePod{{end}}
 {{define "content"}}
-<h1>仪表盘</h1>
 <p>欢迎，{{.Email}}。</p>
+
 <div class="cards">
   <a class="card" href="/workbench"><h3>内容工作台</h3><p>管理内容品牌、选题与文章修订</p></a>
-  <a class="card" href="/digests"><h3>单集精读</h3><p>一键生成与管理单源精读文与小红书笔记</p></a>
   <a class="card" href="/podcasts"><h3>播客订阅</h3><p>管理与处理订阅的播客</p></a>
   <a class="card" href="/uploads"><h3>音频上传</h3><p>上传本地音频进行转录分析</p></a>
   <a class="card" href="/search"><h3>全库搜索</h3><p>检索所有转录与分析内容</p></a>
-  <a class="card" href="/settings"><h3>设置</h3><p>切换 AI provider 与模型</p></a>
+  <a class="card" href="/settings"><h3>设置</h3><p>模型、预算、TTS 与安全配置</p></a>
 </div>
+
+<!-- U01：学习泳道 -->
+<section class="panel" style="margin:1rem 0">
+  <h2>继续学习</h2>
+  {{with .Attention}}
+  {{range .Learning}}
+  <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
+    <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
+    {{if .Link}}<a class="btn btn-secondary" href="{{.Link}}">查看</a>{{end}}
+  </div>
+  {{else}}
+  <p class="empty">暂无待处理的学习事项。</p>
+  {{end}}
+  {{end}}
+</section>
+
+<!-- U01：创作泳道 -->
+<section class="panel" style="margin:1rem 0">
+  <h2>继续创作</h2>
+  {{with .Attention}}
+  {{range .Creation}}
+  <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
+    <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
+    {{if .Link}}<a class="btn btn-secondary" href="{{.Link}}">查看</a>{{end}}
+  </div>
+  {{else}}
+  <p class="empty">暂无待处理的创作事项。</p>
+  {{end}}
+  {{end}}
+</section>
+
+<!-- U01：最近精读文 -->
+{{with .RecentDigests}}
+<section class="panel" style="margin:1rem 0">
+  <h2>最近精读文</h2>
+  {{range .}}
+  <div class="list-item"><a href="/digest/{{.ID}}">{{.Title}}</a> <span class="meta">v{{.Version}}</span></div>
+  {{end}}
+  <a class="btn btn-secondary" href="/digests">全部精读文</a>
+</section>
+{{end}}
+
+<!-- U01：创作素材选择 -->
+{{with .Selections}}
+<section class="panel" style="margin:1rem 0">
+  <h2>创作素材选择</h2>
+  {{range .}}
+  <div class="list-item"><a href="/creation/selections">{{if .Title}}{{.Title}}{{else}}未命名选择{{end}}</a> <span class="meta">{{.Status}}</span></div>
+  {{end}}
+  <a class="btn btn-secondary" href="/creation/selections">管理素材选择</a>
+</section>
+{{end}}
 {{end}}

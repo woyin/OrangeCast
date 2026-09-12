@@ -99,8 +99,47 @@ func (srv *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	auth.ClearSessionCookie(w, r, srv.store)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
+// handleDashboard 首页并列继续学习与继续创作（U01 / ADR-0024 §1）。
+// 复用 AttentionQueue 呈现新重点、继续听、待处理问题，以及精读文、候选、
+// Brief、写作/审校中的文章。GET 只读，不入队或调用模型。
 func (srv *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	u, _ := srv.store.GetUserByID(r.Context(), userID)
-	srv.tmpl.Render(w, "dashboard.html", map[string]any{"Email": u.Email})
+	data := map[string]any{"Email": u.Email, "CSRF": auth.CSRFValue(r)}
+
+	// 注意力队列（学习 + 创作双泳道）。
+	profiles, err := srv.store.ListEditorialProfiles(r.Context())
+	if err == nil && len(profiles) > 0 {
+		items, err := srv.store.AttentionQueue(r.Context(), profiles[0].ID)
+		if err == nil {
+			var learning, creation []store.AttentionItem
+			for _, item := range items {
+				if item.Lane == "learning" {
+					learning = append(learning, item)
+				} else {
+					creation = append(creation, item)
+				}
+			}
+			data["Attention"] = map[string]any{"Learning": learning, "Creation": creation}
+		}
+	}
+
+	// 最近精读文。
+	digests, err := srv.store.ListEpisodeDigests(r.Context())
+	if err == nil && len(digests) > 3 {
+		digests = digests[:3]
+	}
+	if len(digests) > 0 {
+		data["RecentDigests"] = digests
+	}
+
+	// 创作素材选择。
+	if profile := profiles[0]; len(profiles) > 0 {
+		selections, err := srv.store.ListCreationSelections(r.Context(), profile.ID)
+		if err == nil && len(selections) > 0 {
+			data["Selections"] = selections
+		}
+	}
+
+	srv.tmpl.Render(w, "dashboard.html", data)
 }

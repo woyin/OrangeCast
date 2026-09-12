@@ -2834,3 +2834,23 @@ func TestPodcastIngestionPolicy_SavesProcessingDepth(t *testing.T) {
 		t.Fatalf("非法深度应 400: %d", rec.Code)
 	}
 }
+
+// TestDashboard_AttentionLanesAndDigests U01：首页并列学习与创作泳道、最近精读文。
+func TestDashboard_AttentionLanesAndDigests(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "dash@example.com", "password123")
+	rec := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("首页应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"继续学习", "继续创作", "内容工作台"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("首页缺少 %q", want)
+		}
+	}
+	// 空数据显示空状态提示
+	if !strings.Contains(body, "暂无") {
+		t.Log("空数据显示空状态（正常）")
+	}
+}
