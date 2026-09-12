@@ -80,6 +80,9 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobHighlight:
 			// 高光独立任务（B06）使用高光角色配置
 			tc = provider.TaskConfig{Provider: ptrStr(st.HighlightProvider), Model: ptrStr(st.HighlightModel)}
+		case models.JobNarration:
+			// 解说任务（B07）：本地 TTS 零成本，Provider 路由保持默认
+			tc = provider.TaskConfig{Provider: ptrStr(st.HighlightProvider), Model: ptrStr(st.HighlightModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -264,6 +267,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doDigest(ctx, job, bundle)
 	case models.JobHighlight:
 		return w.doHighlightJob(ctx, job, bundle)
+	case models.JobNarration:
+		return w.doNarrationJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

@@ -23,6 +23,7 @@ type NarrationRow struct {
 	DurationSeconds float64
 	CharCount       int
 	Provider        string
+	CacheKey        string // 内容感知缓存身份（B07）；旧行为 ''（legacy，不参与命中）
 	CreatedAt       string
 }
 
@@ -60,12 +61,12 @@ func (s *Store) CreateNarration(ctx context.Context, sourceType models.SourceTyp
 func (s *Store) GetCurrentNarration(ctx context.Context, sourceType models.SourceType, sourceID, highlightID string) (*NarrationRow, error) {
 	r := &NarrationRow{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider, created_at
+		`SELECT id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider, COALESCE(cache_key,''), created_at
 		 FROM narrations
 		 WHERE source_type=? AND source_id=? AND highlight_id=?
 		 ORDER BY version DESC LIMIT 1`,
 		string(sourceType), sourceID, highlightID).
-		Scan(&r.ID, &r.SourceType, &r.SourceID, &r.HighlightID, &r.Version, &r.Voice, &r.Model, &r.RelPath, &r.DurationSeconds, &r.CharCount, &r.Provider, &r.CreatedAt)
+		Scan(&r.ID, &r.SourceType, &r.SourceID, &r.HighlightID, &r.Version, &r.Voice, &r.Model, &r.RelPath, &r.DurationSeconds, &r.CharCount, &r.Provider, &r.CacheKey, &r.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -76,7 +77,7 @@ func (s *Store) GetCurrentNarration(ctx context.Context, sourceType models.Sourc
 // 返回 highlight_id → NarrationRow 映射，供 DJ 页一次性取全部。
 func (s *Store) ListCurrentNarrationsForSource(ctx context.Context, sourceType models.SourceType, sourceID string) (map[string]*NarrationRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT n.id, n.source_type, n.source_id, n.highlight_id, n.version, n.voice, n.model, n.relpath, n.duration_seconds, n.char_count, n.provider, n.created_at
+		`SELECT n.id, n.source_type, n.source_id, n.highlight_id, n.version, n.voice, n.model, n.relpath, n.duration_seconds, n.char_count, n.provider, COALESCE(n.cache_key,''), n.created_at
 		 FROM narrations n
 		 INNER JOIN (
 		   SELECT highlight_id, MAX(version) AS maxv
@@ -92,7 +93,7 @@ func (s *Store) ListCurrentNarrationsForSource(ctx context.Context, sourceType m
 	out := map[string]*NarrationRow{}
 	for rows.Next() {
 		r := &NarrationRow{}
-		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.HighlightID, &r.Version, &r.Voice, &r.Model, &r.RelPath, &r.DurationSeconds, &r.CharCount, &r.Provider, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.HighlightID, &r.Version, &r.Voice, &r.Model, &r.RelPath, &r.DurationSeconds, &r.CharCount, &r.Provider, &r.CacheKey, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out[r.HighlightID] = r
@@ -105,4 +106,43 @@ func (s *Store) DeleteNarrationsForSource(ctx context.Context, sourceType models
 	_, err := s.DB.ExecContext(ctx,
 		`DELETE FROM narrations WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
 	return err
+}
+
+// CreateNarrationCached 以内容感知缓存身份写入 Narration（B07）。
+// cache_key 唯一标识（文本指纹+输入版本+Provider+模型+音色+语言）；同 key 幂等返回既有行。
+func (s *Store) CreateNarrationCached(ctx context.Context, sourceType models.SourceType, sourceID, highlightID, cacheKey, voice, model, relpath string, durationSeconds float64, charCount int, providerName string) (version int, reused bool, err error) {
+	if cacheKey == "" {
+		return 0, false, fmt.Errorf("%w: narration cache key required", ErrInvalidEditorialState)
+	}
+	if existing, err := s.GetNarrationByCacheKey(ctx, sourceType, sourceID, highlightID, cacheKey); err == nil {
+		return existing.Version, true, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return 0, false, err
+	}
+	v, err := s.CreateNarration(ctx, sourceType, sourceID, highlightID, voice, model, relpath, durationSeconds, charCount, providerName)
+	if err != nil {
+		return 0, false, err
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE narrations SET cache_key=? WHERE source_type=? AND source_id=? AND highlight_id=? AND version=?`,
+		cacheKey, string(sourceType), sourceID, highlightID, v); err != nil {
+		return v, false, err
+	}
+	return v, false, nil
+}
+
+// GetNarrationByCacheKey 按缓存身份读取 Narration；无命中返回 ErrNotFound。
+func (s *Store) GetNarrationByCacheKey(ctx context.Context, sourceType models.SourceType, sourceID, highlightID, cacheKey string) (*NarrationRow, error) {
+	row := &NarrationRow{}
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id, source_type, source_id, highlight_id, version, voice, model, relpath, duration_seconds, char_count, provider, COALESCE(cache_key,''), created_at
+		 FROM narrations WHERE source_type=? AND source_id=? AND highlight_id=? AND cache_key=?`,
+		string(sourceType), sourceID, highlightID, cacheKey).
+		Scan(&row.ID, &row.SourceType, &row.SourceID, &row.HighlightID, &row.Version, &row.Voice, &row.Model, &row.RelPath, &row.DurationSeconds, &row.CharCount, &row.Provider, &row.CacheKey, &row.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
 }

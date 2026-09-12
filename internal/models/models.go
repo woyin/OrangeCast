@@ -29,6 +29,8 @@ const (
 	JobDigest JobType = "episode_digest"
 	// JobHighlight 高光独立任务（B06）：从冻结的 Transcript 版本生成 HighlightSet。
 	JobHighlight JobType = "highlight"
+	// JobNarration 解说独立任务（B07）：从冻结的高光版本合成解说音轨。
+	JobNarration JobType = "narration"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
