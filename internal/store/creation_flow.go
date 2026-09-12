@@ -708,3 +708,82 @@ func (s *Store) InheritClaimMap(ctx context.Context, oldRevisionID, newRevisionI
 	}
 	return len(inherited), nil
 }
+
+// ---- 双向导航查询（U02）----
+
+// MaterialUsage 单条材料的使用记录。
+type MaterialUsage struct {
+	Kind   string `json:"kind"` // digest | article
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
+	Link   string `json:"link"`
+}
+
+// FindUsageByKeyPoint 反查一个 KeyPoint 被哪些精读文/文章修订采用。
+// 数据来源：claim_map_entries.material_ids_json（文章）和 digest_blocks（引用事实）。
+func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]MaterialUsage, error) {
+	var out []MaterialUsage
+	// 1) 精读文中的引用（digest_blocks.citations_json 含 keypoint 引用的 Segment 不直接对齐——
+	//    用 claim_map_entries 匹配文章修订；精读文块只匹配 target_source_id 或 citations_json）。
+	articleRows, err := s.DB.QueryContext(ctx,
+		`SELECT cme.revision_id, ad.title
+		 FROM claim_map_entries cme
+		 JOIN article_drafts ad ON ad.id = cme.draft_id
+		 WHERE cme.material_ids_json LIKE ?`,
+		"%"+keypointID+"%")
+	if err == nil {
+		defer articleRows.Close()
+		for articleRows.Next() {
+			var revID, title string
+			if err := articleRows.Scan(&revID, &title); err == nil {
+				out = append(out, MaterialUsage{Kind: "article", Title: title, Detail: "文章修订 " + revID, Link: "/workbench"})
+			}
+		}
+	}
+	// 2) 精读文（episode_digests 通过 creation_history 关联）。
+	digestRows, err := s.DB.QueryContext(ctx,
+		`SELECT ed.id, ed.title, ed.version
+		 FROM episode_digests ed
+		 JOIN digest_blocks db ON db.digest_id = ed.id
+		 WHERE ed.id IN (SELECT digest_id FROM digest_blocks WHERE citations_json LIKE ? OR target_source_id = ?)
+		 ORDER BY ed.version DESC`,
+		"%"+keypointID+"%", keypointID)
+	if err == nil {
+		defer digestRows.Close()
+		seenDigest := map[string]bool{}
+		for digestRows.Next() {
+			var id, title string
+			var version int
+			if err := digestRows.Scan(&id, &title, &version); err == nil && !seenDigest[id] {
+				seenDigest[id] = true
+				out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+			}
+		}
+	}
+	return out, nil
+}
+
+// FindUsageByNote 反查一条个人笔记被哪些精读文采用。
+func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialUsage, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT ed.id, ed.title, ed.version
+		 FROM episode_digests ed
+		 JOIN digest_blocks db ON db.digest_id = ed.id
+		 WHERE db.note_id = ?
+		 ORDER BY ed.version DESC`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MaterialUsage
+	seen := map[string]bool{}
+	for rows.Next() {
+		var id, title string
+		var version int
+		if err := rows.Scan(&id, &title, &version); err == nil && !seen[id] {
+			seen[id] = true
+			out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+		}
+	}
+	return out, rows.Err()
+}

@@ -72,6 +72,14 @@
   {{end}}
 </div>
 
+{{with .MaterialUsage}}
+<section class="panel" style="margin:1rem 0">
+  <h2>被采用为素材</h2>
+  {{range .}}
+  <div class="list-item"><a href="{{.Link}}">{{.Title}}</a> <span class="meta">{{.Detail}}</span></div>
+  {{end}}
+</section>
+{{end}}
 {{with .SourceDigests}}
 <section class="panel" style="margin:1rem 0">
   <h2>精读文</h2>

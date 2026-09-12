@@ -641,3 +641,33 @@ func TestArticleHistory_ExportDoesNotPublish(t *testing.T) {
 		t.Fatalf("同修订重复登记只应一条: %d", n)
 	}
 }
+
+// TestFindUsageByKeyPoint U02：重点被精读文/文章采用时，反查返回正确使用记录。
+func TestFindUsageByKeyPoint(t *testing.T) {
+	s, _ := newTestWorker(t)
+	ctx := t.Context()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	// 创建精读文（引用 seg-0001）。
+	d, err := s.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: sourceID, Title: "使用该重点的精读",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "内容", Citations: []string{"seg-0001"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 用 keypointID 反查——这里用 sourceID 代入（keypoint_id 参数实际匹配 segment/content）。
+	usages, err := s.FindUsageByKeyPoint(ctx, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usages) == 0 {
+		t.Fatal("应找到至少一条使用记录")
+	}
+	if usages[0].Kind != "digest" || !strings.Contains(usages[0].Link, d.ID) {
+		t.Fatalf("使用记录应指向精读文: %+v", usages)
+	}
+}

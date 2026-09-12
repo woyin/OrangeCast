@@ -73,6 +73,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if candidates, err := srv.store.ListMaterialCandidates(r.Context(), sourceType, sourceID); err == nil {
 		data["MaterialCandidates"] = candidates
 	}
+	// U02：该来源的重点被哪些精读文/文章采用。
+	if usages, err := srv.store.FindUsageByKeyPoint(r.Context(), sourceID); err == nil && len(usages) > 0 {
+		data["MaterialUsage"] = usages
+	}
 	// B09：分阶段进度（知识 / DJ 高光 / 解说），失败阶段带原因与重试入口。
 	if stages, err := srv.store.SourceStageStatuses(r.Context(), sourceType, sourceID); err == nil {
 		data["Stages"] = stages
