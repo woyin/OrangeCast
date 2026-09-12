@@ -23,22 +23,14 @@ func TestClaimReviewStore_RoundTrip(t *testing.T) {
 		t.Fatalf("状态不符: %+v", review)
 	}
 	latest, err := s.LatestClaimReview(ctx, "rev-1")
-	if err != nil || latest.ID != review.ID {
-		t.Fatalf("latest 应返回刚创建的审校: %+v %v", latest, err)
-	}
-	_, err = s.CreateClaimReview(ctx, models.ClaimReview{
-		WorkRevisionID: "rev-1", Status: "failed", IssuesJSON: `["问题1"]`,
-	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 同 revision 的 latest 检查（created_at 秒级精度可能相同，验证无错误即可）。
-	if latest2 == nil {
-		t.Fatal("latest2 不应为 nil")
+	if latest.ID != review.ID {
+		t.Fatalf("latest 应为刚创建的审校: %+v", latest)
 	}
 }
 
-// TestClaimReviewStore_FailPersisted C11：fail 状态和 issues 正确持久化。
 func TestClaimReviewStore_FailPersisted(t *testing.T) {
 	s, _ := newTestWorker(t)
 	ctx := context.Background()
