@@ -479,3 +479,93 @@ func TestCreationArticleBridge(t *testing.T) {
 		t.Fatalf("反向查询应有效: %+v %v", revLink, err)
 	}
 }
+
+// TestInheritClaimMap_RevisionLineage C12：修改片段不继承、未修改片段继承、
+// 旧审校不继承、删除的片段不继承。
+func TestInheritClaimMap_RevisionLineage(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := srv.store.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, Status: "proposed", WorkingTitle: "C12",
+		ProposedClaim: "C12 主张", CreationForm: "article",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.AcceptCreationProposal(ctx, proposal.ID, "Owner 主张"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := srv.store.CreateCreationBrief(ctx, models.CreationBrief{
+		CreationProposalID: proposal.ID, OwnerClaim: "Owner 主张",
+		MaterialPlanJSON: `["kp-a"]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.ConfirmCreationBrief(ctx, brief.ID); err != nil {
+		t.Fatal(err)
+	}
+	link, err := srv.store.EnsureCreationArticleLink(ctx, proposal.ID, brief.ID, "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := srv.store.CreateArticleDraft(ctx, link.ArticleBriefID, "C12 文章")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMarkdown := "# C12\n\n未修改的段落原文。被修改的段落旧文本。将被删除的段落。"
+	rev1, err := srv.store.CreateArticleRevision(ctx, models.ArticleRevision{
+		DraftID: draft.ID, Markdown: oldMarkdown, Origin: "writer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []models.ClaimMapEntry{
+		{Excerpt: "未修改的段落原文", ClaimKind: "source_claim", MaterialIDs: []string{"kp-a"}, SourceTitle: "来源"},
+		{Excerpt: "被修改的段落旧文本", ClaimKind: "synthesis_claim", MaterialIDs: []string{"kp-a"}},
+		{Excerpt: "将被删除的段落", ClaimKind: "owner_claim"},
+	}
+	if err := srv.store.SaveClaimMap(ctx, draft.ID, rev1.ID, entries); err != nil {
+		t.Fatal(err)
+	}
+	// 旧审校不继承到新修订。
+	if _, err := srv.store.CreateClaimReview(ctx, models.ClaimReview{
+		WorkRevisionID: rev1.ID, Status: "passed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 新修订：修改一处、删除一处、保留一处。
+	newMarkdown := "# C12\n\n未修改的段落原文。被修改的段落新文本。"
+	rev2, err := srv.store.CreateArticleRevision(ctx, models.ArticleRevision{
+		DraftID: draft.ID, Markdown: newMarkdown, Origin: "writer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, err := srv.store.InheritClaimMap(ctx, rev1.ID, rev2.ID, draft.ID, newMarkdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inherited != 1 {
+		t.Fatalf("应只继承 1 条（未修改的）: %d", inherited)
+	}
+	newEntries, _ := srv.store.ListClaimMap(ctx, draft.ID, rev2.ID)
+	if len(newEntries) != 1 || newEntries[0].Excerpt != "未修改的段落原文" {
+		t.Fatalf("新修订 ClaimMap 应只含未修改片段: %+v", newEntries)
+	}
+	// 旧修订 ClaimMap 不变。
+	oldEntries, _ := srv.store.ListClaimMap(ctx, draft.ID, rev1.ID)
+	if len(oldEntries) != 3 {
+		t.Fatalf("旧修订 ClaimMap 应保持不变: %d", len(oldEntries))
+	}
+	// 旧审校不继承到新修订。
+	_, err = srv.store.LatestClaimReview(ctx, rev2.ID)
+	if err == nil {
+		t.Fatal("旧审校不应继承到新修订")
+	}
+}

@@ -679,3 +679,32 @@ func (s *Store) ListClaimMap(ctx context.Context, draftID, revisionID string) ([
 	}
 	return out, rows.Err()
 }
+
+// InheritClaimMap 修订时正确继承主张映射（C12 / ADR-0024 §6）：
+//   - 旧修订的 ClaimMap 中，逐字出现的片段可继承（身份/证据关系未变化）；
+//   - 修改处（新文本或引用变化的片段）重新校验，不自动继承；
+//   - 旧审校（claim_reviews）不继承——新修订需要重新审校。
+//
+// oldRevisionID 为基础修订，newRevisionID 为新修订（已通过 CreateArticleRevision 创建）。
+// newMarkdown 是新修订的正文。返回继承的条目数。
+func (s *Store) InheritClaimMap(ctx context.Context, oldRevisionID, newRevisionID, draftID, newMarkdown string) (int, error) {
+	entries, err := s.ListClaimMap(ctx, draftID, oldRevisionID)
+	if err != nil {
+		return 0, err
+	}
+	var inherited []models.ClaimMapEntry
+	for _, e := range entries {
+		// 只有逐字出现的片段才可继承（身份/证据关系未变化）。
+		if strings.Contains(newMarkdown, e.Excerpt) {
+			inherited = append(inherited, e)
+		}
+		// 未逐字出现的片段不继承（需要重新审校，C11 接入）。
+	}
+	if len(inherited) == 0 {
+		return 0, nil
+	}
+	if err := s.SaveClaimMap(ctx, draftID, newRevisionID, inherited); err != nil {
+		return 0, err
+	}
+	return len(inherited), nil
+}
