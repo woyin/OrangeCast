@@ -25,13 +25,16 @@
     </select>
   </label>
   <button id="dj-full" class="btn btn-secondary" type="button">▶ 继续听原节目</button>
+  <button id="dj-pin" class="btn btn-secondary" type="button" disabled title="收藏当前播放的原音区间">⭐ 收藏这段</button>
+  <button id="dj-note" class="btn btn-secondary" type="button" disabled title="记录个人理解（自动锚定当前片段，Reference 身份）">✍ 记下我的理解</button>
+  <span id="dj-action-feedback" class="meta" aria-live="polite" style="margin-left:0.5rem"></span>
   <span id="dj-status" style="margin-left:0.5rem;color:var(--muted)"></span>
 </div>
 <p class="meta" id="dj-progress" aria-live="polite"></p>
 
 <div id="playlist" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-plan-version="{{.HighlightVersion}}">
 {{range $i, $h := .Highlights}}
-<div class="dj-item" data-idx="{{$i}}" data-start="{{$h.Start}}" data-end="{{$h.End}}" data-narration="{{$h.NarrationURL}}" data-highlight-id="{{$h.HighlightID}}">
+<div class="dj-item" data-idx="{{$i}}" data-start="{{$h.Start}}" data-end="{{$h.End}}" data-narration="{{$h.NarrationURL}}" data-highlight-id="{{$h.HighlightID}}" data-segments="{{$h.Segments}}">
   <div class="dj-gist">
     <strong>高光 {{$i}}</strong>（{{formatTime $h.Start}} – {{formatTime $h.End}}）
     {{if not $h.NarrationURL}}<span class="narration-missing" style="color:var(--muted);font-size:0.8rem"> · AI 解说未生成</span>{{end}}
@@ -93,6 +96,11 @@
       document.querySelectorAll('.dj-item').forEach(function(el) {
         el.style.outline = (item && el.dataset.idx === item.idx) ? '2px solid var(--accent, #333)' : '';
       });
+      // D08：解说播放时锚定其参考原音（使用该解说对应高光的片段，不错挂）。
+      if (item && item.type === 'evidence') { lastEvidenceItem = item; }
+      else if (item && item.type === 'narration' && item.segmentIds && item.segmentIds.length) {
+        lastEvidenceItem = item;
+      }
       // D06：总进度与当前片段身份（原音/AI 解说）。
       var pos = parseInt(idx) + 1;
       if (progressEl) {
@@ -107,8 +115,10 @@
     var items = [];
     document.querySelectorAll('.dj-item').forEach(function(el, i) {
       var nar = el.dataset.narration;
-      if (nar) items.push({type: 'narration', url: nar, idx: String(i)});
-      items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i)});
+      var segs = [];
+      try { segs = JSON.parse(el.dataset.segments || '[]'); } catch (e) {}
+      if (nar) items.push({type: 'narration', url: nar, idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
+      items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
     });
     return items;
   }
@@ -218,6 +228,54 @@
   if (prevBtn) prevBtn.addEventListener('click', function() { player.prev(); });
   if (nextBtn) nextBtn.addEventListener('click', function() { player.next(); });
   if (stopBtn) stopBtn.addEventListener('click', function() { player.stop(); });
+  // ---- D08：收藏片段 / 记录理解（复用既有 Pin 与 OwnerNote，不建独立体系）----
+  var lastEvidenceItem = null;
+  function currentItemSegments() {
+    if (!lastEvidenceItem) return null;
+    if (lastEvidenceItem.segmentIds && lastEvidenceItem.segmentIds.length) return lastEvidenceItem.segmentIds;
+    return null;
+  }
+  function postForm(path, params, feedback) {
+    params.set('_csrf', csrfToken);
+    var body = new URLSearchParams(params);
+    fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrfToken },
+      body: body.toString()
+    }).then(function (r) {
+      feedback.textContent = r.ok ? '已保存' : '保存失败（' + r.status + '）';
+    }).catch(function (e) {
+      feedback.textContent = '保存失败：' + e.message;
+    });
+    // 保存完成不重置播放器：仅更新反馈文本。
+  }
+  var pinBtn = document.getElementById('dj-pin');
+  var noteBtn = document.getElementById('dj-note');
+  var feedback = document.getElementById('dj-action-feedback');
+  if (pinBtn) pinBtn.addEventListener('click', function () {
+    var segs = currentItemSegments();
+    if (!segs) { feedback.textContent = '暂无可收藏的原音区间'; return; }
+    var params = new URLSearchParams();
+    params.set('source_type', sourceType);
+    params.set('source_id', sourceId);
+    params.set('segment_ids', JSON.stringify(segs));
+    params.set('source_title', 'DJ 精听');
+    postForm('/api/pin', params, feedback);
+  });
+  if (noteBtn) noteBtn.addEventListener('click', function () {
+    var segs = currentItemSegments();
+    if (!segs) { feedback.textContent = '暂无可锚定的原音区间'; return; }
+    var text = window.prompt('记下你的理解（个人理解，自动以 Reference 锚定当前片段，不会变成原文证据）：');
+    if (!text || !text.trim()) return;
+    var params = new URLSearchParams();
+    params.set('source_type', sourceType);
+    params.set('source_id', sourceId);
+    params.set('kind', 'owner_reflection');
+    params.set('content', text.trim());
+    params.set('references_json', JSON.stringify(segs));
+    postForm('/api/owner-notes', params, feedback);
+  });
+
   var rateSel = document.getElementById('dj-rate');
   if (rateSel) rateSel.addEventListener('change', function() {
     player.setRate(parseFloat(rateSel.value));

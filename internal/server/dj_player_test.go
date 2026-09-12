@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -252,5 +253,80 @@ func TestDJHarnessScenariosViaNode(t *testing.T) {
 	// 由执行器在不等时以非零退出保证）。
 	if !strings.Contains(string(out), "PASS") {
 		t.Fatalf("夹具应输出 PASS 统计: %s", out)
+	}
+}
+
+// TestDJBriefCaptureButtons D08：DJ 页提供收藏/理解按钮（复用 /api/pin 与
+// /api/owner-notes，不建独立 DJ 笔记体系）；个人理解以 OwnerReflection 身份保存，
+// 不会变成原文证据；重复收藏不产生重复行（TogglePin 按 segment_ids 幂等）。
+func TestDJBriefCaptureButtons(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "djcapture@example.com", "password123")
+	podcast, err := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/djcap.xml", "DJ收藏播客", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "djcap-1", Title: "收藏单集", AudioURL: "https://a.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	eps, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	seedHighlightAndNarration(t, srv, eps[0].ID)
+
+	rec := doWithCookie(srv, session, http.MethodGet, "/sources/episode/"+eps[0].ID+"/dj")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DJ 页应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"dj-pin", "dj-note", "/api/pin", "/api/owner-notes", "owner_reflection", "data-segments"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("DJ 页缺少 %q", want)
+		}
+	}
+	// 记录理解 → OwnerReflection 落库，出现在单集学习页（个人身份，非原文证据）。
+	rec0 := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	form := url.Values{
+		"_csrf":           {csrf},
+		"source_type":     {"episode"},
+		"source_id":       {eps[0].ID},
+		"kind":            {"owner_reflection"},
+		"content":         {"我的理解：这段在讲样本选择偏差"},
+		"references_json": {`["seg-0001"]`},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/owner-notes", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-CSRF-Token", csrf)
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("理解应保存 303: %d %s", rec.Code, rec.Body.String())
+	}
+	page := doWithCookie(srv, session, http.MethodGet, "/sources/episode/"+eps[0].ID)
+	pageBody := page.Body.String()
+	if !strings.Contains(pageBody, "我的理解：这段在讲样本选择偏差") || !strings.Contains(pageBody, "owner_reflection") {
+		t.Fatalf("单集页应显示个人理解（OwnerReflection 身份）")
+	}
+	// 收藏幂等：同 segment_ids 两次 TogglePin → 1 行再 0 行（不重复）。
+	if _, err := srv.store.TogglePin(t.Context(), models.SourceEpisode, eps[0].ID, `["seg-0001"]`, 0, 5, "DJ 精听"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = srv.store.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pins WHERE source_id=? AND segment_ids='["seg-0001"]'`, eps[0].ID).Scan(&n)
+	if n != 1 {
+		t.Fatalf("首次收藏应有且仅有 1 行: %d", n)
+	}
+	if _, err := srv.store.TogglePin(t.Context(), models.SourceEpisode, eps[0].ID, `["seg-0001"]`, 0, 5, "DJ 精听"); err != nil {
+		t.Fatal(err)
+	}
+	_ = srv.store.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pins WHERE source_id=? AND segment_ids='["seg-0001"]'`, eps[0].ID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("取消收藏应删除行: %d", n)
 	}
 }

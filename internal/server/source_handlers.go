@@ -322,7 +322,8 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		Start        float64
 		End          float64
 		Citations    []string
-		NarrationURL string // 当前 Narration wav 的 URL；空=未生成（前端跳过+显示标记）
+		Segments     []string // D08：段落 ID（收藏/理解锚定）
+		NarrationURL string   // 当前 Narration wav 的 URL；空=未生成（前端跳过+显示标记）
 	}
 	narrations, _ := srv.store.ListCurrentNarrationsForSource(r.Context(), sourceType, sourceID)
 	var highlights []highlightView
@@ -333,6 +334,7 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		}
 		hv := highlightView{
 			HighlightID: h.ID, Gist: h.Gist, Start: start, End: end, Citations: h.Citations,
+			Segments: h.Citations,
 		}
 		if nar, ok := narrations[h.ID]; ok {
 			hv.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + h.ID
