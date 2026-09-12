@@ -93,10 +93,14 @@ func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDiges
 		}
 	}
 	for _, row := range searchRows {
+		status := row.Status
+		if status == "" {
+			status = "pending" // 与 AddDigestSearchSources 语义一致（G02 修复点）
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO digest_search_sources (id,digest_id,query,url,title,document_id,status)
 			 VALUES (?,?,?,?,?,?,?)`,
-			uuid.NewString(), d.ID, row.Query, row.URL, row.Title, row.DocumentID, row.Status); err != nil {
+			uuid.NewString(), d.ID, row.Query, row.URL, row.Title, row.DocumentID, status); err != nil {
 			return nil, fmt.Errorf("写入检索落源: %w", err)
 		}
 	}

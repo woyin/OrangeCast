@@ -251,20 +251,28 @@ func CrossEpisodeCases() []CrossEpisodeCase {
 
 // OwnerNoteCases 返回个人笔记身份用例。
 func OwnerNoteCases() []OwnerNoteCase {
-	return []OwnerNoteCase{
-		{
-			ID: "note-li-01", EpisodeID: "zh-long-01", Kind: "source_note",
-			Content:        "受访者提到挂号应用每半年改版一次，老人需要重新学习。",
-			AnchorSegments: []string{"li-seg-08"},
-			IsEvidence:     true,
-		},
-		{
-			ID: "note-li-02", EpisodeID: "zh-long-01", Kind: "owner_reflection",
-			Content:        "这让我想起我外婆：只肯用视频通话，每次系统更新都要找人帮忙——我猜改版疲劳是普遍现象。",
-			AnchorSegments: []string{"li-seg-03"},
-			IsEvidence:     false,
-		},
-	}
+	return ownerNoteCasesForCheck
+}
+
+// ownerNoteCasesForCheck 笔记用例存储（测试可临时替换以覆盖校验分支）。
+var ownerNoteCasesForCheck = []OwnerNoteCase{
+	{
+		ID: "note-li-01", EpisodeID: "zh-long-01", Kind: "source_note",
+		Content:        "受访者提到挂号应用每半年改版一次，老人需要重新学习。",
+		AnchorSegments: []string{"li-seg-08"},
+		IsEvidence:     true,
+	},
+	{
+		ID: "note-li-02", EpisodeID: "zh-long-01", Kind: "owner_reflection",
+		Content:        "这让我想起我外婆：只肯用视频通话，每次系统更新都要找人帮忙——我猜改版疲劳是普遍现象。",
+		AnchorSegments: []string{"li-seg-03"},
+		IsEvidence:     false,
+	},
+}
+
+// setOwnerNoteCasesForCheck 替换笔记用例集（仅测试使用）。
+func setOwnerNoteCasesForCheck(cases []OwnerNoteCase) {
+	ownerNoteCasesForCheck = cases
 }
 
 // CheckLearningFixtures 校验学习/成文夹具自身的完整性（不评模型输出）。

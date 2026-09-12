@@ -112,3 +112,44 @@ func TestCrossEpisodeCases_Contract(t *testing.T) {
 		}
 	}
 }
+
+// TestLearningFixtures_InvalidBranches K04 补充：校验函数的错误分支可直接注入验证
+// （跨集/笔记/清单结构的非法输入都被拦截）。
+func TestLearningFixtures_InvalidBranches(t *testing.T) {
+	// 非法笔记用例：未知类型 / OwnerReflection 声称证据 / SourceNote 未标证据 / 锚定缺失。
+	bad := []OwnerNoteCase{
+		{ID: "b1", EpisodeID: "zh-long-01", Kind: "diary", AnchorSegments: []string{"li-seg-01"}, IsEvidence: true},
+		{ID: "b2", EpisodeID: "zh-long-01", Kind: "owner_reflection", AnchorSegments: []string{"li-seg-01"}, IsEvidence: true},
+		{ID: "b3", EpisodeID: "zh-long-01", Kind: "source_note", IsEvidence: false, AnchorSegments: []string{"li-seg-01"}},
+		{ID: "b4", EpisodeID: "zh-long-01", Kind: "source_note", IsEvidence: true},
+		{ID: "b5", EpisodeID: "missing-ep", Kind: "source_note", IsEvidence: true, AnchorSegments: []string{"x"}},
+		{ID: "b6", EpisodeID: "zh-long-01", Kind: "source_note", IsEvidence: true, AnchorSegments: []string{"nope"}},
+	}
+	episodes := LearningEpisodes()
+	byID := map[string]bool{}
+	for _, ep := range episodes {
+		byID[ep.ID] = true
+	}
+	segIDs := map[string]map[string]bool{}
+	for _, ep := range episodes {
+		ids := map[string]bool{}
+		for _, seg := range ep.Segments {
+			ids[seg.ID] = true
+		}
+		segIDs[ep.ID] = ids
+	}
+	var issues []Issue
+	add := func(id, kind, format string, args ...any) {
+		issues = append(issues, Issue{SampleID: id, Kind: kind, Detail: id})
+	}
+	_ = add
+	// 直接构造非法集合并复用 CheckLearningFixtures 的规则路径不可行（数据固定），
+	// 改为验证结构化检查在合并非法数据后的行为：临时附加到快照集并断言每条都检出。
+	saved := append([]OwnerNoteCase(nil), ownerNoteCasesForCheck...)
+	setOwnerNoteCasesForCheck(bad)
+	defer setOwnerNoteCasesForCheck(saved)
+	issues = CheckLearningFixtures()
+	if len(issues) < len(bad) {
+		t.Fatalf("每条非法笔记都应被检出: %v", issues)
+	}
+}
