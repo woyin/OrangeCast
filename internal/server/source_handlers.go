@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -353,4 +354,49 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		documents, _ = srv.store.SearchDocuments(r.Context(), q, 20)
 	}
 	srv.tmpl.Render(w, "search.html", map[string]any{"Query": q, "Hits": hits, "Documents": documents})
+}
+
+// handleSourceSnapshot 按快照 ID 定位引用的只读端点（B01 / ADR-0024 §4）。
+// 音频快照返回带起止秒数的 Segment 与原音可回听性；文档快照返回段落位置（无秒数）。
+// 已 Purge / 版本不存在返回 410，明确失效而不是静默解析当前版本。
+func (srv *Server) handleSourceSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/source-snapshots/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	snap, segments, docSegments, err := srv.store.SnapshotContent(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, store.ErrSnapshotInvalidated) {
+		http.Error(w, "来源快照已失效", http.StatusGone)
+		return
+	}
+	if err != nil {
+		http.Error(w, "读取快照失败", http.StatusInternalServerError)
+		return
+	}
+	payload := map[string]any{
+		"snapshot":          snap,
+		"audio_segments":    segments,
+		"document_segments": docSegments,
+	}
+	if snap.Kind == models.SnapshotKindAudio {
+		identity, err := srv.store.SnapshotAudioIdentity(r.Context(), id)
+		if err != nil {
+			http.Error(w, "读取原音身份失败", http.StatusInternalServerError)
+			return
+		}
+		payload["audio"] = identity
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		http.Error(w, "编码失败", http.StatusInternalServerError)
+	}
 }

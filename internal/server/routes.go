@@ -115,7 +115,8 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/purge", srv.handlePurge) // Purge（ADR-0012）：完整删除 Source
 	mux.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	mux.HandleFunc("/api/audio/", srv.handleAudio)
-	mux.HandleFunc("/api/narration/", srv.handleNarration) // Narration 解说音轨（ADR-0019）
+	mux.HandleFunc("/api/narration/", srv.handleNarration)             // Narration 解说音轨（ADR-0019）
+	mux.HandleFunc("/api/source-snapshots/", srv.handleSourceSnapshot) // 来源快照只读定位（B01）
 	mux.HandleFunc("/digests", srv.handleDigestList)
 	mux.HandleFunc("/digest/", srv.handleDigestDetail)                                 // 精读文草稿页（ADR-0023）
 	mux.HandleFunc("/digest/search-source/status", srv.handleDigestSearchSourceStatus) // ⑥b 落源确认/剔除

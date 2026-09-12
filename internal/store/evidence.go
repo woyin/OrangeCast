@@ -108,6 +108,8 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 		`DELETE FROM processing_jobs WHERE source_type = ? AND source_id = ?`,
 		`DELETE FROM evidence_audio WHERE source_type = ? AND source_id = ?`,
 		`DELETE FROM search_index WHERE source_type = ? AND source_id = ?`,
+		// 来源快照（B01）不删行：标 purged 保留"依据已删除"的审计事实，读取显式失效。
+		`UPDATE source_snapshots SET status = 'purged' WHERE source_type = ? AND source_id = ? AND status != 'purged'`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt, string(sourceType), sourceID); err != nil {
 			return fmt.Errorf("purge 级联删除: %w", err)
