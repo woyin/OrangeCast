@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -121,5 +123,97 @@ func TestSourceSnapshotAPI_Invalidation(t *testing.T) {
 	}
 	if rec := doWithCookie(srv, session, http.MethodGet, "/api/source-snapshots/"+snap.ID); rec.Code != http.StatusGone {
 		t.Fatalf("Purge 后应 410 明确失效：%d", rec.Code)
+	}
+}
+
+// TestSourceDetail_ShowsStagesAndRetry B09：单集页显示分阶段进度；
+// 失败阶段带原因与重试按钮；GET 只读不入队。
+func TestSourceDetail_ShowsStagesAndRetry(t *testing.T) {
+	srv, session, epID := seedSnapshotSource(t)
+	ctx := t.Context()
+	// 卡片就绪
+	job, _, err := srv.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: epID, JobType: models.JobAnalyze, IntentID: "an-api",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, epID, store.KindKnowledgeCard, "fake", "m", "1", job.ID, `{"title":"T","summary":{"text":"S","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetCurrentVersion(ctx, models.SourceEpisode, epID, store.KindKnowledgeCard, version); err != nil {
+		t.Fatal(err)
+	}
+	// 高光失败（引擎/预算类原因）
+	hl, _, err := srv.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: epID, JobType: models.JobHighlight,
+		IntentID: "highlight:api:v1", InputSnapshotJSON: `{"transcript_version":1}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MarkJobRunning(ctx, hl.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.MarkJobFailed(ctx, hl.ID, "预算检查拒绝任务: x"); err != nil {
+		t.Fatal(err)
+	}
+
+	before, _ := srv.store.ListQueuedOrRunning(ctx)
+	rec := doWithCookie(srv, session, http.MethodGet, "/sources/episode/"+epID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("单集页应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"处理进度", "知识", "DJ 高光", "AI 解说", "重试此阶段", "预算不足"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("单集页缺少 %q", want)
+		}
+	}
+	after, _ := srv.store.ListQueuedOrRunning(ctx)
+	if len(after) != len(before) {
+		t.Fatalf("GET 不得入队任务: %d → %d", len(before), len(after))
+	}
+}
+
+// TestRetryStageEndpoint_FrozenInputAndIdempotency 重试端点：带回冻结输入；双击幂等。
+func TestRetryStageEndpoint_FrozenInputAndIdempotency(t *testing.T) {
+	srv, session, epID := seedSnapshotSource(t)
+	get := func() string {
+		rec := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "cwp_csrf" {
+				return c.Value
+			}
+		}
+		return ""
+	}
+	csrf := get()
+	post := func() *httptest.ResponseRecorder {
+		form := url.Values{"_csrf": {csrf}, "source_type": {"episode"}, "source_id": {epID}, "stage": {"highlight"}}
+		req := httptest.NewRequest(http.MethodPost, "/api/retry-stage", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := post(); rec.Code != http.StatusSeeOther {
+		t.Fatalf("重试应 303: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post(); rec.Code != http.StatusSeeOther {
+		t.Fatalf("双击重试应幂等 303: %d", rec.Code)
+	}
+	jobs, _ := srv.store.ListQueuedOrRunning(t.Context())
+	count := 0
+	for _, j := range jobs {
+		if j.JobType == models.JobHighlight {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("双击重试只应有一个活跃高光任务: %d", count)
 	}
 }

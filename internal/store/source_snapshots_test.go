@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -312,5 +313,102 @@ func TestSourceSnapshot_BackupRestorePreservesIdentity(t *testing.T) {
 	if id != snap.ID || kind != string(models.SnapshotKindAudio) || status != models.SnapshotActive ||
 		audioSHA != "sha-backup" || version != snap.ContentVersion || versionID != snap.ContentVersionID {
 		t.Fatalf("备份库快照身份不一致: %s/%s/%s/%s/%d", id, kind, status, audioSHA, version)
+	}
+}
+
+// TestSourceStageStatuses_B09 阶段推导：知识就绪、高光失败带原因、解说等待。
+func TestSourceStageStatuses_B09(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	epID := seedSnapshotEpisode(t, s)
+	seedSnapshotTranscript(t, s, models.SourceEpisode, epID, "要点")
+	// 卡片就绪
+	cardPayload := `{"title":"T","summary":{"text":"S","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[]}`
+	job, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: epID, JobType: models.JobAnalyze, IntentID: "an-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, epID, KindKnowledgeCard, "fake", "m", "1", job.ID, cardPayload); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, epID, KindKnowledgeCard, 1); err != nil {
+		t.Fatal(err)
+	}
+	// 高光任务失败（预算原因）
+	hlJob, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: epID, JobType: models.JobHighlight,
+		IntentID: "highlight:test:v1", InputSnapshotJSON: `{"transcript_version":1}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkJobRunning(ctx, hlJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobFailed(ctx, hlJob.ID, "预算检查拒绝任务: monthly budget exhausted"); err != nil {
+		t.Fatal(err)
+	}
+
+	stages, err := s.SourceStageStatuses(ctx, models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byStage := map[string]*SourceStage{}
+	for _, st := range stages {
+		byStage[st.Stage] = st
+	}
+	if byStage["knowledge"] == nil || byStage["knowledge"].Status != "ready" {
+		t.Fatalf("知识应就绪: %+v", byStage["knowledge"])
+	}
+	hl := byStage["highlight"]
+	if hl == nil || hl.Status != "failed" || !strings.Contains(hl.Detail, "预算不足") {
+		t.Fatalf("高光失败应带预算原因: %+v", hl)
+	}
+	if hl.LastJobID != hlJob.ID {
+		t.Fatalf("失败阶段应能定位任务: %+v", hl)
+	}
+	na := byStage["narration"]
+	if na == nil || na.Status != "waiting" {
+		t.Fatalf("解说应等待高光: %+v", na)
+	}
+}
+
+// TestRetryStageJob_ReusesFrozenInput 重试带回失败任务的冻结输入（不漂移到新 current）。
+func TestRetryStageJob_ReusesFrozenInput(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	epID := seedSnapshotEpisode(t, s)
+	v1 := seedSnapshotTranscript(t, s, models.SourceEpisode, epID, "第一版")
+	failed, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: epID, JobType: models.JobHighlight,
+		IntentID: "highlight:retry:v1", InputSnapshotJSON: `{"transcript_version":1}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkJobRunning(ctx, failed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobFailed(ctx, failed.ID, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	// 转录前进到 v2，但重试仍用 v1 快照。
+	seedSnapshotTranscript(t, s, models.SourceEpisode, epID, "第二版")
+
+	retry, created, err := s.RetryStageJob(ctx, models.SourceEpisode, epID, "highlight")
+	if err != nil || !created {
+		t.Fatalf("重试应入队: %v %v", created, err)
+	}
+	exec, _ := s.GetJobExecution(ctx, retry.ID)
+	if !strings.Contains(exec.InputSnapshotJSON, `"transcript_version":1`) {
+		t.Fatalf("重试应带回冻结输入 v1: %s", exec.InputSnapshotJSON)
+	}
+	_ = v1
+	// 双击重试：命中同一活跃任务，不重复入队。
+	retry2, created2, err := s.RetryStageJob(ctx, models.SourceEpisode, epID, "highlight")
+	if err != nil || created2 || retry2.ID != retry.ID {
+		t.Fatalf("重复重试应幂等: %+v %v %v", retry2, created2, err)
 	}
 }

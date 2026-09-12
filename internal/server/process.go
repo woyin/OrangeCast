@@ -56,3 +56,21 @@ func (srv *Server) handleProcessBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, fmt.Sprintf("/podcasts/%s?enqueued=%d&skipped=%d", podcastID, enqueued, skipped), http.StatusSeeOther)
 }
+
+// handleRetryStage 从失败阶段精确重试（B09）：带回失败任务的冻结输入；
+// 重试是幂等意图——双击/重复提交命中同一活跃任务，不会重复入队或重复调用模型。
+// 正常 GET 与轮询只读；只有显式 POST 才入队。
+func (srv *Server) handleRetryStage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sourceType := models.SourceType(r.FormValue("source_type"))
+	sourceID := r.FormValue("source_id")
+	stage := r.FormValue("stage")
+	if _, _, err := srv.store.RetryStageJob(r.Context(), sourceType, sourceID, stage); err != nil {
+		http.Error(w, "重试失败："+err.Error(), http.StatusConflict)
+		return
+	}
+	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
+}

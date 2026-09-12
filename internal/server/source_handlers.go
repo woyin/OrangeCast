@@ -73,6 +73,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if candidates, err := srv.store.ListMaterialCandidates(r.Context(), sourceType, sourceID); err == nil {
 		data["MaterialCandidates"] = candidates
 	}
+	// B09：分阶段进度（知识 / DJ 高光 / 解说），失败阶段带原因与重试入口。
+	if stages, err := srv.store.SourceStageStatuses(r.Context(), sourceType, sourceID); err == nil {
+		data["Stages"] = stages
+	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }
 
