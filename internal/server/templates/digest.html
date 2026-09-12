@@ -1,0 +1,89 @@
+{{define "title"}}精读文 · {{.Digest.Title}}{{end}}
+{{define "content"}}
+<section class="panel">
+  <h1>{{.Digest.Title}}</h1>
+  <p class="meta">
+    修订 v{{.Digest.Version}} · {{.Digest.Provider}} · {{.Digest.CreatedAt}}
+    {{if .Digest.Degraded}} · <span class="error">联网补充不可用（降级生成）</span>{{end}}
+  </p>
+  <div style="margin-top:0.75rem">
+  </div>
+</section>
+
+<section class="panel">
+  <h2>正文</h2>
+  {{range .Blocks}}
+  <article class="digest-block block-{{.Type}}">
+    {{if eq .Type "ai_expansion"}}<p class="tag tag-generated">AI 展开 · 非原文</p>
+    {{else if eq .Type "note"}}<p class="tag tag-owner">Owner 笔记</p>
+    {{else if eq .Type "cited_fact"}}<p class="tag tag-cited">引用事实</p>
+    {{else}}<p class="tag tag-cited">本集转述</p>{{end}}
+    <p>{{.Text}}</p>
+    {{if .Citations}}
+    <p class="meta">
+      {{if .TargetSourceID}}来源文档：{{.TargetSourceID}} · {{else}}本集 · {{end}}
+      {{range $i, $c := .Citations}}{{if $i}} {{end}}{{$c}}{{end}}
+    </p>
+    {{end}}
+  </article>
+  {{end}}
+</section>
+
+{{if .SearchSources}}
+<section class="panel">
+  <h2>本次联网补充的来源（发布前逐条确认）</h2>
+  <p class="meta">剔除后，引用该来源的事实块会一并删除。</p>
+  {{range .SearchSources}}
+  <article class="workflow-item">
+    <div class="workflow-item-body">
+      <p><a href="{{.URL}}" rel="noopener noreferrer" target="_blank">{{.Title}}</a></p>
+      <p class="meta">检索词：{{.Query}} · 状态：{{.Status}}</p>
+    </div>
+    {{if eq .Status "pending"}}
+    <form method="post" action="/digest/search-source/status" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="source_row_id" value="{{.ID}}">
+      <input type="hidden" name="status" value="confirmed">
+      <button class="btn" type="submit">确认保留</button>
+    </form>
+    <form method="post" action="/digest/search-source/status" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="source_row_id" value="{{.ID}}">
+      <input type="hidden" name="status" value="rejected">
+      <button class="btn btn-secondary" type="submit">剔除</button>
+    </form>
+    {{else if eq .Status "confirmed"}}
+    <form method="post" action="/digest/search-source/status" style="display:inline">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="source_row_id" value="{{.ID}}">
+      <input type="hidden" name="status" value="rejected">
+      <button class="btn btn-secondary" type="submit">改为剔除</button>
+    </form>
+    {{end}}
+  </article>
+  {{end}}
+</section>
+{{end}}
+
+{{if .FactGaps}}
+<section class="panel">
+  <h2>未消解的事实缺口</h2>
+  <p class="meta">这些内容因无可靠来源未写入正文；可补充来源后重新生成。</p>
+  <ul>{{range .FactGaps}}<li>{{.Text}}</li>{{end}}</ul>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>小红书笔记版</h2>
+  {{with .Rewrite}}
+  <pre class="digest-rewrite">{{.Text}}</pre>
+  {{else}}
+  <p class="meta">尚未生成（生成失败不阻塞长文版）。</p>
+  <form method="post" action="/digest/rewrite-retry">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="digest_id" value="{{$.Digest.ID}}">
+    <button class="btn" type="submit">重试生成</button>
+  </form>
+  {{end}}
+</section>
+{{end}}

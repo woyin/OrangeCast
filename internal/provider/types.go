@@ -281,6 +281,9 @@ type ProviderBundle struct {
 	StudyChat        StudyChatProvider
 	RefChecker       ReferenceChecker
 	Narration        NarrationProvider
+	DigestWriter     DigestWriterProvider
+	DigestSearch     SourceSearchProvider
+	DigestRewriter   DigestRewriteProvider
 }
 
 // Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。

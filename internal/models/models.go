@@ -25,6 +25,8 @@ const (
 	JobTranscribe JobType = "transcribe"
 	// JobAnalyze 处理任务类型：分析生成知识卡片。
 	JobAnalyze JobType = "analyze"
+	// JobDigest 处理任务类型：生成 EpisodeDigest 单集精读文（ADR-0023）。
+	JobDigest JobType = "episode_digest"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

@@ -108,7 +108,10 @@ func (s *Store) CalculateEditorialCost(ctx context.Context, providerName, model 
 
 // RecordEditorialUsage appends an immutable usage and cost audit row for one editorial task attempt.
 func (s *Store) RecordEditorialUsage(ctx context.Context, record models.EditorialUsageRecord) (*models.EditorialUsageRecord, error) {
-	if record.EditorialProfileID == "" || record.TaskKind == "" || record.EntityID == "" || record.Provider == "" || record.Model == "" || record.PromptVersion == "" || record.InputUnits < 0 || record.OutputUnits < 0 || record.CostCents < 0 {
+	if record.EditorialProfileID == "" && !strings.HasPrefix(record.TaskKind, "digest_") {
+		return nil, fmt.Errorf("%w: editorial usage outside digest tasks requires a profile", ErrInvalidEditorialState)
+	}
+	if record.TaskKind == "" || record.EntityID == "" || record.Provider == "" || record.Model == "" || record.PromptVersion == "" || record.InputUnits < 0 || record.OutputUnits < 0 || record.CostCents < 0 {
 		return nil, fmt.Errorf("%w: incomplete editorial usage record", ErrInvalidEditorialState)
 	}
 	record.ID = uuid.NewString()

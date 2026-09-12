@@ -71,6 +71,9 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobAnalyze:
 			// analyze job 包含分析+高光，用 analysis 配置
 			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
+		case models.JobDigest:
+			// 精读文写作复用 Writer 角色配置（ADR-0023：与文章写作同池计费治理）
+			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -168,6 +171,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doTranscribe(ctx, job, bundle)
 	case models.JobAnalyze:
 		return w.doAnalyze(ctx, job, bundle)
+	case models.JobDigest:
+		return w.doDigest(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}
@@ -470,6 +475,9 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 			return err
 		}
 		if err := w.store.DeleteNarrationsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return err
+		}
+		if err := w.store.DeleteEpisodeDigestsForSource(ctx, p.SourceType, p.SourceID); err != nil {
 			return err
 		}
 		// 3) 事务性删除 DB 行
