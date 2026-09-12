@@ -1,0 +1,37 @@
+{{define "title"}}创作素材选择 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>创作素材选择</h1><a class="btn btn-secondary" href="/workbench">返回工作台</a></div>
+<p class="meta">从一个或多个来源选择关键观点与个人笔记，组成一次创作素材选择。个人笔记以"我的理解"身份进入，不会变成原文证据；被排除的材料会显式给出原因。选择与确认不触发任何付费调用。</p>
+
+<section class="panel">
+  <h2>新建素材选择</h2>
+  <form method="post" action="/creation/selections" class="subform">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>标题（可选）<input name="title" placeholder="例如：咖啡与健康的一期"></label>
+    <label>关键观点 ID（每行一个，来自重点页）<textarea name="material_ids" rows="3" placeholder="kp-xxxx"></textarea></label>
+    <label>个人笔记 ID（每行一个，来自单集笔记）<textarea name="note_ids" rows="3" placeholder="note-xxxx"></textarea></label>
+    <label class="meta"><input type="checkbox" name="confirm" value="1"> 同时确认为可用范围</label>
+    <button class="btn" type="submit">保存素材选择</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>已有素材选择</h2>
+  {{range .Selections}}
+  <article class="workflow-item">
+    <div class="workflow-item-body">
+      <div class="item-kicker">{{.Status}} · 修订 {{.UpdatedAt}}</div>
+      <strong>{{if .Title}}{{.Title}}{{else}}未命名选择{{end}}</strong>
+      <p class="meta">关键观点 {{len .MaterialIDs}} 条 · 个人笔记 {{len .NoteIDs}} 条</p>
+      {{if .Excluded}}
+      <details><summary class="error">被排除材料（{{len .Excluded}}）——显式原因</summary>
+        <ul>{{range .Excluded}}<li class="error">{{.ID}}：{{.Reason}}</li>{{end}}</ul>
+      </details>
+      {{end}}
+    </div>
+  </article>
+  {{else}}
+  <p class="empty">还没有素材选择。保存后可进入构思与简报。</p>
+  {{end}}
+</section>
+{{end}}

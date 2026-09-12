@@ -107,3 +107,37 @@ type ClaimReview struct {
 	Provider, Model, PromptVersion                    *string
 	CostCents                                         *int64
 }
+
+// CreationSelectionStatus 素材选择状态（C01）。
+const (
+	SelectionDraft     = "draft"
+	SelectionConfirmed = "confirmed"
+)
+
+// CreationSelection 跨来源创作素材选择快照（C01）：
+// KeyPoint 以来源主张身份进入，OwnerNote 以个人材料身份进入（不转换、不冒充）。
+// Excluded 记录被排除材料与原因（质量/陈旧/Owner 排除/Provider 策略），显式解释。
+type CreationSelection struct {
+	ID                 string
+	EditorialProfileID string
+	Title              string
+	MaterialIDs        []string
+	NoteIDs            []string
+	Scope              []CreationSelectionScope
+	Excluded           []CreationSelectionExclusion
+	Status             string
+	CreatedAt          string
+	UpdatedAt          string
+}
+
+// CreationSelectionScope 选择的来源范围。
+type CreationSelectionScope struct {
+	SourceType string `json:"source_type"`
+	SourceID   string `json:"source_id"`
+}
+
+// CreationSelectionExclusion 一条被排除材料及原因。
+type CreationSelectionExclusion struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
