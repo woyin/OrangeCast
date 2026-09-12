@@ -166,3 +166,21 @@ h1 { margin-top: 0; }
 .btn-secondary:hover { opacity: 0.8; }
 .batch-toolbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; margin-bottom: 0.75rem; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; }
 .batch-toolbar #batch-count { font-weight: 600; color: var(--accent); }
+
+/* DJ 传输控件（D06）：触控目标 ≥44px、无横向溢出、控件标签可见 */
+.dj-controls button,
+#dj-autoplay,
+#dj-pause,
+#dj-prev,
+#dj-next,
+#dj-stop,
+#dj-full {
+  min-height: 44px;
+  min-width: 44px;
+}
+#dj-rate {
+  min-height: 44px;
+}
+div[style*="margin: 1rem 0"] {
+  flex-wrap: wrap; /* 小屏幕换行，避免横向溢出 */
+}

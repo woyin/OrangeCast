@@ -12,10 +12,22 @@
 <div style="margin: 1rem 0;">
   <button id="dj-autoplay" class="btn" type="button">▶▶ 自动播放全集</button>
   <button id="dj-pause" class="btn btn-secondary" type="button" disabled>⏸ 暂停</button>
+  <button id="dj-prev" class="btn btn-secondary" type="button" disabled>⏮ 上一段</button>
   <button id="dj-next" class="btn btn-secondary" type="button" disabled>⏭ 下一段</button>
   <button id="dj-stop" class="btn" type="button" disabled>■ 停止</button>
+  <label class="meta">速度
+    <select id="dj-rate" aria-label="播放速度">
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+  </label>
+  <button id="dj-full" class="btn btn-secondary" type="button">▶ 继续听原节目</button>
   <span id="dj-status" style="margin-left:0.5rem;color:var(--muted)"></span>
 </div>
+<p class="meta" id="dj-progress" aria-live="polite"></p>
 
 <div id="playlist">
 {{range $i, $h := .Highlights}}
@@ -53,9 +65,12 @@
   var narration = document.getElementById('dj-narration');
   var autoplayBtn = document.getElementById('dj-autoplay');
   var pauseBtn = document.getElementById('dj-pause');
+  var prevBtn = document.getElementById('dj-prev');
   var nextBtn = document.getElementById('dj-next');
   var stopBtn = document.getElementById('dj-stop');
   var statusEl = document.getElementById('dj-status');
+  var progressEl = document.getElementById('dj-progress');
+  var totalItems = document.querySelectorAll('.dj-item').length;
 
   var STATE_TEXT = {
     idle: '待机', loading: '加载中…', playing: '播放中', paused: '已暂停',
@@ -70,13 +85,21 @@
       if (statusEl) statusEl.textContent = STATE_TEXT[state] || state;
       if (pauseBtn) pauseBtn.disabled = (state !== 'playing' && state !== 'buffering' && state !== 'loading');
       if (nextBtn) nextBtn.disabled = (state === 'idle');
+      if (prevBtn) prevBtn.disabled = (state === 'idle');
       if (stopBtn) stopBtn.disabled = (state === 'idle');
       if (autoplayBtn) autoplayBtn.disabled = (state === 'playing' || state === 'buffering' || state === 'loading');
     },
-    onItem: function(item) {
+    onItem: function(item, idx) {
       document.querySelectorAll('.dj-item').forEach(function(el) {
         el.style.outline = (item && el.dataset.idx === item.idx) ? '2px solid var(--accent, #333)' : '';
       });
+      // D06：总进度与当前片段身份（原音/AI 解说）。
+      var pos = parseInt(idx) + 1;
+      if (progressEl) {
+        progressEl.textContent = item
+          ? '进度：' + pos + ' / ' + totalItems + ' 段 · 当前：' + (item.type === 'narration' ? 'AI 解说' : '原音区间')
+          : '';
+      }
     }
   });
 
@@ -95,8 +118,25 @@
     player.play();
   });
   if (pauseBtn) pauseBtn.addEventListener('click', function() { player.pause(); });
+  if (prevBtn) prevBtn.addEventListener('click', function() { player.prev(); });
   if (nextBtn) nextBtn.addEventListener('click', function() { player.next(); });
   if (stopBtn) stopBtn.addEventListener('click', function() { player.stop(); });
+  var rateSel = document.getElementById('dj-rate');
+  if (rateSel) rateSel.addEventListener('change', function() {
+    player.setRate(parseFloat(rateSel.value));
+  });
+  var fullBtn = document.getElementById('dj-full');
+  if (fullBtn) fullBtn.addEventListener('click', function() {
+    // “继续听原节目”：从当前原音实际位置播放到集尾；AI 解说暂停不丢失清单。
+    player.playFullProgram();
+  });
+  // 键盘可达性（D06）：空格暂停/继续、→ 下一段、← 上一段（输入焦点不在控件时）。
+  document.addEventListener('keydown', function(e) {
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); player.pause(); }
+    if (e.code === 'ArrowRight') { player.next(); }
+    if (e.code === 'ArrowLeft') { player.prev(); }
+  });
 
   document.querySelectorAll('.dj-play').forEach(function(btn) {
     btn.addEventListener('click', function() {

@@ -45,6 +45,7 @@
     var skipRequested = false;
     var pauseRequested = false;
     var resumeAt = null; // 暂停时的原音位置（恢复用，不回到条目开头）
+    var rate = 1;        // 播放速度（D06）：应用于原音与解说
 
     function setState(s, detail) {
       state = s;
@@ -119,6 +120,7 @@
 
         function begin() {
           if (finished || stale(t)) { finish('aborted'); return; }
+          try { media.playbackRate = rate; } catch (e) { /* 替身或实现不支持 */ }
           var p;
           try {
             p = media.play();
@@ -143,7 +145,8 @@
           begin();
           return;
         }
-        var rangeEnd = item.end; // 本条目的区间末尾（闭包内供 ontimeupdate 使用）
+        // D06：end 为 null（继续听原节目）时不设区间末尾——播放到集尾自然 ended。
+        var rangeEnd = item.end === null || item.end === undefined ? null : item.end;
         var target = resumeAt !== null ? resumeAt : item.start;
         var onSeeked = function () {
           media.onseeked = null;
@@ -234,6 +237,39 @@
         idx = 0;
         currentItem = null;
         setState(STATES.IDLE);
+      },
+      prev: function () {
+        // 上一段（D06）：回到上一条目开头。
+        if (idx > 0) {
+          idx--;
+        }
+        resumeAt = null;
+        var t = ++token;
+        hardStopMedia();
+        pauseRequested = false;
+        skipRequested = false;
+        runQueueFrom(t);
+      },
+      setRate: function (r) {
+        if (typeof r !== 'number' || !(r >= 0.5 && r <= 3)) return;
+        rate = r;
+        try { evidence.playbackRate = r; } catch (e) { /* 未就绪 */ }
+        try { narration.playbackRate = r; } catch (e) { /* 未就绪 */ }
+      },
+      getRate: function () { return rate; },
+      playFullProgram: function () {
+        // “继续听原节目”（D06）：从当前原音位置播放到集尾（rangeEnd=null，
+        // timeupdate 不再截停）；仍受同一状态机与会话令牌治理。
+        token++;
+        hardStopMedia();
+        pauseRequested = false;
+        skipRequested = false;
+        var start = (typeof evidence.currentTime === 'number' && evidence.currentTime > 0) ? evidence.currentTime : 0;
+        resumeAt = null;
+        queue = [{ type: 'evidence', start: start, end: null, idx: 'full', full: true }];
+        idx = 0;
+        var t = token;
+        runQueueFrom(t);
       },
       playItems: function (items) {
         // 手动试听：取消旧会话，只播放给定条目序列。

@@ -79,6 +79,60 @@ func TestDJPageUsesExtractedPlayer(t *testing.T) {
 	}
 }
 
+// TestDJPageTransportControls_D06 完整传输控件：上一段/下一段/倍速/继续原节目/
+// 进度显示；键盘可达（button 元素 + keydown 绑定）；倍速写回 playbackRate。
+func TestDJPageTransportControls_D06(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "djtransport@example.com", "password123")
+	podcast, err := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/djd06.xml", "DJ播客D06", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "dj-d06", Title: "DJ单集D06", AudioURL: "https://cdn.example.com/d.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := srv.store.ListEpisodes(t.Context(), podcast.ID)
+	if err != nil || len(eps) != 1 {
+		t.Fatalf("单集 setup: %v", err)
+	}
+	seedHighlightAndNarration(t, srv, eps[0].ID)
+	rec := doWithCookie(srv, session, http.MethodGet, "/sources/episode/"+eps[0].ID+"/dj")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DJ 页应 200: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"dj-prev", "dj-next", "dj-pause", // 上一段/下一段/暂停
+		"dj-rate",             // 速度选择
+		"dj-full",             // 继续听原节目
+		"dj-progress",         // 总进度显示
+		"aria-label=\"播放速度\"", // 控件标签
+		"keydown",             // 键盘可达
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("DJ 页缺少 %q", want)
+		}
+	}
+	playerSrc, err := os.ReadFile("static/dj-player.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(playerSrc)
+	for _, want := range []string{"prev: function", "setRate: function", "playFullProgram: function", "playbackRate"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("dj-player.js 缺少 %q", want)
+		}
+	}
+	// app.css 触控目标样式
+	css, err := os.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), "min-height: 44px") {
+		t.Fatal("app.css 应包含触控目标最小尺寸")
+	}
+}
+
 // TestDJHarnessFixtureServedFromTestDataOnly D05：浏览器夹具仅存在于 testdata，
 // 由测试路由注入真实播放器源码后提供；生产路由不包含夹具。
 func TestDJHarnessFixtureServedFromTestDataOnly(t *testing.T) {
