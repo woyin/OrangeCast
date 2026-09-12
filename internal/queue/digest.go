@@ -39,7 +39,16 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	if err != nil {
 		return err
 	}
-	notes := w.digestOwnerNotes(ctx, job)
+	var frozenNoteIDs []string
+	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.InputSnapshotJSON != "" {
+		var snap digestInputSnapshot
+		_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
+		frozenNoteIDs = snap.NoteIDs
+	}
+	notes, err := w.digestOwnerNotes(ctx, job, frozenNoteIDs)
+	if err != nil {
+		return err
+	}
 
 	// 2) 长文初稿
 	draft, err := bundle.DigestWriter.ComposeDigest(ctx, provider.DigestWritingRequest{
@@ -114,16 +123,54 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	return nil
 }
 
-// digestSourceMaterial 读本集 Transcript Segments + 卡片摘要 + 标题。
+// digestInputSnapshot 冻结的精读素材身份（G01，store 侧同构）。
+type digestInputSnapshot struct {
+	SnapshotID        string   `json:"snapshot_id"`
+	TranscriptVersion int      `json:"transcript_version"`
+	CardVersion       int      `json:"card_version"`
+	NoteIDs           []string `json:"note_ids"`
+}
+
+// digestSourceMaterial 按入队时冻结的来源快照读取素材（G01）：
+//   - Episode/Upload：读快照冻结的 Transcript 版本（重分析不改变本次输入）；
+//   - Document：从其证据文档版本与段落位置构造素材（不再误查 Transcript 指针）；
+//   - 超过段数上限的文档显式报错（不静默截掉尾部）。
+//
+// 旧任务（无快照）回退当前版本保持兼容。
 func (w *Worker) digestSourceMaterial(ctx context.Context, job *models.ProcessingJob) ([]provider.Segment, string, string, error) {
-	av, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindTranscript)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("读取当前转录版本（需先完成转录）: %w", err)
+	var snap digestInputSnapshot
+	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.InputSnapshotJSON != "" {
+		_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
 	}
-	var payload provider.TranscriptPayload
-	if err := json.Unmarshal([]byte(av.Payload), &payload); err != nil {
-		return nil, "", "", fmt.Errorf("解析转录载荷: %w", err)
+
+	// Document 路径：快照指向的文档版本 → 段落完整单元。
+	if job.SourceType == models.SourceDocument {
+		return w.digestDocumentMaterial(ctx, job.SourceID, snap.SnapshotID)
 	}
+
+	var segments []provider.Segment
+	if snap.SnapshotID != "" {
+		snapshotDoc, audioSegs, _, err := w.store.SnapshotContent(ctx, snap.SnapshotID)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("读取冻结来源快照: %w", err)
+		}
+		if snapshotDoc.Kind == models.SnapshotKindDocument {
+			return w.digestDocumentMaterial(ctx, job.SourceID, snap.SnapshotID)
+		}
+		segments = audioSegs
+	} else {
+		// 旧任务兼容：无快照回退当前转录版本。
+		av, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindTranscript)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("读取当前转录版本（需先完成转录）: %w", err)
+		}
+		var payload provider.TranscriptPayload
+		if err := json.Unmarshal([]byte(av.Payload), &payload); err != nil {
+			return nil, "", "", fmt.Errorf("解析转录载荷: %w", err)
+		}
+		segments = payload.Segments
+	}
+
 	title, summary := "", ""
 	if job.SourceType == models.SourceEpisode {
 		if ep, err := w.store.GetEpisodeByID(ctx, job.SourceID); err == nil {
@@ -134,29 +181,72 @@ func (w *Worker) digestSourceMaterial(ctx context.Context, job *models.Processin
 			title = up.OriginalFilename
 		}
 	}
-	if cv, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindKnowledgeCard); err == nil {
-		var card provider.KnowledgeCard
-		if json.Unmarshal([]byte(cv.Payload), &card) == nil {
-			summary = card.Summary.Text
-			if title == "" {
-				title = card.Title
+	// 卡片摘要同样冻结到快照的卡片版本；无记录则留空。
+	if snap.CardVersion > 0 {
+		if cv, err := w.store.GetArtifactVersion(ctx, job.SourceType, job.SourceID, store.KindKnowledgeCard, snap.CardVersion); err == nil {
+			var card provider.KnowledgeCard
+			if json.Unmarshal([]byte(cv.Payload), &card) == nil {
+				summary = card.Summary.Text
+				if title == "" {
+					title = card.Title
+				}
 			}
 		}
 	}
-	return payload.Segments, summary, title, nil
+	return segments, summary, title, nil
 }
 
-// digestOwnerNotes 读本集 Owner 笔记（source_note + owner_reflection）。
-func (w *Worker) digestOwnerNotes(ctx context.Context, job *models.ProcessingJob) []provider.DigestOwnerNote {
+// digestMaxDocumentSegments 文档精读的段数上限（G01）：超过即显式失败，
+// 不静默截掉尾部；分阶段处理属 G02。
+const digestMaxDocumentSegments = 600
+
+// digestDocumentMaterial 从文档证据版本构造精读素材（段落完整单元）。
+func (w *Worker) digestDocumentMaterial(ctx context.Context, documentID, snapshotID string) ([]provider.Segment, string, string, error) {
+	doc, err := w.store.GetDocument(ctx, documentID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("读取文档证据: %w", err)
+	}
+	if snapshotID != "" {
+		// 快照读取内部校验文档版本一致性（防旧链接指向新版本，失效即显式错误）。
+		if _, _, _, err := w.store.SnapshotContent(ctx, snapshotID); err != nil {
+			return nil, "", "", fmt.Errorf("读取冻结文档快照: %w", err)
+		}
+	}
+	segs := store.DocumentSegments(doc)
+	if len(segs) > digestMaxDocumentSegments {
+		return nil, "", "", fmt.Errorf("文档过长（%d 段 > 上限 %d），暂不支持一键精读；请拆分后导入", len(segs), digestMaxDocumentSegments)
+	}
+	out := make([]provider.Segment, 0, len(segs))
+	for _, sg := range segs {
+		out = append(out, provider.Segment{ID: sg.ID, Text: sg.Text})
+	}
+	summary := ""
+	if card, err := w.store.GetDocumentKnowledgeCard(ctx, documentID); err == nil {
+		summary = card.Summary.Text
+	}
+	return out, summary, doc.Title, nil
+}
+
+// digestOwnerNotes 读取入队时冻结的笔记（G01）：
+// 只取快照记录的笔记 ID（排队后改笔记不影响本次输入）；读取错误显式返回，
+// 不静默吞掉。Annotation（标注）不是笔记，不进入精读素材。
+func (w *Worker) digestOwnerNotes(ctx context.Context, job *models.ProcessingJob, noteIDs []string) ([]provider.DigestOwnerNote, error) {
 	rows, err := w.store.ListOwnerNotes(ctx, job.SourceType, job.SourceID)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("读取 Owner 笔记: %w", err)
+	}
+	allowed := map[string]bool{}
+	for _, id := range noteIDs {
+		allowed[id] = true
 	}
 	out := make([]provider.DigestOwnerNote, 0, len(rows))
 	for _, n := range rows {
+		if noteIDs != nil && !allowed[n.ID] {
+			continue // 入队后新写的笔记不属于本次冻结输入
+		}
 		out = append(out, provider.DigestOwnerNote{NoteID: n.ID, Text: n.Content, Kind: n.Kind})
 	}
-	return out
+	return out, nil
 }
 
 // digestResolveGaps 消解 FactGap：逐条搜索 → 落源 → 汇总补织。

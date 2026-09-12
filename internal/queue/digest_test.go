@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -286,5 +288,138 @@ func TestDoDigest_NoTranscript(t *testing.T) {
 	got, _ := s.GetJob(ctx, noTrJob.ID)
 	if got.Status != models.StatusFailed {
 		t.Fatalf("无转录版本应 job failed，实际 %s", got.Status)
+	}
+}
+
+// TestDoDigest_DocumentSource G01：Document Source 从入队跑到正文——
+// 素材来自文档段落（不再误查 Transcript），块引用文档段落 ID。
+func TestDoDigest_DocumentSource(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	doc, err := s.CreatePastedDocument(ctx, "架构文档", "第一段讲架构分层。\n\n第二段讲数据一致性。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &fakeDigestWriter{compose: &provider.DigestWritingResult{
+				Title: "读懂架构文档",
+				Blocks: []provider.DigestBlockDraft{
+					{Type: provider.DigestBlockParaphraseStr, Text: "文档先讲分层。", Citations: []string{doc.ID + "-p0001"}},
+				},
+			}},
+			DigestRewriter: &fakeDigestRewriter{text: "钩子"},
+		}, nil
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceDocument, doc.ID)
+	if err != nil || job == nil {
+		t.Fatalf("文档入队失败: %v %v", job, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("文档精读失败: %v", err)
+	}
+	d, err := s.GetCurrentEpisodeDigest(ctx, models.SourceDocument, doc.ID)
+	if err != nil || d.Title != "读懂架构文档" {
+		t.Fatalf("文档精读应落库: %v %+v", err, d)
+	}
+	blocks, _ := s.ListDigestBlocks(ctx, d.ID)
+	if len(blocks) != 1 || len(blocks[0].Citations) == 0 || blocks[0].Citations[0] != doc.ID+"-p0001" {
+		t.Fatalf("块应引用文档段落: %+v", blocks)
+	}
+}
+
+// TestDoDigest_FrozenInput G01：入队后改笔记/重分析不改变本次输入。
+func TestDoDigest_FrozenInput(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+	// 入队前的一条笔记 → 属于冻结输入
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "source_note",
+		Content: "入队前笔记", CitationsJSON: `["seg-0001"]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID)
+	if err != nil || job == nil {
+		t.Fatal(err)
+	}
+	// 入队后再写一条新笔记 → 不属于本次输入
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "owner_reflection",
+		Content: "入队后笔记",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var captured []provider.DigestOwnerNote
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "冻结输入", Blocks: validDraftBlocks()}},
+		}, nil
+	}
+	// 通过包装 writer 捕获请求里的笔记
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &capturingWriter{inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "冻结输入", Blocks: validDraftBlocks()}}, captured: &captured},
+		}, nil
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("精读失败: %v", err)
+	}
+	found := false
+	for _, n := range captured {
+		if n.Text == "入队前笔记" {
+			found = true
+		}
+		if n.Text == "入队后笔记" {
+			t.Fatal("入队后的笔记不应进入本次输入")
+		}
+	}
+	if !found {
+		t.Fatalf("入队前笔记应在冻结输入内: %+v", captured)
+	}
+}
+
+// capturingWriter 捕获 Compose 请求中的笔记（G01 冻结断言用）。
+type capturingWriter struct {
+	inner    provider.DigestWriterProvider
+	captured *[]provider.DigestOwnerNote
+}
+
+func (c *capturingWriter) ComposeDigest(ctx context.Context, req provider.DigestWritingRequest) (*provider.DigestWritingResult, error) {
+	*c.captured = req.Notes
+	return c.inner.ComposeDigest(ctx, req)
+}
+func (c *capturingWriter) WeaveDigestFacts(ctx context.Context, req provider.DigestWeaveRequest) (*provider.DigestWeaveResult, error) {
+	return c.inner.WeaveDigestFacts(ctx, req)
+}
+func (c *capturingWriter) Name() string { return "capturing" }
+
+// TestDoDigest_DocumentTooLongExplicit G01：过长文档显式失败，不静默截尾。
+func TestDoDigest_DocumentTooLongExplicit(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	content := ""
+	for i := 0; i < 601; i++ {
+		content += fmt.Sprintf("段落%d。\n\n", i)
+	}
+	doc, err := s.CreatePastedDocument(ctx, "超长文档", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{DigestWriter: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "x", Blocks: validDraftBlocks()}}}, nil
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceDocument, doc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetJob(ctx, job.ID)
+	if got.Status != models.StatusFailed || got.LastError == nil || !strings.Contains(*got.LastError, "文档过长") {
+		t.Fatalf("过长文档应显式失败: %+v", got)
 	}
 }
