@@ -29,7 +29,7 @@ func TestPurgeSourceDerivedData(t *testing.T) {
 		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-0001"}},
 		KeyPoints: []provider.KeyPoint{{Content: "关键要点", Description: "d", Citations: []string{"seg-0001"}}},
 	}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep", 1, card, segs); err != nil {
 		t.Fatalf("IndexKeyPoints: %v", err)
 	}
 	// 2) Paraphrase

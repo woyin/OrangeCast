@@ -32,7 +32,7 @@ func TestMaterialCandidateQualityGateAndIdempotentMaterialChange(t *testing.T) {
 	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, episodes[0].ID, KindTranscript, transcriptVersion); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, episodes[0].Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "可复用观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, episodes[0].Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "可复用观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, err := s.ListKeyPoints(ctx, 1, 10)

@@ -21,7 +21,7 @@ func seedKpEpisode(t *testing.T, s *Store, feedURL, guid, title, kpContent, kpDe
 		KeyPoints: []provider.KeyPoint{{Content: kpContent, Description: kpDesc, Citations: []string{"seg-0001"}}},
 	}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, ep[0].ID, title, 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, ep[0].ID, title, 1, card, segs); err != nil {
 		t.Fatalf("IndexKeyPoints: %v", err)
 	}
 	return ep[0].ID
@@ -239,7 +239,7 @@ func TestGetKpGraph_SameEpisodeNoEdge(t *testing.T) {
 		KeyPoints: []provider.KeyPoint{{Content: "主权财富基金改变全球投资", Description: "长期投资者", Citations: []string{"seg-0001"}}},
 	}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "主权财富基金"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	// 再次索引（同一 source）不同内容
@@ -249,7 +249,7 @@ func TestGetKpGraph_SameEpisodeNoEdge(t *testing.T) {
 		KeyPoints: []provider.KeyPoint{{Content: "主权财富基金是长期投资者", Description: "全球投资", Citations: []string{"seg-0002"}}},
 	}
 	segs2 := []provider.Segment{{ID: "seg-0002", Start: 5, End: 10, Text: "主权财富基金"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 2, card2, segs2); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "ep1", 2, card2, segs2); err != nil {
 		t.Fatal(err)
 	}
 

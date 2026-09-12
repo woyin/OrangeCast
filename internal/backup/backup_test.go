@@ -72,7 +72,7 @@ func buildFixture(t *testing.T, dataDir string) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "Ep", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "可恢复的学习素材", Citations: []string{"seg-0001"}}}}, []provider.Segment{{ID: "seg-0001", End: 2}}); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "Ep", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "可恢复的学习素材", Citations: []string{"seg-0001"}}}}, []provider.Segment{{ID: "seg-0001", End: 2}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, err := s.ListKeyPoints(ctx, 1, 10)

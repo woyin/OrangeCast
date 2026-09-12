@@ -31,7 +31,7 @@ func TestIndexKeyPoints_Basic(t *testing.T) {
 		{ID: "seg-0002", Start: 5, End: 10, Text: "第二段"},
 		{ID: "seg-0003", Start: 10, End: 15, Text: "第三段"},
 	}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	kps, total, err := s.ListKeyPoints(ctx, 1, 10)
@@ -102,7 +102,7 @@ func TestGetKeyPointsReturnsRequestedRowsAndMarksMissingIDs(t *testing.T) {
 	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "batch", Title: "ep", AudioURL: "https://batch.example/audio.mp3"}})
 	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
 	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "批量要点", Citations: []string{"seg"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := s.ListKeyPoints(ctx, 1, 10)
@@ -130,7 +130,7 @@ func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *te
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
 	seedCurrentTranscript(t, s, models.SourceEpisode, episodes[0].ID, segs)
 	card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "自动要点", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	automatic, _, err := s.ListKeyPoints(ctx, 1, 10)
@@ -148,7 +148,7 @@ func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *te
 		t.Fatal(err)
 	}
 
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 2, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "ep", 2, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	rows, total, err := s.ListKeyPoints(ctx, 1, 10)
@@ -156,8 +156,15 @@ func TestIndexKeyPoints_ReindexPreservesManualAndMatchingAutomaticIdentity(t *te
 		t.Fatalf("manual and automatic keypoints should survive reindex: rows=%+v total=%d err=%v", rows, total, err)
 	}
 	gotAutomatic, err := s.GetKeyPoint(ctx, automatic[0].ID)
-	if err != nil || gotAutomatic.ProductionStatus != models.KeyPointInbox || gotAutomatic.Origin != models.KeyPointAutomatic {
-		t.Fatalf("matching automatic keypoint should keep ID but refresh status: kp=%+v err=%v", gotAutomatic, err)
+	if err != nil || gotAutomatic.Origin != models.KeyPointAutomatic {
+		t.Fatalf("matching automatic keypoint should keep ID: kp=%+v err=%v", gotAutomatic, err)
+	}
+	// K03：Owner 触碰的生产状态在重分析后保留（不再被重置为 inbox）。
+	if gotAutomatic.ProductionStatus != models.KeyPointShortlisted {
+		t.Fatalf("K03: shortlisted 状态应保留: kp=%+v", gotAutomatic)
+	}
+	if gotAutomatic.CardVersion != 2 {
+		t.Fatalf("K03: 卡片版本应刷新: kp=%+v", gotAutomatic)
 	}
 	gotManual, err := s.GetKeyPoint(ctx, manual.ID)
 	if err != nil || gotManual.Origin != models.KeyPointManual || gotManual.ProductionStatus != models.KeyPointInbox {
@@ -247,7 +254,7 @@ func TestManualKeyPointFTSFailureRollsBackAndIndexFailureReturns(t *testing.T) {
 			t.Fatal(err)
 		}
 		card := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "x", Citations: []string{"seg"}}}}
-		if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "source", "title", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err == nil {
+		if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "source", "title", 1, card, []provider.Segment{{ID: "seg", End: 1}}); err == nil {
 			t.Fatal("missing index table should fail automatic reindex")
 		}
 	})
@@ -427,7 +434,7 @@ func TestIndexKeyPoints_SkipsInvalid(t *testing.T) {
 		{ID: "seg-0001", Start: 0, End: 5, Text: "a"},
 		{ID: "seg-0002", Start: 10, End: 5, Text: "b"}, // end < start，非法时间范围
 	}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	kps, total, _ := s.ListKeyPoints(ctx, 1, 10)
@@ -479,7 +486,7 @@ func TestIndexKeyPoints_DBErrors(t *testing.T) {
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
 		t.Fatal("keypoint_search 表缺失时 IndexKeyPoints 应报错")
 	}
 }
@@ -494,7 +501,7 @@ func TestIndexKeyPoints_InsertError(t *testing.T) {
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
 		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
 	}
 }
@@ -535,7 +542,7 @@ func TestIndexKeyPoints_DeleteIndexError(t *testing.T) {
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, segs); err == nil {
 		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
 	}
 }
@@ -547,7 +554,7 @@ func TestIndexKeyPoints_BeginTxError(t *testing.T) {
 	ctx := context.Background()
 	s.Close()
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("关闭 DB 时 IndexKeyPoints 应报错")
 	}
 }
@@ -561,7 +568,7 @@ func TestIndexKeyPoints_DeleteIndexOnlyError(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("keypoint_index 表缺失时 IndexKeyPoints 应报错")
 	}
 }
@@ -575,7 +582,7 @@ func TestIndexKeyPoints_SearchInsertError(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("keypoint_search 表缺失时 IndexKeyPoints 应报错")
 	}
 }
@@ -607,7 +614,7 @@ func TestListKeyPoints_ScanError(t *testing.T) {
 	eps, _ := s.ListEpisodes(ctx, p.ID)
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.ExecContext(ctx, `UPDATE keypoint_index SET card_version='bad' WHERE source_id=?`, eps[0].ID); err != nil {
@@ -630,7 +637,7 @@ func TestIndexKeyPoints_DeleteIndexViewError(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("keypoint_index 为视图时 IndexKeyPoints 应报错")
 	}
 }
@@ -649,7 +656,7 @@ func TestIndexKeyPoints_DeleteIndexTriggerError(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("keypoint_index DELETE 被中止时 IndexKeyPoints 应报错")
 	}
 }
@@ -666,7 +673,7 @@ func TestIndexKeyPoints_InsertIndexError(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: -1, End: 0, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: -1, End: 0, Text: "x"}}); err == nil {
 		t.Fatal("负 time_start 违反 CHECK 约束应报错")
 	}
 }
@@ -683,7 +690,7 @@ func TestIndexKeyPoints_InsertSearchError2(t *testing.T) {
 		t.Fatal(err)
 	}
 	card := &provider.KnowledgeCard{Title: "T", KeyPoints: []provider.KeyPoint{{Content: "KP", Citations: []string{"seg-0001"}}}}
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, "ep1", "t", 1, card, []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}); err == nil {
 		t.Fatal("keypoint_search 缺列时 IndexKeyPoints 应报错")
 	}
 }
@@ -698,5 +705,83 @@ func TestSearchKeyPoints_JoinError(t *testing.T) {
 	}
 	if _, _, err := s.SearchKeyPoints(ctx, "wealth", 1, 10); err == nil {
 		t.Fatal("keypoint_index 缺失时 SearchKeyPoints 应报错")
+	}
+}
+
+// TestIndexKeyPoints_ReconcileK03 K03 专项：稳定匹配保留 Owner 决策；
+// 原样重分析零 MaterialChange；未匹配按依赖 stale/删除。
+func TestIndexKeyPoints_ReconcileK03(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "ep", AudioURL: "https://a.mp3"}})
+	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
+	epID := episodes[0].ID
+	segs := []provider.Segment{
+		{ID: "seg-0001", Start: 0, End: 5, Text: "x"},
+		{ID: "seg-0002", Start: 5, End: 10, Text: "y"},
+	}
+	seedCurrentTranscript(t, s, models.SourceEpisode, epID, segs)
+	cardV1 := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{
+		{Content: "要点A", Citations: []string{"seg-0001"}},
+		{Content: "要点B", Citations: []string{"seg-0002"}},
+	}}
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, epID, "ep", 1, cardV1, segs); err != nil {
+		t.Fatal(err)
+	}
+	kps, _, _ := s.ListKeyPoints(ctx, 1, 10)
+	var kpA string
+	for _, kp := range kps {
+		if kp.Content == "要点A" {
+			kpA = kp.ID
+		}
+	}
+	// Owner 触碰：A 设为 shortlisted；B 保留 inbox。
+	if err := s.SetKeyPointProductionStatus(ctx, kpA, models.KeyPointShortlisted); err != nil {
+		t.Fatal(err)
+	}
+
+	// 原样重分析（同卡片、版本不变）→ 零 MaterialChange、A 保持 shortlisted。
+	stats, err := s.IndexKeyPoints(ctx, models.SourceEpisode, epID, "ep", 1, cardV1, segs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MaterialChanges != 0 || stats.Kept != 2 || stats.New != 0 {
+		t.Fatalf("原样重分析不应产生变化: %+v", stats)
+	}
+	gotA, _ := s.GetKeyPoint(ctx, kpA)
+	if gotA.ProductionStatus != models.KeyPointShortlisted {
+		t.Fatalf("Owner 决策应保留: %+v", gotA)
+	}
+
+	// 新版本卡片：A 更新（版本变化）、B 消失、C 新增。
+	cardV2 := &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{
+		{Content: "要点A", Citations: []string{"seg-0001"}},
+		{Content: "要点C", Citations: []string{"seg-0002"}},
+	}}
+	stats2, err := s.IndexKeyPoints(ctx, models.SourceEpisode, epID, "ep", 2, cardV2, segs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats2.Kept != 0 || stats2.Updated != 1 || stats2.New != 1 || stats2.MaterialChanges != 1 {
+		t.Fatalf("实质变化应记录一次 MaterialChange: %+v", stats2)
+	}
+	gotA2, _ := s.GetKeyPoint(ctx, kpA)
+	if gotA2.ID != kpA || gotA2.CardVersion != 2 || gotA2.ProductionStatus != models.KeyPointShortlisted {
+		t.Fatalf("A 应保留 ID 与决策并刷新版本: %+v", gotA2)
+	}
+	// B 未匹配且 Owner 未触碰（inbox）→ 删除。
+	var n int
+	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM keypoint_index WHERE source_id=? AND content='要点B'`, epID).Scan(&n)
+	if n != 0 {
+		t.Fatal("未匹配且无依赖的旧重点应被删除")
+	}
+	// 再次同样重分析（幂等）：无新 MaterialChange。
+	stats3, err := s.IndexKeyPoints(ctx, models.SourceEpisode, epID, "ep", 2, cardV2, segs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats3.MaterialChanges != 0 {
+		t.Fatalf("重复重分析不得新增 MaterialChange: %+v", stats3)
 	}
 }

@@ -35,7 +35,7 @@ func TestEvaluateAutomaticDiscoveryEnforcesWindowDebounceBackpressureAndDailyLim
 			{Content: episode.Title + "观点三", Citations: []string{"seg-3"}},
 		}}
 		segments := []provider.Segment{{ID: "seg-1", End: 1}, {ID: "seg-2", Start: 1, End: 2}, {ID: "seg-3", Start: 2, End: 3}}
-		if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episode.ID, episode.Title, 1, card, segments); err != nil {
+		if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episode.ID, episode.Title, 1, card, segments); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestEvaluateAutomaticDiscoveryRespectsDebounceAndProfileExclusion(t *testin
 	}
 	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
 	for _, episode := range episodes {
-		if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "观点", Citations: []string{"seg"}}}}, []provider.Segment{{ID: "seg", End: 1}}); err != nil {
+		if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "观点", Citations: []string{"seg"}}}}, []provider.Segment{{ID: "seg", End: 1}}); err != nil {
 			t.Fatal(err)
 		}
 	}

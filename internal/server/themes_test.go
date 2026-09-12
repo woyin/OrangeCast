@@ -31,7 +31,7 @@ func TestThemeBoardCreateConfirmAndLinkKeyPoint(t *testing.T) {
 	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
 	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
-	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
@@ -179,7 +179,7 @@ func TestScoutCreatesDeduplicatedCrossEpisodeProposal(t *testing.T) {
 	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "one", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"}, {GUID: "two", Title: "第二集", AudioURL: "https://cdn.example.com/2.mp3"}})
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
 	for i, episode := range episodes {
-		if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "观点" + string(rune('A'+i)), Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+		if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "观点" + string(rune('A'+i)), Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -310,7 +310,7 @@ func TestScoutRequestSupportsExplicitSingleEpisodeDeepRead(t *testing.T) {
 	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "deep-one", Title: "第一集", AudioURL: "https://cdn.example.com/1.mp3"}, {GUID: "deep-two", Title: "第二集", AudioURL: "https://cdn.example.com/2.mp3"}})
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
 	for _, episode := range episodes {
-		if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "观点", Citations: []string{"seg-1"}}, {Content: episode.Title + "补充", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+		if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "观点", Citations: []string{"seg-1"}}, {Content: episode.Title + "补充", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -360,7 +360,7 @@ func TestScoutRequestRejectsArchivedAndMissingThemeMaterial(t *testing.T) {
 	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
 	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
-	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)

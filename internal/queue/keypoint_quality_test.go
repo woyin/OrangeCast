@@ -52,7 +52,7 @@ func seedKeypointsForQuality(t *testing.T, s *store.Store, sourceID string) {
 	}
 	_ = cards
 	// 重点索引（K02 任务读取的来源）
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "标题", 1, mustCard(t, payload), mustSegments(t)); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, sourceID, "标题", 1, mustCard(t, payload), mustSegments(t)); err != nil {
 		t.Fatal(err)
 	}
 }

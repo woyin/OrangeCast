@@ -1303,7 +1303,7 @@ func TestKeyPointsSearch(t *testing.T) {
 		KeyPoints: []provider.KeyPoint{{Content: "sovereign wealth funds change global investment", Description: "long-term investors", Citations: []string{"seg-0001"}}},
 	}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "sovereign wealth"}}
-	if err := srv.store.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep1", 1, card, segs); err != nil {
+	if _, err := srv.store.IndexKeyPoints(ctx, models.SourceEpisode, eps[0].ID, "ep1", 1, card, segs); err != nil {
 		t.Fatalf("IndexKeyPoints: %v", err)
 	}
 

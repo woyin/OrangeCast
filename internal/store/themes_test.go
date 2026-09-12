@@ -16,7 +16,7 @@ func TestThemeLifecycleAcceptsOwnerAddedActiveKeyPointsWithoutScope(t *testing.T
 	podcast, _ := s.CreatePodcast(ctx, "https://feed.example.com/rss", "播客", "", "")
 	s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
 	episodes, _ := s.ListEpisodes(ctx, podcast.ID)
-	if err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := s.ListKeyPoints(ctx, 1, 10)

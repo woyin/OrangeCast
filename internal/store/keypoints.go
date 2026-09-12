@@ -41,54 +41,36 @@ type KeyPointRow struct {
 // 每个 KeyPoint 的 Citation（Segment ID 列表）被解析为聚合时间范围（min start – max end），
 // 存入 keypoint_index 表 + keypoint_search FTS5 表。用于 /keypoints 全局视图。
 // 真理来源是 artifact_versions.payload；本表是索引投影（ADR-0017）。
-func loadAutomaticKeyPointIDs(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID string) (map[string]string, error) {
-	oldIDs := map[string]string{}
-	oldRows, err := tx.QueryContext(ctx,
-		`SELECT id, citations_json, content FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic'`,
-		string(sourceType), sourceID)
-	if err != nil {
-		return nil, err
-	}
-	for oldRows.Next() {
-		var id, citationsJSON, content string
-		if err := oldRows.Scan(&id, &citationsJSON, &content); err != nil {
-			oldRows.Close()
-			return nil, err
-		}
-		var citations []string
-		if err := json.Unmarshal([]byte(citationsJSON), &citations); err == nil {
-			oldIDs[keyPointReconciliationKey(citations, content)] = id
-		}
-	}
-	if err := oldRows.Err(); err != nil {
-		oldRows.Close()
-		return nil, err
-	}
-	if err := oldRows.Close(); err != nil {
-		return nil, err
-	}
-	return oldIDs, nil
+// KeyPointReconcileStats 重分析协调结果（K03）。
+type KeyPointReconcileStats struct {
+	Kept            int // 稳定匹配且内容未变：保留 ID 与全部 Owner 决策
+	Updated         int // 稳定匹配但卡片版本/时间跨度更新
+	New             int // 新自动重点
+	Staled          int // 未匹配但被依赖/被 Owner 触碰：保留并标 stale
+	Removed         int // 未匹配且无依赖：删除
+	MaterialChanges int // 幂等写入的 MaterialChange 条数
 }
 
-func clearAutomaticKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID string) error {
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM keypoint_search WHERE keypoint_id IN (SELECT id FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic')`,
-		string(sourceType), sourceID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic'`,
-		string(sourceType), sourceID); err != nil {
-		return err
-	}
-	return nil
+// automaticKeyPointRow 旧自动重点的协调视图。
+type automaticKeyPointRow struct {
+	ID               string
+	Content          string
+	Description      string
+	CardVersion      int
+	TimeStart        float64
+	TimeEnd          float64
+	ProductionStatus string
+	QualityStatus    string
+	EvidenceStatus   string
 }
 
-func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment, oldIDs map[string]string) error {
+func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment, oldRows map[string]*automaticKeyPointRow) (*KeyPointReconcileStats, error) {
+	stats := &KeyPointReconcileStats{}
 	segMap := make(map[string]provider.Segment, len(segments))
 	for _, seg := range segments {
 		segMap[seg.ID] = seg
 	}
+	matched := map[string]bool{}
 	for _, kp := range card.KeyPoints {
 		cites := validCitations(kp.Citations, segMap)
 		if len(cites) == 0 {
@@ -99,49 +81,185 @@ func indexCardKeyPoints(ctx context.Context, tx *sql.Tx, sourceType models.Sourc
 		if end <= start {
 			continue
 		}
-		kpID := oldIDs[keyPointReconciliationKey(cites, kp.Content)]
-		if kpID == "" {
+		content := strings.TrimSpace(kp.Content)
+		description := strings.TrimSpace(kp.Description)
+		key := keyPointReconciliationKey(cites, content)
+		old, exists := oldRows[key]
+		kpID := ""
+		changed := false
+		if exists {
+			kpID = old.ID
+			matched[key] = true
+			if old.CardVersion != cardVersion || old.TimeStart != start || old.TimeEnd != end || old.Description != description {
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE keypoint_index SET card_version=?, time_start=?, time_end=?, description=? WHERE id=?`,
+					cardVersion, start, end, description, kpID); err != nil {
+					return stats, fmt.Errorf("更新 keypoint_index: %w", err)
+				}
+				stats.Updated++
+				changed = true
+			} else {
+				stats.Kept++
+			}
+			// 重现的历史 stale 重点恢复有效。
+			if old.EvidenceStatus != "valid" {
+				if _, err := tx.ExecContext(ctx,
+					`UPDATE keypoint_index SET evidence_status='valid', stale_at=NULL, stale_reason='' WHERE id=?`, kpID); err != nil {
+					return stats, err
+				}
+			}
+		} else {
 			kpID = uuid.NewString()
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, evidence_status, quality_status, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+				kpID, string(sourceType), sourceID, sourceTitle,
+				content, description,
+				string(citationsJSON), string(models.RelationCitation), start, end, cardVersion,
+				string(models.KeyPointAutomatic), string(models.KeyPointInbox), "valid", string(models.KeyPointNeedsReview)); err != nil {
+				return stats, fmt.Errorf("写入 keypoint_index: %w", err)
+			}
+			stats.New++
+			changed = true
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, evidence_status, quality_status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-			kpID, string(sourceType), sourceID, sourceTitle,
-			strings.TrimSpace(kp.Content), strings.TrimSpace(kp.Description),
-			string(citationsJSON), string(models.RelationCitation), start, end, cardVersion,
-			string(models.KeyPointAutomatic), string(models.KeyPointInbox), "valid", string(models.KeyPointNeedsReview)); err != nil {
-			return fmt.Errorf("写入 keypoint_index: %w", err)
+			`DELETE FROM keypoint_search WHERE keypoint_id=?`, kpID); err != nil {
+			return stats, err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO keypoint_search (keypoint_id, content, description, source_title) VALUES (?, ?, ?, ?)`,
-			kpID, strings.TrimSpace(kp.Content), strings.TrimSpace(kp.Description), sourceTitle); err != nil {
-			return err
+			kpID, content, description, sourceTitle); err != nil {
+			return stats, err
 		}
-		if err := indexLocalKeyPointEmbedding(ctx, tx, kpID, kp.Content+" "+kp.Description+" "+sourceTitle); err != nil {
-			return err
+		if err := indexLocalKeyPointEmbedding(ctx, tx, kpID, content+" "+description+" "+sourceTitle); err != nil {
+			return stats, err
+		}
+		// K03：MaterialChange 只标记"已具备发现资格重点的实质变化"——
+		// 新重点待质量判定通过时由 quality_approved 记录；原样重分析（Kept）
+		// 不产生新发现价值。
+		if changed && exists && (old.QualityStatus == string(models.KeyPointReady) || old.QualityStatus == string(models.KeyPointOwnerConfirmed) || old.ProductionStatus != string(models.KeyPointInbox)) {
+			n, err := recordKeyPointMaterialChangeTx(ctx, tx, kpID, string(sourceType), sourceID, content, citationsJSON, cardVersion)
+			if err != nil {
+				return stats, err
+			}
+			stats.MaterialChanges += n
 		}
 	}
-	return nil
+
+	// 未匹配旧自动重点：被人工派生/Owner 决策/Owner 触碰 → 标 stale 保留；否则删除。
+	for key, old := range oldRows {
+		if matched[key] {
+			continue
+		}
+		dep, err := keyPointHasDependencies(ctx, tx, old.ID, old.ProductionStatus, old.QualityStatus)
+		if err != nil {
+			return stats, err
+		}
+		if dep {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE keypoint_index SET evidence_status='stale', stale_at=datetime('now'), stale_reason='重分析后未能匹配该重点' WHERE id=?`,
+				old.ID); err != nil {
+				return stats, err
+			}
+			stats.Staled++
+		} else {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM keypoint_search WHERE keypoint_id=?`, old.ID); err != nil {
+				return stats, err
+			}
+			if _, err := tx.ExecContext(ctx, `DELETE FROM keypoint_index WHERE id=?`, old.ID); err != nil {
+				return stats, err
+			}
+			stats.Removed++
+		}
+	}
+	return stats, nil
 }
 
-// IndexKeyPoints refreshes the global KeyPoint projection for one Source from a validated KnowledgeCard and its Segments (ADR-0017).
-func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) error {
+// keyPointHasDependencies 判断未被匹配的旧重点是否需要保留为 stale：
+// 有人工派生（parent_keypoint_id 指向它）或 Owner 相关性决策，或 Owner 触碰过
+// 生产状态/质量状态。
+func keyPointHasDependencies(ctx context.Context, tx *sql.Tx, id, productionStatus, qualityStatus string) (bool, error) {
+	if productionStatus != string(models.KeyPointInbox) || qualityStatus == string(models.KeyPointOwnerConfirmed) {
+		return true, nil
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM keypoint_index WHERE parent_keypoint_id = ?`, id).Scan(&n); err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM editorial_relevance WHERE keypoint_id = ? AND owner_override IS NOT NULL AND owner_override != ''`, id).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// recordKeyPointMaterialChangeTx 事务内幂等写 MaterialChange；返回实际新插入行数（0/1）。
+func recordKeyPointMaterialChangeTx(ctx context.Context, tx *sql.Tx, keyPointID, sourceType, sourceID, content string, citationsJSON []byte, cardVersion int) (int, error) {
+	hash := keyPointReconciliationKey([]string{string(citationsJSON)}, fmt.Sprintf("%s:%d", content, cardVersion))
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO material_changes (id,keypoint_id,source_type,source_id,change_kind,snapshot_hash) VALUES (?,?,?,?,?,?) ON CONFLICT(keypoint_id,change_kind,snapshot_hash) DO NOTHING`,
+		uuid.NewString(), keyPointID, sourceType, sourceID, "auto_keypoint_changed", hash)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// IndexKeyPoints 重分析后协调全局重点投影（K03 / ADR-0022）：
+// 稳定匹配相同来源与语义的自动重点（保留 ID、Owner 决策与生产状态），
+// 新重点插入，未匹配重点按依赖 stale 或删除；状态、索引与 MaterialChange
+// 在同一事务内完成。原样重分析不产生新 MaterialChange。
+func (s *Store) IndexKeyPoints(ctx context.Context, sourceType models.SourceType, sourceID, sourceTitle string, cardVersion int, card *provider.KnowledgeCard, segments []provider.Segment) (*KeyPointReconcileStats, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
-	oldIDs, err := loadAutomaticKeyPointIDs(ctx, tx, sourceType, sourceID)
+	oldRows, err := loadAutomaticKeyPointRows(ctx, tx, sourceType, sourceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := clearAutomaticKeyPoints(ctx, tx, sourceType, sourceID); err != nil {
-		return err
+	stats, err := indexCardKeyPoints(ctx, tx, sourceType, sourceID, sourceTitle, cardVersion, card, segments, oldRows)
+	if err != nil {
+		return nil, err
 	}
-	if err := indexCardKeyPoints(ctx, tx, sourceType, sourceID, sourceTitle, cardVersion, card, segments, oldIDs); err != nil {
-		return err
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
-	return tx.Commit()
+	return stats, nil
+}
+
+// loadAutomaticKeyPointRows 读取全部旧自动重点（协调输入，键为稳定协调键）。
+func loadAutomaticKeyPointRows(ctx context.Context, tx *sql.Tx, sourceType models.SourceType, sourceID string) (map[string]*automaticKeyPointRow, error) {
+	rows := map[string]*automaticKeyPointRow{}
+	query, err := tx.QueryContext(ctx,
+		`SELECT id, content, COALESCE(description,''), card_version, time_start, time_end,
+		        production_status, quality_status, COALESCE(evidence_status,'valid'), citations_json
+		 FROM keypoint_index WHERE source_type=? AND source_id=? AND origin='automatic'`,
+		string(sourceType), sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer query.Close()
+	for query.Next() {
+		r := &automaticKeyPointRow{}
+		var citationsJSON string
+		if err := query.Scan(&r.ID, &r.Content, &r.Description, &r.CardVersion, &r.TimeStart, &r.TimeEnd,
+			&r.ProductionStatus, &r.QualityStatus, &r.EvidenceStatus, &citationsJSON); err != nil {
+			return nil, err
+		}
+		var citations []string
+		if err := json.Unmarshal([]byte(citationsJSON), &citations); err != nil {
+			continue
+		}
+		rows[keyPointReconciliationKey(citations, r.Content)] = r
+	}
+	return rows, query.Err()
 }
 
 func validCitations(citations []string, segs map[string]provider.Segment) []string {

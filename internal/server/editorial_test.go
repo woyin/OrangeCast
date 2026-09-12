@@ -115,7 +115,7 @@ func TestKeyPointStatusAPIUpdatesInboxState(t *testing.T) {
 		t.Fatal(err)
 	}
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
-	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "Episode", 1,
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "Episode", 1,
 		&provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "素材", Citations: []string{"seg-1"}}}},
 		[]provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
@@ -527,7 +527,7 @@ func TestWriterCreatesEvidenceMappedImmutableRevision(t *testing.T) {
 	}
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
 	seedEditorialTranscript(t, srv, models.SourceEpisode, episodes[0].ID, []provider.Segment{{ID: "seg-1", End: 1, Text: "证据"}})
-	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "效率也会带来审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "效率也会带来审查成本", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)
@@ -747,7 +747,7 @@ func TestWriterRejectsUnconfirmedMaterialsAndProviderFailures(t *testing.T) {
 	podcast, _ := srv.store.CreatePodcast(t.Context(), "https://feed.example.com/rss", "播客", "", "")
 	srv.store.MergeEpisodes(t.Context(), podcast.ID, []models.Episode{{GUID: "episode", Title: "单集", AudioURL: "https://cdn.example.com/ep.mp3"}})
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
-	if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "有证据的观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodes[0].ID, "单集", 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: "有证据的观点", Citations: []string{"seg-1"}}}}, []provider.Segment{{ID: "seg-1", End: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	keyPoints, _, _ := srv.store.ListKeyPoints(t.Context(), 1, 10)

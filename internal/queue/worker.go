@@ -382,8 +382,11 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	} else if up, err := w.store.GetUploadByID(ctx, job.SourceID); err == nil {
 		sourceTitle = up.OriginalFilename
 	}
-	if err := w.store.IndexKeyPoints(ctx, job.SourceType, job.SourceID, sourceTitle, version, validated, payload.Segments); err != nil {
+	if stats, err := w.store.IndexKeyPoints(ctx, job.SourceType, job.SourceID, sourceTitle, version, validated, payload.Segments); err != nil {
 		log.Printf("任务 %s KeyPoint 索引刷新失败（不阻塞）: %v", job.ID, err)
+	} else if stats != nil && (stats.Updated > 0 || stats.New > 0 || stats.Staled > 0) {
+		log.Printf("任务 %s 重点协调: kept=%d updated=%d new=%d staled=%d removed=%d changes=%d",
+			job.ID, stats.Kept, stats.Updated, stats.New, stats.Staled, stats.Removed, stats.MaterialChanges)
 	}
 
 	w.recordCallUsage(ctx, job, "analysis", bundle.Analysis.Name(), analysisModel, analysis.Usage)

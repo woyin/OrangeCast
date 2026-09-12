@@ -29,7 +29,7 @@ func TestRelationKind_CitationBackfill(t *testing.T) {
 		},
 	}
 	segs := []provider.Segment{{ID: "seg-0001", Start: 0, End: 5, Text: "x"}}
-	if err := s.IndexKeyPoints(ctx, srcType, srcID, "ep", 1, card, segs); err != nil {
+	if _, err := s.IndexKeyPoints(ctx, srcType, srcID, "ep", 1, card, segs); err != nil {
 		t.Fatal(err)
 	}
 	kps, _, err := s.ListKeyPoints(ctx, 1, 10)

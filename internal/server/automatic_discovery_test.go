@@ -48,7 +48,7 @@ func TestRunAutomaticDiscoveryCreatesOneDurableBatchAndCreationProposal(t *testi
 	}
 	episodes, _ := srv.store.ListEpisodes(t.Context(), podcast.ID)
 	for _, episode := range episodes {
-		if err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "洞见一", Citations: []string{"seg-1"}}, {Content: episode.Title + "洞见二", Citations: []string{"seg-2"}}, {Content: episode.Title + "洞见三", Citations: []string{"seg-3"}}}}, []provider.Segment{{ID: "seg-1", End: 1}, {ID: "seg-2", Start: 1, End: 2}, {ID: "seg-3", Start: 2, End: 3}}); err != nil {
+		if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episode.ID, episode.Title, 1, &provider.KnowledgeCard{KeyPoints: []provider.KeyPoint{{Content: episode.Title + "洞见一", Citations: []string{"seg-1"}}, {Content: episode.Title + "洞见二", Citations: []string{"seg-2"}}, {Content: episode.Title + "洞见三", Citations: []string{"seg-3"}}}}, []provider.Segment{{ID: "seg-1", End: 1}, {ID: "seg-2", Start: 1, End: 2}, {ID: "seg-3", Start: 2, End: 3}}); err != nil {
 			t.Fatal(err)
 		}
 	}
