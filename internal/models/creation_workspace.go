@@ -165,3 +165,12 @@ const (
 	RoundDiagnosed = "diagnosed"
 	RoundFailed    = "failed"
 )
+
+// ClaimMapEntry 正文片段的主张映射（C09）。
+type ClaimMapEntry struct {
+	Excerpt      string   `json:"excerpt"`
+	ClaimKind    string   `json:"claimKind"`
+	MaterialIDs  []string `json:"materialIds"`
+	SourceTitle  string   `json:"sourceTitle"`
+	CitationRefs []string `json:"citationRefs"`
+}

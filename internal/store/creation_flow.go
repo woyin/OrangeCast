@@ -630,3 +630,52 @@ func (s *Store) recheckBriefMaterials(ctx context.Context, proposalID string) er
 	}
 	return nil
 }
+
+// ---- ClaimMap（C09）----
+
+// SaveClaimMap 批量写入一个修订的 ClaimMap（先删后插，幂等）。
+func (s *Store) SaveClaimMap(ctx context.Context, draftID, revisionID string, entries []models.ClaimMapEntry) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_maps WHERE draft_id=? AND revision_id=?`, draftID, revisionID); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		materialsJSON, _ := json.Marshal(e.MaterialIDs)
+		citationsJSON, _ := json.Marshal(e.CitationRefs)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO claim_maps (id, draft_id, revision_id, excerpt, claim_kind, material_ids_json, source_title, citation_refs_json)
+			 VALUES (?,?,?,?,?,?,?,?)`,
+			uuid.NewString(), draftID, revisionID, e.Excerpt, e.ClaimKind,
+			string(materialsJSON), e.SourceTitle, string(citationsJSON)); err != nil {
+			return fmt.Errorf("写入 ClaimMap: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// ListClaimMap 读取一个修订的全部 ClaimMap 条目。
+func (s *Store) ListClaimMap(ctx context.Context, draftID, revisionID string) ([]models.ClaimMapEntry, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT excerpt, claim_kind, material_ids_json, source_title, citation_refs_json
+		 FROM claim_maps WHERE draft_id=? AND revision_id=? ORDER BY created_at`, draftID, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.ClaimMapEntry
+	for rows.Next() {
+		var e models.ClaimMapEntry
+		var materials, citations string
+		if err := rows.Scan(&e.Excerpt, &e.ClaimKind, &materials, &e.SourceTitle, &citations); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(materials), &e.MaterialIDs)
+		_ = json.Unmarshal([]byte(citations), &e.CitationRefs)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
