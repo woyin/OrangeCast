@@ -83,7 +83,7 @@ func parseClaimReviewResult(content string) (*ClaimReviewResult, error) {
 	return result, nil
 }
 
-// ReviewClaimsGroq Groq 独立审校。
+// ReviewClaims Groq 独立审校。
 func (g *GroqProvider) ReviewClaims(ctx context.Context, req ClaimReviewRequest) (*ClaimReviewResult, TaskUsage, error) {
 	content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
 		{"role": "system", "content": claimReviewSystemPrompt + "\n必须只输出一个 JSON 对象。"},
@@ -96,7 +96,7 @@ func (g *GroqProvider) ReviewClaims(ctx context.Context, req ClaimReviewRequest)
 	return result, usage, err
 }
 
-// ReviewClaimsOpenAI OpenAI 独立审校。
+// ReviewClaims OpenAI 独立审校。
 func (o *OpenAIProvider) ReviewClaims(ctx context.Context, req ClaimReviewRequest) (*ClaimReviewResult, TaskUsage, error) {
 	payload := map[string]any{
 		"model":        o.effectiveAnalysisModel(),

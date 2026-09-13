@@ -131,7 +131,7 @@ func parseQualityVerdict(content string) (*KeypointQualityVerdict, error) {
 	return v, nil
 }
 
-// AssessKeypointQualityGroq Groq 的独立判定实现（K02）。
+// AssessKeypointQuality ... Groq 的独立判定实现（K02）。
 func (g *GroqProvider) AssessKeypointQuality(ctx context.Context, input KeypointQualityInput) (*KeypointQualityVerdict, TaskUsage, error) {
 	if verdict, final := PrecheckKeypointQuality(input); final {
 		return &verdict, TaskUsage{}, nil
@@ -147,7 +147,7 @@ func (g *GroqProvider) AssessKeypointQuality(ctx context.Context, input Keypoint
 	return verdict, usage, err
 }
 
-// AssessKeypointQualityOpenAI OpenAI 的独立判定实现（K02），与 Groq 同一契约。
+// AssessKeypointQuality ... OpenAI 的独立判定实现（K02），与 Groq 同一契约。
 func (o *OpenAIProvider) AssessKeypointQuality(ctx context.Context, input KeypointQualityInput) (*KeypointQualityVerdict, TaskUsage, error) {
 	if verdict, final := PrecheckKeypointQuality(input); final {
 		return &verdict, TaskUsage{}, nil

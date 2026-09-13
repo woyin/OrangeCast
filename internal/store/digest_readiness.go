@@ -92,7 +92,7 @@ func (s *Store) EvaluateDigestReadiness(ctx context.Context, digestID string) (*
 	return out, nil
 }
 
-// DigestReadinessSummary 返回给模板/导出的简短状态行。
+// Summary 返回给模板/导出的简短状态行。
 func (r *DigestReadiness) Summary() string {
 	if r.Deliverable {
 		return "可交付：引用、来源确认与依据检查全部通过"

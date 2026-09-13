@@ -44,8 +44,11 @@ func scanDigestBlock(row interface{ Scan(...any) error }) (*models.DigestBlock, 
 	return b, nil
 }
 
-// CreateEpisodeDigest 写入一次不可变精读文修订（含全部内容块），版本 = 该 Source 已有最大版本 + 1。
-// 版本空间与 narrations 同构（ADR-0023 §1）：并发下由 UNIQUE(source_type,source_id,version) 兜底。
+// CreateEpisodeDigest 兼容入口：无落源与缺口的原子发布。
+func (s *Store) CreateEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock) (*models.EpisodeDigest, error) {
+	return s.PublishEpisodeDigest(ctx, d, blocks, nil, nil)
+}
+
 // PublishEpisodeDigest 原子发布一份完整修订（G02）：正文、块、检索落源、缺口
 // 在单个事务内写入——不存在"半份修订成为 current"的中间状态；失败整体回滚可重试。
 func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock, searchRows []models.DigestSearchSource, factGaps []models.DigestFactGap) (*models.EpisodeDigest, error) {
@@ -115,11 +118,6 @@ func (s *Store) PublishEpisodeDigest(ctx context.Context, d *models.EpisodeDiges
 		return nil, err
 	}
 	return s.GetEpisodeDigest(ctx, d.ID)
-}
-
-// CreateEpisodeDigest 兼容入口：无落源与缺口的原子发布。
-func (s *Store) CreateEpisodeDigest(ctx context.Context, d *models.EpisodeDigest, blocks []models.DigestBlock) (*models.EpisodeDigest, error) {
-	return s.PublishEpisodeDigest(ctx, d, blocks, nil, nil)
 }
 
 // GetCurrentEpisodeDigest 返回该 Source 当前采用的精读文修订（MAX(version)）；无版本返回 ErrNotFound。

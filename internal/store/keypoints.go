@@ -41,6 +41,7 @@ type KeyPointRow struct {
 // 每个 KeyPoint 的 Citation（Segment ID 列表）被解析为聚合时间范围（min start – max end），
 // 存入 keypoint_index 表 + keypoint_search FTS5 表。用于 /keypoints 全局视图。
 // 真理来源是 artifact_versions.payload；本表是索引投影（ADR-0017）。
+
 // KeyPointReconcileStats 重分析协调结果（K03）。
 type KeyPointReconcileStats struct {
 	Kept            int // 稳定匹配且内容未变：保留 ID 与全部 Owner 决策

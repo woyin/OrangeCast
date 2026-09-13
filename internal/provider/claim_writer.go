@@ -155,7 +155,7 @@ func writeClaimArticle(ctx context.Context, req ClaimAwareWritingRequest, comple
 	return result, usage, nil
 }
 
-// WriteArticleWithClaimsGroq Groq v2 写作。
+// WriteArticleWithClaims Groq v2 写作。
 func (g *GroqProvider) WriteArticleWithClaims(ctx context.Context, req ClaimAwareWritingRequest) (*ClaimAwareWritingResult, TaskUsage, error) {
 	return writeClaimArticle(ctx, req, func(ctx context.Context, system, user string) (string, TaskUsage, error) {
 		content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
@@ -166,7 +166,7 @@ func (g *GroqProvider) WriteArticleWithClaims(ctx context.Context, req ClaimAwar
 	})
 }
 
-// WriteArticleWithClaimsOpenAI OpenAI v2 写作。
+// WriteArticleWithClaims OpenAI v2 写作。
 func (o *OpenAIProvider) WriteArticleWithClaims(ctx context.Context, req ClaimAwareWritingRequest) (*ClaimAwareWritingResult, TaskUsage, error) {
 	return writeClaimArticle(ctx, req, func(ctx context.Context, system, user string) (string, TaskUsage, error) {
 		payload := map[string]any{
