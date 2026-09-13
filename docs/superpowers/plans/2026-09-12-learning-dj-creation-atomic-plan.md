@@ -2,7 +2,7 @@
 
 日期：2026-09-12。产品优先级：用户已确认学习与创作并重。
 
-计划状态：**50/53 首轮任务已完成（2026-09-13 最终验证）**。已完成并入库：A01–A04、B01–B09、K01–K04、G01–G08、D01–D08、C01–C10（48 个功能提交，起于 8ff8845 终于 7f33f90，逐任务记录见 `docs/implementation-log/`）。外部阻塞：K05（真实 Provider 评分）、U03（移动端人工核对）、V02（真实旅程）。已完成：U01（首页并列）、V01（备份恢复验证）、D03（真实引擎：kokoro-onnx + v1.0 权重，`tts-check` 真实合成中文/英文 wav，人耳音质评价留 Owner）。门禁：race/vet/build/check/gofmt/lint 全绿；cover-gate 有已知债务（evalset 90.2/provider 87.9/queue 83.3 低于 95）。46 个增量迁移（0001–0046）全部一致。
+计划状态：**50/53 首轮任务已完成（2026-09-13 最终验证）**。已完成并入库：A01–A04、B01–B09、K01–K04、G01–G08、D01–D08、C01–C10（48 个功能提交，起于 8ff8845 终于 7f33f90，逐任务记录见 `docs/implementation-log/`）。外部阻塞：K05（真实 Provider 评分）、U03（移动端人工核对）、V02（真实旅程）。已完成：U01（首页并列）、V01（备份恢复验证）、D03（真实引擎：kokoro-onnx + v1.0 权重，`tts-check` 真实合成中文/英文 wav，人耳音质评价留 Owner）。门禁：race/vet/build/check/gofmt/lint 全绿；cover-gate 已知债务（evalset 94.0/provider 86.7/queue 77.0 低于 95，store 75.2 低于 78.4 登记地板；cmd 经 D03 补测 96.2% 达标）。44 个增量迁移（0001–0044）全部一致。
 
 ## 1. 实施目标与完成范围
 

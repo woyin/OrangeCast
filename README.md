@@ -109,9 +109,18 @@ docker compose up -d
 | `PUBLIC_URL` | 否 | 公网 URL；决定 Secure Cookie 与 Citation 链接 | http://localhost:8080 |
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
-| `KOKORO_BINARY` | 否 | Kokoro TTS 二进制路径（自托管，零成本） | `kokoro`（PATH 查找） |
-| `KOKORO_VOICE` | 否 | Narration 默认音色 | `af_heart` |
-| `KOKORO_MODEL` | 否 | Kokoro 模型文件路径（某些发行版需要） | 空 |
+| `KOKORO_BINARY` | 否 | 解说 TTS 可执行文件（推荐 `scripts/kokoro` 包装，见 [生产部署「解说音轨」](docs/production-deployment.md)） | `kokoro`（PATH 查找） |
+| `KOKORO_VOICE` | 否 | Narration 默认音色（中文 `zf_xiaobei`/`zm_yunyang`；英文 `af_heart`） | `af_heart` |
+| `KOKORO_MODEL` / `KOKORO_MODEL_DIR` | 否 | 权重：完整 onnx 路径 / 目录（取其中 `kokoro-v1.0.onnx` + `voices-v1.0.bin`） | 空 |
+| `KOKORO_LANGUAGE` | 否 | `en`/`zh`；仅用于 `tts-check` 预检一致性提示，实际语言按音色前缀推断 | `en` |
+| `KOKORO_TIMEOUT_SECONDS` | 否 | 单次合成超时秒数 | 120 |
+
+解说引擎未安装时 Narration 自动跳过、不影响原音；预检与短句试听：
+
+```sh
+cloudwisepod tts-check                    # 仅预检
+cloudwisepod tts-check --output /tmp/a.wav # 预检 + 真实合成试听
+```
 
 ---
 

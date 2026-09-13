@@ -20,6 +20,8 @@
 
 这些能力是迁移资产，不再直接定义目标领域模型。当前实现与 ADR-0022 的差距见 [`learning-creation-migration-gap.md`](learning-creation-migration-gap.md)。旧黄金旅程保留在 [`v1-golden-journey-run.md`](v1-golden-journey-run.md) 作为历史实录。
 
+**2026-09 更新**：首轮学习/创作原子计划（53 项）已交付 50 项——来源快照、任务意图、预算预留、处理深度、关键点质量、Owner 笔记、单集精读修订链、DJ 编排与播放、跨集构思/写作 v2/Claim 审校/创作历史、首页双工作区、备份全量验证、真实 Kokoro TTS。任务级 SHA 与证据见 `docs/implementation-log/` 与 [`release-notes-2026-09.md`](release-notes-2026-09.md)；剩余 K05/U03/V02 为外部条件，后续扩展 X01–X04 未动工。
+
 ## 迁移原则
 
 1. **数据优先兼容**：现有 Source、KeyPoint、提案、Brief、Draft、Revision、审校、费用和备份数据不得丢失。

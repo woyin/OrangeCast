@@ -16,7 +16,9 @@
 
 CloudWisePod 已完成 Roadmap Phase 0–7（2026-08-01）：单 Owner、自托管、Evidence-first 的播客证据库。Go + SQLite + SSR 单二进制，具备 RSS、上传、Groq 转录、不可变 ArtifactVersion、真实 Citation 的知识卡片、持久 EvidenceAudio、可恢复 SQLite 任务队列、分段级全文搜索、确定性 Markdown 下载、备份/恢复 CLI、CSRF/限流/SSRF 公网安全基线。
 
-自动化验证全部通过（`go test ./...` / `go vet ./...` / `go build ./cmd/cloudwisepod` / `git diff --check`）。发布前仍需：真实 Groq key 跑通约 60 分钟黄金旅程（含处理中重启与跨实例恢复）、EvalSet 人工评分。
+2026-09 首轮原子计划（53 项）已交付 50 项：来源快照/任务意图/预算预留、关键点质量与 Owner 笔记、单集精读（冻结材料/修订链/独立改写）、DJ 编排与媒体状态机播放/进度/笔记、跨集构思→写作 v2→Claim 审校→发布历史、首页双工作区、备份全量验证、真实 Kokoro TTS（`tts-check` 预检/试听）。逐任务记录见 `docs/implementation-log/`，发布说明见 `docs/release-notes-2026-09.md`。
+
+自动化验证全部通过（`go test ./... -race` / `go vet ./...` / `go build ./cmd/cloudwisepod` / `git diff --check`；store 包 race 约 12.6 分钟，CI 已放宽 `-timeout 25m`）。发布前仍需（外部条件，代码不阻塞）：K05 真实 Provider 评分、U03 移动端人工核对、V02 真实双旅程、D03 人耳试听确认。
 
 ## 仓库基线
 
