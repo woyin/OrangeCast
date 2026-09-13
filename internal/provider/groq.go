@@ -18,10 +18,11 @@ const (
 	// gpt-oss-120b 上下文 128K 且支持 json_object/json_schema（TPM 8K，分窗路径靠退避等待）。
 	// 替代可选 qwen/qwen3.8-27b（中文强）——可在设置页按角色覆盖。
 	groqAnalysisModel = "openai/gpt-oss-120b"
-	// 分窗预算按真实限额校准（2026-09-13 实测）：gpt-oss-120b 免费 on_demand TPM=8000，
-	// 12000 字中文窗口 + 系统提示 ≈ 10,296 tokens 必 429（"Limit 8000, Requested 10296"）；
-	// 5000 字 ≈ 4,900 tokens 留出输出余量；窗口间隔 60s 保证每窗落在独立限额窗口内。
-	analysisWindowCharBudget  = 5000
+	// 分窗预算按真实限额校准（2026-09-13 实测）：gpt-oss 免费 on_demand TPM=8000，
+	// 请求 tokens ≈ 预算字符 × 0.88（中文）+ 输出；6500 字 ≈ 5.7K in + ~1.5K out ≈ 7.2K ✓。
+	// 注意 whisper 对中文可产生数千个 7 字级小片段，ID 行开销显著放大窗口数
+	//（3335 片段 ≈ 10–13 窗）；片段合并是后续降本方向，见 V02 验收记录。
+	analysisWindowCharBudget  = 6500
 	analysisWindowMinInterval = 60 * time.Second
 )
 
