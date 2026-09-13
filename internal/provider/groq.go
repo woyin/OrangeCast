@@ -339,20 +339,13 @@ func (g *GroqProvider) analyzeWindow(segments []Segment) (*KnowledgeCard, string
 	for _, seg := range segments {
 		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
 	}
-	// gpt-oss 系走 json_schema：其 reasoning 与最终 JSON 分离，json_object 模式下
-	// reasoning 挤占输出会导致 json_validate_failed（2026-09-13 gpt-oss-20b 实测）。
-	modelName := g.model
-	if modelName == "" {
-		modelName = groqAnalysisModel
-	}
-	jsonMode := "object"
-	if strings.Contains(modelName, "gpt-oss") {
-		jsonMode = "schema"
-	}
+	// json_object（非 schema）：gpt-oss 低 reasoning 档 + json_object 实测可稳定产出合法
+	// JSON（2026-09-13）；json_schema 非 strict 模式在 reasoning 模型上反而触发
+	// json_validate_failed（schema 提示与 reasoning 输出格式冲突）。
 	content, _, model, usage, err := g.completeContextWithUsage(context.Background(), []map[string]string{
 		{"role": "system", "content": analysisSystemPrompt + "\n\n必须只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块。"},
 		{"role": "user", "content": "请基于以下带编号片段的播客转录稿生成结构化知识卡片（citations 引用片段ID）：\n\n" + sb.String()},
-	}, jsonMode)
+	}, "object")
 	if err != nil {
 		return nil, "", TaskUsage{}, err
 	}
