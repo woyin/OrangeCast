@@ -78,9 +78,7 @@ func TestEvaluateAutomaticDiscoveryEnforcesWindowDebounceBackpressureAndDailyLim
 	}
 	// Keep the prior batch in today's quota while making the original changes
 	// visible to the post-batch window; this isolates the daily guardrail.
-	if _, err := s.DB.ExecContext(ctx, `UPDATE proposal_batches SET created_at=datetime('now','-2 hours') WHERE id=?`, batch.ID); err != nil {
-		t.Fatal(err)
-	}
+	// NOTE: no created_at backdate needed — daily limit counts all of today's batches.
 	decision, err = s.EvaluateAutomaticDiscovery(ctx, profile.ID, time.Now().UTC())
 	if err != nil || decision.Ready || decision.Reason != "daily automatic batch limit reached" {
 		t.Fatalf("daily quota must stop a second automatic batch: decision=%+v err=%v", decision, err)
