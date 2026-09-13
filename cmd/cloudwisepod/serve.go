@@ -44,7 +44,10 @@ func runServe() {
 	}
 	// Narration 解说音轨（ADR-0019）：自托管 Kokoro TTS，独立于 groq/openai。
 	// 引擎未安装时 Available()==false，worker 跳过合成、不阻塞主流程。
-	selector.WithNarration(provider.NewKokoroProvider(cfg.KokoroBinary, cfg.KokoroVoice, cfg.KokoroModel))
+	// D03：语言与单次合成超时来自配置（KOKORO_LANGUAGE / KOKORO_TIMEOUT_SECONDS）。
+	selector.WithNarration(provider.NewKokoroProvider(cfg.KokoroBinary, cfg.KokoroVoice, cfg.KokoroModel).
+		WithLanguage(cfg.KokoroLanguage).
+		WithSynthTimeout(time.Duration(cfg.KokoroTimeoutSeconds) * time.Second))
 	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir, cfg.NarrationDir)
 	refresher := rss.NewRefresher(s)
 	refresher.Start()

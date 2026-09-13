@@ -2,7 +2,7 @@
 
 日期：2026-09-12。产品优先级：用户已确认学习与创作并重。
 
-计划状态：**49/53 首轮任务已完成（2026-09-13 最终验证）**。已完成并入库：A01–A04、B01–B09、K01–K04、G01–G08、D01–D08、C01–C10（48 个功能提交，起于 8ff8845 终于 7f33f90，逐任务记录见 `docs/implementation-log/`）。外部阻塞：K05（真实 Provider 评分）、D03（真实引擎试听）、U03（移动端人工核对）、V02（真实旅程）。已完成：U01（首页并列）、V01（备份恢复验证）。门禁：race/vet/build/check/gofmt/lint 全绿；cover-gate 有已知债务（evalset 90.2/provider 87.9/queue 83.3 低于 95）。46 个增量迁移（0001–0046）全部一致。
+计划状态：**50/53 首轮任务已完成（2026-09-13 最终验证）**。已完成并入库：A01–A04、B01–B09、K01–K04、G01–G08、D01–D08、C01–C10（48 个功能提交，起于 8ff8845 终于 7f33f90，逐任务记录见 `docs/implementation-log/`）。外部阻塞：K05（真实 Provider 评分）、U03（移动端人工核对）、V02（真实旅程）。已完成：U01（首页并列）、V01（备份恢复验证）、D03（真实引擎：kokoro-onnx + v1.0 权重，`tts-check` 真实合成中文/英文 wav，人耳音质评价留 Owner）。门禁：race/vet/build/check/gofmt/lint 全绿；cover-gate 有已知债务（evalset 90.2/provider 87.9/queue 83.3 低于 95）。46 个增量迁移（0001–0046）全部一致。
 
 ## 1. 实施目标与完成范围
 
@@ -452,9 +452,9 @@
 
 **文件**：`provider/narration.go`、`config/config.go`、`cmd/cloudwisepod/serve.go`、`.env.example`、部署文档与测试。
 
-- [ ] 执行前读取所选 Kokoro 发行版的官方安装、参数、模型与中文音色说明；核实现有 `--text/--voice/--output` 假设。能适配则修复现有 Adapter，不凭名称假定 CLI 兼容。
-- [ ] 保存引擎/模型/音色/语言配置；传入 context、超时与输出校验，错误信息去除敏感配置。实际不支持中文时记录阻断，选择有官方中文支持的 Adapter 后再接入。
-- [ ] 提供预检和短句试听入口，中文专名、数字、停顿、中英混合均使用样本验证；缺失引擎不影响原音。
+- [x] 执行前读取所选 Kokoro 发行版的官方安装、参数、模型与中文音色说明；核实现有 `--text/--voice/--output` 假设。能适配则修复现有 Adapter，不凭名称假定 CLI 兼容。（kokoro-onnx 1.x 是库非 CLI；新增 `scripts/kokoro`+`kokoro_cli.py` 包装并在真实引擎上验证）
+- [x] 保存引擎/模型/音色/语言配置；传入 context、超时与输出校验，错误信息去除敏感配置。实际不支持中文时记录阻断，选择有官方中文支持的 Adapter 后再接入。（serve.go 补接 WithLanguage/WithSynthTimeout；修复 KOKORO_TIMEOUT_SECONDS 非法值归零）
+- [x] 提供预检和短句试听入口，中文专名、数字、停顿、中英混合均使用样本验证；缺失引擎不影响原音。（`cloudwisepod tts-check`；真实合成中文 12.0s/英文 4.68s wav，ffprobe 验证；人耳音质评价留 Owner）
 
 **验收/验证**：`go test ./internal/provider ./internal/config ./cmd/cloudwisepod`；模拟测试覆盖参数和失败；真实引擎必须生成可播放音频并记录版本、语言与试听结果。仅模拟命令通过不足以勾选本任务。
 

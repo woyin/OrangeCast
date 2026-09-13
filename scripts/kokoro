@@ -1,0 +1,12 @@
+#!/bin/sh
+# Kokoro TTS CLI shim（D03）：把 kokoro-onnx Python 运行时包装成 CloudWisePod
+# KokoroProvider 期望的 --text/--voice/--output 风格 CLI。
+#
+# 安装（见 docs/deployment-config.md「解说音轨」）：
+#   uv venv --python 3.12 ~/.local/share/cloudwisepod/kokoro/venv
+#   uv pip install --python ~/.local/share/cloudwisepod/kokoro/venv/bin/python kokoro-onnx soundfile
+#   下载 kokoro-v1.0.onnx 与 voices-v1.0.bin 到 ~/.local/share/cloudwisepod/kokoro/
+#
+# 环境变量：KOKORO_VENV 覆盖解释器；KOKORO_MODEL / KOKORO_MODEL_DIR 指定权重。
+: "${KOKORO_VENV:=$HOME/.local/share/cloudwisepod/kokoro/venv}"
+exec "$KOKORO_VENV/bin/python" "$(dirname "$0")/kokoro_cli.py" "$@"

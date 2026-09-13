@@ -140,3 +140,42 @@ func TestEnsureDirs_Error(t *testing.T) {
 		t.Fatal("目录不可创建应报错")
 	}
 }
+
+// TestLoad_KokoroNarrationConfig D03：解说引擎配置解析与默认值。
+func TestLoad_KokoroNarrationConfig(t *testing.T) {
+	os.Setenv("SESSION_SECRET", "test-secret")
+	defer os.Unsetenv("SESSION_SECRET")
+	// 默认：PATH 查找 kokoro、英文音色、120s 超时。
+	t.Setenv("KOKORO_BINARY", "")
+	t.Setenv("KOKORO_VOICE", "")
+	t.Setenv("KOKORO_LANGUAGE", "")
+	os.Unsetenv("KOKORO_TIMEOUT_SECONDS")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.KokoroBinary != "kokoro" || c.KokoroVoice != "af_heart" || c.KokoroLanguage != "en" || c.KokoroTimeoutSeconds != 120 {
+		t.Fatalf("默认值不符: %+v", c)
+	}
+	// 显式配置：中文运行时（scripts/kokoro 包装 + 中文音色 + 30s 超时）。
+	t.Setenv("KOKORO_BINARY", "scripts/kokoro")
+	t.Setenv("KOKORO_VOICE", "zf_xiaobei")
+	t.Setenv("KOKORO_LANGUAGE", "zh")
+	t.Setenv("KOKORO_TIMEOUT_SECONDS", "30")
+	c2, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c2.KokoroBinary != "scripts/kokoro" || c2.KokoroVoice != "zf_xiaobei" || c2.KokoroLanguage != "zh" || c2.KokoroTimeoutSeconds != 30 {
+		t.Fatalf("显式配置不符: %+v", c2)
+	}
+	// 非法超时回退默认 120s。
+	t.Setenv("KOKORO_TIMEOUT_SECONDS", "not-a-number")
+	c3, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c3.KokoroTimeoutSeconds != 120 {
+		t.Fatalf("非法超时应回退 120: %d", c3.KokoroTimeoutSeconds)
+	}
+}

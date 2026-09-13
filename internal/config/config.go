@@ -57,7 +57,9 @@ func Load() (*Config, error) {
 	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
 	c.KokoroModel = os.Getenv("KOKORO_MODEL")
 	c.KokoroLanguage = envOrDefault("KOKORO_LANGUAGE", "en")
-	if v, err := strconv.Atoi(envOrDefault("KOKORO_TIMEOUT_SECONDS", "120")); err == nil && v > 0 {
+	// 默认 120s；显式配置仅在合法正整数时覆盖（非法值不静默归零）。
+	c.KokoroTimeoutSeconds = 120
+	if v, err := strconv.Atoi(os.Getenv("KOKORO_TIMEOUT_SECONDS")); err == nil && v > 0 {
 		c.KokoroTimeoutSeconds = v
 	}
 

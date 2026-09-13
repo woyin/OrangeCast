@@ -537,3 +537,37 @@ func TestMainUnknownCommandExits(t *testing.T) {
 	defer func() { os.Args = oldArgs }()
 	main()
 }
+
+// TestParseTTSCheckArgs D03：tts-check 参数解析（缺 --output 合法 = 仅预检）。
+func TestParseTTSCheckArgs(t *testing.T) {
+	opts, err := parseTTSCheckArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.text != "" || opts.voice != "" || opts.output != "" {
+		t.Fatalf("空参数应为零值: %+v", opts)
+	}
+	opts2, err := parseTTSCheckArgs([]string{"--text", "样本", "--voice", "zm_yunyang", "--output", "/tmp/a.wav"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts2.text != "样本" || opts2.voice != "zm_yunyang" || opts2.output != "/tmp/a.wav" {
+		t.Fatalf("参数应生效: %+v", opts2)
+	}
+	if _, err := parseTTSCheckArgs([]string{"--bogus"}); err == nil {
+		t.Fatal("未知 flag 应报错")
+	}
+}
+
+// TestTTSCheckCore_Unavailable D03：引擎不可用时预检显式报错，不落文件。
+func TestTTSCheckCore_Unavailable(t *testing.T) {
+	cfg := &config.Config{
+		KokoroBinary:         "definitely-not-a-real-binary-xyz",
+		KokoroVoice:          "zf_xiaobei",
+		KokoroLanguage:       "zh",
+		KokoroTimeoutSeconds: 120,
+	}
+	if _, err := ttsCheckCore(cfg, ttsCheckOptions{output: filepath.Join(t.TempDir(), "o.wav")}); err == nil {
+		t.Fatal("引擎不可用应报错")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestKokoroProvider_SynthesizePrependsOpeningLabel (ADR-0019 听觉分级)
@@ -211,5 +212,50 @@ func TestKokoroProvider_D03PreflightAndGuards(t *testing.T) {
 	_ = gotArgs
 	if !strings.Contains(string(logged), "--out") || !strings.Contains(string(logged), "zf_xiaobei") {
 		t.Fatalf("参数模板应生效: %s", string(logged))
+	}
+}
+
+// TestKokoroProvider_D03PreflightVoiceMatch D03：预检的语言/音色一致性提示。
+func TestKokoroProvider_D03PreflightVoiceMatch(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-kokoro")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// zh + zf_ 音色：配置一致，无告警。
+	k := NewKokoroProvider(script, "zf_xiaobei", "").WithLanguage("zh")
+	msg, err := k.Preflight()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(msg, "配置一致") {
+		t.Fatalf("zh+zf_ 应一致: %s", msg)
+	}
+	// zh + 非 zf_/zm_ 音色：显式提示可能不成立，但不报错（软提示）。
+	k2 := NewKokoroProvider(script, "af_heart", "").WithLanguage("zh")
+	msg2, err := k2.Preflight()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(msg2, "注意") || !strings.Contains(msg2, "zf_") {
+		t.Fatalf("zh+af_ 应给出告警: %s", msg2)
+	}
+}
+
+// TestKokoroProvider_D03SynthTimeout D03：超时受控——引擎卡住时在时限内返回
+// 可读错误，不悬挂（错误信息含引擎名与超时秒数，不含完整参数与路径配置）。
+func TestKokoroProvider_D03SynthTimeout(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "slow-kokoro")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 10\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	k := NewKokoroProvider(script, "zf_xiaobei", "").WithSynthTimeout(150 * time.Millisecond)
+	_, err := k.SynthesizeContext(context.Background(), "超时样本", "", filepath.Join(dir, "o.wav"))
+	if err == nil {
+		t.Fatal("引擎卡住应返回超时错误")
+	}
+	if !strings.Contains(err.Error(), "超时") {
+		t.Fatalf("错误应说明超时: %v", err)
 	}
 }
