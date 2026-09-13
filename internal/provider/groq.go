@@ -131,6 +131,11 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 		"model":       model,
 		"messages":    messages,
 		"temperature": 0.3,
+		// Groq 默认 completion 上限会在归并 5 张候选卡时截断 JSON
+		//（2026-09-13 实测 "max completion tokens reached before generating a valid document"）。
+		// 显式放宽；TPM 限额只按输入+实际输出计（max_completion_tokens=30000 实测不触发 429），
+		// 费用仍按实际输出计。
+		"max_completion_tokens": 8192,
 	}
 	switch jsonMode {
 	case "schema":
