@@ -20,3 +20,18 @@ func TestOpenAIDigest_ComposeDigest(t *testing.T) {
 		t.Fatalf("结果不符: %+v", result)
 	}
 }
+
+// TestOpenAIDigest_OpenAIDigestCall_Direct 直接测试底层调用。
+func TestOpenAIDigest_OpenAIDigestCall_Direct(t *testing.T) {
+	srv := newOpenAITestServer(t, "直接调用内容")
+	defer srv.Close()
+	o := NewOpenAIProvider("k").WithBaseURL(srv.URL)
+	text, usage, err := o.openaiDigestCall(context.Background(), "system prompt", "user input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "直接调用内容" {
+		t.Fatalf("内容不符: %q", text)
+	}
+	_ = usage
+}
