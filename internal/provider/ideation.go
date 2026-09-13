@@ -121,7 +121,7 @@ func BuildIdeationPrompt(req IdeationDiagnosisRequest) string {
 const ideationSystemPrompt = `你是严格基于材料的构思助手。只依据给出的材料 ID 与原文进行诊断；
 超出材料的问题放入 gaps；引用必须使用输入中的材料 ID，不得编造。只输出 JSON。`
 
-// DiagnoseIdeationGroq Groq 诊断实现（C03）。
+// DiagnoseIdeation Groq 诊断实现（C03）。
 func (g *GroqProvider) DiagnoseIdeation(ctx context.Context, req IdeationDiagnosisRequest) (*IdeationDiagnosis, TaskUsage, error) {
 	if err := ValidateIdeagnosisInput(req); err != nil {
 		return nil, TaskUsage{}, err
@@ -140,7 +140,7 @@ func (g *GroqProvider) DiagnoseIdeation(ctx context.Context, req IdeationDiagnos
 	return diag, usage, nil
 }
 
-// DiagnoseIdeationOpenAI OpenAI 诊断实现（C03），与 Groq 同一契约。
+// DiagnoseIdeation OpenAI 诊断实现（C03），与 Groq 同一契约。
 func (o *OpenAIProvider) DiagnoseIdeation(ctx context.Context, req IdeationDiagnosisRequest) (*IdeationDiagnosis, TaskUsage, error) {
 	if err := ValidateIdeagnosisInput(req); err != nil {
 		return nil, TaskUsage{}, err
