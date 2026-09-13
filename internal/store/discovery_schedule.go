@@ -43,7 +43,14 @@ func (s *Store) EvaluateAutomaticDiscovery(ctx context.Context, profileID string
 	if !settings.Enabled {
 		return DiscoveryScheduleDecision{Reason: "automatic discovery paused"}, nil
 	}
-	// C06：每日批次上限检查（在开放批次检查之前——当日已达上限时始终阻断）。
+	open, err := s.HasOpenProposalBatch(ctx, profileID)
+	if err != nil {
+		return DiscoveryScheduleDecision{}, err
+	}
+	if open {
+		return DiscoveryScheduleDecision{Reason: "unprocessed proposal batch exists"}, nil
+	}
+	// C06：每日批次上限检查（在开放批次检查之后——批次已完成但仍受当日上限约束）。
 	var dailyLimit int
 	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(daily_limit,0) FROM discovery_settings WHERE editorial_profile_id=?`, profileID).Scan(&dailyLimit); err != nil && err != sql.ErrNoRows {
@@ -59,13 +66,6 @@ func (s *Store) EvaluateAutomaticDiscovery(ctx context.Context, profileID string
 		if todayCount >= dailyLimit {
 			return DiscoveryScheduleDecision{Reason: "daily automatic batch limit reached"}, nil
 		}
-	}
-	open, err := s.HasOpenProposalBatch(ctx, profileID)
-	if err != nil {
-		return DiscoveryScheduleDecision{}, err
-	}
-	if open {
-		return DiscoveryScheduleDecision{Reason: "unprocessed proposal batch exists"}, nil
 	}
 	var windowStart string
 	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at),'') FROM proposal_batches WHERE editorial_profile_id=?`, profileID).Scan(&windowStart); err != nil {
