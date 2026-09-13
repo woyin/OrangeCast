@@ -145,3 +145,34 @@ After the next 30-minute cron tick, logs should include `RSS refresh cron comple
 - [ ] Pages app deployed
 - [ ] Worker deployed
 - [ ] Verify Worker logs show cron execution
+
+## 新增配置（学习-DJ-创作管线 2026-09）
+
+| 环境变量 | 必填 | 说明 | 默认值 |
+|---|---|---|---|
+| `KOKORO_BINARY` | 否 | Kokoro TTS 二进制路径（自托管，零成本） | `kokoro`（PATH 查找） |
+| `KOKORO_VOICE` | 否 | Narration 默认音色（中文用 `zf_`/`zm_` 前缀，如 `zf_xiaobei`） | `af_heart` |
+| `KOKORO_MODEL` | 否 | Kokoro 模型文件路径（某些发行版需要） | 空 |
+| `KOKORO_LANGUAGE` | 否 | 语言（`en`/`zh`；中文需发行版安装 `misaki[zh]`） | `en` |
+| `KOKORO_TIMEOUT_SECONDS` | 否 | 单次合成超时秒数 | `120` |
+
+### TTS 预检与试听
+
+```bash
+cloudwisepod tts-check              # 预检引擎 + 短句试听
+cloudwisepod tts-check --text "自定义试听文本"
+```
+
+预检通过后会生成 `wav` 文件到临时目录，请实际播放确认中文与停顿效果。
+
+### 处理深度
+
+每个播客可设置处理深度：`knowledge`（转录+卡片+重点，默认）或 `knowledge_dj`（另加高光+解说+播放清单）。深度只影响之后入队的新集。
+
+### 全局预算
+
+设置页可配置全局月度预算（分）与自动处理日限额。预算不足或缺少价格配置的付费任务会被拒绝并显示原因。
+
+### 备份与恢复
+
+备份包含全部新表（来源快照、DJ 清单、构思轮次、素材选择、ClaimMap、审校结果、预算预留、听播进度）。恢复后 Narration 音频文件需重新合成（不进备份包）。详见 `docs/deployment.md`。

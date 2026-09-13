@@ -184,3 +184,48 @@ h1 { margin-top: 0; }
 div[style*="margin: 1rem 0"] {
   flex-wrap: wrap; /* 小屏幕换行，避免横向溢出 */
 }
+
+/* ---- U03：移动布局与可访问性 ---- */
+
+/* 触控目标：所有交互控件最小 44×44px（Apple HIG / WCAG 2.5.5） */
+@media (max-width: 768px) {
+  button, .btn, select, input[type="text"], input[type="email"],
+  input[type="password"], input[type="number"], textarea {
+    min-height: 44px;
+    font-size: 16px; /* 防 iOS 自动缩放 */
+  }
+  .cards { grid-template-columns: 1fr; }
+  .dj-controls, .batch-toolbar, .source-head { flex-wrap: wrap; }
+  .panel { padding: 0.75rem; }
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+/* 键盘焦点可见性（WCAG 2.4.7） */
+:focus-visible {
+  outline: 2px solid var(--accent, #4f46e5);
+  outline-offset: 2px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* 减少动画偏好（WCAG 2.3.3） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 高对比度模式支持 */
+@media (prefers-contrast: more) {
+  :root { --border: #000; --muted: #333; }
+  .meta, .hint { color: #333; }
+}
+
+/* 防止长文本溢出 */
+pre, code, .digest-block, .workflow-item-body {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
