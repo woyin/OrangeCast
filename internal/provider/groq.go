@@ -137,6 +137,11 @@ func (g *GroqProvider) chatComplete(messages []map[string]string, jsonMode strin
 		// 费用仍按实际输出计。
 		"max_completion_tokens": 8192,
 	}
+	// gpt-oss 系默认 reasoning 档位会挤占 completion 预算（实测高输入下 reasoning
+	// 占比 >70%，JSON 被 json_validate_failed 拒绝）；知识卡/归并属提取任务，low 足够。
+	if strings.Contains(model, "gpt-oss") {
+		payload["reasoning_effort"] = "low"
+	}
 	switch jsonMode {
 	case "schema":
 		payload["response_format"] = map[string]any{
