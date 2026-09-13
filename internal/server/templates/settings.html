@@ -48,7 +48,7 @@
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">分析（知识卡片）</td>
         <td style="padding:0.5rem"><select name="analysis_provider"><option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="llama-3.3-70b-versatile"></td>
+        <td style="padding:0.5rem"><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="openai/gpt-oss-120b"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">高光（AI DJ）</td>
@@ -58,7 +58,7 @@
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">问答（Q&A）</td>
         <td style="padding:0.5rem"><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="llama-3.3-70b-versatile"></td>
+        <td style="padding:0.5rem"><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="openai/gpt-oss-120b"></td>
       </tr>
       <tr style="border-bottom:1px solid var(--border)">
         <td style="padding:0.5rem">Writer（文章写作）</td>

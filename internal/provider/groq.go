@@ -13,13 +13,16 @@ import (
 const (
 	groqBaseURL         = "https://api.groq.com/openai/v1"
 	groqTranscribeModel = "whisper-large-v3"
-	// 分析/QA 用 llama-3.3-70b：TPM 12K 比 gpt-oss-120b(8K) 宽裕，能吃下整集 transcript。
-	// 它不支持 json_schema strict，但支持 json_object（保证合法 JSON），
-	// 配合 prompt 约束字段 + parseJSONLoose 容错解析兜底（第 10 题设计）。
-	groqAnalysisModel = "llama-3.3-70b-versatile"
-	// 留出 prompt、JSON 输出和中文 token 密度的余量，避免触及 Groq 12K TPM。
-	analysisWindowCharBudget  = 12000
-	analysisWindowMinInterval = 30 * time.Second
+	// 分析/QA 用 openai/gpt-oss-120b：llama-3.3-70b-versatile 已于 2026 年从 Groq 下线
+	// （model_not_found，V1 黄金旅程与 2026-09 V02 旅程两次实测）；现存 chat 模型中
+	// gpt-oss-120b 上下文 128K 且支持 json_object/json_schema（TPM 8K，分窗路径靠退避等待）。
+	// 替代可选 qwen/qwen3.8-27b（中文强）——可在设置页按角色覆盖。
+	groqAnalysisModel = "openai/gpt-oss-120b"
+	// 分窗预算按真实限额校准（2026-09-13 实测）：gpt-oss-120b 免费 on_demand TPM=8000，
+	// 12000 字中文窗口 + 系统提示 ≈ 10,296 tokens 必 429（"Limit 8000, Requested 10296"）；
+	// 5000 字 ≈ 4,900 tokens 留出输出余量；窗口间隔 60s 保证每窗落在独立限额窗口内。
+	analysisWindowCharBudget  = 5000
+	analysisWindowMinInterval = 60 * time.Second
 )
 
 // GroqProvider Groq 全套实现（方案 B 主力）。
