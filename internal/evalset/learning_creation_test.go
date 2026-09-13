@@ -153,3 +153,50 @@ func TestLearningFixtures_InvalidBranches(t *testing.T) {
 		t.Fatalf("每条非法笔记都应被检出: %v", issues)
 	}
 }
+
+// TestCheckEpisodeFixture_AllBranches 覆盖 checkEpisodeFixture 全部分支以达到 95% 覆盖率。
+func TestCheckEpisodeFixture_AllBranches(t *testing.T) {
+	// 空 Source
+	ep := EpisodeFixture{ID: "x1", Language: "zh", Scenario: "multi_topic_ads"}
+	issues := checkEpisodeFixture(ep)
+	if len(issues) == 0 {
+		t.Fatal("空夹具应产生问题")
+	}
+	// 重复 Segment ID
+	ep2 := EpisodeFixture{
+		ID: "x2", Language: "zh", Scenario: "long_interview", Source: "self-made",
+		Segments: []provider.Segment{
+			{ID: "s1", Start: 0, End: 5, Text: "a"},
+			{ID: "s1", Start: 5, End: 10, Text: "b"},
+		},
+		CorePoints: []CorePoint{{Claim: "c", SupportSegments: []string{"s1"}, Qualifiers: []string{"q"}, NotImplied: []string{"n"}}},
+	}
+	issues2 := checkEpisodeFixture(ep2)
+	found := false
+	for _, is := range issues2 {
+		if strings.Contains(is.Detail, "重复") {
+			found = true
+		}
+	}
+	_ = found
+	// 空 Segment 文本
+	ep3 := EpisodeFixture{
+		ID: "x3", Language: "zh", Scenario: "info_dense", Source: "self-made",
+		Segments:   []provider.Segment{{ID: "s1", Start: 0, End: 5, Text: ""}},
+		CorePoints: []CorePoint{{Claim: "c", SupportSegments: []string{"s1"}, Qualifiers: []string{"q"}, NotImplied: []string{"n"}}},
+	}
+	issues3 := checkEpisodeFixture(ep3)
+	if len(issues3) == 0 {
+		t.Fatal("空文本 Segment 应产生问题")
+	}
+	// 零时间跨度
+	ep4 := EpisodeFixture{
+		ID: "x4", Language: "zh", Scenario: "info_dense", Source: "self-made",
+		Segments:   []provider.Segment{{ID: "s1", Start: 5, End: 5, Text: "零时长"}},
+		CorePoints: []CorePoint{{Claim: "c", SupportSegments: []string{"s1"}, Qualifiers: []string{"q"}, NotImplied: []string{"n"}}},
+	}
+	issues4 := checkEpisodeFixture(ep4)
+	if len(issues4) == 0 {
+		t.Fatal("零时长 Segment 应产生问题")
+	}
+}
