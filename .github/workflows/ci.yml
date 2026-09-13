@@ -34,7 +34,8 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./... -race
+        # store 包的 race 测试在慢机上可超 10m，显式放宽包级超时（2026-09-13 实测 12.6m）
+        run: go test ./... -race -timeout 25m
 
       - name: go build
         run: go build ./cmd/cloudwisepod
