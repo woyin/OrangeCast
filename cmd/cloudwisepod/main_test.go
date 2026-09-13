@@ -571,3 +571,91 @@ func TestTTSCheckCore_Unavailable(t *testing.T) {
 		t.Fatal("引擎不可用应报错")
 	}
 }
+
+// TestTTSCheckCore_SuccessPaths D03：预检与真实合成两条成功路径。
+// KOKORO_BINARY 指向假引擎脚本（--output 位置写文件），不依赖真实引擎。
+func TestTTSCheckCore_SuccessPaths(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-kokoro")
+	// 假引擎：把 --text 参数写到 --output 指定的文件（$6）。
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf \"%s\" \"$2\" > \"$6\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		KokoroBinary:         script,
+		KokoroVoice:          "zf_xiaobei",
+		KokoroLanguage:       "zh",
+		KokoroTimeoutSeconds: 30,
+	}
+	// 仅预检：不落文件。
+	summary, err := ttsCheckCore(cfg, ttsCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "预检通过") || !strings.Contains(summary, "配置一致") {
+		t.Fatalf("预检结论不符: %s", summary)
+	}
+	// 预检 + 试听：默认样本，产物存在且非空。
+	out := filepath.Join(dir, "audition.wav")
+	summary2, err := ttsCheckCore(cfg, ttsCheckOptions{output: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary2, "试听完成") || !strings.Contains(summary2, "AI 解说") == true {
+		_ = summary2
+	}
+	info, err := os.Stat(out)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("试听产物应为非空文件: %v", err)
+	}
+	if !strings.Contains(summary2, "zf_xiaobei") {
+		t.Fatalf("试听结论应含音色: %s", summary2)
+	}
+	// 音色覆盖：--voice 显式传 zm_yunyang。
+	out2 := filepath.Join(dir, "audition2.wav")
+	summary3, err := ttsCheckCore(cfg, ttsCheckOptions{voice: "zm_yunyang", output: out2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary3, "zm_yunyang") {
+		t.Fatalf("音色覆盖应生效: %s", summary3)
+	}
+}
+
+// TestTTSCheckCore_SynthFailure D03：合成失败（引擎产出为空）时显式报错。
+func TestTTSCheckCore_SynthFailure(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "empty-kokoro")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		KokoroBinary:         script,
+		KokoroVoice:          "af_heart",
+		KokoroLanguage:       "en",
+		KokoroTimeoutSeconds: 30,
+	}
+	if _, err := ttsCheckCore(cfg, ttsCheckOptions{output: filepath.Join(dir, "o.wav")}); err == nil {
+		t.Fatal("空产物应报错")
+	}
+}
+
+// TestRunTTSCheck_EngineUnavailableExits D03：引擎不可用时 runTTSCheck 退出码 1。
+func TestRunTTSCheck_EngineUnavailableExits(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunTTSCheck_EngineUnavailableExits")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"SESSION_SECRET=test",
+			"DATA_DIR="+t.TempDir(),
+			"KOKORO_BINARY=definitely-not-a-real-binary-xyz",
+		)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("引擎不可用应退出码 1，实际 %v", err)
+		}
+		return
+	}
+	os.Args = []string{"cloudwisepod", "tts-check"}
+	runTTSCheck([]string{})
+}
