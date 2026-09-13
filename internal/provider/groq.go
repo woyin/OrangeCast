@@ -241,7 +241,7 @@ func (g *GroqProvider) Analyze(transcript string, segments []Segment) (*AnalyzeR
 		if i > 0 {
 			g.waitBetweenAnalysisWindows()
 		}
-		card, windowModel, windowUsage, err := g.analyzeWindow(window)
+		card, windowModel, windowUsage, err := g.analyzeWindowWithTPMRetry(window)
 		if err != nil {
 			return nil, err
 		}
@@ -302,6 +302,31 @@ func (g *GroqProvider) waitBetweenAnalysisWindows() {
 		return
 	}
 	time.Sleep(analysisWindowMinInterval)
+}
+
+// analyzeWindowWithTPMRetry 免费档限额按分钟计量（实测 gpt-oss-120b on_demand TPM=8000，
+// 单窗请求 ≈7K tokens）：被 429 拒绝时等待整个限额窗口（65s）再重试；内置 HTTP 退避
+// 只有 0.25–2s，对分钟级 TPM 无效。窗口因排队拥挤被限流时最多重试 3 次。
+func (g *GroqProvider) analyzeWindowWithTPMRetry(window []Segment) (*KnowledgeCard, string, TaskUsage, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			if g.sleepFn != nil {
+				g.sleepFn(65 * time.Second)
+			} else {
+				time.Sleep(65 * time.Second)
+			}
+		}
+		card, model, windowUsage, err := g.analyzeWindow(window)
+		if err == nil {
+			return card, model, windowUsage, nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "HTTP 429") {
+			return nil, "", TaskUsage{}, err
+		}
+	}
+	return nil, "", TaskUsage{}, lastErr
 }
 
 func (g *GroqProvider) analyzeWindow(segments []Segment) (*KnowledgeCard, string, TaskUsage, error) {

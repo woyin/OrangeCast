@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -621,5 +622,62 @@ func TestGroq_Transcribe_NetworkError(t *testing.T) {
 	_, err := g.Transcribe(path)
 	if err == nil {
 		t.Fatal("连接失败应报错")
+	}
+}
+
+// TestAnalyzeWindowTPMRetry D03/V02：免费档分钟级 TPM 429 时整窗等待后重试；
+// 非 429 错误立即失败。
+func TestAnalyzeWindowTPMRetry(t *testing.T) {
+	calls := 0
+	g := NewGroqProvider("test-key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		calls++
+		if calls <= 2 {
+			return "", 429, fmt.Errorf("groq chat 失败 HTTP 429")
+		}
+		return `{"title":"t","summary":{"text":"s","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[],"suggestedQuestions":[]}`, 200, nil
+	}
+	var sleeps []time.Duration
+	g.sleepFn = func(d time.Duration) { sleeps = append(sleeps, d) }
+	seg := []Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "内容"}}
+	res, err := g.Analyze("内容", seg)
+	if err != nil {
+		t.Fatalf("429 后应重试成功: %v", err)
+	}
+	if res.Card == nil || res.Card.Title != "t" {
+		t.Fatalf("卡片应生成: %+v", res.Card)
+	}
+	if calls != 3 {
+		t.Fatalf("应调用 3 次（2 次 429 + 1 次成功），实际 %d", calls)
+	}
+	if len(sleeps) < 2 {
+		t.Fatalf("应至少等待 2 次 TPM 窗口: %v", sleeps)
+	}
+	longWait := false
+	for _, d := range sleeps {
+		if d >= 60*time.Second {
+			longWait = true
+		}
+	}
+	if !longWait {
+		t.Fatalf("应包含 ≥60s 的 TPM 等待: %v", sleeps)
+	}
+}
+
+// TestAnalyzeWindowNon429FailsFast 非 429 错误不做 TPM 重试。
+func TestAnalyzeWindowNon429FailsFast(t *testing.T) {
+	calls := 0
+	g := NewGroqProvider("test-key")
+	g.chatCompleteFn = func(messages []map[string]string, jsonMode string) (string, int, error) {
+		calls++
+		return "", 400, fmt.Errorf("groq chat 失败 HTTP 400")
+	}
+	g.sleepFn = func(time.Duration) {}
+	_, err := g.Analyze("内容", []Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "内容"}})
+	if err == nil {
+		t.Fatal("400 应立即失败")
+	}
+	if calls != 1 {
+		t.Fatalf("非 429 不应重试，实际调用 %d 次", calls)
 	}
 }
