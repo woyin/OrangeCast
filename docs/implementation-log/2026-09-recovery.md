@@ -114,3 +114,13 @@
   - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go test -race -timeout 40m ./internal/queue/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、临时构建通过。
 - 提交：`fix(keypoints): connect quality jobs to usable material state`。
 - 限制：质量判定按卡片版本入队一次，重点级增量判定（部分重点变化）沿用整卡重判；判定任务与 DJ 解说任务的执行顺序由 created_at 决定，未做优先级调度。
+
+## 里程碑 M1 检查（R01–R05 交付后）
+
+- 状态：实现与自动验证完成（cover-gate 为已知既有债务，属 R24 范围）。
+- 结果：
+  - `go test ./...` 通过（修复 `internal/backup` 迁移计数断言 44→46 跟随新增迁移）。
+  - `go vet ./...` 通过；`make lint` 通过；临时目录 `go build ./cmd/cloudwisepod` 通过。
+  - 队列/存储包 `-race` 通过（R02–R05 各提交内已记录）。
+  - `make cover-gate` 仍失败：queue 77.3%、store 74.0%（基线即失败：evalset 94.0/provider 86.7/queue 77.3/store 75.2 均低于门槛）。本轮新增代码引入少量未覆盖行，store 由 75.2 微降至 74.0，未修改任何门槛或豁免；按计划由 R24 以行为测试补足，不以降低门槛方式通过。
+- 用户可观察结果（M1 验收对象）：自动处理受全局预算与日限额约束（本次预估计入、恢复幂等、未知结果不盲目重试、额度不足可延迟重试），自动重点经独立质量判定形成 ready 素材并可进入发现；旧任务与旧数据兼容路径有回归。
