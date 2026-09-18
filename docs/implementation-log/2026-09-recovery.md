@@ -199,3 +199,20 @@
   - `go test ./...` 全部通过；race（Narration/DJ）通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
 - 提交：`feat(dj): play versioned intro transition and outro narration`。
 - 限制：过渡脚本中的 AnchorHighlightID 尚未用于 D08 锚定增强；合成请求与播放项目一致性、部分失败连播的浏览器交互验证属 R25；本地 TTS 真实 wav 听感属外部验收。
+
+## R11 — 修复续听 JSON、项目定位和并发保存
+
+- 状态：实现与自动验证完成（浏览器交互细节待 R25）。
+- 交付：
+  - JSON 契约（`models/dj.go`）：`ListeningProgress` 显式 snake_case JSON 标签——GET 与 POST 同名字段同语义；无记录 GET 返回 `{}`。
+  - 定位（`templates/dj.html`）：`item_position` 语义固定为持久化清单项位置（`dj_plan_items.position`，含解说与原音），页面对象携带 `data-position`；恢复优先按 `item_position` 精确定位、回退 `highlight_id`（原音），不再把"含解说的索引"当"仅原音索引"用。
+  - 恢复：一次 `load + playItems` 连播目标及其后队列，移除旧实现 `playItems([target])` + `setTimeout` 二次调用的重复 play 竞态；恢复保存的倍速；清单变更（plan_id 不一致）提示不静默跳段；目标位置越界/不存在时明确提示且不恢复。
+  - 进度身份：`plan_id` 绑定确切持久化清单 ID（不再用 `highlights:vN` 别名）。
+  - 存储（`store/listening_progress.go`）：SELECT+UPDATE 改为单语句原子 UPSERT（`ON CONFLICT(source_type,source_id) DO UPDATE ... WHERE excluded.seq > seq`）——同时首次保存、多标签并发、倒序请求都原子安全。
+- 验证：
+  - `TestListeningProgress_CAS`（store，-race）：8 并发混合 seq 首存/更新 → 恰好保留最大 seq 状态。
+  - `TestListeningProgress_JSONContract`（server）：POST snake_case → GET 同字段同值；无记录空对象。
+  - `TestListeningProgress_RoundTrip` 既有倒序覆盖保持通过；`TestListeningProgress_PageWiring` 更新为稳定位置契约（`item_position`）。
+  - `go test -timeout 40m ./internal/queue/ ./internal/server/ ./internal/store/` 全部通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
+- 提交：`fix(player): restore progress using stable plan item identities`。
+- 限制：暂停/跳段/重复点击与"解说与原音交错时恢复第 2 段"的浏览器交互验证属 R25（DOM/JS 行为已按契约实现并以模板断言固定关键标识）。

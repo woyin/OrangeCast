@@ -361,6 +361,7 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		"KeyPoints":   card.KeyPoints,
 		"AudioURL":    audioURL,
 		"PlanExists":  true,
+		"PlanID":      plan.ID,
 		"PlanVersion": plan.Version,
 		"PlanTotal":   plan.TotalSeconds,
 		// D07：高光版本作为进度身份（恢复只在版本可映射时迁移位置）。

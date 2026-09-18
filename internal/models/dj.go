@@ -45,16 +45,20 @@ type DJPlanItem struct {
 
 // ListeningProgress 听播进度（D07）：Source + 清单版本 + 片段身份 + 片段内位置
 // + 速度。seq 单调递增防旧请求覆盖新状态；与完整播放（原音页）进度语义分开。
+// ListeningProgress 听播进度（D07/R11）。
+// JSON 契约（GET/POST 一致，snake_case）：item_position 是持久化清单项的稳定
+// 位置（plan_items.position，含解说与原音）；恢复以 item_position + highlight_id
+// 定位，不混用"含解说的索引"与"仅原音的索引"。
 type ListeningProgress struct {
-	ID                string
-	SourceType        SourceType
-	SourceID          string
-	PlanID            string
-	PlanVersion       int
-	ItemPosition      int
-	HighlightID       string
-	ItemOffsetSeconds float64
-	Speed             float64
-	Seq               int64
-	UpdatedAt         string
+	ID                string     `json:"id"`
+	SourceType        SourceType `json:"source_type"`
+	SourceID          string     `json:"source_id"`
+	PlanID            string     `json:"plan_id"`
+	PlanVersion       int        `json:"plan_version"`
+	ItemPosition      int        `json:"item_position"`
+	HighlightID       string     `json:"highlight_id"`
+	ItemOffsetSeconds float64    `json:"item_offset_seconds"`
+	Speed             float64    `json:"speed"`
+	Seq               int64      `json:"seq"`
+	UpdatedAt         string     `json:"updated_at"`
 }

@@ -138,14 +138,15 @@
       var nar = el.dataset.narration;
       var segs = [];
       try { segs = JSON.parse(el.dataset.segments || '[]'); } catch (e) {}
+      var pos = parseInt(el.dataset.position, 10); // R11：稳定计划项位置（含解说与原音）
       if (el.dataset.kind === 'narration') {
         // R10：清单脚本项目（开场/过渡/收尾/Gist 解说）——有音频则按计划顺序入队，
         // 无音频跳过（部分失败仍连播原音），绝不冒充原音。
-        if (nar) items.push({type: 'narration', url: nar, idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
+        if (nar) items.push({type: 'narration', url: nar, idx: String(i), position: pos, highlightId: el.dataset.highlightId, segmentIds: segs});
         return;
       }
-      if (nar) items.push({type: 'narration', url: nar, idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
-      items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
+      if (nar) items.push({type: 'narration', url: nar, idx: String(i), position: pos, highlightId: el.dataset.highlightId, segmentIds: segs});
+      items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i), position: pos, highlightId: el.dataset.highlightId, segmentIds: segs});
     });
     return items;
   }
@@ -158,7 +159,8 @@
   var sourceId = pl ? pl.dataset.sourceId : '';
   var csrfToken = '{{.CSRF}}';
   var planVersion = {{.HighlightVersion}};
-  var planId = 'highlights:v' + planVersion;
+  // R11：进度身份绑定确切持久化清单（非高光版本别名）。
+  var planId = '{{.PlanID}}';
   var seq = Date.now();
   var saveTimer = null;
 
@@ -171,7 +173,7 @@
       source_id: sourceId,
       plan_id: planId,
       plan_version: planVersion,
-      item_position: pos.index + 1,
+      item_position: typeof item.position === 'number' ? item.position : pos.index + 1,
       highlight_id: item.highlightId || '',
       item_offset_seconds: evidence.currentTime,
       speed: player.getRate(),
@@ -198,13 +200,14 @@
   });
   window.addEventListener('pagehide', saveProgress);
 
-  // 恢复提示：重新打开显示“继续听”，等用户点击（自动播放只由用户动作启动）。
+  // R11 恢复提示：按稳定清单项位置 + 高光身份定位（不混用索引体系）；一次加载
+  // 并播放后续队列（无重复 play 竞态）；恢复倍速；越界位置不跳错片段。
   fetch('/api/listening-progress?source_type=' + encodeURIComponent(sourceType) + '&source_id=' + encodeURIComponent(sourceId))
     .then(function (r) { return r.json(); })
     .then(function (saved) {
       if (!saved || !saved.plan_id) return;
       if (saved.plan_id !== planId) {
-        if (statusEl) statusEl.textContent = '高光已更新，上次进度无法精确恢复。';
+        if (statusEl) statusEl.textContent = '清单已更新，上次进度无法精确恢复。';
         return;
       }
       var btn = document.createElement('button');
@@ -213,19 +216,29 @@
       btn.textContent = '▶ 继续听（上次位置）';
       btn.addEventListener('click', function () {
         var items = buildItems();
-        var posIdx = Math.max(0, (saved.item_position || 1) - 1);
-        var target = items.filter(function (it) { return it.type === 'evidence'; })[saved.item_position - 1] || items[0];
-        if (!target) return;
-        target.start = saved.item_offset_seconds || target.start; // 从片段内位置恢复
-        player.load(items);
-        player.playItems([target]);
-        // 从目标位置继续连播其后的条目
-        var restIdx = items.indexOf(target) + 1;
-        if (restIdx < items.length) {
-          var rest = items.slice(restIdx);
-          setTimeout(function () { player.playItems([target].concat(rest)); }, 0);
+        // 稳定定位：优先 item_position（清单项位置），其次 highlight_id；越界则不恢复。
+        var target = null;
+        for (var k = 0; k < items.length; k++) {
+          if (items[k].position === saved.item_position) { target = items[k]; break; }
         }
-        void posIdx;
+        if (!target && saved.highlight_id) {
+          for (var j = 0; j < items.length; j++) {
+            if (items[j].type === 'evidence' && items[j].highlightId === saved.highlight_id) { target = items[j]; break; }
+          }
+        }
+        if (!target) {
+          if (statusEl) statusEl.textContent = '上次位置已不在当前清单中。';
+          btn.remove();
+          return;
+        }
+        if (target.type === 'evidence') {
+          target.start = saved.item_offset_seconds || target.start; // 从片段内位置恢复
+        }
+        if (saved.speed && typeof saved.speed === 'number') player.setRate(saved.speed); // 恢复倍率
+        var restIdx = items.indexOf(target) + 1;
+        var queue = [target].concat(items.slice(restIdx)); // 一次加载并连播后续队列
+        player.load(queue);
+        player.playItems(queue); // 单次调用，无重复 play 竞态
         btn.remove();
       });
       var bar = autoplayBtn.parentNode;
