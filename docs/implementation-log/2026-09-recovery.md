@@ -67,3 +67,18 @@
 - 提交：`fix(queue): gate unknown results behind persisted call boundaries`。
 - 限制：pending_remote 目前无自动解除路径，Owner 处置入口（预算页）待后续任务；逐阶段 checkpoint 恢复属 R08；全量 store -race 约 10.5 分钟，接近默认 10 分钟超时，后续里程碑用更大 `-timeout` 执行。
 
+
+## R03 — 自动日限额按执行资格计数
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - 迁移 0046：`processing_jobs.intent_admitted_at`（NULL=未获准；旧行默认 NULL，旧任务兼容；未改已应用迁移）。
+  - `store/budget.go`：`HoldBudget` 中旧的"按当日任务行计数"替换为 `AdmitAutomatedDailyIntent`：入队不占额，领取时在同一事务内判定并写入准入时刻；限额统计对象为"当日已获准的自动处理意图"（按来源去重，UTC 日边界与既有语义一致）；同源重试/后续分析解说子任务不重复占名额；手动任务不受限。
+  - `store/jobs.go`：`DeferJobForDailyLimit`——额度不足的任务保持 running + 未来租约（10 分钟），原因写入 last_error；现有调度规则下租约到期重新领取再尝试准入，不在队列头部阻塞后续任务，不整批永久失败。
+  - `queue/worker.go`：`processClaimed` 对 `ErrAutoDailyLimitReached` 走延迟路径，不 MarkJobFailed、不标记来源失败（此刻尚无预占，无需收尾）。
+- 验证：
+  - `TestAutoDailyJobLimit` 重写：入队多个自动任务行不占名额；限额 1 时首个意图获准、第二来源被拒；同源子任务/重试放行且不重复计数；手动任务不受限；跨日额度重新可用。
+  - `TestWorker_DailyLimitDefersInsteadOfFailing`（queue，真实 ProcessOne 入口）：第一集完成占名额；第二集延迟（running+未来租约+原因可见），未到期不被重复领取；跨日后继续完成。
+  - `go test -race -run 'TestAutoDailyJobLimit|TestHoldBudget|TestBudgetPending' ./internal/store/`、`go test -race -run 'TestWorker' ./internal/queue/` 通过；`go test ./internal/queue/ ./internal/store/ ./internal/server/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；迁移计数断言 45→46。
+- 提交：`fix(ingestion): enforce daily limits on admitted processing intents`。
+- 限制：一天边界沿用既有 UTC 日语义（未改局部时区行为）；延迟租约固定 10 分钟，未做指数退避；进度页对"延迟重试"的专门展示随 R25 浏览器验收核对。

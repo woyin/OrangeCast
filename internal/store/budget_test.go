@@ -195,7 +195,8 @@ func TestOwnerMonthlyUsageCents_Aggregates(t *testing.T) {
 	}
 }
 
-// TestAutoDailyJobLimit 自动任务达到当日上限被拒；手动任务不受限。
+// TestAutoDailyJobLimit R03：日限额按“当日已获准的自动处理意图”计数（按来源去重）。
+// 入队不占额；同源重试/子任务不重复计数；跨日重新可用；手动任务不受限。
 func TestAutoDailyJobLimit(t *testing.T) {
 	s := newTestStore(t)
 	ctx := t.Context()
@@ -207,12 +208,12 @@ func TestAutoDailyJobLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "e", AudioURL: "https://a.mp3"}}); err != nil {
+	if _, err := s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "g1", Title: "e1", AudioURL: "https://a1.mp3"}, {GUID: "g2", Title: "e2", AudioURL: "https://a2.mp3"}}); err != nil {
 		t.Fatal(err)
 	}
 	eps, _ := s.ListEpisodes(ctx, podcast.ID)
-	// 创建两个当日 automated 任务行（日限额按任务行计数）。
-	for _, jt := range []models.JobType{models.JobTranscribe, models.JobAnalyze} {
+	// 入队多个自动任务行（含同集子任务）不占名额：首个意图仍可获准。
+	for _, jt := range []models.JobType{models.JobTranscribe, models.JobAnalyze, models.JobHighlight} {
 		if _, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
 			SourceType: models.SourceEpisode, SourceID: eps[0].ID, JobType: jt,
 			IntentID: "intent-" + string(jt), Automated: true,
@@ -220,12 +221,50 @@ func TestAutoDailyJobLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.HoldBudget(ctx, "auto-1", "transcribe", true, "groq", "m", 0, 0); !errors.Is(err, ErrAutoDailyLimitReached) {
-		t.Fatalf("达到日上限后自动任务应被拒: %v", err)
+	if _, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: eps[1].ID, JobType: models.JobTranscribe,
+		IntentID: "intent-e2", Automated: true,
+	}); err != nil {
+		t.Fatal(err)
 	}
+
+	// 首个意图获准；同集重试/子任务不重复计数、不拒绝。
+	if _, err := s.HoldBudget(ctx, mustJobID(t, s, eps[0].ID, models.JobTranscribe), "transcribe", true, "groq", "m", 0, 0); err != nil {
+		t.Fatalf("限额内首个意图应获准: %v", err)
+	}
+	if _, err := s.HoldBudget(ctx, mustJobID(t, s, eps[0].ID, models.JobAnalyze), "analyze", true, "groq", "m", 0, 0); err != nil {
+		t.Fatalf("同源子任务不应重复占名额或被拒: %v", err)
+	}
+	// 第二个来源被限。
+	if _, err := s.HoldBudget(ctx, mustJobID(t, s, eps[1].ID, models.JobTranscribe), "transcribe", true, "groq", "m", 0, 0); !errors.Is(err, ErrAutoDailyLimitReached) {
+		t.Fatalf("额度已满时新来源应被拒: %v", err)
+	}
+	// 重试同一意图不重复计数（仍不拒绝，也不新增名额）。
+	if _, err := s.HoldBudget(ctx, mustJobID(t, s, eps[0].ID, models.JobTranscribe), "transcribe", true, "groq", "m", 0, 0); err != nil {
+		t.Fatalf("同源重试应放行: %v", err)
+	}
+	// 手动任务不受限。
 	if _, err := s.HoldBudget(ctx, "manual-1", "transcribe", false, "groq", "m", 0, 0); err != nil {
 		t.Fatalf("手动任务不受日限额约束: %v", err)
 	}
+	// 跨日：昨日获准的不占今日名额。
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET intent_admitted_at = datetime('now','-1 day') WHERE source_id = ?`, eps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, mustJobID(t, s, eps[1].ID, models.JobTranscribe), "transcribe", true, "groq", "m", 0, 0); err != nil {
+		t.Fatalf("跨日后额度应重新可用: %v", err)
+	}
+}
+
+func mustJobID(t *testing.T, s *Store, sourceID string, jt models.JobType) string {
+	t.Helper()
+	var id string
+	if err := s.DB.QueryRowContext(t.Context(),
+		`SELECT id FROM processing_jobs WHERE source_id = ? AND job_type = ? ORDER BY created_at LIMIT 1`, sourceID, string(jt)).Scan(&id); err != nil {
+		t.Fatalf("读取任务行: %v", err)
+	}
+	return id
 }
 
 // TestPodcastProcessingDepth_B05 深度读写与合法组合检查；旧订阅回填 knowledge。

@@ -103,6 +103,59 @@ func (s *Store) OwnerMonthlyUsageCents(ctx context.Context) (int64, error) {
 	return editorial.Int64 + learning.Int64 + held.Int64, nil
 }
 
+// AdmitAutomatedDailyIntent 原子获取日限额执行资格（R03）。
+//   - 限额统计对象：当日已获准的自动处理意图，按来源（source_type, source_id）去重——
+//     同一集的后续分析/解说子任务与同一意图的重试不重复占名额；
+//   - 额度获取与执行资格原子关联：入队不占额，领取时在同一事务内判定并写入
+//     intent_admitted_at；未获准的排队任务不提前耗尽额度；
+//   - 一天边界与既有语义一致（UTC 日，datetime('now','start of day')）。
+func (s *Store) AdmitAutomatedDailyIntent(ctx context.Context, jobID string) error {
+	limit, err := s.GetAutoDailyJobLimit(ctx)
+	if err != nil {
+		return err
+	}
+	if limit == nil {
+		return nil
+	}
+	var automated bool
+	var sourceType, sourceID string
+	err = s.DB.QueryRowContext(ctx,
+		`SELECT is_automated, source_type, source_id FROM processing_jobs WHERE id = ?`, jobID).
+		Scan(&automated, &sourceType, &sourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: 任务 %s 不存在", ErrInvalidEditorialState, jobID)
+	}
+	if err != nil {
+		return err
+	}
+	if !automated {
+		return nil // 手动任务不受日限额约束
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// 当日已获准名额（排除本任务自身来源：同源重试/子任务不重复计数）。
+	var admitted int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT source_type || ':' || source_id) FROM processing_jobs
+		 WHERE is_automated = 1 AND intent_admitted_at IS NOT NULL
+		   AND intent_admitted_at >= datetime('now','start of day')
+		   AND NOT (source_type = ? AND source_id = ?)`, sourceType, sourceID).Scan(&admitted); err != nil {
+		return err
+	}
+	if admitted >= *limit {
+		return fmt.Errorf("%w: 今日自动处理额度已满（%d 个来源），任务保持排队待重试", ErrAutoDailyLimitReached, *limit)
+	}
+	// 同任务重试不重复计数：已有准入时刻的行不再改写；额度获取与执行资格同事务。
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE processing_jobs SET intent_admitted_at = datetime('now') WHERE id = ? AND intent_admitted_at IS NULL`, jobID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // reuseOrRejectReservation 按持久状态决定已有预占的转移（B02）：
 // 活跃状态（held/pending_remote）复用；已终结（settled/released_*）明确拒绝，
 // 不覆盖已结算金额；复用不构成重新调用模型的授权。
@@ -115,32 +168,20 @@ func reuseOrRejectReservation(res *models.BudgetReservation) (*models.BudgetRese
 	}
 }
 
-// HoldBudget 任务领取后的调用前预占（B04/B02）：
-//  1. 自动任务受单日数量上限约束；
+// HoldBudget 任务领取后的调用前预占（B04/B02/R03）：
+//  1. 自动任务先原子获取日限额执行资格（R03）：按来源去重、入队不占额、
+//     同任务重试不重复计数；额度不足返回 ErrAutoDailyLimitReached，任务保持可重试；
 //  2. 已配置预算时，模型必须有价格（否则配置缺口，unknown 不伪装为零成本）；
 //  3. 同一事务内：先读同 job 预占行（活跃复用/终结拒绝），再判断已知用量 +
 //     有效在途预占 + 本次预估之和（恰好等于上限可执行，超过则拒绝）；并发预占由
 //     事务串行化保证，同 job 并发首次预占命中 UNIQUE(job_id) 时复用已插入行。
 //
 // 预算未配置时不预占（记录 nil 语义），行为与旧路径一致。
-//
-// 预算未配置时不预占（记录 nil 语义），行为与旧路径一致。
 func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automated bool, providerName, model string, estimateUnitsIn, estimateUnitsOut int) (*models.BudgetReservation, error) {
-	// 日限额只约束订阅自动产生的任务。
+	// 日限额按执行资格计数（R03）：仅约束订阅自动产生的任务。
 	if automated {
-		limit, err := s.GetAutoDailyJobLimit(ctx)
-		if err != nil {
+		if err := s.AdmitAutomatedDailyIntent(ctx, jobID); err != nil {
 			return nil, err
-		}
-		if limit != nil {
-			var today int64
-			if err := s.DB.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM processing_jobs WHERE is_automated = 1 AND created_at >= datetime('now','start of day')`).Scan(&today); err != nil {
-				return nil, err
-			}
-			if today >= *limit {
-				return nil, fmt.Errorf("%w: 今日自动任务已达 %d 个上限", ErrAutoDailyLimitReached, *limit)
-			}
 		}
 	}
 

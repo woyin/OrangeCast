@@ -32,6 +32,8 @@ const (
 	pollInterval   = 3 * time.Second
 	maxAudioSize   = 500 << 20 // 单集音频最大下载量（500MB）
 	// Groq 的 25MB 上限包含 multipart 开销；EvidenceAudio 留出余量，避免边界 413。
+	// R03：额度不足任务的延迟租约——到期后重新领取再尝试准入，不阻塞其他任务。
+	dailyLimitDeferLease = "10 minutes"
 )
 
 // Worker 处理转录与分析任务。
@@ -169,6 +171,13 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 	go w.heartbeatLoop(hbCtx, job.ID)
 
 	if err := w.processJob(hbCtx, job); err != nil {
+		// R03：日限额额度不足是暂时状态——延迟租约后由现有调度规则重试准入，
+		// 不标记失败、不把来源标记失败，也不把后续任务阻塞在队列头部。
+		if errors.Is(err, store.ErrAutoDailyLimitReached) {
+			log.Printf("任务 %s 今日自动处理额度已满，延迟重试: %v", job.ID, err)
+			_ = w.store.DeferJobForDailyLimit(ctx, job.ID, dailyLimitDeferLease, err.Error())
+			return nil
+		}
 		// 应用正常关闭会取消 worker context。此时保留 running 状态，
 		// 让下一次启动的 ResetRunningOnStartup 将任务重新入队；不能把
 		// 可恢复的中断伪装成业务失败。

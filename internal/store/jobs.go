@@ -276,6 +276,17 @@ func (s *Store) HeartbeatJob(ctx context.Context, jobID, leaseDuration string) e
 	return err
 }
 
+// DeferJobForDailyLimit 额度不足的任务保持可重试（R03）：任务回到 running 并设置
+// 未来租约——现有调度规则下租约到期后会被重新领取再尝试准入，不在队列头部
+// 阻塞后续任务，也不把整批永久失败；原因写入 last_error 保持可见。
+func (s *Store) DeferJobForDailyLimit(ctx context.Context, jobID, leaseDuration, reason string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET status='running', lease_until=datetime('now', ?), heartbeat_at=NULL, last_error=?, updated_at=datetime('now')
+		 WHERE id = ? AND status IN ('queued','running')`,
+		leaseDuration, reason, jobID)
+	return err
+}
+
 // ListQueuedOrRunning 列出全部未完成任务（用于测试与诊断）。
 func (s *Store) ListQueuedOrRunning(ctx context.Context) ([]*models.ProcessingJob, error) {
 	rows, err := s.DB.QueryContext(ctx,
