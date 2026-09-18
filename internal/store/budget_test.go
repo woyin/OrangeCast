@@ -405,3 +405,200 @@ func (s *Store) countHeldReservations(ctx context.Context) (int, error) {
 	}
 	return n, nil
 }
+
+// TestHoldBudget_ReusesHeldReservationOnRecovery R02：恢复领取同一 job 时按持久
+// 状态复用已 held 的预占——不重复 INSERT、不重复计入占用、无唯一约束错误。
+func TestHoldBudget_ReusesHeldReservationOnRecovery(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.HoldBudget(ctx, "job-r", "analyze", false, "groq", "m", 1_000_000, 0)
+	if err != nil || first == nil {
+		t.Fatalf("首次预占失败: %v", err)
+	}
+	second, err := s.HoldBudget(ctx, "job-r", "analyze", false, "groq", "m", 1_000_000, 0)
+	if err != nil {
+		t.Fatalf("恢复领取应复用预占，不应报唯一约束错误: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("应复用同一预占行: %s vs %s", first.ID, second.ID)
+	}
+	total, err := s.OwnerMonthlyUsageCents(ctx)
+	if err != nil || total != 1 {
+		t.Fatalf("复用不应重复计入占用: total=%d err=%v", total, err)
+	}
+}
+
+// TestHoldBudget_RejectsReservationAfterTerminal 已终结（settled）预占的同 job
+// 重新预占是非法转移：明确拒绝，不覆盖已结算金额。
+func TestHoldBudget_RejectsReservationAfterTerminal(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-t", "analyze", false, "groq", "m", 1_000_000, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleBudget(ctx, "job-t", 3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-t", "analyze", false, "groq", "m", 1_000_000, 0); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("已结算预占的同 job 重复预占应被明确拒绝: %v", err)
+	}
+	res, err := s.getReservationByJob(ctx, "job-t")
+	if err != nil || res.Status != models.BudgetSettled || res.ActualCostCents == nil || *res.ActualCostCents != 3 {
+		t.Fatalf("已结算金额不应被改写: %+v %v", res, err)
+	}
+	// released 后同样拒绝重新预占。
+	if _, err := s.HoldBudget(ctx, "job-r2", "analyze", false, "groq", "m", 1_000_000, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReleaseBudget(ctx, "job-r2", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-r2", "analyze", false, "groq", "m", 1_000_000, 0); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("已释放预占的同 job 重复预占应被明确拒绝: %v", err)
+	}
+}
+
+// TestHoldBudget_ConcurrentSameJob 同 job 首次并发预占：查询与插入在同一事务，
+// 并发命中 UNIQUE(job_id) 时复用已插入行——恰好一行，无错误、无重复占用。
+func TestHoldBudget_ConcurrentSameJob(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	ids := make(chan string, 16)
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := s.HoldBudget(ctx, "job-c", "analyze", false, "groq", "m", 1_000_000, 0)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- res.ID
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("并发同 job 预占不应失败: %v", err)
+	}
+	seen := map[string]bool{}
+	for id := range ids {
+		seen[id] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("并发预占应全部复用同一行: %v", seen)
+	}
+	total, err := s.OwnerMonthlyUsageCents(ctx)
+	if err != nil || total != 1 {
+		t.Fatalf("并发预占不应重复计入占用: total=%d err=%v", total, err)
+	}
+}
+
+// TestBudgetPendingRemoteTransitions pending_remote：远端结果未知时预估继续占用；
+// 可复用（不授权重调）；事后可按实际费用结算；重复转移幂等。
+func TestBudgetPendingRemoteTransitions(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(10)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-p", "analyze", false, "groq", "m", 5_000_000, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkBudgetPendingRemote(ctx, "job-p"); err != nil {
+		t.Fatal(err)
+	}
+	// pending_remote 继续计入占用：5 分占用下 6 分新预占被拒。
+	if _, err := s.HoldBudget(ctx, "job-other", "analyze", false, "groq", "m", 6_000_000, 0); !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("pending_remote 应继续占用预算: %v", err)
+	}
+	// 复用 pending_remote 行（返回持久状态，不新建、不改状态）。
+	res, err := s.HoldBudget(ctx, "job-p", "analyze", false, "groq", "m", 5_000_000, 0)
+	if err != nil || res.Status != models.BudgetPendingRemote {
+		t.Fatalf("pending_remote 应按持久状态复用: %+v %v", res, err)
+	}
+	// 重复转移幂等；已终结后转移为 no-op。
+	if err := s.MarkBudgetPendingRemote(ctx, "job-p"); err != nil {
+		t.Fatalf("重复 pending 转移应幂等: %v", err)
+	}
+	if err := s.SettleBudget(ctx, "job-p", 7); err != nil {
+		t.Fatalf("pending_remote 应可按实际费用结算: %v", err)
+	}
+	if err := s.MarkBudgetPendingRemote(ctx, "job-p"); err != nil {
+		t.Fatalf("已结算后的 pending 转移应 no-op: %v", err)
+	}
+	total, err := s.OwnerMonthlyUsageCents(ctx)
+	if err != nil || total != 0 {
+		t.Fatalf("结算后 pending 预估应移出占用: total=%d err=%v", total, err)
+	}
+}
+
+// TestHoldBudget_ConcurrentSameJob_TightBudget 同 job 并发且预算恰好只容一份预占：
+// 第二方必须在事务内先读到第一方的预占行并复用，而不是把对方占用计入限额而错误拒绝。
+func TestHoldBudget_ConcurrentSameJob_TightBudget(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(1)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	ids := make(chan string, 8)
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := s.HoldBudget(ctx, "job-tight", "analyze", false, "groq", "m", 1_000_000, 0)
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- res.ID
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("预算仅容一份时同 job 并发预占不应被拒: %v", err)
+	}
+	seen := map[string]bool{}
+	for id := range ids {
+		seen[id] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("应复用同一预占行: %v", seen)
+	}
+}

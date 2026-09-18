@@ -563,23 +563,27 @@ type UsageReceipt struct {
 	CostKnown   bool
 }
 
-// BudgetReservation 任务级预算在途预估（B04）。
-// held 计入月度占用；结算以实际费用替换；释放区分是否已发生远端调用。
+// BudgetReservation 任务级预算在途预估（B04/B02）。
+// 一 job 至多一行（UNIQUE(job_id)）；held 与 pending_remote 计入月度占用；
+// 结算以实际费用替换；释放区分是否已发生远端调用。
 type BudgetReservation struct {
 	ID                 string
 	JobID              string
 	Operation          string
 	EstimatedCostCents int64
-	Status             string // held | settled | released_no_call | released_unknown
+	Status             string // held | pending_remote | settled | released_no_call | released_unknown
 	Reason             string
 	ActualCostCents    *int64
 	CreatedAt          string
 	SettledAt          *string
 }
 
-// 预算预留状态。
+// 预算预留状态（一 job 一行，状态单向转移）。
 const (
-	BudgetHeld            = "held"
+	BudgetHeld = "held"
+	// BudgetPendingRemote 远端调用已发出但结果未知：预估继续计入月度占用，
+	// 不假定未知调用免费；事后以实际 receipt 结算或 Owner 显式释放。
+	BudgetPendingRemote   = "pending_remote"
 	BudgetSettled         = "settled"
 	BudgetReleasedNoCall  = "released_no_call"
 	BudgetReleasedUnknown = "released_unknown"

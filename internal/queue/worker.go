@@ -151,6 +151,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 	// 不重放远端模型调用；"结果写入后中断再执行不新增版本"由此保证。
 	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.ResultState == models.JobResultComplete {
 		log.Printf("任务 %s 命中已持久化结果，恢复时直接复用", job.ID)
+		// B02/B04：恢复复用同样结算预占（结果已知 → 实际费用），
+		// 不把预占留在 held 状态永久占用预算。
+		w.settleJobBudget(ctx, job)
 		return w.store.MarkJobSucceeded(ctx, job.ID)
 	}
 	hbCtx, hbCancel := context.WithCancel(ctx)
@@ -168,8 +171,8 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		log.Printf("任务 %s 处理失败: %v", job.ID, err)
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
 		w.markSourceFailed(ctx, job)
-		w.releaseJobBudget(ctx, job) // B04：失败释放预占，区分是否已发生远端调用
-		return nil                   // 已标记失败，不算周期错误
+		w.finalizeJobBudgetOnFailure(ctx, job) // B02/B04：按结果已知性收尾预占
+		return nil                             // 已标记失败，不算周期错误
 	}
 	w.settleJobBudget(ctx, job) // B04：成功后以实际费用结算预占
 	return w.store.MarkJobSucceeded(ctx, job.ID)
@@ -236,11 +239,23 @@ func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob)
 	}
 }
 
-// releaseJobBudget 失败释放：已发生远端调用（有 receipt）时标记结果未知，否则直接解除。
-func (w *Worker) releaseJobBudget(ctx context.Context, job *models.ProcessingJob) {
-	receipts, _ := w.jobReceiptUsage(ctx, job.ID)
-	if err := w.store.ReleaseBudget(ctx, job.ID, receipts > 0); err != nil && !errors.Is(err, store.ErrNotFound) {
-		log.Printf("任务 %s 预算释放失败: %v", job.ID, err)
+// finalizeJobBudgetOnFailure 失败收尾（B02/B04）：
+//   - 已获得远端结果（有已知费用 receipt）→ 按实际费用结算；
+//   - 远端结果未知（无已知费用 receipt，不据此推断未调用）→ 转入 pending_remote
+//     保留待处理，预估继续计入月度占用，不假定未知调用免费。
+//
+// 重复调用幂端；明确未调用前的失败（如入队参数错误）由调用方在调用前拦截，
+// 到达此处的失败一律不宣称“未发生远端调用”。
+func (w *Worker) finalizeJobBudgetOnFailure(ctx context.Context, job *models.ProcessingJob) {
+	receipts, cost := w.jobReceiptUsage(ctx, job.ID)
+	if receipts > 0 {
+		if err := w.store.SettleBudget(ctx, job.ID, cost); err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("任务 %s 预算按已落账结果结算失败: %v", job.ID, err)
+		}
+		return
+	}
+	if err := w.store.MarkBudgetPendingRemote(ctx, job.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		log.Printf("任务 %s 预算转为待处理失败: %v", job.ID, err)
 	}
 }
 
