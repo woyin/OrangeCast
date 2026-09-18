@@ -59,7 +59,58 @@ func (s *Store) enqueueJob(ctx context.Context, sourceType models.SourceType, so
 	if err != nil {
 		return nil, fmt.Errorf("插入 job: %w", err)
 	}
-	return job, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	// R04：入队时冻结执行配置（新任务专属，旧任务不受影响）。
+	if err := s.FreezeJobTaskConfig(ctx, job.ID, jobType); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+// FreezeJobTaskConfig 入队时冻结执行配置（R04）：把当前 settings 的任务级
+// Provider 与生效模型写入任务行；仅对新任务（configured_provider 为空）生效，
+// 不改写已冻结配置，也不伪造旧任务从未保存的历史配置。
+// config_version 冻结已知提示/契约版本（如精读写作），未知留空不杜撰。
+// 本地任务（如解说 TTS）无任务级配置，不冻结。
+func (s *Store) FreezeJobTaskConfig(ctx context.Context, jobID string, jobType models.JobType) error {
+	st, err := s.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	var tc provider.TaskConfig
+	switch jobType {
+	case models.JobTranscribe:
+		tc = provider.TaskConfig{Provider: deref(st.TranscriptionProvider), Model: deref(st.TranscriptionModel)}
+	case models.JobAnalyze, models.JobKeypointQuality:
+		tc = provider.TaskConfig{Provider: deref(st.AnalysisProvider), Model: deref(st.AnalysisModel)}
+	case models.JobDigest, models.JobDigestRewrite:
+		tc = provider.TaskConfig{Provider: deref(st.WriterProvider), Model: deref(st.WriterModel)}
+	case models.JobHighlight:
+		tc = provider.TaskConfig{Provider: deref(st.HighlightProvider), Model: deref(st.HighlightModel)}
+	default:
+		return nil
+	}
+	if tc.Provider == "" {
+		tc.Provider = "groq"
+	}
+	model := provider.EffectiveModel(tc.Provider, tc.Model, string(jobType))
+	version := ""
+	if jobType == models.JobDigest {
+		version = provider.DigestWriterPromptVersion
+	}
+	_, err = s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET configured_provider=?, configured_model=?, config_version=?
+		 WHERE id=? AND COALESCE(configured_provider,'')=''`,
+		tc.Provider, model, version, jobID)
+	return err
 }
 
 // MarkJobRunning 原子状态转换 queued→running，防止重复处理。返回是否成功 claim。
@@ -125,6 +176,10 @@ func (s *Store) enqueueAnalyze(ctx context.Context, sourceType models.SourceType
 		job.ID, string(job.SourceType), job.SourceID, string(job.JobType), string(job.Status), boolToInt(automated))
 	if err != nil {
 		return nil, fmt.Errorf("插入 analyze job: %w", err)
+	}
+	// R04：入队时冻结执行配置（新任务专属，旧任务不受影响）。
+	if err := s.FreezeJobTaskConfig(ctx, job.ID, models.JobAnalyze); err != nil {
+		return nil, err
 	}
 	return job, nil
 }

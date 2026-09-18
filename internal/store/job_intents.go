@@ -58,6 +58,10 @@ func (s *Store) EnqueueJobIdempotent(ctx context.Context, spec JobIntentSpec) (*
 		}
 		return nil, false, fmt.Errorf("幂等入队任务: %w", err)
 	}
+	// R04：入队时冻结执行配置；显式传入的 spec 配置优先（已非空则不覆盖）。
+	if err := s.FreezeJobTaskConfig(ctx, job.ID, spec.JobType); err != nil {
+		return nil, false, err
+	}
 	return job, true, nil
 }
 

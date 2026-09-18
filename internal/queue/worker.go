@@ -64,7 +64,12 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		client: client, poll: pollInterval,
 	}
 	w.taskConfigFor = func(job *models.ProcessingJob) (provider.TaskConfig, error) {
-		// 读 settings 选每任务的 Provider + Model（ADR-0009 扩展）
+		// R04：优先读取入队时冻结的任务配置；空（旧任务）走当前设置兼容路径，
+		// 不伪造它从未保存的历史配置。
+		if exec, err := w.store.GetJobExecution(context.Background(), job.ID); err == nil && exec.ConfiguredProvider != "" {
+			return provider.TaskConfig{Provider: exec.ConfiguredProvider, Model: exec.ConfiguredModel}, nil
+		}
+		// 读 settings 选每任务的 Provider + Model（ADR-0009 扩展；旧任务兼容路径）
 		st, err := w.store.GetSettings(context.Background())
 		if err != nil {
 			return provider.TaskConfig{Provider: "groq"}, nil // 降级默认
@@ -195,6 +200,37 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 	return w.store.MarkJobSucceeded(ctx, job.ID)
 }
 
+// sendPolicyJobTypes 需要在执行时动态检查来源访问策略的任务
+// （向 Provider 发送来源内容的任务；本地组装/合成类任务不在此列）。
+var sendPolicyJobTypes = map[models.JobType]bool{
+	models.JobTranscribe: true, models.JobAnalyze: true, models.JobDigest: true,
+	models.JobHighlight: true, models.JobKeypointQuality: true, models.JobDigestRewrite: true,
+	models.JobIdeationDiagnosis: true, models.JobClaimReview: true,
+}
+
+// enforceSourceSendPolicy 执行时动态应用来源模型数据策略（R04）：
+// LocalOnly 或未批准 Provider 阻止外发；无策略记录的来源类型放行。
+func (w *Worker) enforceSourceSendPolicy(ctx context.Context, job *models.ProcessingJob) error {
+	if !sendPolicyJobTypes[job.JobType] {
+		return nil
+	}
+	tc, err := w.taskConfigFor(job)
+	if err != nil {
+		return err
+	}
+	allowed, err := w.store.CanSendSourceToProvider(ctx, job.SourceType, job.SourceID, tc.Provider)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if !allowed {
+		return fmt.Errorf("来源访问策略禁止发送至 %s（LocalOnly 或未批准 Provider）；请 Owner 调整策略后重新入队", tc.Provider)
+	}
+	return nil
+}
+
 // budgetEstimateUnits 返回预算预估计量单位（B04）。转录按音频计费、单位未知，
 // 预估 0（价格缺失时由配置缺口路径显式阻塞）；chat 类操作用保守默认值。
 func budgetEstimateUnits(operation string) (int, int) {
@@ -314,6 +350,11 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 	// B04：付费任务在构建 Provider 之前做全局预算检查并预占在途预估；
 	// 预算不足/未配价格/日限额超限以显式错误失败（可见原因，不无限重试）。
 	if err := w.holdJobBudget(ctx, job); err != nil {
+		return err
+	}
+	// R04：来源访问策略在执行时仍动态检查——冻结输入不绕过 LocalOnly、
+	// 失效或 Owner 撤销授权。
+	if err := w.enforceSourceSendPolicy(ctx, job); err != nil {
 		return err
 	}
 	bundle, err := w.bundleFor(job)

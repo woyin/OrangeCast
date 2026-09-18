@@ -82,3 +82,19 @@
   - `go test -race -run 'TestAutoDailyJobLimit|TestHoldBudget|TestBudgetPending' ./internal/store/`、`go test -race -run 'TestWorker' ./internal/queue/` 通过；`go test ./internal/queue/ ./internal/store/ ./internal/server/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；迁移计数断言 45→46。
 - 提交：`fix(ingestion): enforce daily limits on admitted processing intents`。
 - 限制：一天边界沿用既有 UTC 日语义（未改局部时区行为）；延迟租约固定 10 分钟，未做指数退避；进度页对"延迟重试"的专门展示随 R25 浏览器验收核对。
+
+## R04 — 执行使用冻结的配置和来源
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `store/jobs.go`：`FreezeJobTaskConfig`——入队时把当前 settings 的任务级 Provider 与生效模型（`provider.EffectiveModel`，空配置不产生不可追溯模型）写入任务行；只对新任务（configured_provider 为空）生效，不覆盖显式传入的 spec 配置；`config_version` 冻结已知提示/契约版本（精读 digest-writer-v1），未知留空不杜撰；本地任务（解说 TTS 等）不冻结。
+  - 三条入队路径统一接入冻结：`enqueueJob`（订阅自动摄取）、`enqueueAnalyze`（转录后衔接）、`EnqueueJobIdempotent`（幂等意图入队）。子任务语义：输入快照经 `InheritJobInputSnapshot` 继承上游（B08 既有），任务配置在子任务自身入队时按其任务角色冻结。
+  - `queue/worker.go`：`taskConfigFor` 优先读取持久冻结配置；为空（旧任务）走当前设置兼容路径，不伪造历史配置。
+  - `queue/worker.go`：`enforceSourceSendPolicy`——外发类任务（转录/分析/精读/高光/重点质量/渠道改写/构思诊断/独立审校）在执行时动态检查来源模型数据策略（`CanSendSourceToProvider`）；LocalOnly、未批准 Provider 或 Owner 撤销授权阻止外发，以可见失败终结；无策略记录的来源类型放行。
+- 验证：
+  - `TestWorker_ExecutesFrozenConfig`：入队冻结 A；排队后改设置任务输入不漂移；新重分析任务冻结新配置 B，旧任务仍为 A。
+  - `TestWorker_LegacyJobFallsBackToSettings`：无冻结配置的旧任务回退当前设置，不杜撰。
+  - `TestWorker_PolicyRevocationStillBlocks`：入队后设 LocalOnly，执行时 Provider 不被调用，任务以可见原因失败。
+  - `go test -timeout 30m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；新测试 `-race` 通过。
+- 提交：`fix(jobs): execute persisted provider and source snapshots`。
+- 限制：处理深度与来源版本冻结沿用 B05/B06/B08 快照机制（本任务验证其被 worker 消费）；策略检查粒度为任务级 Provider，未细化到每次独立模型调用（R08+ 按阶段补）。
