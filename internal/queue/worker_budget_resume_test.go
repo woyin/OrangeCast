@@ -336,8 +336,15 @@ func TestWorker_DailyLimitDefersInsteadOfFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.ProcessOne(ctx); err != nil {
-		t.Fatalf("额度拒绝不应报周期错误: %v", err)
+	// R05 衔接：先排空第一集的质量判定任务，直到 j2 被领取并延迟。
+	for i := 0; i < 10; i++ {
+		if err := w.ProcessOne(ctx); err != nil {
+			t.Fatalf("额度拒绝不应报周期错误: %v", err)
+		}
+		got, _ := s.GetJob(ctx, j2.ID)
+		if got.Status != models.StatusQueued {
+			break
+		}
 	}
 	got, _ = s.GetJob(ctx, j2.ID)
 	if got.Status != models.StatusRunning {

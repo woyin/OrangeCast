@@ -292,7 +292,8 @@ func TestPipeline_KnowledgeDJDepthChainsFullDJ(t *testing.T) {
 	if _, err := s.EnqueueIngestionJobWithSnapshot(ctx, models.SourceUpload, up.ID, models.JobTranscribe, `{"processing_depth":"knowledge_dj"}`); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 4; i++ {
+	// R05：质量判定是分析后的独立衔接任务，排在解说之前但不阻塞 DJ（共 5 步）。
+	for i := 0; i < 5; i++ {
 		if err := w.ProcessOne(ctx); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}

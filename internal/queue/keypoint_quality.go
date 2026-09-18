@@ -121,7 +121,14 @@ func (w *Worker) doKeypointQualityJob(ctx context.Context, job *models.Processin
 		assessed++
 		_ = failed
 	}
-	result, _ := json.Marshal(map[string]any{"card_version": snapshot.CardVersion, "assessed": assessed})
+	// K03/R05：消费匹配指纹与版本的判定，更新正式质量状态并写一次变化。
+	applyStats, err := w.store.ApplyKeypointQualityResults(ctx, job.SourceType, job.SourceID, snapshot.CardVersion)
+	if err != nil {
+		return fmt.Errorf("应用质量判定: %w", err)
+	}
+	result, _ := json.Marshal(map[string]any{"card_version": snapshot.CardVersion, "assessed": assessed,
+		"applied": applyStats.Applied, "material_changes": applyStats.MaterialChanges,
+		"unchanged": applyStats.Unchanged, "skipped_owner": applyStats.SkippedOwner, "skipped_no_match": applyStats.SkippedNoMatch})
 	return w.store.SaveJobResult(ctx, job.ID, string(result), models.JobResultComplete)
 }
 

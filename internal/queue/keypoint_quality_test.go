@@ -18,10 +18,15 @@ type qualityAnalyzer struct {
 	calls   int
 	diag    *provider.IdeationDiagnosis
 	diagErr error
+	card    *provider.KnowledgeCard // 非空时 Analyze 返回该卡片（链路测试用）
 }
 
 func (f *qualityAnalyzer) Analyze(transcript string, segments []provider.Segment) (*provider.AnalyzeResult, error) {
-	return &provider.AnalyzeResult{Card: &provider.KnowledgeCard{Title: "T"}}, nil
+	card := f.card
+	if card == nil {
+		card = &provider.KnowledgeCard{Title: "T"}
+	}
+	return &provider.AnalyzeResult{Card: card}, nil
 }
 func (f *qualityAnalyzer) Name() string { return "fake" }
 
@@ -170,5 +175,151 @@ func TestKeypointQualityJob_ProgramInvalidSkipsModel(t *testing.T) {
 	}
 	if invalid == nil || len(invalid.Reasons) == 0 {
 		t.Fatalf("空引用重点应被程序拦截: %+v", results)
+	}
+}
+
+// TestAnalysisChainsQualityToReady R05：从正常分析入口一路执行到 Ready 并可参与发现；
+// 重跑不增加变化。分析（索引后幂等入队质量）→ 质量判定 → 正式状态 ready +
+// 一条 material_change；重复判定不新增变化。
+func TestAnalysisChainsQualityToReady(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	qa := &qualityAnalyzer{
+		card: &provider.KnowledgeCard{
+			Title:   "主权基金",
+			Summary: provider.CitedText{Text: "配置变化", Citations: []string{"seg-0001"}},
+			KeyPoints: []provider.KeyPoint{{
+				Content: "主讲人认为低剂量咖啡与更低风险相关", Description: "限定：相关性非因果",
+				Citations: []string{"seg-0001"},
+			}},
+			Chapters: []provider.Chapter{{Title: "开篇", Citations: []string{"seg-0001"}}},
+		},
+		verdict: provider.KeypointQualityVerdict{Decision: models.KPQualityReady, Reasons: []string{"原文支持"}},
+	}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Analysis: qa}, nil
+	}
+	if _, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "a-chain",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 第一步：分析（含索引 + 幂等入队质量判定）。
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("分析失败: %v", err)
+	}
+	// 第二步：质量判定（自动衔接的任务）。
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("质量判定失败: %v", err)
+	}
+	kps, _, err := s.ListKeyPointsFiltered(ctx, store.KeyPointFilter{SourceType: models.SourceEpisode, SourceID: sourceID}, 1, 10)
+	if err != nil || len(kps) != 1 {
+		t.Fatalf("应有一条重点: %v %+v", err, kps)
+	}
+	if kps[0].QualityStatus != models.KeyPointReady {
+		t.Fatalf("判定通过后应为 ready: %+v", kps[0])
+	}
+	var changes int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM material_changes WHERE keypoint_id = ? AND change_kind='quality_approved'`, kps[0].ID).Scan(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if changes != 1 {
+		t.Fatalf("应恰好一条进入发现的变化: %d", changes)
+	}
+	// 重跑质量判定：幂等，不新增变化。
+	if _, err := w.EnqueueKeypointQualityJob(ctx, models.SourceEpisode, sourceID, kps[0].CardVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("重跑判定失败: %v", err)
+	}
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM material_changes WHERE keypoint_id = ? AND change_kind='quality_approved'`, kps[0].ID).Scan(&changes); err != nil {
+		t.Fatal(err)
+	}
+	if changes != 1 {
+		t.Fatalf("重跑不得新增变化: %d", changes)
+	}
+}
+
+// TestApplyKeypointQuality_StaleAndOwnerGuard R05：旧结果/过期判定不批准新内容；
+// Owner 决策（owner_confirmed、排除、人工修改）不被自动判定覆盖。
+func TestApplyKeypointQuality_StaleAndOwnerGuard(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedKeypointsForQuality(t, s, sourceID)
+	completeSeedJobs(t, s)
+
+	// 三条重点：正常自动、owner_confirmed、Owner 排除（dismissed）。
+	if _, err := s.DB.ExecContext(ctx,
+		`INSERT INTO keypoint_index (id, source_type, source_id, source_title, content, description, citations_json, relation_kind, time_start, time_end, card_version, origin, production_status, evidence_status, quality_status, created_at)
+		 VALUES ('kp-owner', 'episode', ?, '标题', 'Owner 已确认的观点', '', '["seg-0001"]', 'citation', 0, 0, 1, 'automatic', 'inbox', 'ok', 'owner_confirmed', datetime('now')),
+		        ('kp-excluded', 'episode', ?, '标题', 'Owner 排除的观点', '', '["seg-0001"]', 'citation', 0, 0, 1, 'automatic', 'dismissed', 'ok', 'needs_review', datetime('now')),
+		        ('kp-edited', 'episode', ?, '标题', 'Owner 修改过的观点', '', '["seg-0001"]', 'citation', 0, 0, 1, 'edited', 'inbox', 'ok', 'needs_review', datetime('now'))`,
+		sourceID, sourceID, sourceID); err != nil {
+		t.Fatal(err)
+	}
+	qa := &qualityAnalyzer{verdict: provider.KeypointQualityVerdict{Decision: models.KPQualityReady}}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Analysis: qa}, nil
+	}
+	if _, err := w.EnqueueKeypointQualityJob(ctx, models.SourceEpisode, sourceID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("判定失败: %v", err)
+	}
+	getQ := func(id string) string {
+		var q string
+		if err := s.DB.QueryRowContext(ctx, `SELECT quality_status FROM keypoint_index WHERE id=?`, id).Scan(&q); err != nil {
+			t.Fatal(err)
+		}
+		return q
+	}
+	if q := getQ("kp-owner"); q != "owner_confirmed" {
+		t.Fatalf("owner_confirmed 不得被自动判定覆盖: %s", q)
+	}
+	if q := getQ("kp-excluded"); q != "needs_review" {
+		t.Fatalf("Owner 排除的重点不应进入发现资格: %s", q)
+	}
+	if q := getQ("kp-edited"); q != "needs_review" {
+		t.Fatalf("人工修改的重点不得被覆盖: %s", q)
+	}
+	// 自动重点（seed 的 kp-1）通过并 ready。
+	var autoReady int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM keypoint_index WHERE source_id=? AND card_version=1
+		   AND id NOT IN ('kp-owner','kp-excluded','kp-edited') AND quality_status='ready'`,
+		sourceID).Scan(&autoReady); err != nil {
+		t.Fatal(err)
+	}
+	if autoReady != 1 {
+		t.Fatalf("自动重点应恰好一条 ready: %d", autoReady)
+	}
+
+	// 过期判定：自动重点内容变化后指纹不匹配 → 不批准新内容。
+	var kpID string
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT id FROM keypoint_index WHERE content LIKE '主讲人认为%'`).Scan(&kpID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE keypoint_index SET content='内容已变化的新表述', quality_status='needs_review' WHERE id=?`, kpID); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := s.ApplyKeypointQualityResults(ctx, models.SourceEpisode, sourceID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.SkippedNoMatch == 0 {
+		t.Fatalf("指纹不匹配的旧结果应被跳过: %+v", stats)
+	}
+	if q := getQ(kpID); q != "needs_review" {
+		t.Fatalf("过期判定不得批准新内容: %s", q)
 	}
 }

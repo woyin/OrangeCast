@@ -492,9 +492,16 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	}
 	if stats, err := w.store.IndexKeyPoints(ctx, job.SourceType, job.SourceID, sourceTitle, version, validated, payload.Segments); err != nil {
 		log.Printf("任务 %s KeyPoint 索引刷新失败（不阻塞）: %v", job.ID, err)
-	} else if stats != nil && (stats.Updated > 0 || stats.New > 0 || stats.Staled > 0) {
-		log.Printf("任务 %s 重点协调: kept=%d updated=%d new=%d staled=%d removed=%d changes=%d",
-			job.ID, stats.Kept, stats.Updated, stats.New, stats.Staled, stats.Removed, stats.MaterialChanges)
+	} else {
+		if stats != nil && (stats.Updated > 0 || stats.New > 0 || stats.Staled > 0) {
+			log.Printf("任务 %s 重点协调: kept=%d updated=%d new=%d staled=%d removed=%d changes=%d",
+				job.ID, stats.Kept, stats.Updated, stats.New, stats.Staled, stats.Removed, stats.MaterialChanges)
+		}
+		// R05：分析索引完成后幂等入队质量判定。knowledge 与 knowledge_dj 深度均获得
+		// 质量步骤；DJ 链不依赖质量全部通过（判定是独立任务，失败不回抹卡片）。
+		if _, err := w.EnqueueKeypointQualityJob(ctx, job.SourceType, job.SourceID, version); err != nil {
+			log.Printf("任务 %s 衔接重点质量判定失败: %v", job.ID, err)
+		}
 	}
 
 	w.recordCallUsage(ctx, job, "analysis", bundle.Analysis.Name(), analysisModel, analysis.Usage)

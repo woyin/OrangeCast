@@ -98,3 +98,19 @@
   - `go test -timeout 30m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；新测试 `-race` 通过。
 - 提交：`fix(jobs): execute persisted provider and source snapshots`。
 - 限制：处理深度与来源版本冻结沿用 B05/B06/B08 快照机制（本任务验证其被 worker 消费）；策略检查粒度为任务级 Provider，未细化到每次独立模型调用（R08+ 按阶段补）。
+
+## R05 — 自动质量判断形成可发现素材
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `queue/worker.go`（doAnalyze）：KeyPoint 索引完成后幂等入队质量判定（`EnqueueKeypointQualityJob`，意图 `kpq:<source>:cv<N>` 冻结卡片版本与转录版本）。knowledge 与 knowledge_dj 深度均获得质量步骤；DJ 链不依赖质量全部通过（判定是独立任务，失败只显式可见，不回抹卡片、不阻塞解说衔接）。
+  - `store/creation_workspace.go`：K03 消费路径 `ApplyKeypointQualityResults`——同一事务内只消费与当前内容指纹（`FingerprintKeypoint`）且卡片版本都匹配的判定，更新 `keypoint_index.quality_status`；进入发现资格的通过写一次 `quality_approved` MaterialChange（ON CONFLICT 幂等，重跑不增加变化）。约束：origin=edited/manual、`owner_confirmed`、production 已挑选/排除/搁置的重点不被自动判定覆盖；指纹或版本不匹配的旧结果不批准新内容（SkippedNoMatch 可观测）。
+  - `queue/keypoint_quality.go`（doKeypointQualityJob）：判定落库后应用结果，结果 JSON 携带 applied/unchanged/skipped 统计。
+  - 测试基建：`fakeAnalyzer` 支持判定接口（默认保守 needs_review，不伪装通过）；`qualityAnalyzer` 可注入分析卡片。
+- 验证：
+  - `TestAnalysisChainsQualityToReady`：真实分析入口→索引→自动衔接判定→`ready` + 恰好一条变化；重跑判定不新增变化（可参与发现：`discovery_schedule` 既有 `quality_status IN ('ready','owner_confirmed')` 过滤开始有真实供给）。
+  - `TestApplyKeypointQuality_StaleAndOwnerGuard`：owner_confirmed/排除/人工修改不被覆盖；内容变化后旧指纹判定不批准（保持 needs_review，可读可重试）。
+  - 既有端到端判定测试保持通过（模型不可用显式失败、程序拦截不调模型）。
+  - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go test -race -timeout 40m ./internal/queue/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、临时构建通过。
+- 提交：`fix(keypoints): connect quality jobs to usable material state`。
+- 限制：质量判定按卡片版本入队一次，重点级增量判定（部分重点变化）沿用整卡重判；判定任务与 DJ 解说任务的执行顺序由 created_at 决定，未做优先级调度。

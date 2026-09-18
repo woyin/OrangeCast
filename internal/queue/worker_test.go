@@ -542,6 +542,12 @@ func (f *fakeAnalyzer) Analyze(transcript string, segments []provider.Segment) (
 }
 func (f *fakeAnalyzer) Name() string { return "fake" }
 
+// AssessKeypointQuality 让 fakeAnalyzer 支持质量判定任务（R05）：默认保守
+// needs_review，不伪装通过，避免流水线测试中判定任务因能力缺失而失败。
+func (f *fakeAnalyzer) AssessKeypointQuality(ctx context.Context, input provider.KeypointQualityInput) (*provider.KeypointQualityVerdict, provider.TaskUsage, error) {
+	return &provider.KeypointQualityVerdict{Decision: models.KPQualityNeedsReview, Reasons: []string{"fake 默认保守判定"}}, provider.TaskUsage{}, nil
+}
+
 type fakeHighlight struct{ err error }
 
 func (f *fakeHighlight) GenerateHighlights(segments []provider.Segment) (*provider.HighlightSet, error) {

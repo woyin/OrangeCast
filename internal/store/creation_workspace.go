@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -331,4 +332,114 @@ func (s *Store) ListKeyPointRowsByCardVersion(ctx context.Context, sourceType mo
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ---- K03：质量判定结果 → 正式质量状态（R05）----
+
+// KeypointQualityApplyStats 一次应用的结果统计（可观测，重跑可解释）。
+type KeypointQualityApplyStats struct {
+	Applied         int // 更新了正式质量状态的重点数
+	MaterialChanges int // 本次写入的变化数（quality_approved，幂等去重）
+	Unchanged       int // 判定与当前状态一致
+	SkippedOwner    int // Owner 决策（owner_confirmed/排除/搁置/已用/人工修改）不覆盖
+	SkippedNoMatch  int // 无匹配指纹或卡片版本的判定（旧结果不批准新内容）
+}
+
+// ApplyKeypointQualityResults 消费匹配当前内容指纹与卡片版本的质量判定，
+// 在同一事务内更新正式质量状态；进入发现资格的通过写一次 quality_approved
+// 变化（ON CONFLICT 幂等，重跑不增加变化）。约束：
+//   - 只有 origin=automatic 且未被 Owner 挑选/排除/搁置的重点被自动判定更新；
+//   - owner_confirmed 与 production 决策不被覆盖；
+//   - 指纹不匹配（内容已改）或卡片版本不一致的旧结果不批准新内容；
+//   - 无判定或被跳过时重点保持当前状态，仍可读，判定任务可重试。
+func (s *Store) ApplyKeypointQualityResults(ctx context.Context, sourceType models.SourceType, sourceID string, cardVersion int) (*KeypointQualityApplyStats, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT id, content, COALESCE(description,''), citations_json, origin, production_status, quality_status
+		 FROM keypoint_index WHERE source_type=? AND source_id=? AND card_version=?`,
+		string(sourceType), sourceID, cardVersion)
+	if err != nil {
+		return nil, err
+	}
+	type kpRow struct {
+		id, content, description, citations, origin, production, quality string
+	}
+	var kps []kpRow
+	for rows.Next() {
+		var r kpRow
+		if err := rows.Scan(&r.id, &r.content, &r.description, &r.citations, &r.origin, &r.production, &r.quality); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		kps = append(kps, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	stats := &KeypointQualityApplyStats{}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for _, kp := range kps {
+		if kp.origin != string(models.KeyPointAutomatic) ||
+			kp.quality == string(models.KeyPointOwnerConfirmed) ||
+			kp.production == string(models.KeyPointShortlisted) ||
+			kp.production == string(models.KeyPointUsed) ||
+			kp.production == string(models.KeyPointDismissed) {
+			stats.SkippedOwner++
+			continue
+		}
+		var citations []string
+		_ = json.Unmarshal([]byte(kp.citations), &citations)
+		fingerprint := provider.FingerprintKeypoint(kp.content, kp.description, citations)
+		// 事务内读取判定（不可用 s.DB：事务持写锁时会死锁）。
+		row := tx.QueryRowContext(ctx,
+			`SELECT id, keypoint_id, source_type, source_id, card_version, content_fingerprint,
+			        decision, reasons_json, input_snapshot_json, provider, model, job_id, created_at
+			 FROM keypoint_quality_results WHERE keypoint_id=? AND content_fingerprint=?`, kp.id, fingerprint)
+		res, err := s.scanKeypointQuality(row)
+		if errors.Is(err, ErrNotFound) {
+			stats.SkippedNoMatch++ // 尚无当前内容的判定
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if res.CardVersion != cardVersion {
+			stats.SkippedNoMatch++ // 旧卡片版本的判定不批准新内容
+			continue
+		}
+		target := models.KeyPointQualityStatus(res.Decision)
+		if !validKeyPointQualityStatus(target) {
+			return nil, fmt.Errorf("%w: 判定结论 %q 不可映射为质量状态", ErrInvalidEditorialState, res.Decision)
+		}
+		if string(target) == kp.quality {
+			stats.Unchanged++
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE keypoint_index SET quality_status=? WHERE id=? AND quality_status=?`,
+			string(target), kp.id, kp.quality); err != nil {
+			return nil, err
+		}
+		stats.Applied++
+		if target == models.KeyPointReady {
+			snapshot := sha256.Sum256([]byte(kp.content + "\x00" + kp.citations))
+			res2, err := tx.ExecContext(ctx,
+				`INSERT INTO material_changes (id,keypoint_id,source_type,source_id,change_kind,snapshot_hash) VALUES (?,?,?,?,?,?) ON CONFLICT(keypoint_id,change_kind,snapshot_hash) DO NOTHING`,
+				uuid.NewString(), kp.id, string(sourceType), sourceID, "quality_approved", fmt.Sprintf("%x", snapshot))
+			if err != nil {
+				return nil, err
+			}
+			if n, _ := res2.RowsAffected(); n > 0 {
+				stats.MaterialChanges++
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return stats, nil
 }
