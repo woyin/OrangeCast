@@ -124,3 +124,18 @@
   - 队列/存储包 `-race` 通过（R02–R05 各提交内已记录）。
   - `make cover-gate` 仍失败：queue 77.3%、store 74.0%（基线即失败：evalset 94.0/provider 86.7/queue 77.3/store 75.2 均低于门槛）。本轮新增代码引入少量未覆盖行，store 由 75.2 微降至 74.0，未修改任何门槛或豁免；按计划由 R24 以行为测试补足，不以降低门槛方式通过。
 - 用户可观察结果（M1 验收对象）：自动处理受全局预算与日限额约束（本次预估计入、恢复幂等、未知结果不盲目重试、额度不足可延迟重试），自动重点经独立质量判定形成 ready 素材并可进入发现；旧任务与旧数据兼容路径有回归。
+
+## R06 — 精读冻结完整笔记输入
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `store/digests_enqueue.go`：`DigestInputSnapshot` 新增 `notes_recorded` 与 `notes[]`（`DigestFrozenNote`：ID、类型、确切文本、乐观版本 Revision、引用锚点 Anchors）。入队时冻结每条选中笔记的确切内容；`notes_recorded=true` 区分"本次确切选择（含空选择）"与"未记录选择的旧数据"；旧字段 `note_ids` 保留读取兼容。
+  - `queue/digest.go`：新任务（notes_recorded=true）运行时只消费冻结文本/类型，不用库内内容覆盖；对已删除笔记做存在性检查并显式记日志（冻结文本仍参与生成，失效引用不静默）；旧任务（notes_recorded=false）按 NoteIDs 从当前库解析（nil=取全部的旧语义保持），不伪造冻结文本。
+  - Episode/Upload/Document 的不可变来源读取路径为 G01 既有实现（快照版本/文档证据），本任务验证其与笔记冻结共同构成完整输入。
+- 验证：
+  - `TestDoDigest_FrozenNoteContents`：入队快照含文本/类型/锚点；排队后编辑、删除（SQL 模拟，存储层无删除 API）、新增笔记，生成仍按冻结文本。
+  - `TestDoDigest_EmptyNoteSelectionStaysEmpty`：空选择显式记录且保持为空，入队后新增不进入。
+  - `TestDoDigest_LegacySnapshotResolvesNoteIDs`：旧快照按 NoteIDs 兼容解析。
+  - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、`go test -race -run TestDoDigest` 通过。
+- 提交：`fix(digests): freeze selected note contents at enqueue time`。
+- 限制：Owner 笔记目前无删除入口（仅有创建/编辑），删除场景以存储层 SQL 验证；Owner 可见的失效引用提示属页面层（R22/R25）；备份可恢复性由 DB 内快照保证，端到端备份恢复用例在 R23。

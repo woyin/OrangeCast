@@ -601,3 +601,142 @@ func (c *countingRewriter) RewriteDigest(ctx context.Context, req provider.Diges
 	*c.count++
 	return c.inner.RewriteDigest(ctx, req)
 }
+
+// TestDoDigest_FrozenNoteContents R06：入队冻结笔记确切文本/类型/锚点；
+// 排队后编辑、删除、新增笔记均不改变本次输入；空选择保持为空；
+// 旧数据（无冻结文本）按 NoteIDs 兼容解析，不伪造冻结文本。
+func TestDoDigest_FrozenNoteContents(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "source_note",
+		Content: "原始文本", CitationsJSON: `["seg-0001"]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID)
+	if err != nil || job == nil {
+		t.Fatalf("入队失败: %v %v", job, err)
+	}
+	// 快照应含冻结文本与锚点。
+	exec, err := s.GetJobExecution(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap digestInputSnapshot
+	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap); err != nil {
+		t.Fatal(err)
+	}
+	if !snap.NotesRecorded || len(snap.Notes) != 1 || snap.Notes[0].Content != "原始文本" ||
+		snap.Notes[0].Kind != "source_note" || len(snap.Notes[0].Anchors) != 1 || snap.Notes[0].Anchors[0] != "seg-0001" {
+		t.Fatalf("入队应冻结确切笔记输入: %+v", snap)
+	}
+
+	// 排队后：编辑内容、删除笔记、再新增一条 → 均不改变本次输入。
+	noteID := snap.Notes[0].ID
+	if _, err := s.UpdateOwnerNote(ctx, noteID, "编辑后的文本", `["seg-0001"]`, "", snap.Notes[0].Revision); err != nil {
+		t.Fatal(err)
+	}
+	// 笔记无 Owner 删除入口（存储层无 API）；以 SQL 删除模拟唯一现实的失效场景。
+	if _, err := s.DB.ExecContext(ctx, `DELETE FROM owner_notes WHERE id = ?`, noteID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "owner_reflection",
+		Content: "入队后新增",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured []provider.DigestOwnerNote
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &capturingWriter{inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "冻结", Blocks: validDraftBlocks()}}, captured: &captured},
+		}, nil
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("执行失败: %v", err)
+	}
+	if len(captured) != 1 || captured[0].NoteID != noteID || captured[0].Text != "原始文本" || captured[0].Kind != "source_note" {
+		t.Fatalf("应按冻结文本生成，不受编辑/删除/新增影响: %+v", captured)
+	}
+}
+
+// TestDoDigest_EmptyNoteSelectionStaysEmpty R06：空选择显式记录且保持为空；
+// 入队后新增笔记不进入本次输入。
+func TestDoDigest_EmptyNoteSelectionStaysEmpty(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	job, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID)
+	if err != nil || job == nil {
+		t.Fatalf("入队失败: %v %v", job, err)
+	}
+	exec, _ := s.GetJobExecution(ctx, job.ID)
+	var snap digestInputSnapshot
+	_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
+	if !snap.NotesRecorded || len(snap.Notes) != 0 {
+		t.Fatalf("空选择应显式记录为空: %+v", snap)
+	}
+	if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "owner_reflection",
+		Content: "入队后笔记",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var captured []provider.DigestOwnerNote
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &capturingWriter{inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "空选择", Blocks: validDraftBlocks()}}, captured: &captured},
+		}, nil
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatalf("空选择应保持为空: %+v", captured)
+	}
+}
+
+// TestDoDigest_LegacySnapshotResolvesNoteIDs R06：旧任务（无冻结文本）按 NoteIDs
+// 从当前库解析——不伪造冻结文本；读取行为与旧版本一致。
+func TestDoDigest_LegacySnapshotResolvesNoteIDs(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID, Kind: "source_note",
+		Content: "旧任务笔记", CitationsJSON: `["seg-0001"]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID)
+	if err != nil || job == nil {
+		t.Fatal(err)
+	}
+	// 模拟旧快照：仅 NoteIDs，无 notes_recorded/notes。
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET input_snapshot_json = json_remove(input_snapshot_json, '$.notes', '$.notes_recorded') WHERE id = ?`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	var captured []provider.DigestOwnerNote
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &capturingWriter{inner: &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "旧任务", Blocks: validDraftBlocks()}}, captured: &captured},
+		}, nil
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 1 || captured[0].NoteID != note.ID || captured[0].Text != "旧任务笔记" {
+		t.Fatalf("旧任务应按 NoteIDs 从当前库解析: %+v", captured)
+	}
+}

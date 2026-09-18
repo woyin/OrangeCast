@@ -37,12 +37,26 @@ func (s *Store) EnqueueDigestJob(ctx context.Context, sourceType models.SourceTy
 	return job, nil
 }
 
-// DigestInputSnapshot 精读素材的冻结身份（G01）。
+// DigestFrozenNote 入队时冻结的笔记确切内容（R06）：运行时只消费这份输入，
+// 编辑/删除/新增笔记不改变已入队任务。
+type DigestFrozenNote struct {
+	ID       string   `json:"id"`
+	Kind     string   `json:"kind"`
+	Content  string   `json:"content"`
+	Revision int      `json:"revision"`
+	Anchors  []string `json:"anchors,omitempty"` // 引用锚点（citations）
+}
+
+// DigestInputSnapshot 精读素材的冻结身份（G01/R06）。
 type DigestInputSnapshot struct {
 	SnapshotID        string   `json:"snapshot_id"` // B01 来源快照 ID
 	TranscriptVersion int      `json:"transcript_version,omitempty"`
 	CardVersion       int      `json:"card_version,omitempty"`
-	NoteIDs           []string `json:"note_ids,omitempty"`
+	NoteIDs           []string `json:"note_ids,omitempty"` // 旧字段：保留读取兼容
+	// NotesRecorded 区分“未记录笔记选择的旧数据”（false，运行时按 NoteIDs 兼容解析）
+	// 与“本次确切选择”（true，含空选择），新任务始终为 true。
+	NotesRecorded bool               `json:"notes_recorded"`
+	Notes         []DigestFrozenNote `json:"notes,omitempty"`
 }
 
 // freezeDigestInput 冻结素材身份：音频走转录当前版本快照；Document 走其证据版本。
@@ -61,10 +75,17 @@ func (s *Store) freezeDigestInput(ctx context.Context, sourceType models.SourceT
 			snap.CardVersion = cv.Version
 		}
 	}
-	// 冻结入队时已存在的笔记（不含之后新增/修改的）。
+	// 冻结入队时已存在笔记的确切内容（R06）：文本、类型、版本与引用锚点；
+	// 排队后编辑/删除/新增笔记不改变这次输入。空选择也显式记录。
 	rows, err := s.ListOwnerNotes(ctx, sourceType, sourceID)
 	if err == nil {
+		snap.NotesRecorded = true
 		for _, n := range rows {
+			var anchors []string
+			_ = json.Unmarshal([]byte(n.CitationsJSON), &anchors)
+			snap.Notes = append(snap.Notes, DigestFrozenNote{
+				ID: n.ID, Kind: n.Kind, Content: n.Content, Revision: n.Revision, Anchors: anchors,
+			})
 			snap.NoteIDs = append(snap.NoteIDs, n.ID)
 		}
 	}

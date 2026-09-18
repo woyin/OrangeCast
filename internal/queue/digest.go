@@ -39,13 +39,11 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	if err != nil {
 		return err
 	}
-	var frozenNoteIDs []string
 	var frozenSnapshotID string
+	var snap digestInputSnapshot
 	exec, execErr := w.store.GetJobExecution(ctx, job.ID)
 	if execErr == nil && exec.InputSnapshotJSON != "" {
-		var snap digestInputSnapshot
 		_ = json.Unmarshal([]byte(exec.InputSnapshotJSON), &snap)
-		frozenNoteIDs = snap.NoteIDs
 		frozenSnapshotID = snap.SnapshotID
 	}
 	// G02：读取任务断点——composed/composed_validated 阶段保存完整初稿，
@@ -54,9 +52,14 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	if exec != nil && exec.CheckpointJSON != "" {
 		_ = json.Unmarshal([]byte(exec.CheckpointJSON), &cp)
 	}
-	notes, err := w.digestOwnerNotes(ctx, job, frozenNoteIDs)
+	notes, missingNotes, err := w.digestOwnerNotes(ctx, job, snap)
 	if err != nil {
 		return err
+	}
+	for _, id := range missingNotes {
+		// R06：已删除笔记的冻结文本仍参与本次生成（入队时输入不漂移），
+		// 但失效引用显式可见，不静默。
+		log.Printf("任务 %s 冻结笔记 %s 已不存在（按入队时文本生成）", job.ID, id)
 	}
 
 	var draft *provider.DigestWritingResult
@@ -132,12 +135,14 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	return nil
 }
 
-// digestInputSnapshot 冻结的精读素材身份（G01，store 侧同构）。
+// digestInputSnapshot 冻结的精读素材身份（G01/R06，store 侧同构）。
 type digestInputSnapshot struct {
-	SnapshotID        string   `json:"snapshot_id"`
-	TranscriptVersion int      `json:"transcript_version"`
-	CardVersion       int      `json:"card_version"`
-	NoteIDs           []string `json:"note_ids"`
+	SnapshotID        string                   `json:"snapshot_id"`
+	TranscriptVersion int                      `json:"transcript_version"`
+	CardVersion       int                      `json:"card_version"`
+	NoteIDs           []string                 `json:"note_ids"`
+	NotesRecorded     bool                     `json:"notes_recorded"`
+	Notes             []store.DigestFrozenNote `json:"notes"`
 }
 
 // digestSourceMaterial 按入队时冻结的来源快照读取素材（G01）：
@@ -236,26 +241,55 @@ func (w *Worker) digestDocumentMaterial(ctx context.Context, documentID, snapsho
 	return out, summary, doc.Title, nil
 }
 
-// digestOwnerNotes 读取入队时冻结的笔记（G01）：
-// 只取快照记录的笔记 ID（排队后改笔记不影响本次输入）；读取错误显式返回，
-// 不静默吞掉。Annotation（标注）不是笔记，不进入精读素材。
-func (w *Worker) digestOwnerNotes(ctx context.Context, job *models.ProcessingJob, noteIDs []string) ([]provider.DigestOwnerNote, error) {
+// digestOwnerNotes 解析本次输入的笔记（G01/R06）：
+//   - 新任务（notes_recorded=true）：只消费入队时冻结的确切文本/类型；运行时
+//     不用库内内容覆盖；返回已不存在的笔记 ID 供显式记录（冻结文本仍参与生成）。
+//   - 旧任务（notes_recorded=false）：按 NoteIDs 从当前库解析（nil=旧数据取全部；
+//     非 nil=只取记录的）；不伪造冻结文本。
+//
+// 读取错误显式返回，不静默吞掉。Annotation（标注）不是笔记，不进入精读素材。
+func (w *Worker) digestOwnerNotes(ctx context.Context, job *models.ProcessingJob, snap digestInputSnapshot) ([]provider.DigestOwnerNote, []string, error) {
+	if snap.NotesRecorded {
+		out := make([]provider.DigestOwnerNote, 0, len(snap.Notes))
+		for _, n := range snap.Notes {
+			out = append(out, provider.DigestOwnerNote{NoteID: n.ID, Text: n.Content, Kind: n.Kind})
+		}
+		var missing []string
+		if len(snap.Notes) > 0 {
+			// 存在性检查仅用于显式记录失效引用；内容仍取冻结文本。
+			rows, err := w.store.ListOwnerNotes(ctx, job.SourceType, job.SourceID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("读取 Owner 笔记（存在性检查）: %w", err)
+			}
+			alive := map[string]bool{}
+			for _, r := range rows {
+				alive[r.ID] = true
+			}
+			for _, n := range snap.Notes {
+				if !alive[n.ID] {
+					missing = append(missing, n.ID)
+				}
+			}
+		}
+		return out, missing, nil
+	}
+	// 旧任务兼容路径：不伪造冻结文本，按 NoteIDs 从当前库解析。
 	rows, err := w.store.ListOwnerNotes(ctx, job.SourceType, job.SourceID)
 	if err != nil {
-		return nil, fmt.Errorf("读取 Owner 笔记: %w", err)
+		return nil, nil, fmt.Errorf("读取 Owner 笔记: %w", err)
 	}
 	allowed := map[string]bool{}
-	for _, id := range noteIDs {
+	for _, id := range snap.NoteIDs {
 		allowed[id] = true
 	}
 	out := make([]provider.DigestOwnerNote, 0, len(rows))
 	for _, n := range rows {
-		if noteIDs != nil && !allowed[n.ID] {
+		if snap.NoteIDs != nil && !allowed[n.ID] {
 			continue // 入队后新写的笔记不属于本次冻结输入
 		}
 		out = append(out, provider.DigestOwnerNote{NoteID: n.ID, Text: n.Content, Kind: n.Kind})
 	}
-	return out, nil
+	return out, nil, nil
 }
 
 // digestResolveGaps 消解 FactGap：逐条搜索 → 落源 → 汇总补织。
