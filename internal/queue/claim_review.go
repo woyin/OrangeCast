@@ -86,6 +86,7 @@ func (w *Worker) doClaimReviewJob(ctx context.Context, job *models.ProcessingJob
 		ClaimMap:      claimMap,
 		AuthorizedIDs: authorizedIDs,
 	}
+	w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界
 	result, usage, err := prov.ReviewClaims(ctx, req)
 	if err != nil {
 		return fmt.Errorf("独立审校: %w", err)

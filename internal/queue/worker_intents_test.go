@@ -59,19 +59,26 @@ func TestWorker_ReusesCompleteResultOnRecovery(t *testing.T) {
 	}
 }
 
-// TestWorker_UnknownResultReexecutes unknown（结果未知）的任务恢复时重新执行，
-// 不把未知结果冒充完成。
-func TestWorker_UnknownResultReexecutes(t *testing.T) {
+// TestWorker_UnknownResultBlocksReexecution unknown（结果未知）的任务恢复时阻断
+// 自动重执行并可见（B02/R02-b）：不把未知结果冒充完成，也不盲目重调模型；
+// 预占保留 pending_remote，不假定未知调用免费。
+func TestWorker_UnknownResultBlocksReexecution(t *testing.T) {
 	s, w := newTestWorker(t)
 	ctx := context.Background()
 	sourceID := seedEpisode(t, s)
-	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
 
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: provider.EffectiveModel("groq", "", "digest"), InputCentsPerMillion: 1, OutputCentsPerMillion: 1}); err != nil {
+		t.Fatal(err)
+	}
 	calls := 0
 	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
 		calls++
 		return &provider.ProviderBundle{
-			DigestWriter:   &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "恢复后生成", Blocks: validDraftBlocks()}},
+			DigestWriter:   &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "不应生成", Blocks: validDraftBlocks()}},
 			DigestRewriter: &fakeDigestRewriter{text: "渠道"},
 		}, nil
 	}
@@ -86,21 +93,47 @@ func TestWorker_UnknownResultReexecutes(t *testing.T) {
 	if _, err := s.MarkJobRunning(ctx, job.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.HoldBudget(ctx, job.ID, "episode_digest", false, "groq", provider.EffectiveModel("groq", "", "digest"), 120_000, 30_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkJobRemoteCallStarted(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SaveJobResult(ctx, job.ID, ``, models.JobResultUnknown); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ResetRunningOnStartup(ctx); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := w.ProcessOne(ctx); err != nil {
-		t.Fatalf("unknown 结果应重新执行: %v", err)
+		t.Fatalf("阻断处置不应报周期错误: %v", err)
 	}
-	if calls == 0 {
-		t.Fatal("unknown 结果应触发真实重执行")
+	if calls != 0 {
+		t.Fatal("未知结果不得自动重调模型")
 	}
-	d, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
-	if err != nil || d.Title != "恢复后生成" {
-		t.Fatalf("重执行应正常落库: %v %+v", err, d)
+	got, err := s.GetJob(ctx, job.ID)
+	if err != nil || got.Status != models.StatusFailed {
+		t.Fatalf("未知结果应以可见失败阻断: %v %+v", err, got)
+	}
+	if got.LastError == nil || !strings.Contains(*got.LastError, "结果未知") {
+		t.Fatalf("阻断原因应可见: %+v", got.LastError)
+	}
+	if d, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("未知结果不得冒充完成产物: %v %+v", err, d)
+	}
+	res, err := s.ListBudgetReservations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pending bool
+	for _, r := range res {
+		if r.JobID == job.ID && r.Status == models.BudgetPendingRemote {
+			pending = true
+		}
+	}
+	if !pending {
+		t.Fatalf("未知结果的预占应保留 pending_remote: %+v", res)
 	}
 }
 

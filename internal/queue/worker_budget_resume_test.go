@@ -173,3 +173,114 @@ func TestWorker_FinalizeOnFailure_SettlesKnownReceipt(t *testing.T) {
 		t.Fatalf("重复结算不应覆盖金额: %+v", res2)
 	}
 }
+
+// TestWorker_PreCallFailureReleasesBudget R02-b：未到达远端调用边界的失败
+// （如 Provider 路由失败）明确释放 released_no_call，不永久占用预算。
+func TestWorker_PreCallFailureReleasesBudget(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	budget := int64(10)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: provider.EffectiveModel("groq", "", "analyze"), InputCentsPerMillion: 1, OutputCentsPerMillion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return nil, errors.New("Provider 路由不可用（调用前失败）")
+	}
+
+	job, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "a-precall",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("调用前失败不应报周期错误: %v", err)
+	}
+	res := heldReservationOf(t, s, job.ID)
+	if res == nil || res.Status != models.BudgetReleasedNoCall {
+		t.Fatalf("调用前失败应明确释放: %+v", res)
+	}
+	total, err := s.OwnerMonthlyUsageCents(ctx)
+	if err != nil || total != 0 {
+		t.Fatalf("释放后不应占用预算: total=%d err=%v", total, err)
+	}
+}
+
+// TestWorker_ResumeAfterHoldReusesReservation R02：预占后模拟重启（重新领取）：
+// 复用已 held 预占，一个逻辑调用只预占一次、只计费一次、结算一次。
+func TestWorker_ResumeAfterHoldReusesReservation(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: provider.EffectiveModel("groq", "", "analyze"), InputCentsPerMillion: 1, OutputCentsPerMillion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		calls++
+		return &provider.ProviderBundle{Analysis: &fakeAnalyzer{}, Highlight: &fakeHighlight{}}, nil
+	}
+
+	job, _, err := s.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
+		SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobAnalyze, IntentID: "a-resume",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkJobRunning(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	// 预占后进程中断；重启恢复重新领取。
+	if _, err := s.HoldBudget(ctx, job.ID, "analyze", false, "groq", provider.EffectiveModel("groq", "", "analyze"), 100_000, 20_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetRunningOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("恢复执行失败: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("一个逻辑调用只执行一次: calls=%d", calls)
+	}
+	got, err := s.GetJob(ctx, job.ID)
+	if err != nil || got.Status != models.StatusSucceeded {
+		t.Fatalf("任务应成功: %v %+v", err, got)
+	}
+	resList, err := s.ListBudgetReservations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range resList {
+		if r.JobID == job.ID {
+			n++
+			if r.Status != models.BudgetSettled {
+				t.Fatalf("恢复完成后应结算一次: %+v", r)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("预占后重启不得重复预占: %d 行", n)
+	}
+	var receipts int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM usage_records WHERE receipt_id LIKE ?`, job.ID+":%").Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 1 {
+		t.Fatalf("一个逻辑调用只计费一次: receipts=%d", receipts)
+	}
+}

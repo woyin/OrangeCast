@@ -147,14 +147,22 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 // processClaimed 处理已领取的任务：心跳续约 + 执行 + 终态。
 func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) error {
-	// B02：结果已持久化的任务（进程在结果落库后、终态写入前中断）恢复时直接复用，
-	// 不重放远端模型调用；"结果写入后中断再执行不新增版本"由此保证。
-	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.ResultState == models.JobResultComplete {
-		log.Printf("任务 %s 命中已持久化结果，恢复时直接复用", job.ID)
-		// B02/B04：恢复复用同样结算预占（结果已知 → 实际费用），
-		// 不把预占留在 held 状态永久占用预算。
-		w.settleJobBudget(ctx, job)
-		return w.store.MarkJobSucceeded(ctx, job.ID)
+	// B02/R02-b：结果已持久化的任务（进程在结果落库后、终态写入前中断）恢复时按
+	// 持久结果状态处置，不盲目重执行：
+	//   - complete：直接复用，不重放远端调用，同步结算预占；
+	//   - unknown：远端可能已执行但本地无可用结果——阻断自动重执行并可见，
+	//     预占保留待处理；复用 pending 预占不构成重新调用模型的授权。
+	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil {
+		switch exec.ResultState {
+		case models.JobResultComplete:
+			log.Printf("任务 %s 命中已持久化结果，恢复时直接复用", job.ID)
+			w.settleJobBudget(ctx, job)
+			return w.store.MarkJobSucceeded(ctx, job.ID)
+		case models.JobResultUnknown:
+			log.Printf("任务 %s 结果未知，阻断自动重执行（需人工确认）", job.ID)
+			w.finalizeJobBudgetOnFailure(ctx, job)
+			return w.store.MarkJobFailed(ctx, job.ID, "远端结果未知（result_state=unknown），已阻止自动重执行；请人工确认后重新入队")
+		}
 	}
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	defer hbCancel()
@@ -239,13 +247,13 @@ func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob)
 	}
 }
 
-// finalizeJobBudgetOnFailure 失败收尾（B02/B04）：
+// finalizeJobBudgetOnFailure 失败收尾（B02/B04）：按持久调用边界与结果已知性分类。
 //   - 已获得远端结果（有已知费用 receipt）→ 按实际费用结算；
-//   - 远端结果未知（无已知费用 receipt，不据此推断未调用）→ 转入 pending_remote
-//     保留待处理，预估继续计入月度占用，不假定未知调用免费。
+//   - 已到达远端调用边界（remote_call_started 持久标记）但无 receipt → 远端结果
+//     未知，转 pending_remote 保留待处理，不假定未知调用免费；
+//   - 未到达调用边界（调用前失败）→ 明确释放 released_no_call。
 //
-// 重复调用幂端；明确未调用前的失败（如入队参数错误）由调用方在调用前拦截，
-// 到达此处的失败一律不宣称“未发生远端调用”。
+// 重复调用幂等；分类依据是持久化状态，不使用进程内存，也不凭 receipt 反推。
 func (w *Worker) finalizeJobBudgetOnFailure(ctx context.Context, job *models.ProcessingJob) {
 	receipts, cost := w.jobReceiptUsage(ctx, job.ID)
 	if receipts > 0 {
@@ -254,8 +262,26 @@ func (w *Worker) finalizeJobBudgetOnFailure(ctx context.Context, job *models.Pro
 		}
 		return
 	}
-	if err := w.store.MarkBudgetPendingRemote(ctx, job.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		log.Printf("任务 %s 预算转为待处理失败: %v", job.ID, err)
+	started := false
+	if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil {
+		started = exec.RemoteCallStarted
+	}
+	if started {
+		if err := w.store.MarkBudgetPendingRemote(ctx, job.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("任务 %s 预算转为待处理失败: %v", job.ID, err)
+		}
+		return
+	}
+	if err := w.store.ReleaseBudget(ctx, job.ID, false); err != nil && !errors.Is(err, store.ErrNotFound) {
+		log.Printf("任务 %s 预算释放失败: %v", job.ID, err)
+	}
+}
+
+// markRemoteCallStarted 在发起远端模型调用前持久化调用边界（B02/R02-b）。
+// 标记失败只记日志：宁可把调用前失败保守归入“结果未知”，也不遗漏未知调用。
+func (w *Worker) markRemoteCallStarted(ctx context.Context, job *models.ProcessingJob) {
+	if err := w.store.MarkJobRemoteCallStarted(ctx, job.ID); err != nil {
+		log.Printf("任务 %s 记录远端调用边界失败: %v", job.ID, err)
 	}
 }
 
@@ -322,6 +348,7 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 	}
 
 	// 2) 从 EvidenceAudio 转录（播放/引用只依赖它，ADR-0005）
+	w.markRemoteCallStarted(ctx, job)
 	result, err := bundle.Transcription.Transcribe(evidencePath)
 	if err != nil {
 		return fmt.Errorf("转录: %w", err)
@@ -378,6 +405,7 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 	}
 
 	// 模型只引用 Segment.ID；程序负责时间范围解析与证据校验（ADR-0008）
+	w.markRemoteCallStarted(ctx, job)
 	analysis, err := bundle.Analysis.Analyze(payload.Text, payload.Segments)
 	if err != nil {
 		return fmt.Errorf("分析: %w", err)
@@ -452,6 +480,7 @@ func jobSnapshotDepth(ctx context.Context, w *Worker, job *models.ProcessingJob)
 // → SetCurrentVersion 指向新版本。
 // 失败不阻塞主流程（KnowledgeCard 已成功）；Highlight 是可选增强。
 func (w *Worker) doHighlight(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, segments []provider.Segment) error {
+	w.markRemoteCallStarted(ctx, job)
 	raw, err := bundle.Highlight.GenerateHighlights(segments)
 	if err != nil {
 		return fmt.Errorf("生成高光: %w", err)

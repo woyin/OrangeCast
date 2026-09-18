@@ -63,6 +63,7 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	if cp.Draft != nil {
 		draft = cp.Draft
 	} else {
+		w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界（compose）
 		draft, err = bundle.DigestWriter.ComposeDigest(ctx, provider.DigestWritingRequest{
 			SourceTitle:       title,
 			SourceSummary:     summary,
@@ -299,6 +300,7 @@ func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJo
 	}
 	var woven []provider.DigestBlockDraft
 	if len(docs) > 0 {
+		w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界（补织）
 		res, err := bundle.DigestWriter.WeaveDigestFacts(ctx, provider.DigestWeaveRequest{
 			Title: draft.Title, Blocks: blocks, FactGaps: draft.FactGaps, Documents: docs,
 		})
@@ -360,6 +362,7 @@ func documentToDigest(doc *models.Document) provider.DigestDocument {
 
 // digestRewrite 渠道语气版本（F3）：输入只有已过门禁的长文块，产物过格式约束后落库。
 func (w *Worker) digestRewrite(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, digestID, title string, blocks []provider.DigestBlockDraft) error {
+	w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界（渠道语气）
 	res, err := bundle.DigestRewriter.RewriteDigest(ctx, provider.DigestRewriteRequest{
 		Channel: models.DigestChannelXiaohongshu, Blocks: blocks, MaxChars: digestXHSMaxChars, MaxHashtags: digestXHSMaxTags,
 	})

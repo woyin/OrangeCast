@@ -83,11 +83,12 @@ func (s *Store) GetJobExecution(ctx context.Context, jobID string) (*models.Proc
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT COALESCE(intent_id,''), COALESCE(input_snapshot_json,''), COALESCE(config_version,''),
 		        COALESCE(configured_provider,''), COALESCE(configured_model,''),
-		        COALESCE(checkpoint_json,''), COALESCE(result_json,''), COALESCE(result_state,'')
+		        COALESCE(checkpoint_json,''), COALESCE(result_json,''), COALESCE(result_state,''),
+		        COALESCE(remote_call_started,0)
 		 FROM processing_jobs WHERE id = ?`, jobID).
 		Scan(&e.IntentID, &e.InputSnapshotJSON, &e.ConfigVersion,
 			&e.ConfiguredProvider, &e.ConfiguredModel,
-			&e.CheckpointJSON, &e.ResultJSON, &e.ResultState)
+			&e.CheckpointJSON, &e.ResultJSON, &e.ResultState, &e.RemoteCallStarted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -122,6 +123,16 @@ func (s *Store) SaveJobResult(ctx context.Context, jobID, resultJSON, state stri
 		return fmt.Errorf("%w: 任务 %s 不在接受结果的状态", ErrInvalidEditorialState, jobID)
 	}
 	return nil
+}
+
+// MarkJobRemoteCallStarted 持久化任务的远端调用边界（B02/R02-b）：在发起远端
+// 模型调用前调用，崩溃/重启后失败收尾据此区分“调用前失败”与“远端结果未知”；
+// 幂等。仅 running/queued 任务可标记。
+func (s *Store) MarkJobRemoteCallStarted(ctx context.Context, jobID string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET remote_call_started = 1, updated_at = datetime('now') WHERE id = ? AND status IN ('queued','running')`,
+		jobID)
+	return err
 }
 
 // isUniqueConstraintErr 判定是否唯一约束冲突（modernc/sqlite 驱动错误文本）。

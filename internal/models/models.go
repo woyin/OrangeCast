@@ -248,6 +248,7 @@ type ProcessingJobExecution struct {
 	CheckpointJSON     string // 步骤断点
 	ResultJSON         string // 结果与产物身份
 	ResultState        string // '' | complete | unknown
+	RemoteCallStarted  bool   // 已到达远端调用边界（B02/R02-b）：失败收尾据此分类
 }
 
 // ArtifactVersion 不可变产物版本（ADR-0011）：Transcript 或 KnowledgeCard。

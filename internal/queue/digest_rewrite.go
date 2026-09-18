@@ -63,6 +63,7 @@ func (w *Worker) doDigestRewriteJob(ctx context.Context, job *models.ProcessingJ
 		return w.store.SaveJobResult(ctx, job.ID, string(result), models.JobResultComplete)
 	}
 
+	w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界
 	res, err := bundle.DigestRewriter.RewriteDigest(ctx, provider.DigestRewriteRequest{
 		Channel: snapshot.Channel, Blocks: BlocksFromModels(blocks),
 		MaxChars: digestXHSMaxChars, MaxHashtags: digestXHSMaxTags,

@@ -85,6 +85,7 @@ func (w *Worker) doIdeationDiagnosisJob(ctx context.Context, job *models.Process
 		PriorRounds: prior,
 		Materials:   materials,
 	}
+	w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界
 	diag, usage, err := prov.DiagnoseIdeation(ctx, req)
 	if err != nil {
 		_ = w.store.MarkIdeationRoundDiagnosed(ctx, round.ID, "", true)

@@ -95,6 +95,7 @@ func (w *Worker) doKeypointQualityJob(ctx context.Context, job *models.Processin
 			verdict = &pre
 		} else {
 			// 第二层：独立判定（只参考被引用原文；模型不可用则显式失败，不伪装通过）。
+			w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界
 			v, u, err := checker.AssessKeypointQuality(ctx, input)
 			if err != nil {
 				return fmt.Errorf("重点 %s 判定失败: %w", kp.ID, err)
