@@ -28,6 +28,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		srv.handleDownloadMarkdown(w, r)
 		return
 	}
+	if len(rest) >= 2 && rest[0] == "dj" && rest[1] == "plan" {
+		srv.handleDJPlanGenerate(w, r)
+		return
+	}
 	if len(rest) >= 1 && rest[0] == "dj" {
 		srv.handleDJ(w, r)
 		return
@@ -281,84 +285,104 @@ func (srv *Server) handleRevertVersion(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID+"/versions", http.StatusSeeOther)
 }
 
-// handleDJ 渲染 DJ 播放清单页面。
+// handleDJ 渲染 DJ 播放清单页面（R09）：页面读取确切持久化 DJPlan 及其来源快照，
+// 不用"当前高光"冒充清单；旧来源无清单时提供显式生成动作（POST），GET 不触发模型调用。
 func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 	sourceType, sourceID, rest, ok := parseSourcePath(r)
 	if !ok || len(rest) < 1 || rest[0] != "dj" {
 		http.NotFound(w, r)
 		return
 	}
+	plan, err := srv.store.GetLatestDJPlanForSource(r.Context(), sourceType, sourceID)
+	if errors.Is(err, store.ErrNotFound) {
+		// 兼容状态：旧来源无清单（不冒充）。展示生成动作（不触发任何模型调用）。
+		hv := 0
+		if v, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindHighlight); err == nil {
+			hv = v.Version
+		}
+		srv.tmpl.Render(w, "dj.html", map[string]any{
+			"SourceType": string(sourceType), "SourceID": sourceID,
+			"Title": "AI DJ", "PlanExists": false, "HighlightVersion": hv,
+			"CSRF": auth.CSRFValue(r),
+		})
+		return
+	} else if err != nil {
+		http.Error(w, "读取 DJ 清单失败", http.StatusInternalServerError)
+		return
+	}
 
-	// 读取当前 Highlight 版本
+	type djItemView struct {
+		Kind         string // narration | evidence
+		Position     int
+		Text         string // 解说脚本或高光 Gist
+		Start, End   float64
+		NarrationURL string
+		Segments     []string
+		Reason       string
+		HighlightID  string
+	}
+	narrations, _ := srv.store.ListCurrentNarrationsForSource(r.Context(), sourceType, sourceID)
+	items := make([]djItemView, 0, len(plan.Items))
+	for _, it := range plan.Items {
+		v := djItemView{
+			Kind: it.Kind, Position: it.Position, Reason: it.Reason,
+			Start: it.Start, End: it.End, Segments: it.SegmentIDs, HighlightID: it.HighlightID,
+		}
+		switch it.Kind {
+		case models.DJItemNarration:
+			v.Text = it.ScriptText
+			if nar, ok := narrations[it.HighlightID]; ok && (it.NarrationID == "" || it.NarrationID == nar.ID) {
+				v.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + it.HighlightID
+			}
+		case models.DJItemEvidence:
+			v.Text = it.Reason
+		}
+		items = append(items, v)
+	}
+
+	// 页面标题与 Take Aways：来自当前卡片（展示性内容，不充当清单）。
+	var card provider.KnowledgeCard
+	if cv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
+		json.Unmarshal([]byte(cv.Payload), &card)
+	}
+	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
+	srv.tmpl.Render(w, "dj.html", map[string]any{
+		"SourceType":  string(sourceType),
+		"SourceID":    sourceID,
+		"Title":       card.Title,
+		"Items":       items,
+		"KeyPoints":   card.KeyPoints,
+		"AudioURL":    audioURL,
+		"PlanExists":  true,
+		"PlanVersion": plan.Version,
+		"PlanTotal":   plan.TotalSeconds,
+		// D07：高光版本作为进度身份（恢复只在版本可映射时迁移位置）。
+		"HighlightVersion": plan.HighlightVersion,
+		"CSRF":             auth.CSRFValue(r),
+	})
+}
+
+// handleDJPlanGenerate 为旧来源显式生成 DJ 清单任务（POST；GET 不触发模型调用）。
+func (srv *Server) handleDJPlanGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sourceType, sourceID, rest, ok := parseSourcePath(r)
+	if !ok || len(rest) < 2 || rest[0] != "dj" || rest[1] != "plan" {
+		http.NotFound(w, r)
+		return
+	}
 	hv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindHighlight)
 	if err != nil {
 		http.Error(w, "尚无高光片段，请先完成处理", http.StatusNotFound)
 		return
 	}
-	var hs provider.HighlightSet
-	if err := json.Unmarshal([]byte(hv.Payload), &hs); err != nil {
-		http.Error(w, "高光数据损坏", http.StatusInternalServerError)
+	if _, err := srv.store.EnqueueDJPlanJob(r.Context(), sourceType, sourceID, hv.Version, 0); err != nil {
+		http.Error(w, "入队 DJ 清单任务失败："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// 读取当前 Transcript（用于解析 Citation 时间范围）
-	tv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
-	if err != nil {
-		http.Error(w, "尚无转录稿", http.StatusNotFound)
-		return
-	}
-	var tp provider.TranscriptPayload
-	if err := json.Unmarshal([]byte(tv.Payload), &tp); err != nil {
-		http.Error(w, "转录数据损坏", http.StatusInternalServerError)
-		return
-	}
-
-	// 读取 KnowledgeCard（结尾 Take Aways = KeyPoints）
-	var card provider.KnowledgeCard
-	if cv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
-		json.Unmarshal([]byte(cv.Payload), &card)
-	}
-
-	// 构造播放清单：每个 Highlight 解析时间范围
-	type highlightView struct {
-		HighlightID  string
-		Gist         string
-		Start        float64
-		End          float64
-		Citations    []string
-		Segments     []string // D08：段落 ID（收藏/理解锚定）
-		NarrationURL string   // 当前 Narration wav 的 URL；空=未生成（前端跳过+显示标记）
-	}
-	narrations, _ := srv.store.ListCurrentNarrationsForSource(r.Context(), sourceType, sourceID)
-	var highlights []highlightView
-	for _, h := range hs.Highlights {
-		start, end, ok := provider.ResolveCitationSpan(h.Citations, tp.Segments)
-		if !ok {
-			continue
-		}
-		hv := highlightView{
-			HighlightID: h.ID, Gist: h.Gist, Start: start, End: end, Citations: h.Citations,
-			Segments: h.Citations,
-		}
-		if nar, ok := narrations[h.ID]; ok {
-			hv.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + h.ID
-			_ = nar
-		}
-		highlights = append(highlights, hv)
-	}
-
-	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
-	srv.tmpl.Render(w, "dj.html", map[string]any{
-		"SourceType": string(sourceType),
-		"SourceID":   sourceID,
-		"Title":      card.Title,
-		"Highlights": highlights,
-		"KeyPoints":  card.KeyPoints,
-		"AudioURL":   audioURL,
-		// D07：高光版本作为 DJ 清单身份（进度恢复只在版本可映射时迁移位置）。
-		"HighlightVersion": hv.Version,
-		"CSRF":             auth.CSRFValue(r),
-	})
+	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID+"/dj", http.StatusSeeOther)
 }
 
 func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {

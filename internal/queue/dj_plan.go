@@ -290,24 +290,7 @@ func (w *Worker) frozenSegments(ctx context.Context, job *models.ProcessingJob, 
 }
 
 // EnqueueDJPlanJob 入队 DJ 清单编排任务（冻结高光版本与目标时长）。
+// 意图与快照构造统一在 store 层（worker 链接与页面生成动作共用）。
 func (w *Worker) EnqueueDJPlanJob(ctx context.Context, sourceType models.SourceType, sourceID string, highlightVersion int, targetSeconds float64) (*models.ProcessingJob, error) {
-	snapshot, err := json.Marshal(map[string]any{
-		"highlight_version": highlightVersion,
-		"target_seconds":    targetSeconds,
-	})
-	if err != nil {
-		return nil, err
-	}
-	job, created, err := w.store.EnqueueJobIdempotent(ctx, store.JobIntentSpec{
-		SourceType: sourceType, SourceID: sourceID, JobType: models.JobDJPlan,
-		IntentID:          fmt.Sprintf("dj_plan:%s:%s:hv%d:%v", sourceType, sourceID, highlightVersion, targetSeconds),
-		InputSnapshotJSON: string(snapshot),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !created {
-		return nil, nil
-	}
-	return job, nil
+	return w.store.EnqueueDJPlanJob(ctx, sourceType, sourceID, highlightVersion, targetSeconds)
 }

@@ -33,20 +33,41 @@
 <p class="meta" id="dj-progress" aria-live="polite"></p>
 
 <div id="playlist" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-plan-version="{{.HighlightVersion}}">
-{{range $i, $h := .Highlights}}
-<div class="dj-item" data-idx="{{$i}}" data-start="{{$h.Start}}" data-end="{{$h.End}}" data-narration="{{$h.NarrationURL}}" data-highlight-id="{{$h.HighlightID}}" data-segments="{{$h.Segments}}">
+{{if .PlanExists}}
+<p class="meta">清单 v{{.PlanVersion}} · 预计总时长约 {{formatTime .PlanTotal}}（目标时长、段落顺序与选择理由以持久化清单为准）</p>
+{{range .Items}}
+{{if eq .Kind "evidence"}}
+<div class="dj-item" data-start="{{.Start}}" data-end="{{.End}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}" data-segments="{{.Segments}}">
   <div class="dj-gist">
-    <strong>高光 {{$i}}</strong>（{{formatTime $h.Start}} – {{formatTime $h.End}}）
-    {{if not $h.NarrationURL}}<span class="narration-missing" style="color:var(--muted);font-size:0.8rem"> · AI 解说未生成</span>{{end}}
-    <p>{{$h.Gist}}</p>
+    <strong>原音 {{.Position}}</strong>（{{formatTime .Start}} – {{formatTime .End}}）
+    {{if .Reason}}<span class="meta">· {{.Reason}}</span>{{end}}
   </div>
   <div class="dj-controls">
-    {{if $h.NarrationURL}}<button class="btn dj-narration-play" data-narration="{{$h.NarrationURL}}" type="button">🎧 试听 AI 解说</button>{{end}}
-    <button class="btn dj-play" data-start="{{$h.Start}}" data-end="{{$h.End}}" type="button">▶ 播放这段原音</button>
+    <button class="btn dj-play" data-start="{{.Start}}" data-end="{{.End}}" type="button">▶ 播放这段原音</button>
   </div>
 </div>
 {{else}}
-<p class="empty">无高光片段。</p>
+<div class="dj-item dj-script-item" data-kind="narration" data-position="{{.Position}}">
+  <div class="dj-gist">
+    <strong>AI 解说 {{.Position}}</strong>
+    {{if .Reason}}<span class="meta">· {{.Reason}}</span>{{end}}
+    <p>{{.Text}}</p>
+  </div>
+  <div class="dj-controls">
+    {{if .NarrationURL}}<button class="btn dj-narration-play" data-narration="{{.NarrationURL}}" type="button">🎧 试听 AI 解说</button>{{else}}<span class="narration-missing meta">AI 解说未生成（将播放原音）</span>{{end}}
+  </div>
+</div>
+{{end}}
+{{else}}
+<p class="empty">清单为空。</p>
+{{end}}
+{{else}}
+<p class="empty">该来源尚无 DJ 清单（旧来源兼容）。处理完成后可显式生成一份播放清单。</p>
+<form method="post" action="/sources/{{.SourceType}}/{{.SourceID}}/dj/plan">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <button class="btn" type="submit" {{if not .HighlightVersion}}disabled{{end}}>生成 DJ 清单</button>
+  {{if not .HighlightVersion}}<span class="meta">尚无高光片段，请先完成处理。</span>{{end}}
+</form>
 {{end}}
 </div>
 

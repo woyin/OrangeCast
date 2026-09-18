@@ -72,6 +72,45 @@ func (s *Store) GetCurrentDJPlan(ctx context.Context, sourceType models.SourceTy
 	return s.GetDJPlan(ctx, id)
 }
 
+// GetLatestDJPlanForSource 读取该来源最新一份清单（任意高光版本）；无则 ErrNotFound。
+func (s *Store) GetLatestDJPlanForSource(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.DJPlan, error) {
+	var id string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id FROM dj_plans WHERE source_type=? AND source_id=? ORDER BY created_at DESC, version DESC LIMIT 1`,
+		string(sourceType), sourceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetDJPlan(ctx, id)
+}
+
+// EnqueueDJPlanJob 入队 DJ 清单编排任务（冻结高光版本与目标时长）；
+// worker 与页面生成动作共用同一幂等意图，重复请求不重复入队。
+func (s *Store) EnqueueDJPlanJob(ctx context.Context, sourceType models.SourceType, sourceID string, highlightVersion int, targetSeconds float64) (*models.ProcessingJob, error) {
+	snapshot, err := json.Marshal(map[string]any{
+		"highlight_version": highlightVersion,
+		"target_seconds":    targetSeconds,
+	})
+	if err != nil {
+		return nil, err
+	}
+	job, created, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{
+		SourceType: sourceType, SourceID: sourceID, JobType: models.JobDJPlan,
+		IntentID:          fmt.Sprintf("dj_plan:%s:%s:hv%d:%v", sourceType, sourceID, highlightVersion, targetSeconds),
+		InputSnapshotJSON: string(snapshot),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		return nil, nil
+	}
+	return job, nil
+}
+
 // GetDJPlan 读取清单及全部条目（按 position 排序）。
 func (s *Store) GetDJPlan(ctx context.Context, id string) (*models.DJPlan, error) {
 	plan := &models.DJPlan{}

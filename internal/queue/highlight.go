@@ -94,6 +94,11 @@ func (w *Worker) doHighlightJob(ctx context.Context, job *models.ProcessingJob, 
 		if _, err := w.EnqueueNarrationJobForVersion(ctx, job.SourceType, job.SourceID, version, "", "", ""); err != nil {
 			log.Printf("任务 %s 衔接解说任务失败: %v", job.ID, err)
 		}
+		// R09：knowledge_dj 深度（手动或自动）高光就绪后幂等衔接 DJ 清单编排；
+		// 清单任务冻结刚产出的高光版本，队列顺序保证解说先于编排可用（无解说也可编排）。
+		if _, err := w.store.EnqueueDJPlanJob(ctx, job.SourceType, job.SourceID, version, 0); err != nil {
+			log.Printf("任务 %s 衔接 DJ 清单任务失败: %v", job.ID, err)
+		}
 	}
 	result, _ := json.Marshal(map[string]any{"highlight_version": version, "transcript_version": snapshot.TranscriptVersion})
 	return w.store.SaveJobResult(ctx, job.ID, string(result), models.JobResultComplete)

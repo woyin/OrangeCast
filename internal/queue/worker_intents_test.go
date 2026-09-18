@@ -292,8 +292,9 @@ func TestPipeline_KnowledgeDJDepthChainsFullDJ(t *testing.T) {
 	if _, err := s.EnqueueIngestionJobWithSnapshot(ctx, models.SourceUpload, up.ID, models.JobTranscribe, `{"processing_depth":"knowledge_dj"}`); err != nil {
 		t.Fatal(err)
 	}
-	// R05：质量判定是分析后的独立衔接任务，排在解说之前但不阻塞 DJ（共 5 步）。
-	for i := 0; i < 5; i++ {
+	// R05/R09：质量判定与 DJ 清单是分析/高光后的独立衔接任务（共 6 步：转录→
+	// 分析→质量→高光→解说→DJ 清单）。
+	for i := 0; i < 6; i++ {
 		if err := w.ProcessOne(ctx); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
@@ -307,6 +308,23 @@ func TestPipeline_KnowledgeDJDepthChainsFullDJ(t *testing.T) {
 	rows, err := s.ListCurrentNarrationsForSource(ctx, models.SourceUpload, up.ID)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("解说应就绪: %v %+v", err, rows)
+	}
+	// R09：knowledge_dj 入口应产出可播放的持久化清单（非当前高光冒充）。
+	plan, err := s.GetLatestDJPlanForSource(ctx, models.SourceUpload, up.ID)
+	if err != nil {
+		t.Fatalf("knowledge_dj 应产出 DJ 清单: %v", err)
+	}
+	if plan.HighlightVersion == 0 || len(plan.Items) == 0 {
+		t.Fatalf("清单应含高光版本与条目: %+v", plan)
+	}
+	hasEvidence := false
+	for _, it := range plan.Items {
+		if it.Kind == models.DJItemEvidence {
+			hasEvidence = true
+		}
+	}
+	if !hasEvidence {
+		t.Fatalf("清单应含可播放原音项: %+v", plan.Items)
 	}
 }
 

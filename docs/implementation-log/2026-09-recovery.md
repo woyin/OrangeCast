@@ -168,3 +168,18 @@
   - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go test -race -run TestDigest ./internal/queue/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、构建通过。
 - 提交：`fix(digests): resume search and composition from checkpoints`。
 - 限制：渠道改写若在 Provider 响应后、落库前崩溃，重试会再调用一次 Provider（结果未知保守重试一次，落库由 Upsert 幂等兜底）；响应级缓存（先缓存后提交）属 R19 Writer 契约，如需可回移。
+
+## R09 — DJPlan 接入真实生产流程
+
+- 状态：实现与自动验证完成（页面交互细节待 R25 浏览器验收）。
+- 交付：
+  - 生产编排：`queue/highlight.go`——knowledge_dj 深度（手动或自动）高光持久化成功后，幂等衔接 DJ 清单任务（冻结刚产出的高光版本）；`knowledge` 深度不衔接（不生成 DJ）。清单任务在队列中位于解说之后，解说可用时清单使用真实时长；无解说也能编排（Gist 脚本估计时长，页面标注）。
+  - 入队统一：`store/dj_plans.go` 新增 `EnqueueDJPlanJob`（幂等意图 `dj_plan:<source>:hv<N>:<target>`）与 `GetLatestDJPlanForSource`；worker 链接与页面生成动作共用。
+  - 页面消费：`server/source_handlers.go` `handleDJ` 重写——只渲染持久化清单及其条目（含目标时长、顺序、选择理由、逐项 Start/End/SegmentIDs），不再用"当前高光"冒充清单；页面也不再解析当前转录/高光载荷（原始数据损坏不再 500）。旧来源无清单 → 显式兼容状态 + POST `/sources/<t>/<id>/dj/plan` 生成动作（幂等入队）；GET 不触发模型调用。
+  - `templates/dj.html`：按清单条目渲染（evidence 行保留播放器 JS 契约 data-start/end/segments；narration 行显示脚本与试听入口）；无清单渲染生成表单。
+- 验证：
+  - `TestPipeline_KnowledgeDJDepthChainsFullDJ` 扩展：knowledge_dj 全链路 6 步（转录→分析→质量→高光→解说→DJ 清单）后存在含 evidence 项的持久化清单；`TestPipeline_KnowledgeDepthStopsAfterKeyPoints` 验证 knowledge 深度不生成 DJ。
+  - `TestDJRenders_WithNarrationURLs`、`TestDJBriefCaptureButtons` 等以持久化清单驱动重写；新增 `TestDJ_NoPlan_ShowsGenerateAction`（有高光无清单 → 可用生成动作，POST 幂等入队；无清单不冒充高光）；`TestDJ_NoHighlight_404`、`TestDJ_TranscriptMissing_404`、`TestDJ_CorruptHighlight_500`、`TestDJ_CorruptTranscript_500` 按新契约更新为兼容状态断言（旧契约依赖"当前高光即清单"，属本轮替代的错误契约）。
+  - `go test -timeout 40m ./internal/queue/ ./internal/server/ ./internal/store/` 全部通过；race（Pipeline/DJ/Digest）通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
+- 提交：`fix(dj): enqueue and render persisted listening plans`。
+- 限制：旧清单的转录冻结段由 `frozenSegments` 兼容读取（无快照记录回退当前版本——旧任务语义，已在卡内标注）；清单项的解说音频真正进入播放队列属 R10；进度恢复契约（D07/D08）属 R11。

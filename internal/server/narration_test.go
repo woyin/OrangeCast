@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,22 @@ func seedHighlightAndNarration(t *testing.T, srv *Server, sourceID string) (stri
 	wavPath := filepath.Join(srv.cfg.NarrationDir, rel)
 	os.WriteFile(wavPath, []byte("fake-wav-content"), 0o644)
 	srv.store.CreateNarration(ctx, models.SourceEpisode, sourceID, "hl-a", "af_heart", "kokoro-82m", rel, 1.5, 10, "kokoro")
+
+	// R09：同时持久化一份 DJ 清单（页面以清单为唯一事实来源，不冒充当前高光）。
+	plan := &models.DJPlan{
+		SourceType: models.SourceEpisode, SourceID: sourceID, HighlightVersion: v,
+		TargetSeconds: 3600, TotalSeconds: 40,
+		Items: []models.DJPlanItem{
+			{Kind: models.DJItemNarration, ScriptKind: "intro", ScriptText: "开场脚本", EstSeconds: 4, Reason: "开场：说明本集与精听范围（AI 解说）"},
+			{Kind: models.DJItemEvidence, HighlightID: "hl-a", SegmentIDs: []string{"seg-0001", "seg-0002"}, Start: 0, End: 10, EstSeconds: 10, Reason: "原顺序纳入；上下文完整（连续区间）"},
+			{Kind: models.DJItemNarration, HighlightID: "hl-a", ScriptKind: "gist", ScriptText: "第一个高光解说", EstSeconds: 8, Reason: "高光 Gist 解说"},
+			{Kind: models.DJItemEvidence, HighlightID: "hl-b", SegmentIDs: []string{"seg-0003"}, Start: 10, End: 15, EstSeconds: 5, Reason: "原顺序纳入；上下文完整（连续区间）"},
+			{Kind: models.DJItemNarration, HighlightID: "hl-b", ScriptKind: "gist", ScriptText: "第二个高光解说", EstSeconds: 8, Reason: "高光 Gist 解说（估计时长）"},
+		},
+	}
+	if _, err := srv.store.CreateDJPlan(ctx, plan); err != nil {
+		t.Fatalf("seed DJ plan: %v", err)
+	}
 	return rel, wavPath
 }
 
@@ -140,10 +157,62 @@ func TestDJ_NoHighlight_404(t *testing.T) {
 	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
 	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
 	sourceID := eps[0].ID
-	// 不写 Highlight 版本 → DJ 页 404
+	// 不写 Highlight 版本 → DJ 页 200 + 显式兼容状态（生成动作禁用），不 404 也不触发模型调用。
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("无高光应 404，实际 %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("无清单应 200 兼容状态，实际 %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "生成 DJ 清单") || !strings.Contains(body, "disabled") {
+		t.Error("无高光来源应显示禁用的生成动作")
+	}
+}
+
+// TestDJ_NoPlan_ShowsGenerateAction R09：旧来源（有高光、无清单）显示可用的生成动作。
+func TestDJ_NoPlan_ShowsGenerateAction(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djgen@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
+	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID,
+		`{"highlights":[{"id":"hl-a","gist":"g","citations":["seg-0001"]}]}`)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("应 200，实际 %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "生成 DJ 清单") || strings.Contains(body, `type="submit" disabled`) {
+		t.Error("有高光无清单的来源应显示可用的生成动作")
+	}
+	if strings.Contains(body, "第一个高光解说") {
+		t.Error("无清单时不得用当前高光冒充清单")
+	}
+	// POST 生成 → 幂等入队并跳回 DJ 页（携带会话与 CSRF）。
+	csrf := strings.Split(cookie.Value, ":")[0]
+	req := httptest.NewRequest(http.MethodPost, "/sources/episode/"+sourceID+"/dj/plan", strings.NewReader("_csrf="+csrf))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusSeeOther {
+		t.Fatalf("生成动作应 303，实际 %d", rec2.Code)
+	}
+	jobs, _ := srv.store.ListQueuedOrRunning(ctx)
+	found := false
+	for _, j := range jobs {
+		if j.JobType == models.JobDJPlan {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("生成动作应入队 DJ 清单任务")
 	}
 }
 
@@ -157,15 +226,15 @@ func TestDJ_TranscriptMissing_404(t *testing.T) {
 	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
 	sourceID := eps[0].ID
 
-	// 只写高光版本，不写转录稿
+	// 只写高光版本，不写转录稿，也不写清单 → 兼容状态 200（清单页不依赖当前转录）。
 	job, _ := srv.store.EnqueueJob(ctx, models.SourceEpisode, sourceID, models.JobAnalyze)
 	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID,
 		`{"highlights":[{"id":"hl-a","gist":"g","citations":["seg-0001"]}]}`)
 	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
 
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("无转录稿应 404，实际 %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("无清单应 200 兼容状态，实际 %d", rec.Code)
 	}
 }
 
@@ -179,7 +248,8 @@ func TestDJ_BadPath_404(t *testing.T) {
 	}
 }
 
-// TestDJ_CorruptHighlight_500 验证高光载荷损坏时 DJ 页返回 500。
+// TestDJ_CorruptHighlight_NoLeak R09：清单页不读当前高光载荷——原始高光损坏
+// 不影响已持久化清单的渲染（也不再 500）。
 func TestDJ_CorruptHighlight_500(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "djch@example.com", "password123")
@@ -193,13 +263,15 @@ func TestDJ_CorruptHighlight_500(t *testing.T) {
 	hv, _ := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, "groq", "m", "1", job.ID, `{bad json`)
 	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindHighlight, hv)
 
+	// 无清单 → 兼容状态；不得因原始高光损坏而 500。
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("高光载荷损坏应 500，实际 %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("损坏高光不应导致 500，实际 %d", rec.Code)
 	}
 }
 
-// TestDJ_CorruptTranscript_500 验证转录载荷损坏时 DJ 页返回 500。
+// TestDJ_CorruptTranscript_Compat R09：清单页不解析当前转录载荷（时间范围已在
+// 清单项冻结）——损坏转录不再导致 500，页面按清单渲染或进入兼容状态。
 func TestDJ_CorruptTranscript_500(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "djct@example.com", "password123")
@@ -217,8 +289,8 @@ func TestDJ_CorruptTranscript_500(t *testing.T) {
 	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, sourceID, store.KindTranscript, tv)
 
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("转录载荷损坏应 500，实际 %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("转录载荷损坏不应导致 500，实际 %d", rec.Code)
 	}
 }
 
