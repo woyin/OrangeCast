@@ -103,8 +103,9 @@ func (s *Store) OwnerMonthlyUsageCents(ctx context.Context) (int64, error) {
 
 // HoldBudget 任务领取后的调用前预占（B04）：
 //  1. 自动任务受单日数量上限约束；
-//  2. 已配置预算时，模型必须有价格（否则配置缺口）；
-//  3. 已知用量 + 在途预估 + 本次预估不得超过预算；并发预占由事务串行化保证。
+//  2. 已配置预算时，模型必须有价格（否则配置缺口，unknown 不伪装为零成本）；
+//  3. 同一事务内判断已知用量 + 有效在途预占 + 本次预估之和：恰好等于上限可执行，
+//     超过则拒绝；并发预占由事务串行化保证。
 //
 // 预算未配置时不预占（记录 nil 语义），行为与旧路径一致。
 func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automated bool, providerName, model string, estimateUnitsIn, estimateUnitsOut int) (*models.BudgetReservation, error) {
@@ -141,6 +142,9 @@ func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automat
 		}
 		return nil, err
 	}
+	if estimateUnitsIn < 0 || estimateUnitsOut < 0 {
+		return nil, fmt.Errorf("%w: 预估单位不能为负 (%d, %d)", ErrInvalidEditorialState, estimateUnitsIn, estimateUnitsOut)
+	}
 	estimate, known, err := s.ResolveUsageCost(ctx, providerName, model, estimateUnitsIn, estimateUnitsOut)
 	if err != nil {
 		return nil, err
@@ -170,8 +174,8 @@ func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automat
 		return nil, err
 	}
 	total := editorial.Int64 + usage.Int64 + held.Int64
-	if total >= *budget {
-		return nil, fmt.Errorf("%w: 当月已计 %d 分 + 在途预估，达到预算 %d 分", ErrBudgetExhausted, total, *budget)
+	if total+estimate > *budget {
+		return nil, fmt.Errorf("%w: 当月已计 %d 分 + 在途预估 + 本次预估 %d 分，超过预算 %d 分", ErrBudgetExhausted, total, estimate, *budget)
 	}
 	res := &models.BudgetReservation{
 		ID: uuid.NewString(), JobID: jobID, Operation: operation,
@@ -188,8 +192,11 @@ func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automat
 	return res, nil
 }
 
-// SettleBudget 任务完成后以实际费用结算（替换 held 预估）。
+// SettleBudget 任务完成后以实际费用结算（替换 held 预估）；实际费用不能为负。
 func (s *Store) SettleBudget(ctx context.Context, jobID string, actualCents int64) error {
+	if actualCents < 0 {
+		return fmt.Errorf("%w: 实际费用不能为负", ErrInvalidEditorialState)
+	}
 	res, err := s.getReservationByJob(ctx, jobID)
 	if err != nil {
 		return err

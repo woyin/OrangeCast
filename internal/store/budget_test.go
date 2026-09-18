@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -40,40 +41,76 @@ func TestHoldBudget_UnpricedBlocksAutomated(t *testing.T) {
 	}
 }
 
-// TestHoldBudget_Exhausted 预算不足（含在途预估）拒绝新任务；释放后可再次预占。
+// TestHoldBudget_Exhausted 本次预估计入限额：恰好等于上限可执行，超过则拒绝；释放后可再次预占。
 func TestHoldBudget_Exhausted(t *testing.T) {
 	s := newTestStore(t)
+	ctx := t.Context()
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
+		t.Fatal(err)
+	}
+	// 5 分预算拒绝 1000 分预估：本次预占未计入时旧实现会放行。
 	budget := int64(5)
-	if err := s.SetOwnerMonthlyBudget(t.Context(), &budget); err != nil {
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetModelPrice(t.Context(), models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1000, OutputCentsPerMillion: 0}); err != nil {
+	if _, err := s.HoldBudget(ctx, "job-big", "analyze", false, "groq", "m", 1_000_000_000, 0); !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("5 分预算应拒绝 1000 分预估: %v", err)
+	}
+	n, err := s.countHeldReservations(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.HoldBudget(t.Context(), "job-1", "analyze", false, "groq", "m", 1_000_000, 0); err != nil {
+	if n != 0 {
+		t.Fatalf("被拒绝的预占不应落库: held=%d", n)
+	}
+	// 恰好等于上限：5 分预算允许 5 分首次预占。
+	res, err := s.HoldBudget(ctx, "job-1", "analyze", false, "groq", "m", 5_000_000, 0)
+	if err != nil || res == nil || res.EstimatedCostCents != 5 {
+		t.Fatalf("恰好等于上限应可预占: %+v %v", res, err)
+	}
+	// 已计 5 分 + 新预占 1 分超过 5 分预算：拒绝。
+	if _, err := s.HoldBudget(ctx, "job-2", "analyze", false, "groq", "m", 1_000_000, 0); !errors.Is(err, ErrBudgetExhausted) {
+		t.Fatalf("超出预算应拒绝: %v", err)
+	}
+	// 释放 job-1 后可再次预占。
+	if err := s.ReleaseBudget(ctx, "job-1", false); err != nil {
 		t.Fatal(err)
 	}
-	// 5 分预算已被 1 分 hold + 剩余不足 → 第二个 5 分预估被拒
-	if _, err := s.HoldBudget(t.Context(), "job-2", "analyze", false, "groq", "m", 5_000_000, 0); !errors.Is(err, ErrBudgetExhausted) {
-		t.Fatalf("预算不足应拒绝: %v", err)
-	}
-	// 释放 job-1 后可预占
-	if err := s.ReleaseBudget(t.Context(), "job-1", false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.HoldBudget(t.Context(), "job-2", "analyze", false, "groq", "m", 5_000_000, 0); err != nil {
+	if _, err := s.HoldBudget(ctx, "job-2", "analyze", false, "groq", "m", 5_000_000, 0); err != nil {
 		t.Fatalf("释放后应可预占: %v", err)
 	}
 }
 
-// TestHoldBudget_Concurrent 并发预占不能忽略在途预估：总预估不得超过预算。
+// TestHoldBudget_NegativeUnits 预估单位为负是无效输入，不能借负费用扩大预算空间。
+func TestHoldBudget_NegativeUnits(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	budget := int64(1000)
+	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1000, OutputCentsPerMillion: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-neg", "analyze", false, "groq", "m", -1_000_000, 0); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("负预估单位应拒绝: %v", err)
+	}
+	if _, err := s.HoldBudget(ctx, "job-neg", "analyze", false, "groq", "m", 0, -1); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatalf("负输出预估单位应拒绝: %v", err)
+	}
+	if err := s.SettleBudget(ctx, "no-such-job", -5); err == nil {
+		t.Fatal("负实际费用应拒绝结算")
+	}
+}
+
+// TestHoldBudget_Concurrent 并发预占不能忽略在途预估与本次预估：总预估不得超过预算。
 func TestHoldBudget_Concurrent(t *testing.T) {
 	s := newTestStore(t)
 	budget := int64(10)
 	if err := s.SetOwnerMonthlyBudget(t.Context(), &budget); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetModelPrice(t.Context(), models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1000, OutputCentsPerMillion: 0}); err != nil {
+	if err := s.SetModelPrice(t.Context(), models.ModelPrice{Provider: "groq", Model: "m", InputCentsPerMillion: 1, OutputCentsPerMillion: 0}); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -97,6 +134,16 @@ func TestHoldBudget_Concurrent(t *testing.T) {
 	if held > 10 {
 		t.Fatalf("并发预占突破预算上限: held=%d budget=10", held)
 	}
+	if held == 0 {
+		t.Fatal("额度内的预占不应被拒绝")
+	}
+	total, err := s.OwnerMonthlyUsageCents(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total > 10 {
+		t.Fatalf("账面总额超出预算: %d", total)
+	}
 }
 
 // TestOwnerMonthlyUsageCents_Aggregates 学习、digest（无画像）与在途预估都进入月度汇总。
@@ -111,8 +158,8 @@ func TestOwnerMonthlyUsageCents_Aggregates(t *testing.T) {
 	if _, err := s.RecordEditorialUsage(ctx, models.EditorialUsageRecord{TaskKind: "digest_compose", EntityID: "d1", Provider: "groq", Model: "m", PromptVersion: "v", CostCents: 4}); err != nil {
 		t.Fatal(err)
 	}
-	// 在途 hold 2 分
-	budget := int64(100)
+	// 在途 hold 2000 分（预算须覆盖本次预估才会获准）
+	budget := int64(5000)
 	if err := s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
 		t.Fatal(err)
 	}
@@ -348,4 +395,13 @@ func TestListeningProgress_PurgeCascade(t *testing.T) {
 	if _, err := s.GetListeningProgress(ctx, models.SourceEpisode, epID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("来源删除后进度应删除: %v", err)
 	}
+}
+
+func (s *Store) countHeldReservations(ctx context.Context) (int, error) {
+	var n int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM budget_reservations WHERE status = 'held'`).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
