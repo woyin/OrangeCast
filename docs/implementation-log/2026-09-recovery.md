@@ -183,3 +183,19 @@
   - `go test -timeout 40m ./internal/queue/ ./internal/server/ ./internal/store/` 全部通过；race（Pipeline/DJ/Digest）通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
 - 提交：`fix(dj): enqueue and render persisted listening plans`。
 - 限制：旧清单的转录冻结段由 `frozenSegments` 兼容读取（无快照记录回退当前版本——旧任务语义，已在卡内标注）；清单项的解说音频真正进入播放队列属 R10；进度恢复契约（D07/D08）属 R11。
+
+## R10 — 开场、过渡、收尾真正进入音频队列
+
+- 状态：实现与自动验证完成（本地 TTS 真机真实 wav 听感验收待 R25/R26，需本地 Kokoro 环境）。
+- 交付：
+  - `queue/narration.go`：`synthesizePlanScripts`——解说任务在 gist 合成后，为最新 DJ 清单的脚本项目（开场/过渡/收尾/无真实解说的 Gist）按计划身份数成音频：伪 ID `plan:<planID>:p<position>` 绑定确切计划版本与位置；缓存身份含脚本文本指纹+计划版本+伪 ID（脚本指纹），重试不重合成；单项失败不阻塞其余项（checkpoint 可见）。音频仍写入 narrationDir、走独立 narration 播放元素——不进入 EvidenceAudio、不作引用证据。
+  - `server/source_handlers.go`（handleDJ）：脚本项目解说 URL 解析优先 `plan:<id>:p<pos>` 身份，回退高光真实解说；旧计划音频不被新计划覆盖（新计划新伪 ID 独立版本化，旧行不动）。
+  - `templates/dj.html`：脚本项目携带 `data-kind="narration"` 与 `data-narration`；`buildItems` 按 kind 分派——脚本项有音频则按计划顺序入播放队列，无音频跳过（部分失败仍连播原音），AI 解说与原音持续区分。
+  - 复用现有 TTS 配置与缓存（CreateNarrationCached / GetNarrationByCacheKey），无新增迁移（计划绑定经伪 ID + 缓存身份持久化于 narrations 表）。
+- 验证：
+  - `TestNarrationTask_SynthesizesPlanScripts`：2 gist + 2 脚本产出；指纹命中不重复合成；新计划（同高光版本）脚本独立合成且旧计划音频保留。
+  - `TestNarrationTask_ScriptPartialFailure`：任务级成功、脚本项目合成成功、原音不受影响。
+  - `TestDJ_ScriptItemsCarryNarrationURL`（server，真实路由）：脚本项目渲染计划绑定 URL 与 AI 解说身份标注。
+  - `go test ./...` 全部通过；race（Narration/DJ）通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
+- 提交：`feat(dj): play versioned intro transition and outro narration`。
+- 限制：过渡脚本中的 AnchorHighlightID 尚未用于 D08 锚定增强；合成请求与播放项目一致性、部分失败连播的浏览器交互验证属 R25；本地 TTS 真实 wav 听感属外部验收。

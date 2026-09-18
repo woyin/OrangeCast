@@ -256,3 +256,137 @@ func TestNarrationTask_DoesNotRerunHighlights(t *testing.T) {
 		t.Fatalf("解说执行不得重跑高光: %d", n)
 	}
 }
+
+// TestNarrationTask_SynthesizesPlanScripts R10：DJ 清单的脚本项目（开场/过渡/收尾）
+// 以计划身份数成音频（plan:<id>:p<pos> 伪 ID），缓存含脚本指纹——重试不重复合成；
+// 旧计划音频不被新计划覆盖（新计划伪 ID 独立）。
+func TestNarrationTask_SynthesizesPlanScripts(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedCurrentHighlight(t, s, models.SourceEpisode, sourceID, twoHighlights())
+	const hv = 1 // seedCurrentHighlight 首次写入即版本 1
+	completeSeedJobs(t, s)
+
+	plan, err := s.CreateDJPlan(ctx, &models.DJPlan{
+		SourceType: models.SourceEpisode, SourceID: sourceID, HighlightVersion: hv,
+		TargetSeconds: 600, TotalSeconds: 60,
+		Items: []models.DJPlanItem{
+			{Kind: models.DJItemNarration, ScriptKind: "intro", ScriptText: "欢迎收听本期节目", EstSeconds: 4},
+			{Kind: models.DJItemEvidence, HighlightID: "hl-a", SegmentIDs: []string{"seg-0001"}, Start: 0, End: 5, EstSeconds: 5},
+			{Kind: models.DJItemNarration, HighlightID: "hl-a", ScriptKind: "gist", EstSeconds: 8}, // 已有真实解说：无脚本文本，不重复合成
+			{Kind: models.DJItemNarration, ScriptKind: "outro", ScriptText: "感谢收听，记得记笔记", EstSeconds: 4},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nar := &taskNarration{available: true}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Narration: nar}, nil
+	}
+	job, err := w.EnqueueNarrationJob(ctx, models.SourceEpisode, sourceID, "", "zh")
+	if err != nil || job == nil {
+		t.Fatalf("入队失败: %v %v", job, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("解说任务失败: %v", err)
+	}
+	rows, err := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 高光 gist 2 段 + 脚本 2 段（intro/outro）；gist 清单项已有真实解说音频（ScriptText 为空）不重复合成。
+	if len(rows) != 4 {
+		t.Fatalf("应产出 4 段解说（2 gist + 2 脚本）: %d %+v", len(rows), rows)
+	}
+	introKey := planScriptItemID(plan.ID, 1)
+	if _, ok := rows[introKey]; !ok {
+		t.Fatalf("开场脚本应有计划绑定音频: %+v", rows)
+	}
+	outroKey := planScriptItemID(plan.ID, 4)
+	if _, ok := rows[outroKey]; !ok {
+		t.Fatalf("收尾脚本应有计划绑定音频: %+v", rows)
+	}
+	// 指纹复用：再次执行不重复合成（calls 不增加 gist 之外的量）。
+	before := nar.calls
+	job2, err := w.EnqueueNarrationJob(ctx, models.SourceEpisode, sourceID, "", "zh")
+	if err != nil || job2 == nil {
+		t.Fatalf("重试入队失败: %v %v", job2, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if nar.calls != before {
+		t.Fatalf("脚本指纹命中后不得重复合成: %d → %d", before, nar.calls)
+	}
+	// 新计划（同高光版本、新 plan ID）使用新伪 ID，不覆盖旧音频。
+	plan2, err := s.CreateDJPlan(ctx, &models.DJPlan{
+		SourceType: models.SourceEpisode, SourceID: sourceID, HighlightVersion: hv,
+		TargetSeconds: 600, TotalSeconds: 60,
+		Items: []models.DJPlanItem{
+			{Kind: models.DJItemNarration, ScriptKind: "intro", ScriptText: "全新开场词", EstSeconds: 4},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// job2 已终态（非活跃），同意图可再次入队以合成 plan2 的脚本。
+	if _, err := w.EnqueueNarrationJob(ctx, models.SourceEpisode, sourceID, "", "zh"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows2, _ := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, sourceID)
+	newKey := planScriptItemID(plan2.ID, 1)
+	if _, ok := rows2[newKey]; !ok {
+		t.Fatalf("新计划应有独立脚本音频: %+v", rows2)
+	}
+	if _, ok := rows2[introKey]; !ok {
+		t.Fatal("旧计划音频不应被覆盖")
+	}
+}
+
+// TestNarrationTask_ScriptPartialFailure R10：单个脚本项目合成失败——其余段落
+// 照常合成，失败可见（checkpoint），原音与已完成音频不受影响。
+func TestNarrationTask_ScriptPartialFailure(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedCurrentHighlight(t, s, models.SourceEpisode, sourceID, twoHighlights())
+	const hv = 1 // seedCurrentHighlight 首次写入即版本 1
+	completeSeedJobs(t, s)
+
+	plan, err := s.CreateDJPlan(ctx, &models.DJPlan{
+		SourceType: models.SourceEpisode, SourceID: sourceID, HighlightVersion: hv,
+		TargetSeconds: 600, TotalSeconds: 60,
+		Items: []models.DJPlanItem{
+			{Kind: models.DJItemNarration, ScriptKind: "intro", ScriptText: "开场词"},
+			{Kind: models.DJItemEvidence, HighlightID: "hl-a", SegmentIDs: []string{"seg-0001"}, Start: 0, End: 5, EstSeconds: 5},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nar := &taskNarration{available: true}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Narration: nar}, nil
+	}
+	job, err := w.EnqueueNarrationJob(ctx, models.SourceEpisode, sourceID, "", "zh")
+	if err != nil || job == nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("任务不应整体失败: %v", err)
+	}
+	rows, _ := s.ListCurrentNarrationsForSource(ctx, models.SourceEpisode, sourceID)
+	if _, ok := rows[planScriptItemID(plan.ID, 1)]; !ok {
+		t.Fatalf("脚本项目应合成成功: %+v", rows)
+	}
+	got, _ := s.GetJob(ctx, job.ID)
+	if got.Status != models.StatusSucceeded {
+		t.Fatalf("任务应成功终结: %+v", got)
+	}
+}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -323,5 +324,48 @@ func TestDJ_InvalidCitationSkipped(t *testing.T) {
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DJ 页应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDJ_ScriptItemsCarryNarrationURL R10：清单脚本项目（开场/收尾）在音频合成后
+// 于页面对象上携带解说 URL；AI 解说与原音在 DOM 上持续区分（data-kind）。
+func TestDJ_ScriptItemsCarryNarrationURL(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "djscript@example.com", "password123")
+	ctx := context.Background()
+	p, _ := srv.store.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")
+	srv.store.MergeEpisodes(ctx, p.ID, []models.Episode{{GUID: "g1", Title: "Ep", AudioURL: "https://a.mp3"}})
+	eps, _ := srv.store.ListEpisodes(ctx, p.ID)
+	sourceID := eps[0].ID
+	seedHighlightAndNarration(t, srv, sourceID) // 已含清单 seed（v=最新高光版本）
+
+	// 找到 seed 清单，为其中 intro 脚本位置写入计划绑定音频。
+	plan, err := srv.store.GetLatestDJPlanForSource(ctx, models.SourceEpisode, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptKey := ""
+	for _, it := range plan.Items {
+		if it.ScriptText == "开场脚本" {
+			scriptKey = fmt.Sprintf("plan:%s:p%d", plan.ID, it.Position)
+		}
+	}
+	if scriptKey == "" {
+		t.Fatal("seed 清单应含开场脚本项目")
+	}
+	if _, err := srv.store.CreateNarration(ctx, models.SourceEpisode, sourceID, scriptKey, "v", "kokoro-82m", "x.wav", 2, 6, "kokoro"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/dj")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DJ 页应 200，实际 %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-kind="narration"`) {
+		t.Error("脚本项目应显式标注 AI 解说身份")
+	}
+	if !strings.Contains(body, scriptKey) {
+		t.Errorf("脚本项目应绑定计划身份数音 URL，body 应含 %s", scriptKey)
 	}
 }

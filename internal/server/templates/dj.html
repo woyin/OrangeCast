@@ -47,7 +47,7 @@
   </div>
 </div>
 {{else}}
-<div class="dj-item dj-script-item" data-kind="narration" data-position="{{.Position}}">
+<div class="dj-item dj-script-item" data-kind="narration" data-position="{{.Position}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}">
   <div class="dj-gist">
     <strong>AI 解说 {{.Position}}</strong>
     {{if .Reason}}<span class="meta">· {{.Reason}}</span>{{end}}
@@ -138,6 +138,12 @@
       var nar = el.dataset.narration;
       var segs = [];
       try { segs = JSON.parse(el.dataset.segments || '[]'); } catch (e) {}
+      if (el.dataset.kind === 'narration') {
+        // R10：清单脚本项目（开场/过渡/收尾/Gist 解说）——有音频则按计划顺序入队，
+        // 无音频跳过（部分失败仍连播原音），绝不冒充原音。
+        if (nar) items.push({type: 'narration', url: nar, idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
+        return;
+      }
       if (nar) items.push({type: 'narration', url: nar, idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
       items.push({type: 'evidence', start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), idx: String(i), highlightId: el.dataset.highlightId, segmentIds: segs});
     });

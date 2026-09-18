@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -331,8 +332,14 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		switch it.Kind {
 		case models.DJItemNarration:
 			v.Text = it.ScriptText
-			if nar, ok := narrations[it.HighlightID]; ok && (it.NarrationID == "" || it.NarrationID == nar.ID) {
-				v.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + it.HighlightID
+			// 解说音频解析：优先计划脚本身份（plan:<id>:p<pos>），其次高光真实解说。
+			pseudo := fmt.Sprintf("plan:%s:p%d", plan.ID, it.Position)
+			if _, ok := narrations[pseudo]; ok {
+				v.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + pseudo
+			} else if it.HighlightID != "" {
+				if nar, ok := narrations[it.HighlightID]; ok && (it.NarrationID == "" || it.NarrationID == nar.ID) {
+					v.NarrationURL = "/api/narration/" + string(sourceType) + "/" + sourceID + "/" + it.HighlightID
+				}
 			}
 		case models.DJItemEvidence:
 			v.Text = it.Reason

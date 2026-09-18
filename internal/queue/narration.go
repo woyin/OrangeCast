@@ -167,5 +167,78 @@ func (w *Worker) doNarrationJob(ctx context.Context, job *models.ProcessingJob, 
 	if firstErr != nil {
 		_ = w.store.SaveJobCheckpoint(ctx, job.ID, fmt.Sprintf(`{"partial_failure":%q}`, firstErr.Error()))
 	}
+	// R10：清单脚本项目（开场/过渡/收尾/无解说 Gist）按计划身份数成进队，
+	// 失败只记入 firstErr，不阻塞解说任务与其余段落。
+	w.synthesizePlanScripts(ctx, job, bundle, snapshot, &narrated, &firstErr)
+	if firstErr != nil {
+		_ = w.store.SaveJobCheckpoint(ctx, job.ID, fmt.Sprintf(`{"partial_failure":%q}`, firstErr.Error()))
+	}
 	return nil
+}
+
+// planScriptItemID 清单脚本身份：音频绑定确切计划（plan ID + 位置），
+// 旧计划音频不被新计划覆盖（新计划使用新伪 ID 独立版本化）。
+func planScriptItemID(planID string, position int) string {
+	return fmt.Sprintf("plan:%s:p%d", planID, position)
+}
+
+// synthesizePlanScripts R10：为最新 DJ 清单的脚本项目（开场/过渡/收尾/无解说的
+// Gist）合成音频；脚本指纹（文本+计划版本+伪 ID）参与缓存身份，重试不重复合成；
+// 单项失败不阻塞其余项。音频仍存 narrationDir，不进入 EvidenceAudio、不作引用证据。
+func (w *Worker) synthesizePlanScripts(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, snapshot narrationTaskSnapshot, narrated *int, firstErr *error) {
+	plan, err := w.store.GetLatestDJPlanForSource(ctx, job.SourceType, job.SourceID)
+	if err != nil {
+		return // 无清单：无事可做（不阻塞解说任务）
+	}
+	providerName := bundle.Narration.Name()
+	for _, it := range plan.Items {
+		if it.Kind != models.DJItemNarration || it.ScriptText == "" {
+			continue // 已有真实解说音频的项无脚本文本，不重复合成
+		}
+		itemID := planScriptItemID(plan.ID, it.Position)
+		cacheKey := narrationCacheKey(it.ScriptText, itemID, plan.HighlightVersion, providerName, "", snapshot.Voice, snapshot.Language)
+		if row, err := w.store.GetNarrationByCacheKey(ctx, job.SourceType, job.SourceID, itemID, cacheKey); err == nil && row != nil {
+			*narrated++
+			continue // 脚本指纹命中：不重复合成
+		}
+		nextVersion := w.nextNarrationVersion(ctx, job.SourceType, job.SourceID, itemID)
+		relPath := fmt.Sprintf("%s_%s_%s_%d.wav", job.SourceType, job.SourceID, itemID, nextVersion)
+		finalPath := filepath.Join(w.narrationDir, relPath)
+		tmpPath := finalPath + ".tmp"
+		result, err := bundle.Narration.Synthesize(it.ScriptText, snapshot.Voice, tmpPath)
+		if err != nil {
+			os.Remove(tmpPath)
+			if *firstErr == nil {
+				*firstErr = fmt.Errorf("清单脚本位置 %d 合成失败: %w", it.Position, err)
+			}
+			continue
+		}
+		duration, durErr := audioDuration(tmpPath)
+		if durErr != nil || duration <= 0 {
+			os.Remove(tmpPath)
+			if *firstErr == nil {
+				*firstErr = fmt.Errorf("清单脚本位置 %d 的音频校验失败", it.Position)
+			}
+			continue
+		}
+		if err := os.Rename(tmpPath, finalPath); err != nil {
+			os.Remove(tmpPath)
+			if *firstErr == nil {
+				*firstErr = fmt.Errorf("清单脚本位置 %d 音频发布失败: %w", it.Position, err)
+			}
+			continue
+		}
+		voice := snapshot.Voice
+		if voice == "" {
+			voice = result.Voice
+		}
+		if _, _, err := w.store.CreateNarrationCached(ctx, job.SourceType, job.SourceID, itemID, cacheKey, voice, result.Model, relPath, duration, result.CharCount, providerName); err != nil {
+			if *firstErr == nil {
+				*firstErr = fmt.Errorf("清单脚本位置 %d 写库失败: %w", it.Position, err)
+			}
+			continue
+		}
+		w.recordCallUsage(ctx, job, "narration:"+itemID, providerName, result.Model, provider.TaskUsage{InputUnits: result.CharCount, OutputUnits: int(duration)})
+		*narrated++
+	}
 }
