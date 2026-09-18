@@ -180,3 +180,65 @@ func scanCreationSelection(row rowScanner) (*models.CreationSelection, error) {
 	}
 	return sel, nil
 }
+
+// SelectionMaterialSnapshot 单个选中材料的冻结快照条目（R12）。
+// 资格变化（stale/排除/质量下降/不存在）以 Error 显式反馈，不静默改变用户选材。
+type SelectionMaterialSnapshot struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"` // keypoint | note
+	Content     string `json:"content"`
+	Citations   string `json:"citations,omitempty"`
+	CardVersion int    `json:"card_version,omitempty"` // 重点所属卡片版本（内容版本）
+	NoteVersion int    `json:"note_version,omitempty"` // 笔记乐观版本
+	Error       string `json:"error,omitempty"`
+}
+
+// MaterialSnapshotFromSelections 从持久化素材选择构建轮次材料快照（R12）：
+// 逐项冻结当前内容与版本；资格不再满足（stale/Owner 排除/质量下降/已删除）的
+// 材料保留在快照中并附显式错误，不静默丢弃或替换用户的选择。
+func (s *Store) MaterialSnapshotFromSelections(ctx context.Context, selectionIDs []string) ([]SelectionMaterialSnapshot, error) {
+	out := make([]SelectionMaterialSnapshot, 0)
+	for _, selID := range selectionIDs {
+		sel, err := s.GetCreationSelection(ctx, selID)
+		if err != nil {
+			out = append(out, SelectionMaterialSnapshot{ID: selID, Kind: "selection", Error: "素材选择不存在"})
+			continue
+		}
+		for _, kpID := range sel.MaterialIDs {
+			el := s.checkMaterialEligibility(ctx, kpID, "")
+			if !el.Eligible {
+				out = append(out, SelectionMaterialSnapshot{ID: kpID, Kind: "keypoint", Error: el.Reason})
+				continue
+			}
+			kp, err := s.GetKeyPoint(ctx, kpID)
+			if err != nil {
+				out = append(out, SelectionMaterialSnapshot{ID: kpID, Kind: "keypoint", Error: "关键观点读取失败"})
+				continue
+			}
+			out = append(out, SelectionMaterialSnapshot{
+				ID: kp.ID, Kind: "keypoint", Content: kp.Content,
+				Citations: kp.CitationsJSON, CardVersion: kp.CardVersion,
+			})
+		}
+		for _, noteID := range sel.NoteIDs {
+			el := s.checkMaterialEligibility(ctx, "", noteID)
+			if !el.Eligible {
+				out = append(out, SelectionMaterialSnapshot{ID: noteID, Kind: "note", Error: el.Reason})
+				continue
+			}
+			note, err := s.GetOwnerNote(ctx, noteID)
+			if err != nil {
+				out = append(out, SelectionMaterialSnapshot{ID: noteID, Kind: "note", Error: "个人笔记读取失败"})
+				continue
+			}
+			out = append(out, SelectionMaterialSnapshot{
+				ID: note.ID, Kind: "note", Content: note.Content,
+				Citations: note.CitationsJSON, NoteVersion: note.Revision,
+			})
+		}
+		for _, ex := range sel.Excluded {
+			out = append(out, SelectionMaterialSnapshot{ID: ex.ID, Kind: "selection", Error: "选择时被排除：" + ex.Reason})
+		}
+	}
+	return out, nil
+}

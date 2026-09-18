@@ -91,12 +91,24 @@ func (srv *Server) handleIdeationSessionCreate(w http.ResponseWriter, r *http.Re
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	session, err := srv.store.CreateIdeationSession(r.Context(), models.IdeationSession{EditorialProfileID: strings.TrimSpace(r.FormValue("profile_id")), Intent: strings.TrimSpace(r.FormValue("intent")), ConstraintsJSON: strings.TrimSpace(r.FormValue("constraints_json"))})
+	// R12：选中的素材选择（两集重点 + 个人笔记）绑定进同一构思意图。
+	var selectionIDs []string
+	for _, raw := range strings.FieldsFunc(r.FormValue("selection_ids"), func(c rune) bool { return c == '\n' || c == ',' }) {
+		if id := strings.TrimSpace(raw); id != "" {
+			selectionIDs = append(selectionIDs, id)
+		}
+	}
+	selectionsJSON, err := json.Marshal(selectionIDs)
 	if err != nil {
 		writeEditorialError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/workbench?profile="+session.EditorialProfileID, http.StatusSeeOther)
+	session, err := srv.store.CreateIdeationSession(r.Context(), models.IdeationSession{EditorialProfileID: strings.TrimSpace(r.FormValue("profile_id")), Intent: strings.TrimSpace(r.FormValue("intent")), ConstraintsJSON: strings.TrimSpace(r.FormValue("constraints_json")), SelectionsJSON: string(selectionsJSON)})
+	if err != nil {
+		writeEditorialError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/workbench/ideation/rounds?session_id="+session.ID, http.StatusSeeOther)
 }
 
 func (srv *Server) handleResearchNeedCreate(w http.ResponseWriter, r *http.Request) {
@@ -184,19 +196,40 @@ func (srv *Server) handleIdeationRoundCreate(w http.ResponseWriter, r *http.Requ
 	if nonce == "" {
 		nonce = fmt.Sprintf("auto:%d", time.Now().UnixNano())
 	}
-	// 冻结材料快照：所选关键观点的当前内容与引用（只读，不付费）。
+	// 冻结材料快照：优先使用会话绑定的素材选择（R12）；表单直传 material_ids
+	// 保持兼容。所选材料的当前内容与版本在此冻结（只读，不付费）。
 	var materialSnap []map[string]string
-	for _, raw := range strings.FieldsFunc(r.FormValue("material_ids"), func(c rune) bool { return c == '\n' || c == ',' }) {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
+	session, sessErr := srv.store.GetIdeationSession(r.Context(), sessionID)
+	if sessErr == nil && session.SelectionsJSON != "" && session.SelectionsJSON != "[]" {
+		var selectionIDs []string
+		if json.Unmarshal([]byte(session.SelectionsJSON), &selectionIDs) == nil && len(selectionIDs) > 0 {
+			snaps, err := srv.store.MaterialSnapshotFromSelections(r.Context(), selectionIDs)
+			if err != nil {
+				http.Error(w, "冻结素材快照失败："+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, m := range snaps {
+				e := map[string]string{"id": m.ID, "kind": m.Kind, "content": m.Content, "citations": m.Citations}
+				if m.Error != "" {
+					e["error"] = m.Error
+				}
+				materialSnap = append(materialSnap, e)
+			}
 		}
-		if kp, err := srv.store.GetKeyPoint(r.Context(), id); err == nil {
-			materialSnap = append(materialSnap, map[string]string{
-				"id": kp.ID, "content": kp.Content, "citations": kp.CitationsJSON,
-			})
-		} else {
-			materialSnap = append(materialSnap, map[string]string{"id": id, "content": "", "error": "材料不存在"})
+	}
+	if len(materialSnap) == 0 {
+		for _, raw := range strings.FieldsFunc(r.FormValue("material_ids"), func(c rune) bool { return c == '\n' || c == ',' }) {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if kp, err := srv.store.GetKeyPoint(r.Context(), id); err == nil {
+				materialSnap = append(materialSnap, map[string]string{
+					"id": kp.ID, "content": kp.Content, "citations": kp.CitationsJSON,
+				})
+			} else {
+				materialSnap = append(materialSnap, map[string]string{"id": id, "content": "", "error": "材料不存在"})
+			}
 		}
 	}
 	snapJSON, _ := json.Marshal(materialSnap)

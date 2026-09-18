@@ -61,7 +61,11 @@ type CreationProposal struct{ ID, EditorialProfileID, ProposalBatchID, IdeationS
 type CreationHistory struct{ ID, EditorialProfileID, Status, CreationForm, Title, CoreClaim, Audience, Content, SourceURL, CreatedAt, UpdatedAt string }
 
 // IdeationSession persists a directed material exploration.
-type IdeationSession struct{ ID, EditorialProfileID, Intent, ConstraintsJSON, Status, CreatedAt, UpdatedAt string }
+type IdeationSession struct {
+	ID, EditorialProfileID, Intent, ConstraintsJSON, Status, CreatedAt, UpdatedAt string
+	// SelectionsJSON 绑定的素材选择 ID 列表（R12）：轮次材料快照由此冻结。
+	SelectionsJSON string
+}
 
 // MaterialDiagnosis captures supports, conflicts, complements, and research gaps for a session.
 type MaterialDiagnosis struct{ ID, IdeationSessionID, DiagnosisJSON, MaterialSnapshotJSON, CreatedAt string }

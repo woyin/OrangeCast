@@ -216,3 +216,17 @@
   - `go test -timeout 40m ./internal/queue/ ./internal/server/ ./internal/store/` 全部通过；`go vet`、`gofmt`、`git diff --check`、构建通过。
 - 提交：`fix(player): restore progress using stable plan item identities`。
 - 限制：暂停/跳段/重复点击与"解说与原音交错时恢复第 2 段"的浏览器交互验证属 R25（DOM/JS 行为已按契约实现并以模板断言固定关键标识）。
+
+## R12 — 素材选择成为构思输入
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - 迁移 0047：`ideation_sessions.selections_json`（默认 '[]'，旧行兼容）。
+  - `store/creation_selection.go`：`MaterialSnapshotFromSelections`——从持久化素材选择（两集重点 + 个人笔记）逐项冻结当前内容与版本（重点：内容+引用+卡片版本；笔记：内容+引用+乐观版本）；资格不再满足（stale/Owner 排除/质量下降/已删除/选择时被排除）的材料保留在快照中附显式错误——不静默丢弃或替换用户选材。
+  - `store/creation_flow.go`：会话读写含 selections_json。
+  - `server/creation_workspace.go`：会话创建绑定 `selection_ids`；轮次创建优先从会话绑定的选择冻结材料快照（`material_ids` 表单直传保持兼容）。首次 GET 只读不付费、nonce 幂等、轮次追加式（旧结果不覆盖新一轮）均为既有契约，回归保持。
+- 验证：
+  - `TestIdeationSelectionsFlowIntoRound`（server，真实路由）：选择（Owner 确认重点 + 个人笔记）→ 绑定会话 → 轮次快照含两者内容与身份；重复提交同 nonce 不新增轮次。
+  - `go test ./...` 全部通过（迁移计数断言 46→47 跟随）；`go vet`、`gofmt`、`git diff --check` 通过。
+- 提交：`fix(ideation): carry selected materials into persistent sessions`。
+- 限制：资格失效材料的页面级反馈样式属 R22/R25（快照错误字段已结构化可渲染）。

@@ -28,7 +28,10 @@ func (s *Store) CreateIdeationSession(ctx context.Context, session models.Ideati
 	if _, err := s.GetEditorialProfile(ctx, session.EditorialProfileID); err != nil {
 		return nil, err
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO ideation_sessions (id,editorial_profile_id,intent,constraints_json,status) VALUES (?,?,?,?,?)`, session.ID, session.EditorialProfileID, session.Intent, session.ConstraintsJSON, session.Status)
+	if session.SelectionsJSON == "" {
+		session.SelectionsJSON = "[]"
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO ideation_sessions (id,editorial_profile_id,intent,constraints_json,status,selections_json) VALUES (?,?,?,?,?,?)`, session.ID, session.EditorialProfileID, session.Intent, session.ConstraintsJSON, session.Status, session.SelectionsJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +41,7 @@ func (s *Store) CreateIdeationSession(ctx context.Context, session models.Ideati
 // GetIdeationSession retrieves a durable Owner-directed exploration.
 func (s *Store) GetIdeationSession(ctx context.Context, id string) (*models.IdeationSession, error) {
 	v := &models.IdeationSession{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,intent,constraints_json,status,created_at,updated_at FROM ideation_sessions WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &v.Intent, &v.ConstraintsJSON, &v.Status, &v.CreatedAt, &v.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,intent,constraints_json,status,created_at,updated_at,COALESCE(selections_json,'[]') FROM ideation_sessions WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &v.Intent, &v.ConstraintsJSON, &v.Status, &v.CreatedAt, &v.UpdatedAt, &v.SelectionsJSON)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -47,7 +50,7 @@ func (s *Store) GetIdeationSession(ctx context.Context, id string) (*models.Idea
 
 // ListIdeationSessions returns a profile's directed exploration history.
 func (s *Store) ListIdeationSessions(ctx context.Context, profileID string) ([]*models.IdeationSession, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,intent,constraints_json,status,created_at,updated_at FROM ideation_sessions WHERE editorial_profile_id=? ORDER BY updated_at DESC,id DESC`, profileID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,intent,constraints_json,status,created_at,updated_at,COALESCE(selections_json,'[]') FROM ideation_sessions WHERE editorial_profile_id=? ORDER BY updated_at DESC,id DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +58,7 @@ func (s *Store) ListIdeationSessions(ctx context.Context, profileID string) ([]*
 	var out []*models.IdeationSession
 	for rows.Next() {
 		v := &models.IdeationSession{}
-		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &v.Intent, &v.ConstraintsJSON, &v.Status, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &v.Intent, &v.ConstraintsJSON, &v.Status, &v.CreatedAt, &v.UpdatedAt, &v.SelectionsJSON); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
