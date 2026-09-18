@@ -96,8 +96,10 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 	degraded := false
 	var searchRows []models.DigestSearchSource
 	var unresolvedGaps []models.DigestFactGap
-	if len(draft.FactGaps) > 0 {
-		woven, rows, gaps, searchOK := w.digestResolveGaps(ctx, job, bundle, draft, blocks)
+	if cp.PublishedDigestID != "" {
+		// R08：发布后中断——复用已发布修订，不重复落库、不重跑远端阶段。
+	} else if len(draft.FactGaps) > 0 {
+		woven, rows, gaps, searchOK := w.digestResolveGaps(ctx, job, bundle, draft, blocks, &cp)
 		if searchOK {
 			blocks = append(blocks, woven...)
 			searchRows = rows
@@ -116,20 +118,42 @@ func (w *Worker) doDigest(ctx context.Context, job *models.ProcessingJob, bundle
 			log.Printf("任务 %s SourceSearch 不可用，降级生成（缺口 %d 条留档）", job.ID, len(draft.FactGaps))
 		}
 	}
-	// G02：原子发布完整修订（正文+块+落源+缺口同一事务）。
-	digest, err := w.store.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
-		SourceType: job.SourceType, SourceID: job.SourceID, Title: draft.Title, Degraded: degraded,
-		Provider: digestProviderName(bundle.DigestWriter), Model: digestProviderName(bundle.DigestWriter), PromptVersion: provider.DigestWriterPromptVersion,
-		SourceSnapshotID: frozenSnapshotID,
-	}, digestModelsBlocks(blocks), searchRows, unresolvedGaps)
-	if err != nil {
-		return fmt.Errorf("保存精读文: %w", err)
+	// G02：原子发布完整修订（正文+块+落源+缺口同一事务）；发布后立即持久化结果
+	// 与断点（R08）：发布后中断恢复时复用，不产生重复修订。
+	var digest *models.EpisodeDigest
+	if cp.PublishedDigestID != "" {
+		digest, err = w.store.GetEpisodeDigest(ctx, cp.PublishedDigestID)
+		if err != nil {
+			return fmt.Errorf("读取已发布修订: %w", err)
+		}
+		degraded = cp.Degraded
+	} else {
+		digest, err = w.store.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
+			SourceType: job.SourceType, SourceID: job.SourceID, Title: draft.Title, Degraded: degraded,
+			Provider: digestProviderName(bundle.DigestWriter), Model: digestProviderName(bundle.DigestWriter), PromptVersion: provider.DigestWriterPromptVersion,
+			SourceSnapshotID: frozenSnapshotID,
+		}, digestModelsBlocks(blocks), searchRows, unresolvedGaps)
+		if err != nil {
+			return fmt.Errorf("保存精读文: %w", err)
+		}
+		cp.PublishedDigestID = digest.ID
+		cp.Degraded = degraded
+		cp.Stage = "published"
+		if err := w.saveDigestCheckpoint(ctx, job.ID, cp); err != nil {
+			log.Printf("任务 %s 保存发布断点失败: %v", job.ID, err)
+		}
+		if err := w.store.SaveJobResult(ctx, job.ID, fmt.Sprintf(`{"digest_id":%q}`, digest.ID), models.JobResultComplete); err != nil {
+			log.Printf("任务 %s 持久化结果失败: %v", job.ID, err)
+		}
 	}
 
-	// 6) 渠道改写（失败不阻塞长文版；Owner 可在页面重试）
-	if bundle.DigestRewriter != nil {
+	// 6) 渠道改写（失败不阻塞长文版；Owner 可在页面重试）；恢复时已完成的不重做。
+	if bundle.DigestRewriter != nil && !cp.InlineRewriteDone {
 		if err := w.digestRewrite(ctx, job, bundle, digest.ID, draft.Title, blocks); err != nil {
 			log.Printf("任务 %s 渠道改写失败（不阻塞）: %v", job.ID, err)
+		} else {
+			cp.InlineRewriteDone = true
+			_ = w.saveDigestCheckpoint(ctx, job.ID, cp)
 		}
 	}
 	return nil
@@ -295,15 +319,25 @@ func (w *Worker) digestOwnerNotes(ctx context.Context, job *models.ProcessingJob
 // digestResolveGaps 消解 FactGap：逐条搜索 → 落源 → 汇总补织。
 // 返回（补织块, 落源行, 未消解缺口, 搜索是否整体可用）。
 // 搜索整体失败 → searchOK=false（C1 降级）；单条未命中只是该条留档，不算失败。
-func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, draft *provider.DigestWritingResult, blocks []provider.DigestBlockDraft) ([]provider.DigestBlockDraft, []models.DigestSearchSource, []models.DigestFactGap, bool) {
+func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, draft *provider.DigestWritingResult, blocks []provider.DigestBlockDraft, cp *digestCheckpoint) ([]provider.DigestBlockDraft, []models.DigestSearchSource, []models.DigestFactGap, bool) {
 	if bundle.DigestSearch == nil {
 		return nil, nil, gapModels(draft.FactGaps), false
+	}
+	if cp.LandedGaps == nil {
+		cp.LandedGaps = map[string]*digestGapLanding{}
 	}
 	var docs []provider.DigestDocument
 	var rows []models.DigestSearchSource
 	seen := map[string]bool{}
 	searchFailed := false
 	for _, gap := range draft.FactGaps {
+		// R08：已落源缺口直接复用断点，不重复搜索或落源。
+		if landed, ok := cp.LandedGaps[gap]; ok {
+			docs = append(docs, landed.Document)
+			rows = append(rows, models.DigestSearchSource{Query: gap, URL: landed.URL, Title: landed.Document.Title, DocumentID: landed.Document.DocumentID})
+			seen[landed.URL] = true
+			continue
+		}
 		results, err := bundle.DigestSearch.Search(ctx, gap)
 		if err != nil {
 			log.Printf("任务 %s 搜索缺口失败（%s）: %v", job.ID, gap, err)
@@ -322,6 +356,11 @@ func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJo
 			seen[res.URL] = true
 			docs = append(docs, doc)
 			rows = append(rows, models.DigestSearchSource{Query: gap, URL: res.URL, Title: doc.Title, DocumentID: doc.DocumentID})
+			// R08：逐项落源后立即持久化断点（阶段输入=缺口，输出=URL+Document）。
+			cp.LandedGaps[gap] = &digestGapLanding{URL: res.URL, Document: doc}
+			if err := w.saveDigestCheckpoint(ctx, job.ID, *cp); err != nil {
+				log.Printf("任务 %s 保存落源断点失败: %v", job.ID, err)
+			}
 			resolved = true
 			break // 每个缺口取首个可落源结果
 		}
@@ -334,6 +373,10 @@ func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJo
 	}
 	var woven []provider.DigestBlockDraft
 	if len(docs) > 0 {
+		if len(cp.Woven) > 0 {
+			// R08：补织已完成，从断点复用，不重复调用补织。
+			return cp.Woven, rows, w.unresolvedGaps(draft, rows), true
+		}
 		w.markRemoteCallStarted(ctx, job) // R02-b：到达远端调用边界（补织）
 		res, err := bundle.DigestWriter.WeaveDigestFacts(ctx, provider.DigestWeaveRequest{
 			Title: draft.Title, Blocks: blocks, FactGaps: draft.FactGaps, Documents: docs,
@@ -350,20 +393,29 @@ func (w *Worker) digestResolveGaps(ctx context.Context, job *models.ProcessingJo
 			woven = append(woven, b)
 		}
 		_ = w.recordDigestUsage(ctx, job, "digest_weave", digestProviderName(bundle.DigestWriter), provider.DigestWriterPromptVersion, res.Usage)
+		// R08：补织结果持久化到断点（发布前中断可复用，不重复补织）。
+		cp.Woven = woven
+		if err := w.saveDigestCheckpoint(ctx, job.ID, *cp); err != nil {
+			log.Printf("任务 %s 保存补织断点失败: %v", job.ID, err)
+		}
 	}
+	return woven, rows, w.unresolvedGaps(draft, rows), true
+}
+
+// unresolvedGaps 有落源的缺口视为已消解（rows[].Query 即缺口文本）。
+func (w *Worker) unresolvedGaps(draft *provider.DigestWritingResult, rows []models.DigestSearchSource) []models.DigestFactGap {
 	unresolved := gapModels(draft.FactGaps)
-	// 有落源的缺口视为已消解（rows[].Query 即缺口文本）
 	resolved := map[string]bool{}
 	for _, row := range rows {
 		resolved[row.Query] = true
 	}
-	filtered := unresolved[:0]
+	filtered := make([]models.DigestFactGap, 0, len(unresolved))
 	for _, g := range unresolved {
 		if !resolved[g.Text] {
 			filtered = append(filtered, g)
 		}
 	}
-	return woven, rows, filtered, true
+	return filtered
 }
 
 // digestIngestDocument 把一个 URL 经 SSRF 防护管道落源为 Document Source（幂等：同 URL 已存在则复用）。
@@ -576,10 +628,23 @@ var (
 	scripts = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`)
 )
 
-// digestCheckpoint 精读任务断点（G02）：composed 保存完整初稿，重试不重跑 compose。
+// digestCheckpoint 精读任务断点（G02/R08）：逐阶段保存输入与输出，
+// 重试从已知断点继续，不重复远端调用或落源。
 type digestCheckpoint struct {
 	Stage string                        `json:"stage"` // composed | composed_validated
 	Draft *provider.DigestWritingResult `json:"draft,omitempty"`
+	// R08：逐项检索落源断点（缺口文本 → 首个可落源结果与 Document）。
+	LandedGaps        map[string]*digestGapLanding `json:"landed_gaps,omitempty"`
+	Woven             []provider.DigestBlockDraft  `json:"woven,omitempty"` // 补织结果（已消费前持久化）
+	Degraded          bool                         `json:"degraded,omitempty"`
+	PublishedDigestID string                       `json:"published_digest_id,omitempty"` // 发布后中断：复用不重复发布
+	InlineRewriteDone bool                         `json:"inline_rewrite_done,omitempty"`
+}
+
+// digestGapLanding 单个缺口的落源输出（搜索结果 + 已落源 Document）。
+type digestGapLanding struct {
+	URL      string                  `json:"url"`
+	Document provider.DigestDocument `json:"document"`
 }
 
 func (w *Worker) saveDigestCheckpoint(ctx context.Context, jobID string, cp digestCheckpoint) error {

@@ -740,3 +740,194 @@ func TestDoDigest_LegacySnapshotResolvesNoteIDs(t *testing.T) {
 		t.Fatalf("旧任务应按 NoteIDs 从当前库解析: %+v", captured)
 	}
 }
+
+// ---- R08：精读阶段恢复与渠道改写 ----
+
+// resumeCountingSearch / resumeCountingWriter 带调用计数的 fake（恢复断点断言用）。
+type resumeCountingSearch struct {
+	inner fakeDigestSearch
+	calls *int
+}
+
+func (f *resumeCountingSearch) Search(ctx context.Context, query string) ([]provider.DigestSearchResult, error) {
+	*f.calls++
+	return f.inner.Search(ctx, query)
+}
+func (f *resumeCountingSearch) Name() string { return "resume-search" }
+
+type resumeCountingWriter struct {
+	inner *fakeDigestWriter
+	calls *int
+}
+
+func (f *resumeCountingWriter) ComposeDigest(ctx context.Context, req provider.DigestWritingRequest) (*provider.DigestWritingResult, error) {
+	*f.calls++
+	return f.inner.ComposeDigest(ctx, req)
+}
+func (f *resumeCountingWriter) WeaveDigestFacts(ctx context.Context, req provider.DigestWeaveRequest) (*provider.DigestWeaveResult, error) {
+	*f.calls++
+	return f.inner.WeaveDigestFacts(ctx, req)
+}
+func (f *resumeCountingWriter) Name() string { return "resume-writer" }
+
+// TestDigestResolveGaps_ResumeFromCheckpoint R08：逐项检索落源与补织的断点恢复——
+// 同一 checkpoint 下重启重试，不重复 Search、不重复落源、不重复补织。
+func TestDigestResolveGaps_ResumeFromCheckpoint(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	const docURL = "https://reports.example.com/resume-2024"
+	preset, err := s.CreateWebDocument(ctx, "行业报道", docURL, "2024 年行业规模约 1.2 万亿元。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segID string
+	for _, seg := range store.DocumentSegments(preset) {
+		segID = seg.ID
+		break
+	}
+
+	searchCalls, writerCalls := 0, 0
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter: &resumeCountingWriter{inner: &fakeDigestWriter{weave: &provider.DigestWeaveResult{Blocks: []provider.DigestBlockDraft{
+				{Type: provider.DigestBlockCitedFactStr, Text: "据行业报道，规模约 1.2 万亿元。", Citations: []string{segID}, TargetSourceID: preset.ID},
+			}}}, calls: &writerCalls},
+			DigestSearch: &resumeCountingSearch{inner: fakeDigestSearch{results: []provider.DigestSearchResult{{URL: docURL}}}, calls: &searchCalls},
+		}, nil
+	}
+	job := &models.ProcessingJob{ID: "job-resume", SourceType: models.SourceEpisode, SourceID: sourceID, JobType: models.JobDigest}
+	draft := &provider.DigestWritingResult{Title: "T", Blocks: validDraftBlocks(), FactGaps: []string{"2024 行业规模"}}
+	blocks := digestTruncateQuotes(draft.Blocks)
+	bundle, err := w.bundleFor(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := digestCheckpoint{Stage: "composed_validated", Draft: draft}
+	woven1, rows1, gaps1, ok1 := w.digestResolveGaps(ctx, job, bundle, draft, blocks, &cp)
+	if !ok1 || len(rows1) != 1 || len(woven1) != 1 || len(gaps1) != 0 {
+		t.Fatalf("首次消解应落源并补织: ok=%v rows=%d woven=%d gaps=%d", ok1, len(rows1), len(woven1), len(gaps1))
+	}
+	if searchCalls != 1 || writerCalls != 1 {
+		t.Fatalf("首次应恰好一次搜索与补织: search=%d writer=%d", searchCalls, writerCalls)
+	}
+	// 模拟重启：同一持久化断点下重试——不重复 Search / 落源 / 补织。
+	woven2, rows2, gaps2, ok2 := w.digestResolveGaps(ctx, job, bundle, draft, blocks, &cp)
+	if !ok2 || len(rows2) != 1 || len(woven2) != 1 || len(gaps2) != 0 {
+		t.Fatalf("恢复消解结果应一致: %+v", rows2)
+	}
+	if searchCalls != 1 || writerCalls != 1 {
+		t.Fatalf("恢复时不得重复调用 Provider: search=%d writer=%d", searchCalls, writerCalls)
+	}
+	if rows2[0].DocumentID != rows1[0].DocumentID {
+		t.Fatalf("落源 Document 应复用: %s vs %s", rows1[0].DocumentID, rows2[0].DocumentID)
+	}
+}
+
+// TestDoDigest_PublishCrashResume R08：发布后、终态写入前中断——恢复时复用
+// 已发布修订，不产生重复修订、不重调 Provider；渠道改写已完成的不重做。
+func TestDoDigest_PublishCrashResume(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestWriter:   &fakeDigestWriter{compose: &provider.DigestWritingResult{Title: "发布恢复", Blocks: validDraftBlocks()}},
+			DigestRewriter: &fakeDigestRewriter{text: "渠道版本"},
+		}, nil
+	}
+	job, err := s.EnqueueDigestJob(ctx, models.SourceEpisode, sourceID)
+	if err != nil || job == nil {
+		t.Fatalf("入队失败: %v %v", job, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("首次执行失败: %v", err)
+	}
+	d1, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw1, err := s.GetDigestRewrite(ctx, d1.ID, "xiaohongshu")
+	if err != nil {
+		t.Fatalf("内联渠道改写应已落库: %v", err)
+	}
+
+	// 模拟"发布后、终态前"中断：清终态，保留 checkpoint。
+	if _, err := s.DB.ExecContext(ctx,
+		`UPDATE processing_jobs SET status='queued', result_state='', result_json='', lease_until=NULL WHERE id = ?`, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("恢复执行失败: %v", err)
+	}
+	d2, err := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if err != nil || d2.ID != d1.ID || d2.Version != 1 {
+		t.Fatalf("恢复不得产生重复修订: %+v vs %+v", d2, d1)
+	}
+	rw2, _ := s.GetDigestRewrite(ctx, d1.ID, "xiaohongshu")
+	if rw2 == nil || rw2.Text != rw1.Text {
+		t.Fatalf("渠道产物应保持: %+v vs %+v", rw2, rw1)
+	}
+	got, _ := s.GetJob(ctx, job.ID)
+	if got.Status != models.StatusSucceeded {
+		t.Fatalf("任务应成功终结: %+v", got)
+	}
+}
+
+// TestDigestRewriteJob_RetryKeepsMainText R08：渠道改写重试不重做主文或其他渠道；
+// 同修订同输入复用既有产物，不重复调用 Provider。
+func TestDigestRewriteJob_RetryKeepsMainText(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	sourceID := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, sourceID)
+
+	base, err := s.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: sourceID, Title: "主文",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{{Type: models.DigestBlockParaphrase, Text: "转述", Citations: []string{"seg-0001"}}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteCalls := 0
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{
+			DigestRewriter: &countingRewriter{inner: &fakeDigestRewriter{text: "渠道文本"}, count: &rewriteCalls},
+		}, nil
+	}
+	jobA, err := w.EnqueueDigestRewriteJob(ctx, base.ID, "xiaohongshu")
+	if err != nil || jobA == nil {
+		t.Fatalf("改写入队失败: %v %v", jobA, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("改写失败: %v", err)
+	}
+	if rewriteCalls != 1 {
+		t.Fatalf("首次改写应恰好一次调用: %d", rewriteCalls)
+	}
+	// 重复重试同修订同渠道：输入指纹复用，不重新调用 Provider。
+	jobRetry, err := w.EnqueueDigestRewriteJob(ctx, base.ID, "xiaohongshu")
+	if err != nil || jobRetry == nil {
+		t.Fatalf("重试入队失败: %v %v", jobRetry, err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatalf("重试失败: %v", err)
+	}
+	if rewriteCalls != 1 {
+		t.Fatalf("同输入重试不得重复调用 Provider: %d", rewriteCalls)
+	}
+	// 其他渠道不受波及。
+	if _, err := s.GetDigestRewrite(ctx, base.ID, "video"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("其他渠道不应被波及: %v", err)
+	}
+	// 渠道改写不改变当前主文修订。
+	cur, _ := s.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, sourceID)
+	if cur.ID != base.ID {
+		t.Fatalf("渠道改写不应改变当前主文修订: %+v", cur)
+	}
+}

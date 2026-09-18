@@ -152,3 +152,19 @@
   - `go test ./...` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；digest 相关 store/server 测试 `-race` 通过。
 - 提交：`fix(digests): preserve provenance across derived revisions`。
 - 限制：剔除派生的重复提交守卫沿用（同父+同原因不重复派生）；缺口“转回未消解”未自动重新触发补织（属 R08 恢复路径）。
+
+## R08 — 精读阶段恢复与渠道改写
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `queue/digest.go`（digestCheckpoint 扩展）：逐阶段断点——`landed_gaps`（缺口 → 首个落源结果与 Document，逐项落源后立即持久化）、`woven`（补织结果，发布前持久化）、`published_digest_id`（发布后中断复用，不重复发布）、`inline_rewrite_done`（内联渠道改写完成后不重做）。恢复时：已落源缺口直接复用断点（不重复 Search/抓取建档），补织完成则复用结果，已发布修订直接读取。
+  - 发布后立即 `SaveJobResult(complete)`：结果先于终态持久化，崩溃恢复走快路径，不产生重复修订（发布为单事务，版本 = MAX+1）。
+  - `queue/digest_rewrite.go`：既有契约验证保留——只消费快照指定修订与渠道，输入指纹复用，失败保留主文；本任务补齐回归。
+  - 已落源 Document 幂等（同 origin_url 复用）为既有实现，回归覆盖。
+- 验证：
+  - `TestDigestResolveGaps_ResumeFromCheckpoint`：同一持久化断点下重启，Search/补织调用计数不增加，落源 Document 复用。
+  - `TestDoDigest_PublishCrashResume`：清终态模拟发布后中断，恢复后修订唯一（v1）、渠道产物保持、任务成功终结。
+  - `TestDigestRewriteJob_RetryKeepsMainText`：同修订同渠道重试不重复调用 Provider；其他渠道不受波及；主文修订不被渠道改写改变。
+  - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go test -race -run TestDigest ./internal/queue/` 通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、构建通过。
+- 提交：`fix(digests): resume search and composition from checkpoints`。
+- 限制：渠道改写若在 Provider 响应后、落库前崩溃，重试会再调用一次 Provider（结果未知保守重试一次，落库由 Upsert 幂等兜底）；响应级缓存（先缓存后提交）属 R19 Writer 契约，如需可回移。
