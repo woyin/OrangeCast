@@ -139,3 +139,16 @@
   - `go test -timeout 40m ./internal/queue/ ./internal/store/ ./internal/server/` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check`、`go test -race -run TestDoDigest` 通过。
 - 提交：`fix(digests): freeze selected note contents at enqueue time`。
 - 限制：Owner 笔记目前无删除入口（仅有创建/编辑），删除场景以存储层 SQL 验证；Owner 可见的失效引用提示属页面层（R22/R25）；备份可恢复性由 DB 内快照保证，端到端备份恢复用例在 R23。
+
+## R07 — 精读修订继承快照与确认关系
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `store/digests.go`（CreateDigestRevision）：派生修订在同一发布事务内继承父修订证据血缘——`SourceSnapshotID`、检索落源（含 confirmed/pending/rejected 状态）与事实缺口。新增 `ExcludeDocumentID`：来源剔除时该 Document 的落源不继承到新修订，其已消解缺口转回未消解（document_id 置空）；其余落源确认与缺口原样继承。不再因修订而丢失快照（旧实现派生后即触发 legacy_snapshot 就绪问题——整篇被无条件降级）。
+  - `server/digest.go`：`deriveRevisionWithoutSource` 传入剔除 Document；`handleDigestEdit` 保存后跳转新修订 ID（旧实现跳旧 ID，GET 展示旧版本）；旧版本仍可按 ID 回溯；当前指针 = MAX(version) 在发布事务提交后生效。
+- 验证：
+  - `TestDigestRevision_InheritsProvenance`（store）：标题编辑继承快照/落源状态/缺口且就绪状态与父一致、无 legacy_snapshot；剔除派生后 doc-a 落源不继承、其缺口转未消解、doc-b 不受影响；旧版本可读。
+  - `TestDigestEdit_RedirectsToNewRevision`（server，真实路由）：303 跳转 `/digest/<新ID>`，当前指针展示刚保存版本，旧版本回溯不变。
+  - `go test ./...` 全部通过；`go vet ./internal/...`、`gofmt`、`git diff --check` 通过；digest 相关 store/server 测试 `-race` 通过。
+- 提交：`fix(digests): preserve provenance across derived revisions`。
+- 限制：剔除派生的重复提交守卫沿用（同父+同原因不重复派生）；缺口“转回未消解”未自动重新触发补织（属 R08 恢复路径）。

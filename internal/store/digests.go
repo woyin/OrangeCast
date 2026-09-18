@@ -328,6 +328,9 @@ type DigestRevisionInput struct {
 	Reason             string
 	NewTitle           string               // 空则继承基础标题
 	Blocks             []models.DigestBlock // 调整后的完整块序列
+	// ExcludeDocumentID 来源剔除（G04/R07）：该 Document 的落源不继承到新修订，
+	// 其已消解事实缺口转回未消解；其余仍适用的落源确认与缺口随修订继承。
+	ExcludeDocumentID string
 }
 
 // CreateDigestRevision 从基础修订派生一份新修订（G03）：版本 = MAX+1，
@@ -383,11 +386,41 @@ func (s *Store) CreateDigestRevision(ctx context.Context, in DigestRevisionInput
 	if in.NewTitle != "" {
 		title = in.NewTitle
 	}
+	// R07：继承父修订的证据血缘——来源快照、仍适用的检索来源确认（含状态）与
+	// 事实缺口；被剔除 Document 的落源不继承，其已消解缺口转回未消解。
+	// 只让被修改或剔除的内容失效，不把整篇变 legacy（快照随修订保留）。
+	searchRows, err := s.ListDigestSearchSources(ctx, base.ID)
+	if err != nil {
+		return nil, err
+	}
+	inheritedRows := make([]models.DigestSearchSource, 0, len(searchRows))
+	for _, row := range searchRows {
+		if in.ExcludeDocumentID != "" && row.DocumentID == in.ExcludeDocumentID {
+			continue
+		}
+		inheritedRows = append(inheritedRows, models.DigestSearchSource{
+			Query: row.Query, URL: row.URL, Title: row.Title,
+			DocumentID: row.DocumentID, Status: row.Status,
+		})
+	}
+	gaps, err := s.ListDigestFactGaps(ctx, base.ID)
+	if err != nil {
+		return nil, err
+	}
+	inheritedGaps := make([]models.DigestFactGap, 0, len(gaps))
+	for _, gap := range gaps {
+		g := models.DigestFactGap{Text: gap.Text, DocumentID: gap.DocumentID}
+		if in.ExcludeDocumentID != "" && g.DocumentID == in.ExcludeDocumentID {
+			g.DocumentID = "" // 该缺口由被剔除 Document 消解：转回未消解
+		}
+		inheritedGaps = append(inheritedGaps, g)
+	}
 	return s.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
 		SourceType: base.SourceType, SourceID: base.SourceID, Title: title, Degraded: base.Degraded,
 		Provider: base.Provider, Model: base.Model, PromptVersion: base.PromptVersion,
 		ParentDigestID: base.ID, Reason: strings.TrimSpace(in.Reason),
-	}, in.Blocks, nil, nil)
+		SourceSnapshotID: base.SourceSnapshotID,
+	}, in.Blocks, inheritedRows, inheritedGaps)
 }
 
 // GetDigestRewriteInputHash 读取某修订渠道版本的输入指纹；无记录返回空串。

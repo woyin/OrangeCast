@@ -182,7 +182,7 @@ func (srv *Server) deriveRevisionWithoutSource(ctx context.Context, digestID, do
 		reason = "剔除来源（无关联事实块）" + documentID
 	}
 	created, err := srv.store.CreateDigestRevision(ctx, store.DigestRevisionInput{
-		Base: base, Reason: reason, Blocks: kept,
+		Base: base, Reason: reason, Blocks: kept, ExcludeDocumentID: documentID,
 	})
 	if err != nil {
 		return "", err
@@ -234,9 +234,10 @@ func (srv *Server) handleDigestEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "内容块不存在", http.StatusBadRequest)
 		return
 	}
-	if _, err := srv.store.CreateDigestRevision(r.Context(), store.DigestRevisionInput{
+	created, err := srv.store.CreateDigestRevision(r.Context(), store.DigestRevisionInput{
 		Base: base, BaseVersionClaimed: baseVersion, Reason: "Owner 编辑", NewTitle: newTitle, Blocks: kept,
-	}); err != nil {
+	})
+	if err != nil {
 		if err == store.ErrDigestRevisionConflict {
 			http.Error(w, "修订已被其他操作更新（版本冲突），请刷新后重试", http.StatusConflict)
 			return
@@ -244,7 +245,8 @@ func (srv *Server) handleDigestEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "保存修订失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
-	http.Redirect(w, r, "/digest/"+digestID, http.StatusSeeOther)
+	// R07：保存后跳转新修订；旧版本仍可按 ID 查看回溯。
+	http.Redirect(w, r, "/digest/"+created.ID, http.StatusSeeOther)
 }
 
 // handleDigestRewriteRetry 渠道改写重试（失败不阻塞长文版；Owner 在页面手动重试）。

@@ -496,3 +496,46 @@ func TestDigestHistoryAndSourceLink(t *testing.T) {
 		t.Fatalf("历史应含状态与登记时正文: %s / %s", status, content)
 	}
 }
+
+// TestDigestEdit_RedirectsToNewRevision R07：保存后跳转新修订；GET 展示刚保存
+// 的版本（标题编辑生效），旧版本仍可按 ID 查看回溯。
+func TestDigestEdit_RedirectsToNewRevision(t *testing.T) {
+	srv, session, csrf, epID := seedDigestEpisode(t)
+	ctx := t.Context()
+	d, err := srv.store.CreateEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "原标题",
+		Provider: "p", Model: "m", PromptVersion: "v",
+	}, []models.DigestBlock{
+		{Type: models.DigestBlockParaphrase, Text: "原始转述", Citations: []string{"seg-0001"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, _ := srv.store.ListDigestBlocks(ctx, d.ID)
+	form := url.Values{"_csrf": {csrf}, "base_version": {"1"}, "title": {"编辑后标题"}, "text": {"编辑后的转述"}}
+	_ = blocks
+	req := httptest.NewRequest(http.MethodPost, "/digest/"+d.ID+"/edit", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(session)
+	req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("编辑应 303: %d %s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	cur, err := srv.store.GetCurrentEpisodeDigest(ctx, models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc != "/digest/"+cur.ID {
+		t.Fatalf("应跳转新修订（%s），实际 %s", cur.ID, loc)
+	}
+	if cur.Title != "编辑后标题" || cur.Version != 2 {
+		t.Fatalf("GET 当前指针应展示刚保存版本: %+v", cur)
+	}
+	old, err := srv.store.GetEpisodeDigest(ctx, d.ID)
+	if err != nil || old.Title != "原标题" || old.Version != 1 {
+		t.Fatalf("旧版本应可回溯: %v %+v", err, old)
+	}
+}

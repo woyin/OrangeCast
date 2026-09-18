@@ -203,3 +203,110 @@ func TestDigestFlow_QualityAndHistoryReads(t *testing.T) {
 		t.Fatalf("预留列表: %v", err)
 	}
 }
+
+// TestDigestRevision_InheritsProvenance R07：派生修订保留来源快照、仍适用的
+// 检索来源确认与事实缺口；来源剔除只影响新版本（剔除 Document 的落源不继承、
+// 其缺口转回未消解）；标题编辑保留引用与就绪状态，不把整篇变 legacy。
+func TestDigestRevision_InheritsProvenance(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	epID := seedDigestFlowSource(t, s, "flow-r07", "血缘播客")
+	seedSnapshotTranscript(t, s, models.SourceEpisode, epID, "要点")
+	seedDigestFlowCard(t, s, epID)
+	snap, err := s.FreezeSourceSnapshot(ctx, models.SourceEpisode, epID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := s.PublishEpisodeDigest(ctx, &models.EpisodeDigest{
+		SourceType: models.SourceEpisode, SourceID: epID, Title: "初版",
+		Provider: "p", Model: "m", PromptVersion: "v", SourceSnapshotID: snap.ID,
+	}, []models.DigestBlock{{Type: models.DigestBlockParaphrase, Text: "正文", Citations: []string{"seg-0001"}}},
+		[]models.DigestSearchSource{
+			{Query: "qa", URL: "https://ex.com/a", Title: "A", DocumentID: "doc-a", Status: "confirmed"},
+			{Query: "qb", URL: "https://ex.com/b", Title: "B", DocumentID: "doc-b", Status: "pending"},
+		},
+		[]models.DigestFactGap{
+			{Text: "已消解缺口", DocumentID: "doc-a"},
+			{Text: "未消解缺口"},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 标题编辑派生：快照、落源（含状态）与缺口全部继承。
+	blocks, _ := s.ListDigestBlocks(ctx, base.ID)
+	kept := make([]models.DigestBlock, 0, len(blocks))
+	for _, b := range blocks {
+		kept = append(kept, *b)
+	}
+	rev2, err := s.CreateDigestRevision(ctx, DigestRevisionInput{
+		Base: base, BaseVersionClaimed: 1, Reason: "改标题", NewTitle: "新标题", Blocks: kept,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev2.SourceSnapshotID != snap.ID {
+		t.Fatalf("新修订应继承来源快照: %q", rev2.SourceSnapshotID)
+	}
+	if rev2.Title != "新标题" {
+		t.Fatalf("新标题应生效: %q", rev2.Title)
+	}
+	rows2, _ := s.ListDigestSearchSources(ctx, rev2.ID)
+	if len(rows2) != 2 {
+		t.Fatalf("落源应继承: %+v", rows2)
+	}
+	statusByID := map[string]string{}
+	for _, r := range rows2 {
+		statusByID[r.DocumentID] = r.Status
+	}
+	if statusByID["doc-a"] != "confirmed" || statusByID["doc-b"] != "pending" {
+		t.Fatalf("落源确认状态应保留: %+v", statusByID)
+	}
+	gaps2, _ := s.ListDigestFactGaps(ctx, rev2.ID)
+	if len(gaps2) != 2 {
+		t.Fatalf("事实缺口应继承: %+v", gaps2)
+	}
+	// 就绪状态与父修订一致（pending 落源仍阻断，快照不缺失）。
+	rBase, _ := s.EvaluateDigestReadiness(ctx, base.ID)
+	rRev2, _ := s.EvaluateDigestReadiness(ctx, rev2.ID)
+	if rBase.Deliverable != rRev2.Deliverable {
+		t.Fatalf("标题编辑不应改变就绪状态: base=%+v rev=%+v", rBase, rRev2)
+	}
+	for _, issue := range rRev2.Issues {
+		if issue.Code == "legacy_snapshot" {
+			t.Fatalf("继承快照后不得出现 legacy_snapshot: %+v", rRev2.Issues)
+		}
+	}
+
+	// 来源剔除派生：doc-a 落源不继承，其已消解缺口转回未消解；doc-b 不受影响。
+	keptNoDocA := make([]models.DigestBlock, 0, len(kept))
+	for _, b := range kept {
+		keptNoDocA = append(keptNoDocA, b) // 该 base 无 doc-a 事实块；重点验证落源/缺口传播
+	}
+	rev3, err := s.CreateDigestRevision(ctx, DigestRevisionInput{
+		Base: rev2, BaseVersionClaimed: 2, Reason: "剔除来源 doc-a", Blocks: keptNoDocA, ExcludeDocumentID: "doc-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows3, _ := s.ListDigestSearchSources(ctx, rev3.ID)
+	if len(rows3) != 1 || rows3[0].DocumentID != "doc-b" {
+		t.Fatalf("被剔除 Document 的落源不得继承: %+v", rows3)
+	}
+	gaps3, _ := s.ListDigestFactGaps(ctx, rev3.ID)
+	gapByText := map[string]models.DigestFactGap{}
+	for _, g := range gaps3 {
+		gapByText[g.Text] = *g
+	}
+	if g, ok := gapByText["已消解缺口"]; !ok || g.DocumentID != "" {
+		t.Fatalf("被剔除 Document 的缺口应转回未消解: %+v", gaps3)
+	}
+	if g, ok := gapByText["未消解缺口"]; !ok || g.DocumentID != "" {
+		t.Fatalf("无关缺口应原样继承: %+v", gaps3)
+	}
+	// 旧版本仍可按 ID 读取回溯。
+	old, err := s.GetEpisodeDigest(ctx, base.ID)
+	if err != nil || old.Title != "初版" || old.Version != 1 {
+		t.Fatalf("旧版本应可回溯: %v %+v", err, old)
+	}
+}
