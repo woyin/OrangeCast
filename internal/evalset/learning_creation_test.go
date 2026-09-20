@@ -199,4 +199,24 @@ func TestCheckEpisodeFixture_AllBranches(t *testing.T) {
 	if len(issues4) == 0 {
 		t.Fatal("零时长 Segment 应产生问题")
 	}
+
+	// 引用型标注必须指向真实 Segment；重复组至少包含两个成员，核心观点必须有支持区间。
+	ep5 := EpisodeFixture{
+		ID: "x5", Language: "zh", Scenario: "multi_topic_ads", Source: "self-made",
+		Segments:            []provider.Segment{{ID: "s1", Start: 0, End: 5, Text: "内容"}},
+		AdSegmentIDs:        []string{"missing-ad"},
+		RepeatedPointGroups: [][]string{{"missing-repeat"}},
+		CorePoints:          []CorePoint{{Claim: "c", Qualifiers: []string{"q"}, NotImplied: []string{"n"}}},
+	}
+	issues5 := checkEpisodeFixture(ep5)
+	details := make([]string, 0, len(issues5))
+	for _, issue := range issues5 {
+		details = append(details, issue.Detail)
+	}
+	joined := strings.Join(details, "\n")
+	for _, want := range []string{"广告段 missing-ad 不存在", "重复组 0 少于两个 Segment", "重复组 0 引用不存在的 Segment missing-repeat", "核心观点 0 缺少支持区间"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("应检出 %q，实际问题：%s", want, joined)
+		}
+	}
 }
