@@ -250,9 +250,9 @@ func TestCreationWorkspaceHandlersRoundTrip(t *testing.T) {
 	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("blocking research need must stop confirmation: %d", rec.Code)
 	}
-	// 解决缺口（引用新 Source）后确认成功。
+	// 解决缺口（引用新 Source 的当前版本具体 Segment）后确认成功。
 	newEpisode := seedEpisodeWithTranscript(t, srv, "resolve-ep")
-	if rec := postToHandler(t, srv.handleResearchNeedResolve, url.Values{"research_need_id": {need.ID}, "resolution_source_id": {newEpisode}}); rec.Code != http.StatusSeeOther {
+	if rec := postToHandler(t, srv.handleResearchNeedResolve, url.Values{"research_need_id": {need.ID}, "source_type": {"episode"}, "resolution_source_id": {newEpisode}, "resolution_version": {"1"}, "resolution_detail": {"seg-1"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("resolve research need should redirect: %d body=%s", rec.Code, rec.Body.String())
 	}
 	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}}); rec.Code != http.StatusSeeOther {
