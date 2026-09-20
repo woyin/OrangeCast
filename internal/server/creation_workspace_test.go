@@ -197,6 +197,57 @@ func TestCreationWorkspaceSettingsAcceptanceAndBriefAuthorization(t *testing.T) 
 	if err != nil || confirmed.Status != "confirmed" || confirmed.ConfirmedAt == nil {
 		t.Fatalf("only explicit Owner confirmation may authorize creation: brief=%+v err=%v", confirmed, err)
 	}
+	rev, err := srv.store.GetCreationBriefRevision(t.Context(), confirmed.ID, confirmed.CurrentVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := srv.store.GetCreationArticleLinkByCreationProposal(t.Context(), proposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.CreationBriefID != confirmed.ID || link.CreationBriefVersion != confirmed.CurrentVersion {
+		t.Fatalf("exact link: %+v", link)
+	}
+	ap, err := srv.store.GetArticleProposal(t.Context(), link.ArticleProposalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ab, err := srv.store.GetArticleBrief(t.Context(), link.ArticleBriefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ap.Thesis != rev.OwnerClaim || ab.Thesis != rev.OwnerClaim || ab.Outline != rev.Outline || ab.Style != rev.Style || (ab.TargetLength == nil) != (rev.TargetLength == nil) || (ab.TargetLength != nil && *ab.TargetLength != *rev.TargetLength) || ab.ConfirmedAt == nil {
+		t.Fatalf("compat exact fields: ap=%+v ab=%+v rev=%+v", ap, ab, rev)
+	}
+	var selected struct {
+		Selected []string `json:"selected"`
+	}
+	if err := json.Unmarshal([]byte(rev.MaterialPlanJSON), &selected); err != nil {
+		t.Fatal(err)
+	}
+	var articleSelected []string
+	if err := json.Unmarshal([]byte(ab.MaterialPlan), &articleSelected); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(selected.Selected, ",") != strings.Join(articleSelected, ",") {
+		t.Fatalf("material plan mismatch: %s vs %s", rev.MaterialPlanJSON, ab.MaterialPlan)
+	}
+	if rec := post("/workbench/creation-briefs/confirm", "creation_brief_id="+confirmed.ID+"&expected_version="+strconv.Itoa(confirmed.CurrentVersion)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("repeat confirm should 303: %d %s", rec.Code, rec.Body.String())
+	}
+	link2, err := srv.store.GetCreationArticleLinkByCreationProposal(t.Context(), proposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link2.ID != link.ID || link2.ArticleProposalID != link.ArticleProposalID || link2.ArticleBriefID != link.ArticleBriefID {
+		t.Fatal("repeat confirm changed compatibility IDs")
+	}
+	for table, id := range map[string]string{"creation_article_links": link.ID, "article_proposals": link.ArticleProposalID, "article_briefs": link.ArticleBriefID} {
+		var n int
+		if err := srv.store.DB.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM "+table+" WHERE id=?", id).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s count=%d err=%v", table, n, err)
+		}
+	}
 }
 
 // TestIdeationSelectionsFlowIntoRound R12：素材选择绑定会话后，轮次材料快照从

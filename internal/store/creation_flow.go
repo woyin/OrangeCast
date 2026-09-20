@@ -622,56 +622,58 @@ func (s *Store) CreateCreationBriefRevisionCAS(ctx context.Context, briefID stri
 }
 
 // ConfirmCreationBriefVersion confirms exactly the current immutable revision.
+func (s *Store) confirmCreationBriefVersionTx(ctx context.Context, tx *sql.Tx, briefID string, version int) (string, error) {
+	var current, confirmed int
+	var proposalID string
+	if err := tx.QueryRowContext(ctx, `SELECT current_version,confirmed_version,creation_proposal_id FROM creation_briefs WHERE id=?`, briefID).Scan(&current, &confirmed, &proposalID); errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	} else if err != nil {
+		return "", err
+	}
+	if current != version {
+		return "", ErrCreationBriefVersionConflict
+	}
+	var materialPlan, ownerClaimRevision, outlineRevision, snapshotJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT material_plan_json,owner_claim,outline,curator_input_snapshot_json FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).Scan(&materialPlan, &ownerClaimRevision, &outlineRevision, &snapshotJSON); errors.Is(err, sql.ErrNoRows) {
+		return "", ErrCreationBriefVersionConflict
+	} else if err != nil {
+		return "", err
+	}
+	var proposalStatus, ownerClaim string
+	if err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(owner_claim,'') FROM creation_proposals WHERE id=?`, proposalID).Scan(&proposalStatus, &ownerClaim); err != nil {
+		return "", err
+	}
+	if proposalStatus != "accepted" || strings.TrimSpace(ownerClaim) == "" || strings.TrimSpace(ownerClaimRevision) == "" || strings.TrimSpace(outlineRevision) == "" {
+		return "", fmt.Errorf("%w: exact accepted revision prerequisites failed", ErrInvalidEditorialState)
+	}
+	var blocked int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM research_needs WHERE creation_proposal_id=? AND severity='blocking' AND status!='resolved'`, proposalID).Scan(&blocked); err != nil {
+		return "", err
+	}
+	if blocked > 0 {
+		return "", fmt.Errorf("%w: blocking research need unresolved", ErrInvalidEditorialState)
+	}
+	if err := s.recheckBriefRevisionTx(ctx, tx, proposalID, ownerClaimRevision, materialPlan, snapshotJSON); err != nil {
+		return "", err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_version=?,confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND current_version=?`, version, briefID, version)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return "", ErrCreationBriefVersionConflict
+	}
+	return proposalID, nil
+}
+
 func (s *Store) ConfirmCreationBriefVersion(ctx context.Context, briefID string, version int) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var current, confirmed int
-	var proposalID string
-	if err := tx.QueryRowContext(ctx, `SELECT current_version,confirmed_version,creation_proposal_id FROM creation_briefs WHERE id=?`, briefID).Scan(&current, &confirmed, &proposalID); errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if err != nil {
+	if _, err := s.confirmCreationBriefVersionTx(ctx, tx, briefID, version); err != nil {
 		return err
-	}
-	if current != version {
-		return ErrCreationBriefVersionConflict
-	}
-	var revisionID, materialPlan, ownerClaimRevision, outlineRevision, snapshotJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT id,material_plan_json,owner_claim,outline,curator_input_snapshot_json FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).Scan(&revisionID, &materialPlan, &ownerClaimRevision, &outlineRevision, &snapshotJSON); errors.Is(err, sql.ErrNoRows) {
-		return ErrCreationBriefVersionConflict
-	} else if err != nil {
-		return err
-	}
-	var blocked int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM research_needs WHERE creation_proposal_id=? AND severity='blocking' AND status!='resolved'`, proposalID).Scan(&blocked); err != nil {
-		return err
-	}
-	var proposalStatus, ownerClaim string
-	if err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(owner_claim,'') FROM creation_proposals WHERE id=?`, proposalID).Scan(&proposalStatus, &ownerClaim); err != nil {
-		return err
-	}
-	if proposalStatus != "accepted" || strings.TrimSpace(ownerClaim) == "" {
-		return fmt.Errorf("%w: accepted OwnerClaim required", ErrInvalidEditorialState)
-	}
-	if blocked > 0 {
-		return fmt.Errorf("%w: blocking research need unresolved", ErrInvalidEditorialState)
-	}
-	if strings.TrimSpace(ownerClaimRevision) == "" || strings.TrimSpace(outlineRevision) == "" {
-		return fmt.Errorf("%w: revision OwnerClaim/outline required", ErrInvalidEditorialState)
-	}
-	if err := s.recheckBriefRevisionTx(ctx, tx, proposalID, ownerClaimRevision, materialPlan, snapshotJSON); err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_version=?,confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND current_version=? AND EXISTS (SELECT 1 FROM creation_brief_revisions WHERE brief_id=? AND version=?)`, version, briefID, version, briefID, version)
-	if err != nil {
-		return err
-	}
-	if n, err := result.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 {
-		return ErrCreationBriefVersionConflict
 	}
 	return tx.Commit()
 }

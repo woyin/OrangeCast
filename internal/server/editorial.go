@@ -323,6 +323,14 @@ func (srv *Server) handleArticleBriefCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
+	proposalID := strings.TrimSpace(r.FormValue("proposal_id"))
+	if _, err := srv.store.GetCreationArticleLinkByArticleProposal(r.Context(), proposalID); err == nil {
+		http.Error(w, "linked compatibility proposal is controlled by CreationBrief", http.StatusBadRequest)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	targetLength, err := optionalTargetLength(r.FormValue("target_length"))
 	if err != nil {
 		http.Error(w, "目标字数必须是正整数", http.StatusBadRequest)
@@ -352,7 +360,15 @@ func (srv *Server) handleArticleBriefConfirm(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	profileID := strings.TrimSpace(r.FormValue("profile_id"))
-	if err := srv.store.ConfirmArticleBrief(r.Context(), strings.TrimSpace(r.FormValue("brief_id"))); err != nil {
+	briefID := strings.TrimSpace(r.FormValue("brief_id"))
+	if _, err := srv.store.GetCreationArticleLinkByArticleBrief(r.Context(), briefID); err == nil {
+		http.Error(w, "linked compatibility brief is controlled by CreationBrief", http.StatusBadRequest)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := srv.store.ConfirmArticleBrief(r.Context(), briefID); err != nil {
 		http.Error(w, "确认写作简报失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -365,7 +381,15 @@ func (srv *Server) handleArticleDraftCreate(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	draft, err := srv.store.CreateArticleDraft(r.Context(), strings.TrimSpace(r.FormValue("brief_id")), strings.TrimSpace(r.FormValue("title")))
+	briefID := strings.TrimSpace(r.FormValue("brief_id"))
+	if _, err := srv.store.GetCreationArticleLinkByArticleBrief(r.Context(), briefID); err == nil {
+		http.Error(w, "linked compatibility brief is controlled by CreationBrief", http.StatusBadRequest)
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	draft, err := srv.store.CreateArticleDraft(r.Context(), briefID, strings.TrimSpace(r.FormValue("title")))
 	if err != nil {
 		http.Error(w, "创建文章草稿失败："+err.Error(), http.StatusBadRequest)
 		return

@@ -329,9 +329,9 @@
 - `proposal_batch_r16_test.go`：重复 reject 的 `GetCreationProposal` 现在检查并传播读取错误；零候选测试新增 `HasOpenProposalBatch=false` 断言。
 - 直接验证：`go test -run 'TestProposalBatch_' ./internal/server/` 通过；`go test -race -run TestProposalBatch_ConcurrentLastTwoDecisions_R16 ./internal/server/` 通过（4.028s）。
 
-## R17 — Curator 方案、不可变 Brief revision、CAS 编辑与精确确认（未提交）
+## R17 — Curator 方案、不可变 Brief revision、CAS 编辑与精确确认（已提交 8131cbab0e4865e9296efc6aad0194ddba0c5b56）
 
-- 状态：实现与自动验证完成，当前工作区保留改动，未提交，未进入 R18。
+- 状态：实现与自动验证完成；R17 已由上述原子提交提交，R18 已在独立原子变更中实现。
 - 交付：
   - 接受主张真实 HTTP 路径重新读取 accepted Proposal.OwnerClaim；创建 draft 后幂等入队 `JobCuratorBrief`，冻结 base_version、OwnerClaim、provider/model/prompt、SourceType/CardVersion、材料内容/引用。
   - 迁移 0051：creation_brief_revisions 不可变 revision；旧 confirmed 回填 confirmed_version=1，draft=0；v1 revision 回填；current revision 成为读取真源。
@@ -349,5 +349,23 @@
   - 真实 Workbench GET→原样 POST 测试覆盖 OwnerClaim、outline、selected/rejected、style、target length、claim type、questions、notes，刷新后逐字段保留；stale edit/confirm 409。
   - Create/confirm current revision 缺失、Curator policy/source/stale/excluded/archive/阻断校验均有直接测试；accepted OwnerClaim、ClaimPlan thesis、Curator metadata 与 checkpoint Usage/receipt/replay 受测。
 - 门禁：`go test ./internal/server/`、`./internal/queue/`、`./internal/store/`、`./internal/backup/`、`go test ./...`、`go vet ./...`、`gofmt`、`git diff --check` 通过；Curator checkpoint race 通过。未调用真实付费模型。
-- 限制：尚未提交；R18 未开始。
+- 限制：真实付费模型与真机/浏览器外部验收按后续计划记录；R18 在独立原子变更中实现。
 - 复核修复：CAS 编辑与 Curator revision 应用现在同时清空 `confirmed_at`（不残留旧授权时间）；`TestCreationBrief_EditInvalidatesPriorConfirmation` 断言 confirmed→编辑后 draft、confirmed_version=0、ConfirmedAt=nil。
+
+## R18 — 精确版本桥接与旧入口封堵
+
+- 状态：实现与自动验证完成；本段记录对应 R18 原子变更。
+- 交付：
+  - migration 0052：`creation_article_links.creation_brief_version` 精确回填（confirmed_version/current_version/fallback=1），保留 `contract_version` 契约代际语义。
+  - Confirm+bridge 同事务：R17 精确资格确认、immutable revision、兼容 ArticleProposal/ArticleBrief/link 原子创建或版本更新；同版本/并发幂等，版本更新复用同一组 IDs。
+  - 旧入口/Writer gate：linked compatibility entity 的旧 Brief/Draft handler、initial Writer、revision Writer 在 Provider 前拒绝；unlinked legacy 保持兼容。
+- 验证：
+  - production HTTP 重复确认、精确字段与 link version；
+  - 并发 combined confirm 仍单 link/AP/AB；失败回滚不留孤儿；
+  - legacy gate Provider factory/call 为 0；
+  - migration 0052 三种版本回填；v01 backup restore link version 与旧 AP/AB 可读；
+  - `TestCreationArticleLinkR18_*` store 定向测试通过。
+  - 独立 race 门禁：`go test -count=1 -race -run 'TestCreationArticleLinkR18_|TestMigration0052|TestV01_FullRestore' ./internal/store/` 通过（20.126s）。
+  - 独立 server race 门禁：`go test -count=1 -race -run 'TestCreationWorkspaceSettingsAcceptanceAndBriefAuthorization|TestR18LegacyEntrypointsRejectLinkedArticles' ./internal/server/` 通过（6.191s）。
+  - `go test -count=1 ./...`、`go vet ./...`、`gofmt -l internal`、`git diff --check` 通过。
+- 限制：R19 durable ClaimWriter 尚未开始。

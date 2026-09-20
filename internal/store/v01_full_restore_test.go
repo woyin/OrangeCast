@@ -200,6 +200,26 @@ func TestV01_FullRestore_NewRelationships(t *testing.T) {
 	if abID != link.ArticleBriefID {
 		t.Fatalf("桥接 ArticleBrief ID 应一致: %s != %s", abID, link.ArticleBriefID)
 	}
+	var linkVersion int
+	if err := dst.QueryRow(`SELECT creation_brief_version FROM creation_article_links WHERE creation_proposal_id=?`, acceptedProposal.ID).Scan(&linkVersion); err != nil {
+		t.Fatal(err)
+	}
+	if linkVersion != link.CreationBriefVersion || linkVersion != 1 {
+		t.Fatalf("桥接 Brief version 应为 1: got=%d link=%d", linkVersion, link.CreationBriefVersion)
+	}
+	var apThesis, abThesis, abOutline string
+	if err := dst.QueryRow(`SELECT thesis FROM article_proposals WHERE id=?`, link.ArticleProposalID).Scan(&apThesis); err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.QueryRow(`SELECT thesis,outline_markdown FROM article_briefs WHERE id=?`, link.ArticleBriefID).Scan(&abThesis, &abOutline); err != nil {
+		t.Fatal(err)
+	}
+	if apThesis != "V01 Owner 主张" || abThesis != "V01 Owner 主张" {
+		t.Fatalf("旧文章主张未恢复: %q %q", apThesis, abThesis)
+	}
+	if abOutline != "" {
+		t.Fatalf("旧文章 outline 应可读，实际=%q", abOutline)
+	}
 }
 
 func int64Ptr(v int64) *int64 { return &v }

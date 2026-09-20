@@ -242,7 +242,7 @@ func (srv *Server) handleCreationBriefConfirm(w http.ResponseWriter, r *http.Req
 		http.Error(w, "expected_version 非法", http.StatusBadRequest)
 		return
 	}
-	if err := srv.store.ConfirmCreationBriefVersion(r.Context(), brief.ID, version); err != nil {
+	if _, err := srv.store.ConfirmCreationBriefVersionAndEnsureLink(r.Context(), brief.ID, version, "v2"); err != nil {
 		if errors.Is(err, store.ErrCreationBriefVersionConflict) {
 			http.Error(w, "Brief 版本已过期，请刷新后重试", http.StatusConflict)
 			return

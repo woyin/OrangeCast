@@ -60,6 +60,11 @@ func (srv *Server) loadInitialWriterAuthorization(ctx context.Context, briefID s
 	if err != nil {
 		return nil, internalEditorial("读取选题失败")
 	}
+	if _, linkErr := srv.store.GetCreationArticleLinkByArticleProposal(ctx, proposal.ID); linkErr == nil {
+		return nil, badEditorial("linked compatibility article is controlled by CreationBrief")
+	} else if !errors.Is(linkErr, store.ErrNotFound) {
+		return nil, internalEditorial(linkErr.Error())
+	}
 	profile, err := srv.store.GetEditorialProfile(ctx, proposal.EditorialProfileID)
 	if err != nil {
 		return nil, internalEditorial("读取编辑画像失败")

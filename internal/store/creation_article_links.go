@@ -1,141 +1,209 @@
-// creation_article_links.go 新旧创作契约的持久兼容连接（C08 / ADR-0024 §6）。
-//
-// 为 CreationProposal/CreationBrief 与 ArticleProposal/ArticleBrief 建立持久
-// 一对一映射：Owner 确认新 CreationBrief 后幂等建立兼容 ArticleProposal 和
-// ArticleBrief 记录。旧 Article 记录继续可读、可继续、可导出。
-// 未确认的新 Brief 不建立映射（不把未确认方向迁成已确认主张）。
 package store
 
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
 )
 
-// CreationArticleLink 映射行。
 type CreationArticleLink struct {
-	ID                 string
-	CreationProposalID string
-	CreationBriefID    string
-	ArticleProposalID  string
-	ArticleBriefID     string
-	ContractVersion    string
-	CreatedAt          string
+	ID                   string
+	CreationProposalID   string
+	CreationBriefID      string
+	ArticleProposalID    string
+	ArticleBriefID       string
+	ContractVersion      string
+	CreationBriefVersion int
+	CreatedAt            string
 }
 
-// EnsureCreationArticleLink Owner 确认新 Brief 后幂等建立映射：
-//  1. 创建兼容 ArticleProposal（继承标题/主张/受众，kind=deep_read 单集深读）；
-//  2. 创建兼容 ArticleBrief（继承论文/受众/结构，状态 confirmed）；
-//  3. 写入一对一映射行。
-//
-// 已有映射直接返回（幂等，重复确认/重复桥接只产生一组映射）。
-// 不把未确认方向迁成已确认主张。
-func (s *Store) EnsureCreationArticleLink(ctx context.Context, creationProposalID, creationBriefID, contractVersion string) (*CreationArticleLink, error) {
-	if creationProposalID == "" || creationBriefID == "" {
-		return nil, fmt.Errorf("%w: creation proposal and brief IDs required", ErrInvalidEditorialState)
+// EnsureCreationArticleLink bridges the current confirmed Brief revision using the legacy wrapper.
+func (s *Store) EnsureCreationArticleLink(ctx context.Context, proposalID, briefID, contractVersion string) (*CreationArticleLink, error) {
+	b, err := s.GetCreationBrief(ctx, briefID)
+	if err != nil {
+		return nil, err
 	}
+	if b.Status != "confirmed" || b.CurrentVersion == 0 || b.CurrentVersion != b.ConfirmedVersion {
+		return nil, fmt.Errorf("%w: brief is not exactly confirmed", ErrInvalidEditorialState)
+	}
+	return s.EnsureCreationArticleLinkExact(ctx, proposalID, briefID, b.ConfirmedVersion, contractVersion)
+}
+
+// EnsureCreationArticleLinkExact bridges one exact immutable Brief revision transactionally.
+func (s *Store) EnsureCreationArticleLinkExact(ctx context.Context, proposalID, briefID string, version int, contractVersion string) (*CreationArticleLink, error) {
 	if contractVersion == "" {
 		contractVersion = "v2"
 	}
-
-	// 幂等：已有映射直接返回。
-	existing, err := s.GetCreationArticleLinkByCreationProposal(ctx, creationProposalID)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+	link, err := s.ensureCreationArticleLinkExactTx(ctx, tx, proposalID, briefID, version, contractVersion)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return link, nil
+}
+func (s *Store) ensureCreationArticleLinkExactTx(ctx context.Context, tx *sql.Tx, proposalID, briefID string, version int, contractVersion string) (*CreationArticleLink, error) {
+	p, r, err := loadExactBridgeTx(ctx, tx, proposalID, briefID, version)
+	if err != nil {
+		return nil, err
+	}
+	sel, _, ok := parseMaterialPlan(r.MaterialPlanJSON)
+	if !ok || len(sel) == 0 {
+		return nil, fmt.Errorf("%w: selected materials required", ErrInvalidEditorialState)
+	}
+	data, _ := json.Marshal(sel)
+	l := &CreationArticleLink{}
+	err = tx.QueryRowContext(ctx, `SELECT id,creation_proposal_id,creation_brief_id,article_proposal_id,article_brief_id,contract_version,creation_brief_version,created_at FROM creation_article_links WHERE creation_proposal_id=?`, proposalID).Scan(&l.ID, &l.CreationProposalID, &l.CreationBriefID, &l.ArticleProposalID, &l.ArticleBriefID, &l.ContractVersion, &l.CreationBriefVersion, &l.CreatedAt)
+	if err == nil {
+		if l.CreationBriefID == briefID && l.CreationBriefVersion == version {
+			return l, nil
+		}
+		if err := updateCompatibilityTx(ctx, tx, l.ArticleProposalID, l.ArticleBriefID, p, r, data); err != nil {
+			return nil, err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE creation_article_links SET creation_brief_id=?,creation_brief_version=?,contract_version=? WHERE id=?`, briefID, version, contractVersion, l.ID)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return nil, ErrInvalidEditorialState
+		}
+		l.CreationBriefID, l.CreationBriefVersion, l.ContractVersion = briefID, version, contractVersion
+		return l, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	apID, abID, linkID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	res, err := tx.ExecContext(ctx, `INSERT INTO article_proposals (id,editorial_profile_id,kind,status,title,thesis,audience,rationale,candidate_keypoints_json,provider,model,prompt_version,cost_cents) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, apID, p.EditorialProfileID, "deep_read", "accepted", p.WorkingTitle, r.OwnerClaim, p.Audience, p.Rationale, string(data), "", "", contractVersion, nil)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return nil, ErrInvalidEditorialState
+	}
+	res, err = tx.ExecContext(ctx, `INSERT INTO article_briefs (id,proposal_id,status,thesis,audience,outline_markdown,material_plan_json,conflict_plan_json,style,target_length,confirmed_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))`, abID, apID, "confirmed", r.OwnerClaim, p.Audience, r.Outline, string(data), `[]`, r.Style, r.TargetLength)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return nil, ErrInvalidEditorialState
+	}
+	res, err = tx.ExecContext(ctx, `INSERT INTO creation_article_links (id,creation_proposal_id,creation_brief_id,article_proposal_id,article_brief_id,contract_version,creation_brief_version) VALUES (?,?,?,?,?,?,?)`, linkID, proposalID, briefID, apID, abID, contractVersion, version)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return nil, ErrInvalidEditorialState
+	}
+	return &CreationArticleLink{ID: linkID, CreationProposalID: proposalID, CreationBriefID: briefID, ArticleProposalID: apID, ArticleBriefID: abID, ContractVersion: contractVersion, CreationBriefVersion: version}, nil
+}
 
-	// 读取新契约对象。
-	proposal, err := s.GetCreationProposal(ctx, creationProposalID)
+// ConfirmCreationBriefVersionAndEnsureLink confirms R17 eligibility and bridges compatibility atomically.
+func (s *Store) ConfirmCreationBriefVersionAndEnsureLink(ctx context.Context, briefID string, version int, contractVersion string) (*CreationArticleLink, error) {
+	if contractVersion == "" {
+		contractVersion = "v2"
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("读取 CreationProposal: %w", err)
+		return nil, err
 	}
-	if proposal.Status != "accepted" {
-		return nil, fmt.Errorf("%w: proposal not accepted, cannot bridge", ErrInvalidEditorialState)
-	}
-	brief, err := s.GetCreationBrief(ctx, creationBriefID)
+	defer tx.Rollback()
+	pid, err := s.confirmCreationBriefVersionTx(ctx, tx, briefID, version)
 	if err != nil {
-		return nil, fmt.Errorf("读取 CreationBrief: %w", err)
+		return nil, err
 	}
-	if brief.Status != "confirmed" {
-		return nil, fmt.Errorf("%w: brief not confirmed, cannot bridge", ErrInvalidEditorialState)
-	}
-
-	// 创建兼容 ArticleProposal。
-	ap := models.ArticleProposal{
-		EditorialProfileID: proposal.EditorialProfileID,
-		Kind:               "deep_read",
-		Status:             "accepted",
-		Title:              proposal.WorkingTitle,
-		Thesis:             proposal.ProposedClaim,
-		Audience:           proposal.Audience,
-		Rationale:          proposal.Rationale,
-		CandidateKeyPoints: proposal.MaterialIDsJSON,
-	}
-	articleProposal, err := s.CreateArticleProposal(ctx, ap)
+	link, err := s.ensureCreationArticleLinkExactTx(ctx, tx, pid, briefID, version, contractVersion)
 	if err != nil {
-		return nil, fmt.Errorf("创建兼容 ArticleProposal: %w", err)
+		return nil, err
 	}
-
-	// 创建兼容 ArticleBrief（状态 confirmed）。
-	ab := models.ArticleBrief{
-		ProposalID:   articleProposal.ID,
-		Status:       "confirmed",
-		Thesis:       brief.OwnerClaim,
-		Audience:     proposal.Audience,
-		Outline:      brief.MaterialPlanJSON,
-		MaterialPlan: brief.MaterialPlanJSON,
-		Style:        "",
-	}
-	articleBrief, err := s.CreateArticleBrief(ctx, ab)
-	if err != nil {
-		return nil, fmt.Errorf("创建兼容 ArticleBrief: %w", err)
-	}
-
-	// 写入映射。
-	link := &CreationArticleLink{
-		ID:                 uuid.NewString(),
-		CreationProposalID: creationProposalID,
-		CreationBriefID:    creationBriefID,
-		ArticleProposalID:  articleProposal.ID,
-		ArticleBriefID:     articleBrief.ID,
-		ContractVersion:    contractVersion,
-	}
-	_, err = s.DB.ExecContext(ctx,
-		`INSERT INTO creation_article_links (id, creation_proposal_id, creation_brief_id, article_proposal_id, article_brief_id, contract_version)
-		 VALUES (?,?,?,?,?,?)`,
-		link.ID, link.CreationProposalID, link.CreationBriefID, link.ArticleProposalID, link.ArticleBriefID, link.ContractVersion)
-	if err != nil {
-		return nil, fmt.Errorf("写入映射: %w", err)
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return link, nil
 }
 
-// GetCreationArticleLinkByCreationProposal 按 CreationProposal 读取映射。
-func (s *Store) GetCreationArticleLinkByCreationProposal(ctx context.Context, creationProposalID string) (*CreationArticleLink, error) {
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT id, creation_proposal_id, creation_brief_id, article_proposal_id, article_brief_id, contract_version, created_at
-		 FROM creation_article_links WHERE creation_proposal_id=?`, creationProposalID)
-	return scanCreationArticleLink(row)
+// loadExactBridgeTx validates identity, Proposal accepted status, and the exact
+// confirmed Brief revision. Legacy wrappers may tolerate an empty Outline; the
+// confirmation transaction performs the stricter R17 outline check before calling it.
+func loadExactBridgeTx(ctx context.Context, tx *sql.Tx, proposalID, briefID string, version int) (*models.CreationProposal, *models.CreationBriefRevision, error) {
+	if strings.TrimSpace(proposalID) == "" || strings.TrimSpace(briefID) == "" || version <= 0 {
+		return nil, nil, fmt.Errorf("%w: bridge IDs/version required", ErrInvalidEditorialState)
+	}
+	p := &models.CreationProposal{}
+	var batch, session, round, owner sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,COALESCE(decision_note,''),created_at,updated_at FROM creation_proposals WHERE id=?`, proposalID).Scan(&p.ID, &p.EditorialProfileID, &batch, &session, &round, &p.Status, &p.CreationForm, &p.WorkingTitle, &p.ProposedClaim, &owner, &p.Audience, &p.Rationale, &p.MaterialIDsJSON, &p.HistoryRelationship, &p.DecisionNote, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		return nil, nil, err
+	}
+	p.OwnerClaim = strings.TrimSpace(owner.String)
+	var briefProposalID, briefStatus string
+	var currentVersion, confirmedVersion int
+	if err := tx.QueryRowContext(ctx, `SELECT creation_proposal_id,current_version,confirmed_version,status FROM creation_briefs WHERE id=?`, briefID).Scan(&briefProposalID, &currentVersion, &confirmedVersion, &briefStatus); err != nil {
+		return nil, nil, err
+	}
+	if p.Status != "accepted" || briefProposalID != proposalID || currentVersion != version || confirmedVersion != version || briefStatus != "confirmed" {
+		return nil, nil, fmt.Errorf("%w: exact confirmed prerequisites failed", ErrInvalidEditorialState)
+	}
+	rv := &models.CreationBriefRevision{}
+	if err := tx.QueryRowContext(ctx, `SELECT id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,claim_type,unresolved_questions_json,notes,curator_prompt_version,curator_input_snapshot_json,created_at FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).Scan(&rv.ID, &rv.BriefID, &rv.Version, &rv.OriginJobID, &rv.OwnerClaim, &rv.ClaimPlanJSON, &rv.MaterialPlanJSON, &rv.ResearchNeedIDsJSON, &rv.Outline, &rv.Style, &rv.TargetLength, &rv.ClaimType, &rv.UnresolvedQuestionsJSON, &rv.Notes, &rv.CuratorPromptVersion, &rv.CuratorInputSnapshotJSON, &rv.CreatedAt); err != nil {
+		return nil, nil, err
+	}
+	if rv.OwnerClaim == "" {
+		return nil, nil, fmt.Errorf("%w: revision incomplete", ErrInvalidEditorialState)
+	}
+	return p, rv, nil
 }
 
-// GetCreationArticleLinkByArticleProposal 按 ArticleProposal 读取映射（旧入口反查）。
-func (s *Store) GetCreationArticleLinkByArticleProposal(ctx context.Context, articleProposalID string) (*CreationArticleLink, error) {
-	row := s.DB.QueryRowContext(ctx,
-		`SELECT id, creation_proposal_id, creation_brief_id, article_proposal_id, article_brief_id, contract_version, created_at
-		 FROM creation_article_links WHERE article_proposal_id=?`, articleProposalID)
-	return scanCreationArticleLink(row)
+func updateCompatibilityTx(ctx context.Context, tx *sql.Tx, ap, ab string, p *models.CreationProposal, r *models.CreationBriefRevision, data []byte) error {
+	res, err := tx.ExecContext(ctx, `UPDATE article_proposals SET title=?,thesis=?,audience=?,rationale=?,candidate_keypoints_json=?,status='accepted' WHERE id=?`, p.WorkingTitle, r.OwnerClaim, p.Audience, p.Rationale, string(data), ap)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrInvalidEditorialState
+	}
+	res, err = tx.ExecContext(ctx, `UPDATE article_briefs SET status='confirmed',thesis=?,audience=?,outline_markdown=?,material_plan_json=?,style=?,target_length=?,confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=?`, r.OwnerClaim, p.Audience, r.Outline, string(data), r.Style, r.TargetLength, ab)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrInvalidEditorialState
+	}
+	return nil
 }
 
+// GetCreationArticleLinkByCreationProposal reads a link by CreationProposal.
+func (s *Store) GetCreationArticleLinkByCreationProposal(ctx context.Context, id string) (*CreationArticleLink, error) {
+	return s.getCreationLink(ctx, `creation_proposal_id=?`, id)
+}
+
+// GetCreationArticleLinkByArticleProposal reads a link by legacy ArticleProposal.
+func (s *Store) GetCreationArticleLinkByArticleProposal(ctx context.Context, id string) (*CreationArticleLink, error) {
+	return s.getCreationLink(ctx, `article_proposal_id=?`, id)
+}
+
+// GetCreationArticleLinkByArticleBrief reads a link by legacy ArticleBrief.
+func (s *Store) GetCreationArticleLinkByArticleBrief(ctx context.Context, id string) (*CreationArticleLink, error) {
+	return s.getCreationLink(ctx, `article_brief_id=?`, id)
+}
+func (s *Store) getCreationLink(ctx context.Context, w, a string) (*CreationArticleLink, error) {
+	return scanCreationArticleLink(s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,creation_brief_id,article_proposal_id,article_brief_id,contract_version,creation_brief_version,created_at FROM creation_article_links WHERE `+w, a))
+}
 func scanCreationArticleLink(row interface{ Scan(...any) error }) (*CreationArticleLink, error) {
 	l := &CreationArticleLink{}
-	err := row.Scan(&l.ID, &l.CreationProposalID, &l.CreationBriefID, &l.ArticleProposalID, &l.ArticleBriefID, &l.ContractVersion, &l.CreatedAt)
+	err := row.Scan(&l.ID, &l.CreationProposalID, &l.CreationBriefID, &l.ArticleProposalID, &l.ArticleBriefID, &l.ContractVersion, &l.CreationBriefVersion, &l.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

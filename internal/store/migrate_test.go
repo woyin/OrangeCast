@@ -31,7 +31,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52}
 	if len(applied) != len(want) {
 		t.Fatalf("应应用 %v，实际 %v", want, applied)
 	}
@@ -42,8 +42,8 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	}
 	// schema_migrations 已登记到最新版本
 	v, _ := AppliedVersion(context.Background(), db)
-	if v != 51 {
-		t.Fatalf("AppliedVersion 应为 51，实际 %d", v)
+	if v != 52 {
+		t.Fatalf("AppliedVersion 应为 52，实际 %d", v)
 	}
 	// 关键表存在（含 schema_migrations）
 	for _, tb := range []string{"users", "podcasts", "episodes", "transcripts",
@@ -95,8 +95,8 @@ func TestMigrate_V01FixtureUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
-	if len(applied) != 51 {
-		t.Fatalf("应应用 51 条迁移，实际 %d", len(applied))
+	if len(applied) != 52 {
+		t.Fatalf("应应用 52 条迁移，实际 %d", len(applied))
 	}
 	after := countAll(t, db)
 
@@ -152,8 +152,8 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 51 {
-		t.Errorf("失败迁移不应登记版本；应保持 51，实际 %d", v)
+	if v != 52 {
+		t.Errorf("失败迁移不应登记版本；应保持 52，实际 %d", v)
 	}
 
 	// 可安全重试：再次正常 Migrate 应保持最新版本且不报错（无新迁移）。
@@ -723,5 +723,39 @@ func TestMigration0051_BackfillsBriefRevisionConfirmation(t *testing.T) {
 	}
 	if owner != "已确认主张" || outline != "已确认提纲" {
 		t.Fatalf("v1 内容未保留: %q %q", owner, outline)
+	}
+}
+
+func TestMigration0052_BackfillsExactBriefVersionFallbacks(t *testing.T) {
+	db := openRaw(t, filepath.Join(t.TempDir(), "r18-links.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE creation_briefs(id TEXT PRIMARY KEY,current_version INTEGER NOT NULL,confirmed_version INTEGER NOT NULL); CREATE TABLE creation_article_links(id TEXT PRIMARY KEY,creation_proposal_id TEXT,creation_brief_id TEXT,article_proposal_id TEXT,article_brief_id TEXT,contract_version TEXT); INSERT INTO creation_briefs VALUES ('confirmed',8,7),('current',4,0),('legacy',0,0); INSERT INTO creation_article_links VALUES ('l1','p1','confirmed','a1','b1','v2'),('l2','p2','current','a2','b2','v2'),('l3','p3','legacy','a3','b3','v2');`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("migrations", "0052_creation_article_link_versions.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id,creation_brief_version FROM creation_article_links ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	want := map[string]int{"l1": 7, "l2": 4, "l3": 1}
+	for rows.Next() {
+		var id string
+		var v int
+		if err := rows.Scan(&id, &v); err != nil {
+			t.Fatal(err)
+		}
+		if v != want[id] {
+			t.Fatalf("%s version=%d want=%d", id, v, want[id])
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }

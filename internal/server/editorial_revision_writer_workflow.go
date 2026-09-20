@@ -9,6 +9,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 type revisionWriterAuthorization struct {
@@ -29,6 +30,11 @@ func (srv *Server) loadRevisionWriterAuthorization(ctx context.Context, revision
 	draft, brief, proposal, profile, err := srv.editorialContextForRevision(ctx, revision)
 	if err != nil {
 		return nil, badEditorial("读取文章上下文失败")
+	}
+	if _, linkErr := srv.store.GetCreationArticleLinkByArticleBrief(ctx, brief.ID); linkErr == nil {
+		return nil, badEditorial("linked compatibility article is controlled by CreationBrief")
+	} else if !errors.Is(linkErr, store.ErrNotFound) {
+		return nil, internalEditorial(linkErr.Error())
 	}
 	settings, err := srv.store.GetSettings(ctx)
 	if err != nil {
