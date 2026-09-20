@@ -420,10 +420,14 @@ func (w *Worker) unresolvedGaps(draft *provider.DigestWritingResult, rows []mode
 
 // digestIngestDocument 把一个 URL 经 SSRF 防护管道落源为 Document Source（幂等：同 URL 已存在则复用）。
 func (w *Worker) digestIngestDocument(ctx context.Context, rawURL string) (provider.DigestDocument, bool) {
+	return w.digestIngestDocumentWithFetcher(ctx, rawURL, fetchReadableDocument)
+}
+
+func (w *Worker) digestIngestDocumentWithFetcher(ctx context.Context, rawURL string, fetch func(context.Context, string) (string, string, error)) (provider.DigestDocument, bool) {
 	if existing, err := w.store.GetDocumentByOriginURL(ctx, rawURL); err == nil {
 		return documentToDigest(existing), true
 	}
-	title, content, err := fetchReadableDocument(ctx, rawURL)
+	title, content, err := fetch(ctx, rawURL)
 	if err != nil {
 		log.Printf("落源抓取失败（%s）: %v", rawURL, err)
 		return provider.DigestDocument{}, false
@@ -573,6 +577,12 @@ func fetchReadableDocument(ctx context.Context, rawURL string) (string, string, 
 		return "", "", err
 	}
 	client := safehttp.NewClient(5, 4<<20, 30*time.Second)
+	return fetchReadableDocumentWithClient(ctx, rawURL, client)
+}
+
+// fetchReadableDocumentWithClient 执行已校验 URL 的 HTTP/正文解析阶段。拆出客户端
+// 参数，使响应状态、类型与体积上限可以在不放宽生产 SSRF 校验的前提下验证。
+func fetchReadableDocumentWithClient(ctx context.Context, rawURL string, client *http.Client) (string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", "", err
@@ -611,8 +621,10 @@ func extractReadableHTML(raw string) (string, string, error) {
 	if title == "" {
 		title = "检索落源文档"
 	}
-	text := htmlRe.ReplaceAllString(raw, "")
-	text = scripts.ReplaceAllString(text, "")
+	// 先移除脚本/样式块，再去普通标签；反过来会先删掉 script 标签，
+	// 把其中代码误当作正文保留下来。
+	text := scripts.ReplaceAllString(raw, "")
+	text = htmlRe.ReplaceAllString(text, " ")
 	text = strings.Join(strings.Fields(text), " ")
 	if len(text) > 20000 {
 		text = text[:20000]
