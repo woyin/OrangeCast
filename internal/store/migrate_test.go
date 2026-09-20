@@ -31,7 +31,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51}
 	if len(applied) != len(want) {
 		t.Fatalf("应应用 %v，实际 %v", want, applied)
 	}
@@ -42,8 +42,8 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	}
 	// schema_migrations 已登记到最新版本
 	v, _ := AppliedVersion(context.Background(), db)
-	if v != 50 {
-		t.Fatalf("AppliedVersion 应为 50，实际 %d", v)
+	if v != 51 {
+		t.Fatalf("AppliedVersion 应为 51，实际 %d", v)
 	}
 	// 关键表存在（含 schema_migrations）
 	for _, tb := range []string{"users", "podcasts", "episodes", "transcripts",
@@ -95,8 +95,8 @@ func TestMigrate_V01FixtureUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
-	if len(applied) != 50 {
-		t.Fatalf("应应用 50 条迁移，实际 %d", len(applied))
+	if len(applied) != 51 {
+		t.Fatalf("应应用 51 条迁移，实际 %d", len(applied))
 	}
 	after := countAll(t, db)
 
@@ -152,8 +152,8 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 50 {
-		t.Errorf("失败迁移不应登记版本；应保持 50，实际 %d", v)
+	if v != 51 {
+		t.Errorf("失败迁移不应登记版本；应保持 51，实际 %d", v)
 	}
 
 	// 可安全重试：再次正常 Migrate 应保持最新版本且不报错（无新迁移）。
@@ -672,5 +672,56 @@ func TestMigration0050_BackfillsReadyBatches(t *testing.T) {
 	var old string
 	if err := db.QueryRowContext(ctx, `SELECT completed_at FROM proposal_batches WHERE id='done'`).Scan(&old); err != nil || old != "kept" {
 		t.Fatalf("已有 completed_at 不应覆盖: %q %v", old, err)
+	}
+}
+
+// TestMigration0051_BackfillsBriefRevisionConfirmation R17：旧 confirmed Brief 回填
+// confirmed_version=1、draft 回填 0；两者都产生不可变 v1 revision 内容。
+func TestMigration0051_BackfillsBriefRevisionConfirmation(t *testing.T) {
+	db := openRaw(t, filepath.Join(t.TempDir(), "r17-brief.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE creation_briefs (
+		 id TEXT PRIMARY KEY, creation_proposal_id TEXT NOT NULL, status TEXT NOT NULL,
+		 owner_claim TEXT NOT NULL, claim_plan_json TEXT NOT NULL DEFAULT '[]',
+		 material_plan_json TEXT NOT NULL DEFAULT '[]', research_need_ids_json TEXT NOT NULL DEFAULT '[]',
+		 outline TEXT NOT NULL DEFAULT '', style TEXT NOT NULL DEFAULT '', target_length INTEGER,
+		 confirmed_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		INSERT INTO creation_briefs(id,creation_proposal_id,status,owner_claim,outline) VALUES
+		 ('confirmed-brief','p1','confirmed','已确认主张','已确认提纲'),
+		 ('draft-brief','p2','draft','草案主张','草案提纲');`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("migrations", "0051_curator_brief_versions.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	var cur, conf int
+	if err := db.QueryRowContext(ctx, `SELECT current_version,confirmed_version FROM creation_briefs WHERE id='confirmed-brief'`).Scan(&cur, &conf); err != nil {
+		t.Fatal(err)
+	}
+	if cur != 1 || conf != 1 {
+		t.Fatalf("confirmed 回填错误: current=%d confirmed=%d", cur, conf)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT current_version,confirmed_version FROM creation_briefs WHERE id='draft-brief'`).Scan(&cur, &conf); err != nil {
+		t.Fatal(err)
+	}
+	if cur != 1 || conf != 0 {
+		t.Fatalf("draft 回填错误: current=%d confirmed=%d", cur, conf)
+	}
+	var revisions int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM creation_brief_revisions`).Scan(&revisions); err != nil || revisions != 2 {
+		t.Fatalf("v1 revisions=%d err=%v", revisions, err)
+	}
+	var owner, outline string
+	if err := db.QueryRowContext(ctx, `SELECT owner_claim,outline FROM creation_brief_revisions WHERE brief_id='confirmed-brief' AND version=1`).Scan(&owner, &outline); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "已确认主张" || outline != "已确认提纲" {
+		t.Fatalf("v1 内容未保留: %q %q", owner, outline)
 	}
 }

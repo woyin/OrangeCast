@@ -328,3 +328,26 @@
 
 - `proposal_batch_r16_test.go`：重复 reject 的 `GetCreationProposal` 现在检查并传播读取错误；零候选测试新增 `HasOpenProposalBatch=false` 断言。
 - 直接验证：`go test -run 'TestProposalBatch_' ./internal/server/` 通过；`go test -race -run TestProposalBatch_ConcurrentLastTwoDecisions_R16 ./internal/server/` 通过（4.028s）。
+
+## R17 — Curator 方案、不可变 Brief revision、CAS 编辑与精确确认（未提交）
+
+- 状态：实现与自动验证完成，当前工作区保留改动，未提交，未进入 R18。
+- 交付：
+  - 接受主张真实 HTTP 路径重新读取 accepted Proposal.OwnerClaim；创建 draft 后幂等入队 `JobCuratorBrief`，冻结 base_version、OwnerClaim、provider/model/prompt、SourceType/CardVersion、材料内容/引用。
+  - 迁移 0051：creation_brief_revisions 不可变 revision；旧 confirmed 回填 confirmed_version=1，draft=0；v1 revision 回填；current revision 成为读取真源。
+  - Curator 结果 checkpoint 保存完整 Result+Usage；恢复不二次调用；origin_job_id 幂等；usage receipt 唯一；ClaimPlan thesis 固定 OwnerClaim，模型 thesis 保存 curator_thesis；selected/rejected 合法性由公共 ValidateCuratorResult 校验。
+  - CAS 编辑事务校验 OwnerClaim/outline、selected 非空、JSON 合法、selected/rejected 无重复/交叉且属于 Proposal candidates；继承 Curator metadata；编辑使 status=draft、confirmed_version=0。
+  - 精确确认事务校验 current revision 存在、Proposal accepted/OwnerClaim、blocking gap、selected 材料 ready/owner_confirmed、非 stale/排除、source 身份/版本/归档、冻结 provider policy（external/approved allow/deny/LocalOnly/未知）。
+  - Workbench 使用真实 textarea/input 编辑 OwnerClaim、outline、selected/rejected、style、target length、claim type、questions、notes；GET 从 current revision 投影；stale edit/confirm 返回 409。
+- 专项测试证据：
+  - provider：fabricated、selected/rejected 重复与交叉拒绝。
+  - queue：正常 provider→真实 v2 revision/result version；overlap/missing/archived source 在 Provider 前失败、calls=0、revision v1；checkpoint replay calls=0、revision 唯一、receipt=1、result version=2、snapshot sourceID 真实。
+  - store：CAS 成功/递增/stale/非法 JSON/空 selected/重复交叉/越界/metadata 继承；确认 valid、stale、OwnerExcluded、archived、approved allow/deny、LocalOnly、old version、blocking gap；current revision 删除读取失败。
+  - server：真实 accept→snapshot/job；重复 accept Brief/job 各一；GET 表单真实字段→原样 POST→revision 投影；stale edit/confirm 409；确认门禁保留。
+  - migration/backup：0051 confirmed/draft 回填及 v1；v1/v2 current/confirmed/revision 字段、decision_note 恢复精确。
+  - v1 draft ClaimPlan 是可编辑对象：Curator 完成前真实 HTTP POST edit 可成功生成下一 revision；draft 创建路径复用 proposal 的任意既有 Brief 状态，8 并发调用稳定复用一个 draft ID/一行。
+  - 真实 Workbench GET→原样 POST 测试覆盖 OwnerClaim、outline、selected/rejected、style、target length、claim type、questions、notes，刷新后逐字段保留；stale edit/confirm 409。
+  - Create/confirm current revision 缺失、Curator policy/source/stale/excluded/archive/阻断校验均有直接测试；accepted OwnerClaim、ClaimPlan thesis、Curator metadata 与 checkpoint Usage/receipt/replay 受测。
+- 门禁：`go test ./internal/server/`、`./internal/queue/`、`./internal/store/`、`./internal/backup/`、`go test ./...`、`go vet ./...`、`gofmt`、`git diff --check` 通过；Curator checkpoint race 通过。未调用真实付费模型。
+- 限制：尚未提交；R18 未开始。
+- 复核修复：CAS 编辑与 Curator revision 应用现在同时清空 `confirmed_at`（不残留旧授权时间）；`TestCreationBrief_EditInvalidatesPriorConfirmation` 断言 confirmed→编辑后 draft、confirmed_version=0、ConfirmedAt=nil。

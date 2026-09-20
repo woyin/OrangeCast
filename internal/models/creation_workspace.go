@@ -92,8 +92,21 @@ type ResearchPlan struct {
 // CreationBrief is the Owner-confirmed contract that authorizes work generation.
 type CreationBrief struct {
 	ID, CreationProposalID, Status, OwnerClaim, ClaimPlanJSON, MaterialPlanJSON, ResearchNeedIDsJSON, Outline, Style, CreatedAt, UpdatedAt string
+	CurrentVersion, ConfirmedVersion                                                                                                       int
 	TargetLength                                                                                                                           *int
+	ClaimType, UnresolvedQuestionsJSON, Notes                                                                                              string
+	SelectedMaterialIDsJSON, RejectedMaterialIDsJSON                                                                                       string
 	ConfirmedAt                                                                                                                            *string
+}
+
+// CreationBriefRevision is immutable reviewable Brief content; confirmation binds an exact version.
+type CreationBriefRevision struct {
+	ID, BriefID, OriginJobID                                         string
+	Version                                                          int
+	OwnerClaim, ClaimPlanJSON, MaterialPlanJSON, ResearchNeedIDsJSON string
+	Outline, Style, ClaimType, UnresolvedQuestionsJSON, Notes        string
+	TargetLength                                                     *int
+	CuratorPromptVersion, CuratorInputSnapshotJSON, CreatedAt        string
 }
 
 // ClaimMapKind identifies responsibility and verification semantics for an expression.

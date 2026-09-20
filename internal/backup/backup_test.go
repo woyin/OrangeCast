@@ -105,6 +105,23 @@ func buildFixture(t *testing.T, dataDir string) *store.Store {
 	if err := s.RejectProposal(ctx, decisionProposal.ID, "NotNow", "备份测试拒绝原因"); err != nil {
 		t.Fatal(err)
 	}
+	briefProposal, err := s.CreateCreationProposal(ctx, models.CreationProposal{EditorialProfileID: profile.ID, WorkingTitle: "备份 Brief", ProposedClaim: "备份 Brief 主张", CreationForm: "article", MaterialIDsJSON: `["material-a"]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptCreationProposal(ctx, briefProposal.ID, "备份 Brief Owner"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := s.CreateCreationBriefDraftFromProposal(ctx, briefProposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateCreationBriefRevisionCAS(ctx, brief.ID, 1, models.CreationBriefRevision{OwnerClaim: "备份 Brief Owner", Outline: "备份提纲", MaterialPlanJSON: `{"selected":["material-a"]}`, ClaimType: "synthesis", UnresolvedQuestionsJSON: `[]`, Notes: "备份备注", CuratorPromptVersion: "curator-v1", CuratorInputSnapshotJSON: `{"provider":"fake"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_version=2 WHERE id=?`, brief.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "AI 工作流"}); err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +177,34 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(decisionNote), &decision); err != nil || decision["reason"] != "备份测试拒绝原因" {
 		t.Fatalf("decision_note 恢复不一致: %q %v", decisionNote, err)
 	}
+	var briefID string
+	if err := dstDB.QueryRow(`SELECT id FROM creation_briefs WHERE owner_claim=?`, "备份 Brief Owner").Scan(&briefID); err != nil {
+		t.Fatal(err)
+	}
+	var currentVersion, confirmedVersion int
+	if err := dstDB.QueryRow(`SELECT current_version,confirmed_version FROM creation_briefs WHERE id=?`, briefID).Scan(&currentVersion, &confirmedVersion); err != nil {
+		t.Fatal(err)
+	}
+	if currentVersion != 2 || confirmedVersion != 2 {
+		t.Fatalf("Brief revision pointers not restored: current=%d confirmed=%d", currentVersion, confirmedVersion)
+	}
+	var revisionCount, revisionVersion int
+	var outline, notes string
+	if err := dstDB.QueryRow(`SELECT COUNT(*),MAX(version) FROM creation_brief_revisions WHERE brief_id=?`, briefID).Scan(&revisionCount, &revisionVersion); err != nil {
+		t.Fatal(err)
+	}
+	if revisionCount != 2 || revisionVersion != 2 {
+		t.Fatalf("Brief revisions not restored: count=%d version=%d", revisionCount, revisionVersion)
+	}
+	if err := dstDB.QueryRow(`SELECT outline,notes FROM creation_brief_revisions WHERE brief_id=? AND version=2`, briefID).Scan(&outline, &notes); err != nil {
+		t.Fatal(err)
+	}
+	if outline != "备份提纲" || notes != "备份备注" {
+		t.Fatalf("Brief revision fields not restored: %q %q", outline, notes)
+	}
+
 	var migrationVersion int
-	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 50 {
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 51 {
 		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
 	}
 	var profileName, themeName string

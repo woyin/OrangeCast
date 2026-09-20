@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -67,11 +69,74 @@ func (srv *Server) handleCreationProposalAccept(w http.ResponseWriter, r *http.R
 		writeEditorialError(w, err)
 		return
 	}
-	if _, err := srv.store.CreateCreationBriefDraftFromProposal(r.Context(), proposal.ID); err != nil && !strings.Contains(err.Error(), "needs material") && !strings.Contains(err.Error(), "blocking") {
+	// Acceptance mutates OwnerClaim; reload before freezing the Curator input so
+	// the durable job carries exact Owner authorization, not ProposedClaim/empty.
+	proposal, err = srv.store.GetCreationProposal(r.Context(), proposal.ID)
+	if err != nil {
 		writeEditorialError(w, err)
 		return
 	}
+	brief, briefErr := srv.store.CreateCreationBriefDraftFromProposal(r.Context(), proposal.ID)
+	if briefErr != nil {
+		writeEditorialError(w, briefErr)
+		return
+	}
+	if briefErr == nil {
+		if err := srv.enqueueCuratorBriefForProposal(r.Context(), proposal, brief); err != nil {
+			writeEditorialError(w, err)
+			return
+		}
+	}
 	http.Redirect(w, r, "/workbench?profile="+proposal.EditorialProfileID, http.StatusSeeOther)
+}
+
+// enqueueCuratorBriefForProposal freezes the accepted proposal, candidate material
+// contents, provider/model and prompt contract before the durable worker call.
+func (srv *Server) enqueueCuratorBriefForProposal(ctx context.Context, proposal *models.CreationProposal, brief *models.CreationBrief) error {
+	settings, err := srv.store.GetSettings(ctx)
+	if err != nil {
+		return err
+	}
+	config := editorialTaskConfig(settings, editorialRoleCurator)
+	providerName := config.Provider
+	if providerName == "" {
+		providerName = "groq"
+	}
+	modelName := provider.EffectiveTaskModel(provider.TaskConfig{Provider: providerName, Model: config.Model})
+	var ids []string
+	if err := json.Unmarshal([]byte(proposal.MaterialIDsJSON), &ids); err != nil || len(ids) == 0 {
+		return fmt.Errorf("%w: accepted proposal needs material", store.ErrInvalidEditorialState)
+	}
+	profile, err := srv.store.GetEditorialProfile(ctx, proposal.EditorialProfileID)
+	if err != nil {
+		return err
+	}
+	materials := make([]provider.ArticleMaterial, 0, len(ids))
+	for _, id := range ids {
+		kp, err := srv.store.GetKeyPoint(ctx, id)
+		if err != nil {
+			return fmt.Errorf("Curator 材料不存在: %w", err)
+		}
+		if kp.QualityStatus != models.KeyPointReady && kp.QualityStatus != models.KeyPointOwnerConfirmed || kp.StaleAt != "" || kp.EvidenceStatus == "stale" {
+			return fmt.Errorf("%w: Curator 材料已失效或未就绪", store.ErrInvalidEditorialState)
+		}
+		usable, err := srv.store.CanUseSourceForPublication(ctx, profile.ID, kp.SourceType, kp.SourceID)
+		if err != nil || !usable {
+			return fmt.Errorf("%w: Curator 材料来源已归档或不可用", store.ErrInvalidEditorialState)
+		}
+		canSend, err := srv.store.CanSendSourceToProvider(ctx, kp.SourceType, kp.SourceID, providerName)
+		if err != nil || !canSend {
+			return fmt.Errorf("%w: Curator 材料策略禁止外发", store.ErrInvalidEditorialState)
+		}
+		var citations []string
+		if err := json.Unmarshal([]byte(kp.CitationsJSON), &citations); err != nil || len(citations) == 0 {
+			return fmt.Errorf("%w: Curator 材料 Citation 无效", store.ErrInvalidEditorialState)
+		}
+		materials = append(materials, provider.ArticleMaterial{SourceType: string(kp.SourceType), CardVersion: kp.CardVersion, KeyPointID: kp.ID, SourceID: kp.SourceID, SourceTitle: kp.SourceTitle, Content: kp.Content, Description: kp.Description, Citations: citations})
+	}
+	input, _ := json.Marshal(map[string]any{"proposal_id": proposal.ID, "brief_id": brief.ID, "profile_id": profile.ID, "base_version": brief.CurrentVersion, "owner_claim": proposal.OwnerClaim, "title": proposal.WorkingTitle, "thesis": proposal.OwnerClaim, "audience": proposal.Audience, "voice": profile.Voice, "materials": materials, "provider": providerName, "model": modelName, "prompt_version": provider.CuratorPromptVersion})
+	_, err = srv.store.EnqueueCuratorBriefJob(ctx, proposal.ID, brief.ID, string(input), providerName, modelName)
+	return err
 }
 
 func (srv *Server) handleCreationHistoryCreate(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +237,16 @@ func (srv *Server) handleCreationBriefConfirm(w http.ResponseWriter, r *http.Req
 		writeEditorialError(w, err)
 		return
 	}
-	if err := srv.store.ConfirmCreationBrief(r.Context(), brief.ID); err != nil {
+	version, err := strconv.Atoi(strings.TrimSpace(r.FormValue("expected_version")))
+	if err != nil {
+		http.Error(w, "expected_version 非法", http.StatusBadRequest)
+		return
+	}
+	if err := srv.store.ConfirmCreationBriefVersion(r.Context(), brief.ID, version); err != nil {
+		if errors.Is(err, store.ErrCreationBriefVersionConflict) {
+			http.Error(w, "Brief 版本已过期，请刷新后重试", http.StatusConflict)
+			return
+		}
 		writeEditorialError(w, err)
 		return
 	}
@@ -391,3 +465,113 @@ type ideationDiagnosisView struct {
 	Gaps        []string
 	Claims      []provider.ProposedClaimItem
 }
+
+// handleCreationBriefEdit R17：结构化编辑生成不可变新修订，expected_version CAS；
+// 编辑已确认 Brief 会回到 draft，旧 confirmed_version 不再授权当前版本。
+func (srv *Server) handleCreationBriefEdit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	briefID := strings.TrimSpace(r.FormValue("brief_id"))
+	version, err := strconv.Atoi(strings.TrimSpace(r.FormValue("expected_version")))
+	if err != nil {
+		http.Error(w, "expected_version 非法", http.StatusBadRequest)
+		return
+	}
+	ownerClaim := strings.TrimSpace(r.FormValue("owner_claim"))
+	outline := strings.TrimSpace(r.FormValue("outline"))
+	if ownerClaim == "" || outline == "" {
+		http.Error(w, "OwnerClaim 与提纲不能为空", http.StatusBadRequest)
+		return
+	}
+	selectedRaw := strings.TrimSpace(r.FormValue("selected_material_ids"))
+	if selectedRaw == "" {
+		selectedRaw = "[]"
+	}
+	rejectedRaw := strings.TrimSpace(r.FormValue("rejected_material_ids"))
+	if rejectedRaw == "" {
+		rejectedRaw = "[]"
+	}
+	var selected, rejected []string
+	if json.Unmarshal([]byte(selectedRaw), &selected) != nil || json.Unmarshal([]byte(rejectedRaw), &rejected) != nil || len(selected) == 0 {
+		http.Error(w, "选用材料必须是非空 JSON 数组", http.StatusBadRequest)
+		return
+	}
+	seen := map[string]bool{}
+	for _, id := range selected {
+		if id == "" || seen[id] {
+			http.Error(w, "选用材料存在重复或空 ID", http.StatusBadRequest)
+			return
+		}
+		seen[id] = true
+	}
+	for _, id := range rejected {
+		if id == "" || seen[id] {
+			http.Error(w, "选用/放弃材料不能交叉或重复", http.StatusBadRequest)
+			return
+		}
+		seen[id] = true
+	}
+	materialPlanBytes, _ := json.Marshal(map[string]any{"selected": selected, "rejected": rejected})
+	questions := strings.TrimSpace(r.FormValue("unresolved_questions_json"))
+	if questions == "" {
+		questions = "[]"
+	}
+	var q []string
+	if json.Unmarshal([]byte(questions), &q) != nil {
+		http.Error(w, "未决问题必须是 JSON 数组", http.StatusBadRequest)
+		return
+	}
+	var targetPtr *int
+	if raw := strings.TrimSpace(r.FormValue("target_length")); raw != "" {
+		v, e := strconv.Atoi(raw)
+		if e != nil || v <= 0 {
+			http.Error(w, "篇幅非法", http.StatusBadRequest)
+			return
+		}
+		targetPtr = &v
+	}
+	brief, err := srv.store.GetCreationBrief(r.Context(), briefID)
+	if err != nil {
+		http.Error(w, "Brief 不存在", http.StatusNotFound)
+		return
+	}
+	base, err := srv.store.GetCreationBriefRevision(r.Context(), briefID, brief.CurrentVersion)
+	if err != nil {
+		http.Error(w, "当前 revision 不存在", http.StatusConflict)
+		return
+	}
+	var claimPlan map[string]any
+	if err := json.Unmarshal([]byte(base.ClaimPlanJSON), &claimPlan); err != nil || claimPlan == nil {
+		http.Error(w, "当前 ClaimPlan 已损坏，无法编辑", http.StatusBadRequest)
+		return
+	}
+	claimPlan["thesis"] = ownerClaim
+	claimPlan["claim_type"] = strings.TrimSpace(r.FormValue("claim_type"))
+	claimPlan["unresolved_questions"] = q
+	claimPlanBytes, err := json.Marshal(claimPlan)
+	if err != nil {
+		http.Error(w, "ClaimPlan 序列化失败", http.StatusBadRequest)
+		return
+	}
+	rev, err := srv.store.CreateCreationBriefRevisionCAS(r.Context(), briefID, version, models.CreationBriefRevision{
+		OwnerClaim: ownerClaim, ClaimPlanJSON: string(claimPlanBytes),
+		MaterialPlanJSON: string(materialPlanBytes), ResearchNeedIDsJSON: base.ResearchNeedIDsJSON,
+		Outline: outline, Style: strings.TrimSpace(r.FormValue("style")), TargetLength: targetPtr,
+		ClaimType: strings.TrimSpace(r.FormValue("claim_type")), UnresolvedQuestionsJSON: string(mustJSON(q)), Notes: r.FormValue("notes"),
+		CuratorPromptVersion: base.CuratorPromptVersion, CuratorInputSnapshotJSON: base.CuratorInputSnapshotJSON,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrCreationBriefVersionConflict) {
+			http.Error(w, "Brief 版本已过期，请刷新后重试", http.StatusConflict)
+			return
+		}
+		http.Error(w, "保存 Brief 失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{"saved": true, "brief_id": briefID, "version": rev.Version})
+}
+
+func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }

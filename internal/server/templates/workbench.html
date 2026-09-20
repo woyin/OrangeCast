@@ -18,7 +18,34 @@
 
 <section class="panel"><h2>新的创作方向</h2><p class="meta">模型只能提出 ProposedClaim；只有 Owner 接受或改写后，才成为 OwnerClaim。</p>{{range $.CreationProposals}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}} · {{.CreationForm}}</div><h3>{{.WorkingTitle}}</h3><p><strong>ProposedClaim：</strong>{{.ProposedClaim}}</p>{{if .OwnerClaim}}<p><strong>OwnerClaim：</strong>{{.OwnerClaim}}</p>{{end}}<p>{{.Rationale}}</p>{{if .HistoryRelationship}}<p class="meta">历史提醒：{{.HistoryRelationship}}</p>{{end}}</div>{{if eq .Status "proposed"}}<form class="item-actions" method="post" action="/workbench/creation-proposals/accept"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_proposal_id" value="{{.ID}}"><label>我的主张 <textarea name="owner_claim" rows="2">{{.ProposedClaim}}</textarea></label><button class="btn" type="submit">接受为 OwnerClaim</button></form>{{end}}</article>{{else}}<p class="empty">自动发现或定向构思形成的方向会在这里等待 Owner 决策。</p>{{end}}</section>
 
-<section class="panel"><h2>CreationBrief</h2><p class="meta">接受后的方向会先形成可审阅的 Brief 草案；确认前不得进入作品生成。</p>{{range $.CreationBriefs}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}}</div><h3>{{.OwnerClaim}}</h3><p class="meta">素材方案：{{.MaterialPlanJSON}}</p></div>{{if eq .Status "draft"}}<form class="item-actions" method="post" action="/workbench/creation-briefs/confirm"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><button class="btn" type="submit">确认创作授权</button></form>{{end}}</article>{{else}}<p class="empty">Owner 接受有足够素材的方向后，CreationBrief 草案会出现在这里。</p>{{end}}</section>
+<section class="panel"><h2>CreationBrief</h2><p class="meta">Curator 方案可编辑；保存生成新不可变 revision。确认只授权精确当前 revision。</p>
+{{range $.CreationBriefs}}
+<article class="workflow-item">
+  <div class="workflow-item-body">
+    <div class="item-kicker">{{.Status}} · revision v{{.CurrentVersion}} · confirmed v{{.ConfirmedVersion}}</div>
+    <form method="post" action="/workbench/creation-briefs/edit" class="subform">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <label>OwnerClaim <textarea name="owner_claim" rows="2" required>{{.OwnerClaim}}</textarea></label>
+      <label>提纲 <textarea name="outline" rows="4" required>{{.Outline}}</textarea></label>
+      <label>选用材料 IDs（JSON 数组） <textarea name="selected_material_ids" rows="2" required>{{.SelectedMaterialIDsJSON}}</textarea></label>
+      <label>放弃材料 IDs（JSON 数组） <textarea name="rejected_material_ids" rows="2">{{.RejectedMaterialIDsJSON}}</textarea></label>
+      <label>风格 <input name="style" value="{{.Style}}"></label>
+      <label>目标篇幅 <input name="target_length" type="number" min="1" value="{{.TargetLength}}"></label>
+      <label>主张类型 <input name="claim_type" value="{{.ClaimType}}"></label>
+      <label>未决问题（JSON 数组） <textarea name="unresolved_questions_json" rows="2">{{.UnresolvedQuestionsJSON}}</textarea></label>
+      <label>备注 <textarea name="notes" rows="2">{{.Notes}}</textarea></label>
+      <button class="btn btn-secondary" type="submit">保存新修订</button>
+    </form>
+    {{if eq .Status "draft"}}
+    <form method="post" action="/workbench/creation-briefs/confirm" class="item-actions">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <button class="btn" type="submit">确认精确版本授权</button>
+    </form>
+    {{end}}
+  </div>
+</article>
+{{else}}<p class="empty">Owner 接受有足够素材的方向后，CreationBrief 草案会出现在这里。</p>{{end}}
+</section>
 
 <section class="panel"><h2>DirectedIdeation</h2><p class="meta">这是 Owner 发起的探索合同。它记录意图与约束，不会自行联网研究或生成作品。</p><form method="post" action="/workbench/ideation" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>构思意图 <textarea name="intent" rows="2" required placeholder="例如：比较两种学习方法的适用边界"></textarea></label><label>约束 JSON（可留空）<input name="constraints_json" value="{}"></label><button class="btn btn-secondary" type="submit">开始定向构思</button></form>{{range $.IdeationSessions}}<p><strong>{{.Intent}}</strong> <span class="meta">{{.Status}}</span></p>{{end}}</section>
 

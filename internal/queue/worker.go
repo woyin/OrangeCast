@@ -96,6 +96,8 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobDigestRewrite:
 			// 渠道改写（G06）复用 Writer 角色配置（与文章同池计费）
 			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
+		case models.JobCuratorBrief:
+			tc = provider.TaskConfig{Provider: ptrStr(st.CuratorProvider), Model: ptrStr(st.CuratorModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -245,6 +247,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 40_000, 8_000
 	case "claim_review":
 		return 50_000, 10_000
+	case "curator_brief":
+		return 60_000, 15_000
 	case "digest_rewrite":
 		return 30_000, 6_000
 	default:
@@ -255,7 +259,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobCuratorBrief:
 	default:
 		return nil
 	}
@@ -382,6 +386,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doIdeationDiagnosisJob(ctx, job, bundle)
 	case models.JobClaimReview:
 		return w.doClaimReviewJob(ctx, job, bundle)
+	case models.JobCuratorBrief:
+		return w.doCuratorBriefJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

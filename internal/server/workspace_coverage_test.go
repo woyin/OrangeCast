@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -214,12 +216,26 @@ func TestCreationWorkspaceHandlersRoundTrip(t *testing.T) {
 		t.Fatalf("creation history should list: history=%+v err=%v", history, err)
 	}
 
-	// 研究缺口：建在自动提案上并标记阻断，验证 brief 确认时重查。
+	// 研究缺口：建在真实 ready KeyPoint 提案上，验证 brief 确认时重查。
+	if _, err := srv.store.IndexKeyPoints(t.Context(), models.SourceEpisode, episodeID, "Ep", 1, &provider.KnowledgeCard{
+		Summary:   provider.CitedText{Text: "S", Citations: []string{"seg-1"}},
+		KeyPoints: []provider.KeyPoint{{Content: "真实工作台素材", Citations: []string{"seg-1"}}},
+		Chapters:  []provider.Chapter{{Title: "C", Citations: []string{"seg-1"}}},
+	}, []provider.Segment{{ID: "seg-1", Start: 0, End: 2, Text: "素材"}}); err != nil {
+		t.Fatal(err)
+	}
+	kps, _, err := srv.store.ListKeyPointsFiltered(t.Context(), store.KeyPointFilter{SourceID: episodeID}, 1, 10)
+	if err != nil || len(kps) != 1 {
+		t.Fatalf("seed workbench material: %v %+v", err, kps)
+	}
+	if err := srv.store.SetKeyPointQualityStatus(t.Context(), kps[0].ID, models.KeyPointReady); err != nil {
+		t.Fatal(err)
+	}
 	batch, _, err := srv.store.ReserveAutomaticProposalBatch(t.Context(), models.ProposalBatch{EditorialProfileID: profile.ID, IdempotencyKey: "ws-1", MaterialSnapshotJSON: `["m1"]`})
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposals := []models.CreationProposal{{WorkingTitle: "方向", ProposedClaim: "主张", MaterialIDsJSON: `["m1"]`}}
+	proposals := []models.CreationProposal{{WorkingTitle: "方向", ProposedClaim: "主张", MaterialIDsJSON: "[\"" + kps[0].ID + "\"]"}}
 	if err := srv.store.FinalizeAutomaticProposalBatch(t.Context(), batch.ID, "fake", "scout", "", nil, proposals); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +252,7 @@ func TestCreationWorkspaceHandlersRoundTrip(t *testing.T) {
 	if err != nil || len(briefs) != 1 || briefs[0].Status != "draft" {
 		t.Fatalf("brief draft should exist after accept: briefs=%+v err=%v", briefs, err)
 	}
-	brief := briefs[0]
+	brief := seedCuratorRevisionForTest(t, srv, briefs[0])
 	// 阻断缺口在草稿建立后出现时，确认前重查必须拦下。
 	if rec := postToHandler(t, srv.handleResearchNeedCreate, url.Values{"creation_proposal_id": {proposal.ID}, "severity": {"blocking"}, "question": {"还缺什么证据？"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("blocking research need should create: %d body=%s", rec.Code, rec.Body.String())
@@ -247,7 +263,7 @@ func TestCreationWorkspaceHandlersRoundTrip(t *testing.T) {
 	}
 	need := needs[0]
 	// 有阻断缺口未解决时确认失败。
-	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}}); rec.Code != http.StatusBadRequest {
+	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}, "expected_version": {strconv.Itoa(brief.CurrentVersion)}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("blocking research need must stop confirmation: %d", rec.Code)
 	}
 	// 解决缺口（引用新 Source 的当前版本具体 Segment）后确认成功。
@@ -255,7 +271,7 @@ func TestCreationWorkspaceHandlersRoundTrip(t *testing.T) {
 	if rec := postToHandler(t, srv.handleResearchNeedResolve, url.Values{"research_need_id": {need.ID}, "source_type": {"episode"}, "resolution_source_id": {newEpisode}, "resolution_version": {"1"}, "resolution_detail": {"seg-1"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("resolve research need should redirect: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}}); rec.Code != http.StatusSeeOther {
+	if rec := postToHandler(t, srv.handleCreationBriefConfirm, url.Values{"creation_brief_id": {brief.ID}, "expected_version": {strconv.Itoa(brief.CurrentVersion)}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("resolved need should allow confirmation: %d body=%s", rec.Code, rec.Body.String())
 	}
 	confirmed, err := srv.store.GetCreationBrief(t.Context(), brief.ID)

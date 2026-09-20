@@ -10,7 +10,7 @@ import (
 const (
 	// CuratorPromptVersion identifies the prompt contract used by brief curation requests.
 	CuratorPromptVersion = "curator-v1"
-	curatorSystemPrompt  = `你是内容 Curator。根据 Owner 接受的提案和候选 KeyPoint，生成可供 Owner 审核的 ArticleBrief。只能选择输入材料；必须明确入选、淘汰和冲突处理，输出 thesis、audience、outline、selectedKeyPointIds、rejectedKeyPointIds、conflictPlan、style、targetLength。不得写正文。`
+	curatorSystemPrompt  = `你是内容 Curator。根据 Owner 接受的提案和候选 KeyPoint，生成可供 Owner 审核的 ArticleBrief。只能选择输入材料；必须明确入选、淘汰和冲突处理，输出 thesis、audience、outline、selectedKeyPointIds、rejectedKeyPointIds、conflictPlan、claimType、unresolvedQuestions、notes、style、targetLength。不得写正文。`
 )
 
 func curatorInput(request CuratorRequest) (string, error) {
@@ -24,7 +24,9 @@ func curatorInput(request CuratorRequest) (string, error) {
 	return "为以下已接受提案生成待审核 Brief：\n" + string(b), nil
 }
 
-func validateCuratorResult(result *CuratorResult, request CuratorRequest) (*CuratorResult, error) {
+// ValidateCuratorResult is the public contract gate used by all Curator callers,
+// including fakes and durable-worker recovery paths.
+func ValidateCuratorResult(result *CuratorResult, request CuratorRequest) (*CuratorResult, error) {
 	if result == nil || strings.TrimSpace(result.Thesis) == "" || strings.TrimSpace(result.Outline) == "" || len(result.SelectedKeyPointIDs) == 0 {
 		return nil, fmt.Errorf("Curator 必须返回论点、结构和入选材料")
 	}
@@ -32,10 +34,28 @@ func validateCuratorResult(result *CuratorResult, request CuratorRequest) (*Cura
 	for _, m := range request.Materials {
 		allowed[m.KeyPointID] = true
 	}
-	for _, id := range append(append([]string{}, result.SelectedKeyPointIDs...), result.RejectedKeyPointIDs...) {
+	selected := map[string]bool{}
+	for _, id := range result.SelectedKeyPointIDs {
 		if !allowed[id] {
 			return nil, fmt.Errorf("Curator 引用了未授权 KeyPoint %q", id)
 		}
+		if selected[id] {
+			return nil, fmt.Errorf("Curator 重复选用 KeyPoint %q", id)
+		}
+		selected[id] = true
+	}
+	rejected := map[string]bool{}
+	for _, id := range result.RejectedKeyPointIDs {
+		if !allowed[id] {
+			return nil, fmt.Errorf("Curator 引用了未授权 KeyPoint %q", id)
+		}
+		if rejected[id] {
+			return nil, fmt.Errorf("Curator 重复放弃 KeyPoint %q", id)
+		}
+		if selected[id] {
+			return nil, fmt.Errorf("Curator 同时选用和放弃 KeyPoint %q", id)
+		}
+		rejected[id] = true
 	}
 	return result, nil
 }
@@ -55,7 +75,7 @@ func (g *GroqProvider) Curate(ctx context.Context, request CuratorRequest) (*Cur
 		return nil, fmt.Errorf("解析 Curator 输出: %w", err)
 	}
 	result.Usage = usage
-	return validateCuratorResult(result, request)
+	return ValidateCuratorResult(result, request)
 }
 
 // Curate generates an ArticleBrief draft from an accepted proposal via the OpenAI chat endpoint.
@@ -83,5 +103,11 @@ func (o *OpenAIProvider) Curate(ctx context.Context, request CuratorRequest) (*C
 		return nil, fmt.Errorf("解析 Curator 输出: %w", err)
 	}
 	result.Usage = chatUsage(data, retries)
-	return validateCuratorResult(result, request)
+	return ValidateCuratorResult(result, request)
+}
+
+// validateCuratorResult keeps the historical package-local test/helper name while
+// all production callers use the exported contract gate.
+func validateCuratorResult(result *CuratorResult, request CuratorRequest) (*CuratorResult, error) {
+	return ValidateCuratorResult(result, request)
 }

@@ -39,6 +39,8 @@ const (
 	JobDJPlan JobType = "dj_plan"
 	// JobIdeationDiagnosis 构思诊断任务（C03）：对冻结轮次执行材料诊断。
 	JobIdeationDiagnosis JobType = "ideation_diagnosis"
+	// JobCuratorBrief 持久 Curator 任务（R17）：接受提案后生成可编辑 Brief 修订。
+	JobCuratorBrief JobType = "curator_brief"
 	// JobClaimWriting v2 写作任务（C10）：确认 Brief 后生成带 ClaimMap 的文章。
 	JobClaimWriting JobType = "claim_writing"
 	// JobClaimReview 独立语义审校任务（C11）：检查主张归因与授权。

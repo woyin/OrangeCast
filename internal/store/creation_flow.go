@@ -505,9 +505,11 @@ func (s *Store) HasBlockingResearchNeed(ctx context.Context, proposalID string) 
 	return n > 0, err
 }
 
-// CreateCreationBrief creates a reviewable contract only after blocking needs are resolved.
+// CreateCreationBrief creates a reviewable draft; blocking needs are enforced at confirmation.
 func (s *Store) CreateCreationBrief(ctx context.Context, v models.CreationBrief) (*models.CreationBrief, error) {
-	v.ID = uuid.NewString()
+	if v.ID == "" {
+		v.ID = uuid.NewString()
+	}
 	if v.Status == "" {
 		v.Status = "draft"
 	}
@@ -527,56 +529,228 @@ func (s *Store) CreateCreationBrief(ctx context.Context, v models.CreationBrief)
 	if proposal.Status != "accepted" || v.OwnerClaim == "" {
 		return nil, fmt.Errorf("%w: accepted owner claim required", ErrInvalidEditorialState)
 	}
-	blocked, err := s.HasBlockingResearchNeed(ctx, v.CreationProposalID)
+	// Blocking research needs stop confirmation, not creation of a reviewable draft.
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	if blocked {
-		return nil, fmt.Errorf("%w: blocking research need unresolved", ErrInvalidEditorialState)
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO creation_briefs (id,creation_proposal_id,status,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,current_version,confirmed_version) VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`, v.ID, v.CreationProposalID, v.Status, v.OwnerClaim, v.ClaimPlanJSON, v.MaterialPlanJSON, v.ResearchNeedIDsJSON, v.Outline, v.Style, v.TargetLength, boolToInt(v.Status == "confirmed")); err != nil {
+		return nil, err
 	}
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO creation_briefs (id,creation_proposal_id,status,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length) VALUES (?,?,?,?,?,?,?,?,?,?)`, v.ID, v.CreationProposalID, v.Status, v.OwnerClaim, v.ClaimPlanJSON, v.MaterialPlanJSON, v.ResearchNeedIDsJSON, v.Outline, v.Style, v.TargetLength)
-	if err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO creation_brief_revisions (id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), v.ID, 1, "", v.OwnerClaim, v.ClaimPlanJSON, v.MaterialPlanJSON, v.ResearchNeedIDsJSON, v.Outline, v.Style, v.TargetLength); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetCreationBrief(ctx, v.ID)
 }
 
-// GetCreationBrief retrieves one Owner-reviewable creation contract.
+// CreateCreationBriefRevisionCAS appends an immutable Brief revision and moves the
+// current pointer only when expectedVersion matches. Editing invalidates prior confirmation.
+func (s *Store) CreateCreationBriefRevisionCAS(ctx context.Context, briefID string, expectedVersion int, revision models.CreationBriefRevision) (*models.CreationBriefRevision, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var current int
+	if err := tx.QueryRowContext(ctx, `SELECT current_version FROM creation_briefs WHERE id=?`, briefID).Scan(&current); err != nil {
+		return nil, err
+	}
+	if expectedVersion != current {
+		return nil, ErrCreationBriefVersionConflict
+	}
+	if strings.TrimSpace(revision.OwnerClaim) == "" || strings.TrimSpace(revision.Outline) == "" {
+		return nil, fmt.Errorf("%w: OwnerClaim 与提纲不能为空", ErrInvalidEditorialState)
+	}
+	var proposalID, currentPrompt, currentSnapshot, currentMaterialPlan, proposalMaterials string
+	if err := tx.QueryRowContext(ctx, `SELECT creation_proposal_id FROM creation_briefs WHERE id=?`, briefID).Scan(&proposalID); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT curator_prompt_version,curator_input_snapshot_json,material_plan_json FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, current).Scan(&currentPrompt, &currentSnapshot, &currentMaterialPlan); err != nil {
+		return nil, err
+	}
+	var allowed []string
+	if err := tx.QueryRowContext(ctx, `SELECT material_ids_json FROM creation_proposals WHERE id=?`, proposalID).Scan(&proposalMaterials); err != nil {
+		return nil, err
+	}
+	allowedSet := map[string]bool{}
+	_ = json.Unmarshal([]byte(proposalMaterials), &allowed)
+	for _, id := range allowed {
+		allowedSet[id] = true
+	}
+	selected, rejected, ok := parseMaterialPlan(revision.MaterialPlanJSON)
+	if !ok || len(selected) == 0 {
+		return nil, fmt.Errorf("%w: selected materials must be a non-empty JSON array/object", ErrInvalidEditorialState)
+	}
+	seen := map[string]bool{}
+	for _, id := range append(append([]string{}, selected...), rejected...) {
+		if id == "" || seen[id] || !allowedSet[id] {
+			return nil, fmt.Errorf("%w: invalid or intersecting Brief material IDs", ErrInvalidEditorialState)
+		}
+		seen[id] = true
+	}
+	if revision.CuratorPromptVersion == "" {
+		revision.CuratorPromptVersion = currentPrompt
+	}
+	if revision.CuratorInputSnapshotJSON == "" {
+		revision.CuratorInputSnapshotJSON = currentSnapshot
+	}
+	next := current + 1
+	revision.ID = uuid.NewString()
+	revision.BriefID = briefID
+	revision.Version = next
+	_, err = tx.ExecContext(ctx, `INSERT INTO creation_brief_revisions (id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,claim_type,unresolved_questions_json,notes,curator_prompt_version,curator_input_snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, revision.ID, briefID, next, revision.OriginJobID, revision.OwnerClaim, revision.ClaimPlanJSON, revision.MaterialPlanJSON, revision.ResearchNeedIDsJSON, revision.Outline, revision.Style, revision.TargetLength, revision.ClaimType, revision.UnresolvedQuestionsJSON, revision.Notes, revision.CuratorPromptVersion, revision.CuratorInputSnapshotJSON)
+	if err != nil {
+		return nil, err
+	}
+	update, err := tx.ExecContext(ctx, `UPDATE creation_briefs SET current_version=?,confirmed_version=0,confirmed_at=NULL,status='draft',owner_claim=?,claim_plan_json=?,material_plan_json=?,research_need_ids_json=?,outline=?,style=?,target_length=?,updated_at=datetime('now') WHERE id=? AND current_version=?`, next, revision.OwnerClaim, revision.ClaimPlanJSON, revision.MaterialPlanJSON, revision.ResearchNeedIDsJSON, revision.Outline, revision.Style, revision.TargetLength, briefID, current)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := update.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrCreationBriefVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &revision, nil
+}
+
+// ConfirmCreationBriefVersion confirms exactly the current immutable revision.
+func (s *Store) ConfirmCreationBriefVersion(ctx context.Context, briefID string, version int) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current, confirmed int
+	var proposalID string
+	if err := tx.QueryRowContext(ctx, `SELECT current_version,confirmed_version,creation_proposal_id FROM creation_briefs WHERE id=?`, briefID).Scan(&current, &confirmed, &proposalID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if current != version {
+		return ErrCreationBriefVersionConflict
+	}
+	var revisionID, materialPlan, ownerClaimRevision, outlineRevision, snapshotJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT id,material_plan_json,owner_claim,outline,curator_input_snapshot_json FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).Scan(&revisionID, &materialPlan, &ownerClaimRevision, &outlineRevision, &snapshotJSON); errors.Is(err, sql.ErrNoRows) {
+		return ErrCreationBriefVersionConflict
+	} else if err != nil {
+		return err
+	}
+	var blocked int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM research_needs WHERE creation_proposal_id=? AND severity='blocking' AND status!='resolved'`, proposalID).Scan(&blocked); err != nil {
+		return err
+	}
+	var proposalStatus, ownerClaim string
+	if err := tx.QueryRowContext(ctx, `SELECT status,COALESCE(owner_claim,'') FROM creation_proposals WHERE id=?`, proposalID).Scan(&proposalStatus, &ownerClaim); err != nil {
+		return err
+	}
+	if proposalStatus != "accepted" || strings.TrimSpace(ownerClaim) == "" {
+		return fmt.Errorf("%w: accepted OwnerClaim required", ErrInvalidEditorialState)
+	}
+	if blocked > 0 {
+		return fmt.Errorf("%w: blocking research need unresolved", ErrInvalidEditorialState)
+	}
+	if strings.TrimSpace(ownerClaimRevision) == "" || strings.TrimSpace(outlineRevision) == "" {
+		return fmt.Errorf("%w: revision OwnerClaim/outline required", ErrInvalidEditorialState)
+	}
+	if err := s.recheckBriefRevisionTx(ctx, tx, proposalID, ownerClaimRevision, materialPlan, snapshotJSON); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_version=?,confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND current_version=? AND EXISTS (SELECT 1 FROM creation_brief_revisions WHERE brief_id=? AND version=?)`, version, briefID, version, briefID, version)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrCreationBriefVersionConflict
+	}
+	return tx.Commit()
+}
+
 func (s *Store) GetCreationBrief(ctx context.Context, id string) (*models.CreationBrief, error) {
 	v := &models.CreationBrief{}
 	var confirmed sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,status,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,confirmed_at,created_at,updated_at FROM creation_briefs WHERE id=?`, id).Scan(&v.ID, &v.CreationProposalID, &v.Status, &v.OwnerClaim, &v.ClaimPlanJSON, &v.MaterialPlanJSON, &v.ResearchNeedIDsJSON, &v.Outline, &v.Style, &v.TargetLength, &confirmed, &v.CreatedAt, &v.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,status,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,confirmed_at,created_at,updated_at,current_version,confirmed_version FROM creation_briefs WHERE id=?`, id).Scan(&v.ID, &v.CreationProposalID, &v.Status, &v.OwnerClaim, &v.ClaimPlanJSON, &v.MaterialPlanJSON, &v.ResearchNeedIDsJSON, &v.Outline, &v.Style, &v.TargetLength, &confirmed, &v.CreatedAt, &v.UpdatedAt, &v.CurrentVersion, &v.ConfirmedVersion)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
 	}
 	if confirmed.Valid {
 		value := confirmed.String
 		v.ConfirmedAt = &value
 	}
-	return v, err
+	// R17 真源：旧 brief 内容列只兼容保留；current_version 对应的不可变 revision
+	// 投影到读取对象，避免刷新仍显示 Curator 前的占位内容。
+	rev, revErr := s.GetCreationBriefRevision(ctx, id, v.CurrentVersion)
+	if revErr != nil {
+		return nil, revErr
+	}
+	v.OwnerClaim, v.ClaimPlanJSON, v.MaterialPlanJSON = rev.OwnerClaim, rev.ClaimPlanJSON, rev.MaterialPlanJSON
+	v.ResearchNeedIDsJSON, v.Outline, v.Style = rev.ResearchNeedIDsJSON, rev.Outline, rev.Style
+	v.TargetLength = rev.TargetLength
+	v.ClaimType, v.UnresolvedQuestionsJSON, v.Notes = rev.ClaimType, rev.UnresolvedQuestionsJSON, rev.Notes
+	v.SelectedMaterialIDsJSON, v.RejectedMaterialIDsJSON = materialPlanParts(rev.MaterialPlanJSON)
+	return v, nil
 }
 
 // ListCreationBriefs lists a profile's current and historical creation contracts.
 func (s *Store) ListCreationBriefs(ctx context.Context, profileID string) ([]*models.CreationBrief, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT b.id,b.creation_proposal_id,b.status,b.owner_claim,b.claim_plan_json,b.material_plan_json,b.research_need_ids_json,b.outline,b.style,b.target_length,b.confirmed_at,b.created_at,b.updated_at FROM creation_briefs b JOIN creation_proposals p ON p.id=b.creation_proposal_id WHERE p.editorial_profile_id=? ORDER BY b.updated_at DESC,b.id DESC`, profileID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT b.id FROM creation_briefs b JOIN creation_proposals p ON p.id=b.creation_proposal_id WHERE p.editorial_profile_id=? ORDER BY b.updated_at DESC,b.id DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []*models.CreationBrief
+	var ids []string
 	for rows.Next() {
-		v := &models.CreationBrief{}
-		var confirmed sql.NullString
-		if err := rows.Scan(&v.ID, &v.CreationProposalID, &v.Status, &v.OwnerClaim, &v.ClaimPlanJSON, &v.MaterialPlanJSON, &v.ResearchNeedIDsJSON, &v.Outline, &v.Style, &v.TargetLength, &confirmed, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if confirmed.Valid {
-			value := confirmed.String
-			v.ConfirmedAt = &value
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	out := make([]*models.CreationBrief, 0, len(ids))
+	for _, id := range ids {
+		v, err := s.GetCreationBrief(ctx, id)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// EnqueueCuratorBriefJob creates a durable, idempotent Curator task for an accepted
+// CreationProposal. The caller supplies a frozen input snapshot and selected brief.
+func (s *Store) EnqueueCuratorBriefJob(ctx context.Context, proposalID, briefID, inputSnapshotJSON, providerName, modelName string) (*models.ProcessingJob, error) {
+	return s.enqueueCuratorBriefJob(ctx, proposalID, briefID, inputSnapshotJSON, providerName, modelName)
+}
+
+func (s *Store) enqueueCuratorBriefJob(ctx context.Context, proposalID, briefID, inputSnapshotJSON, providerName, modelName string) (*models.ProcessingJob, error) {
+	intent := "curator_brief:" + proposalID
+	var existingID, status string
+	if err := s.DB.QueryRowContext(ctx, `SELECT id,status FROM processing_jobs WHERE intent_id=? AND job_type=? AND source_id=? ORDER BY created_at DESC LIMIT 1`, intent, string(models.JobCuratorBrief), proposalID).Scan(&existingID, &status); err == nil && status == string(models.StatusSucceeded) {
+		return nil, nil // 成功后的接受重放不生成第二个 Curator job/revision
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	job, _, err := s.EnqueueJobIdempotent(ctx, JobIntentSpec{SourceType: models.SourceEpisode, SourceID: proposalID, JobType: models.JobCuratorBrief, IntentID: intent, InputSnapshotJSON: inputSnapshotJSON, ConfiguredProvider: providerName, ConfiguredModel: modelName, ConfigVersion: provider.CuratorPromptVersion})
+	return job, err
 }
 
 // CreateCreationBriefDraftFromProposal creates the minimum reviewable contract
@@ -594,15 +768,20 @@ func (s *Store) CreateCreationBriefDraftFromProposal(ctx context.Context, propos
 		return nil, fmt.Errorf("%w: accepted proposal needs material", ErrInvalidEditorialState)
 	}
 	var existing string
-	err = s.DB.QueryRowContext(ctx, `SELECT id FROM creation_briefs WHERE creation_proposal_id=? AND status IN ('draft','confirmed') ORDER BY created_at DESC LIMIT 1`, proposalID).Scan(&existing)
+	err = s.DB.QueryRowContext(ctx, `SELECT id FROM creation_briefs WHERE creation_proposal_id=? ORDER BY created_at DESC LIMIT 1`, proposalID).Scan(&existing)
 	if err == nil {
 		return s.GetCreationBrief(ctx, existing)
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
 	}
-	claimPlan, _ := json.Marshal([]map[string]string{{"kind": string(models.ClaimOwner), "claim": proposal.OwnerClaim}})
-	return s.CreateCreationBrief(ctx, models.CreationBrief{CreationProposalID: proposalID, OwnerClaim: proposal.OwnerClaim, ClaimPlanJSON: string(claimPlan), MaterialPlanJSON: proposal.MaterialIDsJSON})
+	claimPlan, _ := json.Marshal(map[string]any{"thesis": proposal.OwnerClaim, "claim_type": "", "unresolved_questions": []string{}})
+	materialPlan, _ := json.Marshal(map[string]any{"selected": materialIDs, "rejected": []string{}})
+	brief, err := s.CreateCreationBrief(ctx, models.CreationBrief{ID: "curator-brief:" + proposalID, CreationProposalID: proposalID, OwnerClaim: proposal.OwnerClaim, ClaimPlanJSON: string(claimPlan), MaterialPlanJSON: string(materialPlan)})
+	if err != nil && isUniqueConstraintErr(err) {
+		return s.GetCreationBrief(ctx, "curator-brief:"+proposalID)
+	}
+	return brief, err
 }
 
 // ConfirmCreationBrief records the explicit work-generation authorization.
@@ -627,7 +806,7 @@ func (s *Store) ConfirmCreationBrief(ctx context.Context, id string) error {
 	if err := s.recheckBriefMaterials(ctx, proposalID); err != nil {
 		return err
 	}
-	r, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND status IN ('draft','needs_review')`, id)
+	r, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_version=current_version,confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND status IN ('draft','needs_review')`, id)
 	if err != nil {
 		return err
 	}
@@ -777,6 +956,53 @@ func (s *Store) CreateMaterialDiagnosisForRound(ctx context.Context, sessionID, 
 // recheckBriefMaterials 确认前逐项校验 Brief 材料的当前资格（C07）：
 // 材料关键观点必须是 ready/owner_confirmed、非 stale、未被 Owner 排除。
 // 材料变化/缺口/陈旧都阻止确认。
+func (s *Store) recheckBriefMaterialsForPlan(ctx context.Context, proposalID, materialPlanJSON string) error {
+	proposal, err := s.GetCreationProposal(ctx, proposalID)
+	if err != nil {
+		return err
+	}
+	ids := mustProposalMaterialIDs(materialPlanJSON)
+	if len(ids) == 0 {
+		ids = mustProposalMaterialIDs(proposal.MaterialIDsJSON)
+	}
+	return s.recheckKeyPointMaterialIDs(ctx, ids)
+}
+
+func mustProposalMaterialIDs(raw string) []string {
+	var ids []string
+	if json.Unmarshal([]byte(raw), &ids) == nil {
+		return ids
+	}
+	var object struct {
+		Selected []string `json:"selected"`
+	}
+	_ = json.Unmarshal([]byte(raw), &object)
+	return object.Selected
+}
+
+func (s *Store) recheckKeyPointMaterialIDs(ctx context.Context, materialIDs []string) error {
+	for _, id := range materialIDs {
+		kp, err := s.GetKeyPoint(ctx, id)
+		if err != nil {
+			return fmt.Errorf("%w: Brief 材料不存在", ErrInvalidEditorialState)
+		}
+		if kp.QualityStatus != models.KeyPointReady && kp.QualityStatus != models.KeyPointOwnerConfirmed {
+			return fmt.Errorf("%w: Brief 材料质量未达标", ErrInvalidEditorialState)
+		}
+		if kp.StaleAt != "" || kp.EvidenceStatus == "stale" {
+			return fmt.Errorf("%w: Brief 材料已陈旧", ErrInvalidEditorialState)
+		}
+		var excluded int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM editorial_relevance WHERE keypoint_id=? AND owner_override='excluded'`, id).Scan(&excluded); err != nil {
+			return err
+		}
+		if excluded > 0 {
+			return fmt.Errorf("%w: Brief 材料已被 Owner 排除", ErrInvalidEditorialState)
+		}
+	}
+	return nil
+}
+
 func (s *Store) recheckBriefMaterials(ctx context.Context, proposalID string) error {
 	proposal, err := s.GetCreationProposal(ctx, proposalID)
 	if err != nil {
@@ -1075,4 +1301,230 @@ func (s *Store) PromoteDiagnosisClaim(ctx context.Context, sessionID, roundID st
 		return existing()
 	}
 	return proposal, err
+}
+
+func (s *Store) recheckBriefMaterialsForPlanTx(ctx context.Context, tx *sql.Tx, proposalID, materialPlanJSON string) error {
+	ids := mustProposalMaterialIDs(materialPlanJSON)
+	if len(ids) == 0 {
+		var raw string
+		if err := tx.QueryRowContext(ctx, `SELECT material_ids_json FROM creation_proposals WHERE id=?`, proposalID).Scan(&raw); err != nil {
+			return err
+		}
+		ids = mustProposalMaterialIDs(raw)
+	}
+	for _, id := range ids {
+		var quality, evidence, stale string
+		if err := tx.QueryRowContext(ctx, `SELECT quality_status,evidence_status,COALESCE(stale_at,'') FROM keypoint_index WHERE id=?`, id).Scan(&quality, &evidence, &stale); err != nil {
+			return fmt.Errorf("%w: Brief 材料不存在", ErrInvalidEditorialState)
+		}
+		if quality != string(models.KeyPointReady) && quality != string(models.KeyPointOwnerConfirmed) {
+			return fmt.Errorf("%w: Brief 材料质量未达标", ErrInvalidEditorialState)
+		}
+		if stale != "" || evidence == "stale" {
+			return fmt.Errorf("%w: Brief 材料已陈旧", ErrInvalidEditorialState)
+		}
+		var excluded int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM editorial_relevance WHERE keypoint_id=? AND owner_override='excluded'`, id).Scan(&excluded); err != nil {
+			return err
+		}
+		if excluded > 0 {
+			return fmt.Errorf("%w: Brief 材料已被 Owner 排除", ErrInvalidEditorialState)
+		}
+	}
+	return nil
+}
+
+// GetCreationBriefRevision reads one immutable Brief revision.
+func (s *Store) GetCreationBriefRevision(ctx context.Context, briefID string, version int) (*models.CreationBriefRevision, error) {
+	r := &models.CreationBriefRevision{}
+	err := s.DB.QueryRowContext(ctx, `SELECT id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,claim_type,unresolved_questions_json,notes,curator_prompt_version,curator_input_snapshot_json,created_at FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).
+		Scan(&r.ID, &r.BriefID, &r.Version, &r.OriginJobID, &r.OwnerClaim, &r.ClaimPlanJSON, &r.MaterialPlanJSON, &r.ResearchNeedIDsJSON, &r.Outline, &r.Style, &r.TargetLength, &r.ClaimType, &r.UnresolvedQuestionsJSON, &r.Notes, &r.CuratorPromptVersion, &r.CuratorInputSnapshotJSON, &r.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// ApplyCuratorResultRevision persists one Curator result exactly once per durable job.
+// Existing origin_job_id is replay-safe; concurrent edits produce a Brief CAS conflict.
+func (s *Store) ApplyCuratorResultRevision(ctx context.Context, briefID, jobID string, expectedVersion int, revision models.CreationBriefRevision) (*models.CreationBriefRevision, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var existing models.CreationBriefRevision
+	err = tx.QueryRowContext(ctx, `SELECT id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,claim_type,unresolved_questions_json,notes,curator_prompt_version,curator_input_snapshot_json,created_at FROM creation_brief_revisions WHERE brief_id=? AND origin_job_id=?`, briefID, jobID).Scan(&existing.ID, &existing.BriefID, &existing.Version, &existing.OriginJobID, &existing.OwnerClaim, &existing.ClaimPlanJSON, &existing.MaterialPlanJSON, &existing.ResearchNeedIDsJSON, &existing.Outline, &existing.Style, &existing.TargetLength, &existing.ClaimType, &existing.UnresolvedQuestionsJSON, &existing.Notes, &existing.CuratorPromptVersion, &existing.CuratorInputSnapshotJSON, &existing.CreatedAt)
+	if err == nil {
+		return &existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	var current int
+	if err := tx.QueryRowContext(ctx, `SELECT current_version FROM creation_briefs WHERE id=?`, briefID).Scan(&current); err != nil {
+		return nil, err
+	}
+	if expectedVersion != current {
+		return nil, ErrCreationBriefVersionConflict
+	}
+	revision.ID, revision.BriefID, revision.Version, revision.OriginJobID = uuid.NewString(), briefID, current+1, jobID
+	_, err = tx.ExecContext(ctx, `INSERT INTO creation_brief_revisions (id,brief_id,version,origin_job_id,owner_claim,claim_plan_json,material_plan_json,research_need_ids_json,outline,style,target_length,claim_type,unresolved_questions_json,notes,curator_prompt_version,curator_input_snapshot_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, revision.ID, briefID, revision.Version, jobID, revision.OwnerClaim, revision.ClaimPlanJSON, revision.MaterialPlanJSON, revision.ResearchNeedIDsJSON, revision.Outline, revision.Style, revision.TargetLength, revision.ClaimType, revision.UnresolvedQuestionsJSON, revision.Notes, revision.CuratorPromptVersion, revision.CuratorInputSnapshotJSON)
+	if err != nil {
+		if isUniqueConstraintErr(err) {
+			return nil, ErrCreationBriefVersionConflict
+		}
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE creation_briefs SET current_version=?,confirmed_version=0,confirmed_at=NULL,status='draft',updated_at=datetime('now') WHERE id=? AND current_version=?`, revision.Version, briefID, current)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, ErrCreationBriefVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &revision, nil
+}
+
+func materialPlanParts(raw string) (string, string) {
+	var ids []string
+	if json.Unmarshal([]byte(raw), &ids) == nil {
+		b, _ := json.Marshal(ids)
+		return string(b), "[]"
+	}
+	var object struct {
+		Selected []string `json:"selected"`
+		Rejected []string `json:"rejected"`
+	}
+	if json.Unmarshal([]byte(raw), &object) != nil {
+		return "[]", "[]"
+	}
+	sel, _ := json.Marshal(object.Selected)
+	rej, _ := json.Marshal(object.Rejected)
+	return string(sel), string(rej)
+}
+
+func parseMaterialPlan(raw string) (selected, rejected []string, ok bool) {
+	var ids []string
+	if json.Unmarshal([]byte(raw), &ids) == nil {
+		return ids, nil, true
+	}
+	var object struct {
+		Selected []string `json:"selected"`
+		Rejected []string `json:"rejected"`
+	}
+	if json.Unmarshal([]byte(raw), &object) != nil {
+		return nil, nil, false
+	}
+	return object.Selected, object.Rejected, true
+}
+
+func (s *Store) recheckBriefRevisionTx(ctx context.Context, tx *sql.Tx, proposalID, ownerClaim, materialPlan, snapshotJSON string) error {
+	selected, _, ok := parseMaterialPlan(materialPlan)
+	if !ok || len(selected) == 0 {
+		return fmt.Errorf("%w: revision selected materials required", ErrInvalidEditorialState)
+	}
+	var allowedRaw string
+	if err := tx.QueryRowContext(ctx, `SELECT material_ids_json FROM creation_proposals WHERE id=?`, proposalID).Scan(&allowedRaw); err != nil {
+		return err
+	}
+	var allowed []string
+	_ = json.Unmarshal([]byte(allowedRaw), &allowed)
+	set := map[string]bool{}
+	for _, id := range allowed {
+		set[id] = true
+	}
+	for _, id := range selected {
+		if !set[id] {
+			return fmt.Errorf("%w: revision material outside proposal candidates", ErrInvalidEditorialState)
+		}
+	}
+	var snap struct {
+		Provider  string `json:"provider"`
+		Materials []struct {
+			ID          string            `json:"keyPointId"`
+			SourceType  models.SourceType `json:"sourceType"`
+			SourceID    string            `json:"sourceId"`
+			CardVersion int               `json:"cardVersion"`
+		} `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(snapshotJSON), &snap); err != nil {
+		return fmt.Errorf("%w: revision Curator snapshot invalid", ErrInvalidEditorialState)
+	}
+	for _, id := range selected {
+		var sourceType, sourceID string
+		var frozenCardVersion int
+		for _, m := range snap.Materials {
+			if m.ID == id {
+				sourceType, sourceID, frozenCardVersion = string(m.SourceType), m.SourceID, m.CardVersion
+			}
+		}
+		if sourceType == "" || sourceID == "" {
+			return fmt.Errorf("%w: selected material missing frozen source", ErrInvalidEditorialState)
+		}
+		if sourceType != string(models.SourceEpisode) && sourceType != string(models.SourceUpload) && sourceType != string(models.SourceDocument) {
+			return fmt.Errorf("%w: frozen source type invalid", ErrInvalidEditorialState)
+		}
+		var actualType, actualSource string
+		var actualCardVersion int
+		if err := tx.QueryRowContext(ctx, `SELECT source_type,source_id,card_version FROM keypoint_index WHERE id=?`, id).Scan(&actualType, &actualSource, &actualCardVersion); err != nil {
+			return fmt.Errorf("%w: selected KeyPoint missing", ErrInvalidEditorialState)
+		}
+		if actualType != sourceType || actualSource != sourceID || (frozenCardVersion > 0 && actualCardVersion != frozenCardVersion) {
+			return fmt.Errorf("%w: selected material source/version differs from frozen snapshot", ErrInvalidEditorialState)
+		}
+		var quality, evidence, stale string
+		if err := tx.QueryRowContext(ctx, `SELECT quality_status,evidence_status,COALESCE(stale_at,'') FROM keypoint_index WHERE id=?`, id).Scan(&quality, &evidence, &stale); err != nil {
+			return err
+		}
+		if quality != string(models.KeyPointReady) && quality != string(models.KeyPointOwnerConfirmed) || evidence == "stale" || stale != "" {
+			return fmt.Errorf("%w: selected material stale or not ready", ErrInvalidEditorialState)
+		}
+		var excluded int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM editorial_relevance WHERE keypoint_id=? AND owner_override='excluded'`, id).Scan(&excluded); err != nil {
+			return err
+		}
+		if excluded > 0 {
+			return fmt.Errorf("%w: selected material excluded", ErrInvalidEditorialState)
+		}
+		var archived *string
+		var policy, approvedJSON string
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT archived_at,model_data_policy,approved_providers_json FROM %s WHERE id=?`, sourceTable(models.SourceType(sourceType))), sourceID).Scan(&archived, &policy, &approvedJSON); err != nil {
+			return fmt.Errorf("%w: frozen source unavailable", ErrInvalidEditorialState)
+		}
+		if archived != nil {
+			return fmt.Errorf("%w: frozen source archived", ErrInvalidEditorialState)
+		}
+		switch models.ModelDataPolicy(policy) {
+		case models.ModelDataExternalAllowed:
+		case models.ModelDataLocalOnly:
+			return fmt.Errorf("%w: frozen Curator provider policy denied", ErrInvalidEditorialState)
+		case models.ModelDataApprovedProvidersOnly:
+			var approved []string
+			if err := json.Unmarshal([]byte(approvedJSON), &approved); err != nil {
+				return err
+			}
+			matched := false
+			for _, name := range approved {
+				if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(snap.Provider)) && strings.TrimSpace(snap.Provider) != "" {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("%w: frozen Curator provider not approved", ErrInvalidEditorialState)
+			}
+		default:
+			return fmt.Errorf("%w: unknown source model data policy", ErrInvalidEditorialState)
+		}
+	}
+	return nil
 }

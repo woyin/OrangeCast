@@ -17,6 +17,9 @@ import (
 // ErrInvalidEditorialState indicates an invalid content production transition or input.
 var ErrInvalidEditorialState = errors.New("invalid editorial state")
 
+// ErrCreationBriefVersionConflict is a CAS conflict for immutable Brief revisions.
+var ErrCreationBriefVersionConflict = errors.New("creation brief version conflict")
+
 // CreateEditorialProfile creates a long-lived content brand profile.
 func (s *Store) CreateEditorialProfile(ctx context.Context, profile models.EditorialProfile) (*models.EditorialProfile, error) {
 	profile.ID = uuid.NewString()

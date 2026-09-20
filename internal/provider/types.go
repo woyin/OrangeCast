@@ -95,6 +95,8 @@ type QAProvider interface {
 
 // ArticleMaterial is one approved KeyPoint available to the Writer. It carries no model-only facts.
 type ArticleMaterial struct {
+	SourceType  string   `json:"sourceType,omitempty"`
+	CardVersion int      `json:"cardVersion,omitempty"`
 	KeyPointID  string   `json:"keyPointId"`
 	SourceID    string   `json:"sourceId"`
 	SourceTitle string   `json:"sourceTitle"`
@@ -213,11 +215,14 @@ type CuratorRequest struct {
 // CuratorResult is the Owner-reviewable brief draft produced by a CuratorProvider.
 type CuratorResult struct {
 	Thesis              string    `json:"thesis"`
+	ClaimType           string    `json:"claimType,omitempty"`
 	Audience            string    `json:"audience"`
 	Outline             string    `json:"outline"`
 	SelectedKeyPointIDs []string  `json:"selectedKeyPointIds"`
 	RejectedKeyPointIDs []string  `json:"rejectedKeyPointIds"`
 	ConflictPlan        []string  `json:"conflictPlan"`
+	UnresolvedQuestions []string  `json:"unresolvedQuestions,omitempty"`
+	Notes               string    `json:"notes,omitempty"`
 	Style               string    `json:"style"`
 	TargetLength        *int      `json:"targetLength,omitempty"`
 	Usage               TaskUsage `json:"-"`

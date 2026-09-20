@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"github.com/woyin/orangecast/internal/models"
-	"strings"
 	"testing"
 )
 
@@ -33,8 +32,9 @@ func TestDirectedIdeationResearchNeedAndCreationBriefAuthorization(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateCreationBrief(ctx, models.CreationBrief{CreationProposalID: proposal.ID, OwnerClaim: "我认为反馈周期应决定学习方法选择"}); err == nil || !strings.Contains(err.Error(), "blocking") {
-		t.Fatalf("blocking research must prevent brief: %v", err)
+	brief, err := s.CreateCreationBrief(ctx, models.CreationBrief{CreationProposalID: proposal.ID, OwnerClaim: "我认为反馈周期应决定学习方法选择"})
+	if err != nil || brief.Status != "draft" {
+		t.Fatalf("blocking research must allow reviewable draft but block confirmation: %+v %v", brief, err)
 	}
 	plan, err := s.CreateResearchPlan(ctx, models.ResearchPlan{ResearchNeedID: need.ID, Question: need.Question, Scope: "只收集 Owner 导入的来源"})
 	if err != nil {
@@ -76,7 +76,7 @@ func TestDirectedIdeationResearchNeedAndCreationBriefAuthorization(t *testing.T)
 	if err := s.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, eps[0].ID, trVersion, "seg-1"); err != nil {
 		t.Fatal(err)
 	}
-	brief, err := s.CreateCreationBrief(ctx, models.CreationBrief{CreationProposalID: proposal.ID, OwnerClaim: "我认为反馈周期应决定学习方法选择", ClaimPlanJSON: `["owner_claim"]`})
+	brief, err = s.CreateCreationBrief(ctx, models.CreationBrief{CreationProposalID: proposal.ID, OwnerClaim: "我认为反馈周期应决定学习方法选择", ClaimPlanJSON: `["owner_claim"]`})
 	if err != nil {
 		t.Fatal(err)
 	}
