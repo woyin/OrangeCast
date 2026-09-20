@@ -411,12 +411,15 @@ func (s *Store) InvalidateResearchResolutions(ctx context.Context, sourceType mo
 		`resolution_source_id=? AND resolution_source_type=? AND status='resolved'`, sourceID, string(sourceType))
 }
 
-// InvalidateSupersededTranscriptResolutions R14：转录重分析切换 current 版本后，
-// 以旧版本为依据的 resolved 缺口重新阻断——重分析不得绕过失效。
+// InvalidateSupersededTranscriptResolutions R14（复核修复）：转录重分析切换
+// current 版本后，以同一来源**同类型**旧版本为依据的 resolved 缺口重新阻断——
+// 重分析不得绕过失效，且不得误伤恰好同 ID 的其他来源类型。
+// 版本变更与失效传播是连续操作：失效失败会向调用方返回错误（不伪装未写入成功
+// 而静默留下旧依据）。
 func (s *Store) InvalidateSupersededTranscriptResolutions(ctx context.Context, sourceType models.SourceType, sourceID string, currentVersion int) error {
 	return s.invalidateResearchResolutionsWhere(ctx,
-		`resolution_source_id=? AND resolution_source_type IN ('episode','upload') AND status='resolved' AND resolution_version<>?`,
-		sourceID, currentVersion)
+		`resolution_source_id=? AND resolution_source_type=? AND status='resolved' AND resolution_version<>?`,
+		sourceID, string(sourceType), currentVersion)
 }
 
 // InvalidateSupersededDocumentResolutions R14：同系列出现新文档版本后，

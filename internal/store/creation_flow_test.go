@@ -262,3 +262,95 @@ func TestResearchNeed_DocumentNewVersionReblocks(t *testing.T) {
 		t.Fatalf("新版本有效依据应可解决: %v", err)
 	}
 }
+
+// TestResearchNeed_SameIDDifferentSourceTypeNotInvalidated R14 复核：转录版本失效
+// 按 (source_id, source_type) 精确匹配——同 ID 的另一来源类型不被误伤。
+func TestResearchNeed_SameIDDifferentSourceTypeNotInvalidated(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	profile, err := s.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := s.CreateCreationProposal(ctx, models.CreationProposal{EditorialProfileID: profile.ID, WorkingTitle: "跨类型", ProposedClaim: "主张X"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptCreationProposal(ctx, proposal.ID, "Owner 主张 X"); err != nil {
+		t.Fatal(err)
+	}
+	need, err := s.CreateResearchNeed(ctx, models.ResearchNeed{CreationProposalID: proposal.ID, Severity: "blocking", Question: "缺口"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Document 来源（ID 恰好会被后续当作"同 ID 来源"）作为有效依据。
+	doc, err := s.CreatePastedDocument(ctx, "文档来源", "足够的正文内容用于落源。\n\n第二段。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segID string
+	for _, seg := range DocumentSegments(doc) {
+		segID = seg.ID
+		break
+	}
+	if err := s.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceDocument, doc.ID, doc.Version, segID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 同 ID 的 Episode 侧转录切换版本：不得波及 Document 依据。
+	podcast, _ := s.CreatePodcast(ctx, "https://f.xml", "P", "", "")
+	if _, err := s.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "same-id", Title: "E", AudioURL: "https://a.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	eps, _ := s.ListEpisodes(ctx, podcast.ID)
+	epJob, _ := s.EnqueueJob(ctx, models.SourceEpisode, eps[0].ID, models.JobTranscribe)
+	_ = epJob
+	// 人为制造"episode 行 ID == document ID"的极端场景不可行（FK 独立），
+	// 直接以同参数调用失效：Document 依据不应被 episode/upload 维度命中。
+	if err := s.InvalidateSupersededTranscriptResolutions(ctx, models.SourceEpisode, doc.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetResearchNeed(ctx, need.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "resolved" || got.ResolutionInvalidated {
+		t.Fatalf("同 ID 不同类型的转录失效不得误伤 Document 依据: %+v", got)
+	}
+	// 同类型版本切换才失效。
+	podcast2, _ := s.CreatePodcast(ctx, "https://f2.xml", "P2", "", "")
+	if _, err := s.MergeEpisodes(ctx, podcast2.ID, []models.Episode{{GUID: "aud-1", Title: "A", AudioURL: "https://a.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	eps2, _ := s.ListEpisodes(ctx, podcast2.ID)
+	audJob, _ := s.EnqueueJob(ctx, models.SourceEpisode, eps2[0].ID, models.JobTranscribe)
+	audV1, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, eps2[0].ID, KindTranscript, "test", "test", "1", audJob.ID,
+		`{"language":"zh","text":"v1","segments":[{"id":"seg-1","start":0,"end":2,"text":"v1"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.MarkJobRunning(ctx, audJob.ID)
+	s.MarkJobSucceeded(ctx, audJob.ID)
+	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, eps2[0].ID, KindTranscript, audV1); err != nil {
+		t.Fatal(err)
+	}
+	need2, err := s.CreateResearchNeed(ctx, models.ResearchNeed{CreationProposalID: proposal.ID, Severity: "blocking", Question: "音频缺口"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveResearchNeedWithEvidence(ctx, need2.ID, models.SourceEpisode, eps2[0].ID, audV1, "seg-1"); err != nil {
+		t.Fatal(err)
+	}
+	audV2, err := s.CreateArtifactVersion(ctx, models.SourceEpisode, eps2[0].ID, KindTranscript, "test", "test", "1", audJob.ID,
+		`{"language":"zh","text":"v2","segments":[{"id":"seg-2","start":0,"end":2,"text":"v2"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, eps2[0].ID, KindTranscript, audV2); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := s.GetResearchNeed(ctx, need2.ID)
+	if got2.Status != "open" || !got2.ResolutionInvalidated {
+		t.Fatalf("同类型版本切换应失效旧依据: %+v", got2)
+	}
+}

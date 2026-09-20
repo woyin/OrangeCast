@@ -273,3 +273,10 @@
   - 既有 brief/研究流程测试迁移到新签名；`go test ./...` 全部通过（backup 迁移计数 48→49）；race（Research/Purge）通过；`go vet`、`gofmt`、`git diff --check` 通过。
 - 提交：`fix(research): resolve gaps with versioned owner-confirmed evidence`。
 - 限制：已成文文章的"待复核"状态属 R20/R21（当前传播到 Brief 层）；研究计划执行仍为 V1 外的范围。
+
+## R14 follow-up — 转录失效按精确来源类型匹配（复核修复）
+
+- 状态：实现与自动验证完成。
+- 交付：`InvalidateSupersededTranscriptResolutions` 的 WHERE 由 `resolution_source_type IN ('episode','upload')` 改为 `resolution_source_type=?` 精确匹配——同 sourceID 的其他来源类型不被误伤；注释明确版本变更与失效传播是连续操作，失效失败向调用方返回错误（不伪装未写入）。
+- 验证：`TestResearchNeed_SameIDDifferentSourceTypeNotInvalidated`——同 ID Document 依据不被 Episode 维度失效误伤；同类型版本切换才正确失效。
+- 提交：`fix(research): match transcript invalidation by exact source type`。
