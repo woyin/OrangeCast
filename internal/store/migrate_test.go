@@ -31,7 +31,7 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49}
+	want := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50}
 	if len(applied) != len(want) {
 		t.Fatalf("应应用 %v，实际 %v", want, applied)
 	}
@@ -42,8 +42,8 @@ func TestMigrate_FreshDB_AppliesAll(t *testing.T) {
 	}
 	// schema_migrations 已登记到最新版本
 	v, _ := AppliedVersion(context.Background(), db)
-	if v != 49 {
-		t.Fatalf("AppliedVersion 应为 49，实际 %d", v)
+	if v != 50 {
+		t.Fatalf("AppliedVersion 应为 50，实际 %d", v)
 	}
 	// 关键表存在（含 schema_migrations）
 	for _, tb := range []string{"users", "podcasts", "episodes", "transcripts",
@@ -95,8 +95,8 @@ func TestMigrate_V01FixtureUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
-	if len(applied) != 49 {
-		t.Fatalf("应应用 49 条迁移，实际 %d", len(applied))
+	if len(applied) != 50 {
+		t.Fatalf("应应用 50 条迁移，实际 %d", len(applied))
 	}
 	after := countAll(t, db)
 
@@ -152,8 +152,8 @@ func TestMigrate_FailedMigration_SafeRetry(t *testing.T) {
 	if err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 49 {
-		t.Errorf("失败迁移不应登记版本；应保持 49，实际 %d", v)
+	if v != 50 {
+		t.Errorf("失败迁移不应登记版本；应保持 50，实际 %d", v)
 	}
 
 	// 可安全重试：再次正常 Migrate 应保持最新版本且不报错（无新迁移）。
@@ -629,5 +629,48 @@ func TestMigrationTableExists_QueryError(t *testing.T) {
 	db.Close()
 	if _, err := migrationTableExists(ctx, db); err == nil {
 		t.Fatal("关闭 DB 时 migrationTableExists 应报错")
+	}
+}
+
+// TestMigration0050_BackfillsReadyBatches R16：升级前已存在的 ready 批次若没有
+// proposed 候选（零候选或所有候选已处理）应被迁移回填为 completed，避免永久背压；
+// 仍有 proposed 候选的批次保持 ready；已有 completed_at 不被覆盖。
+func TestMigration0050_BackfillsReadyBatches(t *testing.T) {
+	db := openRaw(t, filepath.Join(t.TempDir(), "r16-backfill.db"))
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE proposal_batches (id TEXT PRIMARY KEY, status TEXT NOT NULL, completed_at TEXT);
+		CREATE TABLE creation_proposals (id TEXT PRIMARY KEY, proposal_batch_id TEXT, status TEXT NOT NULL);
+		INSERT INTO proposal_batches(id,status,completed_at) VALUES
+		 ('zero','ready',NULL),('processed','ready',NULL),('open','ready',NULL),('done','completed','kept');
+		INSERT INTO creation_proposals(id,proposal_batch_id,status) VALUES
+		 ('p1','processed','accepted'),('p2','processed','saved'),('p3','processed','rejected'),
+		 ('p4','open','proposed');`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("migrations", "0050_proposal_decision_note.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus := func(id, want string) {
+		t.Helper()
+		var status, completed string
+		if err := db.QueryRowContext(ctx, `SELECT status,COALESCE(completed_at,'') FROM proposal_batches WHERE id=?`, id).Scan(&status, &completed); err != nil {
+			t.Fatal(err)
+		}
+		if status != want || completed == "" && want == "completed" {
+			t.Fatalf("batch %s: status=%q completed_at=%q want=%q", id, status, completed, want)
+		}
+	}
+	assertStatus("zero", "completed")
+	assertStatus("processed", "completed")
+	assertStatus("open", "ready")
+	assertStatus("done", "completed")
+	var old string
+	if err := db.QueryRowContext(ctx, `SELECT completed_at FROM proposal_batches WHERE id='done'`).Scan(&old); err != nil || old != "kept" {
+		t.Fatalf("已有 completed_at 不应覆盖: %q %v", old, err)
 	}
 }

@@ -119,7 +119,7 @@ func (s *Store) GetCreationProposal(ctx context.Context, id string) (*models.Cre
 	v := &models.CreationProposal{}
 	var batch, session, owner sql.NullString
 	var round sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,COALESCE(decision_note,''),created_at,updated_at FROM creation_proposals WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.DecisionNote, &v.CreatedAt, &v.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -135,7 +135,7 @@ func (s *Store) GetCreationProposal(ctx context.Context, id string) (*models.Cre
 
 // ListCreationProposals lists all claim-led directions for one profile, newest first.
 func (s *Store) ListCreationProposals(ctx context.Context, profileID string) ([]*models.CreationProposal, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC,id DESC`, profileID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,COALESCE(decision_note,''),created_at,updated_at FROM creation_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC,id DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (s *Store) ListCreationProposals(ctx context.Context, profileID string) ([]
 	for rows.Next() {
 		v := &models.CreationProposal{}
 		var batch, session, round, owner sql.NullString
-		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.DecisionNote, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		v.ProposalBatchID, v.IdeationSessionID, v.IdeationRoundID, v.OwnerClaim = batch.String, session.String, round.String, owner.String
@@ -159,18 +159,8 @@ func (s *Store) AcceptCreationProposal(ctx context.Context, id, ownerClaim strin
 	if ownerClaim == "" {
 		return fmt.Errorf("%w: owner claim required", ErrInvalidEditorialState)
 	}
-	r, err := s.DB.ExecContext(ctx, `UPDATE creation_proposals SET status='accepted',owner_claim=?,updated_at=datetime('now') WHERE id=? AND status='proposed'`, ownerClaim, id)
-	if err != nil {
-		return err
-	}
-	n, err := r.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrInvalidEditorialState
-	}
-	return nil
+	// R16：复用 DecideProposal 事务核心（最后一条决策自动释放批次）。
+	return s.DecideProposal(ctx, id, "accept", ownerClaim, "", "")
 }
 
 // CreateResearchNeed records a blocking or enhancement learning gap.

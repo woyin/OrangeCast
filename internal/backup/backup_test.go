@@ -95,6 +95,16 @@ func buildFixture(t *testing.T, dataDir string) *store.Store {
 	if _, err := s.CreateProposalBatch(ctx, models.ProposalBatch{EditorialProfileID: profile.ID, MaterialSnapshotJSON: `["backup-fixture-v1"]`, IdempotencyKey: "backup-fixture-batch"}); err != nil {
 		t.Fatal(err)
 	}
+	decisionProposal, err := s.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: profile.ID, WorkingTitle: "备份决策", ProposedClaim: "备份主张",
+		CreationForm: "article", MaterialIDsJSON: `["material-a"]`, HistoryRelationship: "possible_duplicate:history-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RejectProposal(ctx, decisionProposal.ID, "NotNow", "备份测试拒绝原因"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.CreateTheme(ctx, models.Theme{EditorialProfileID: profile.ID, Name: "AI 工作流"}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +115,6 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	srcDir := t.TempDir()
 	srcStore := buildFixture(t, srcDir)
 	ctx := context.Background()
-
 	backupFile := filepath.Join(t.TempDir(), "backup.tar.gz")
 	m, err := Create(ctx, srcStore, filepath.Join(srcDir, "evidence"), backupFile)
 	if err != nil {
@@ -143,8 +152,16 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	if email != "owner@example.com" {
 		t.Errorf("Owner email 应为 owner@example.com，实际 %s", email)
 	}
+	var decisionNote string
+	if err := dstDB.QueryRow(`SELECT decision_note FROM creation_proposals WHERE proposed_claim=?`, "备份主张").Scan(&decisionNote); err != nil {
+		t.Fatalf("恢复后读取 decision_note: %v", err)
+	}
+	var decision map[string]string
+	if err := json.Unmarshal([]byte(decisionNote), &decision); err != nil || decision["reason"] != "备份测试拒绝原因" {
+		t.Fatalf("decision_note 恢复不一致: %q %v", decisionNote, err)
+	}
 	var migrationVersion int
-	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 49 {
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 50 {
 		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
 	}
 	var profileName, themeName string

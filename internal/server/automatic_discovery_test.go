@@ -31,7 +31,13 @@ func (f *automaticDiscoveryScout) Scout(_ context.Context, request provider.Scou
 			break
 		}
 	}
-	return &provider.ScoutResult{Proposals: []provider.ScoutProposal{{Kind: "fresh", Title: "学习成果如何改变创作判断", Thesis: "新学习成果应先经质量闸门，再形成 Owner 可承担的创作方向。", Audience: "知识工作者", Rationale: "跨 Episode 的共同模式", CandidateKeyPointIDs: []string{first.KeyPointID, second.KeyPointID}}}}, nil
+	title := "学习成果如何改变创作判断"
+	thesis := "新学习成果应先经质量闸门，再形成 Owner 可承担的创作方向。"
+	if f.calls > 1 {
+		title = "第二窗口的新学习对照"
+		thesis = "第二窗口的新证据应更新 Owner 的创作判断。"
+	}
+	return &provider.ScoutResult{Proposals: []provider.ScoutProposal{{Kind: "fresh", Title: title, Thesis: thesis, Audience: "知识工作者", Rationale: "跨 Episode 的共同模式", CandidateKeyPointIDs: []string{first.KeyPointID, second.KeyPointID}}}}, nil
 }
 
 func (f *automaticDiscoveryScout) Name() string { return "fake-scout" }
@@ -95,8 +101,17 @@ func TestRunAutomaticDiscoveryCreatesOneDurableBatchAndCreationProposal(t *testi
 	if scout.calls != 1 {
 		t.Fatalf("open result batch must apply durable backpressure, got %d calls", scout.calls)
 	}
-	if err := srv.store.SetProposalBatchStatus(t.Context(), batches[0].ProposalBatchID, "completed", "reviewed"); err != nil {
+
+	// R16：真实决策（接受唯一提案）→ 同一事务内最后一条决策自动完成批次。
+	if err := srv.store.DecideProposal(t.Context(), batches[0].ID, "accept", "Owner 承担该主张", "", ""); err != nil {
+		t.Fatalf("accept via DecideProposal: %v", err)
+	}
+	var firstBatchStatus string
+	if err := srv.store.DB.QueryRowContext(t.Context(), `SELECT status FROM proposal_batches WHERE id=?`, batches[0].ProposalBatchID).Scan(&firstBatchStatus); err != nil {
 		t.Fatal(err)
+	}
+	if firstBatchStatus != "completed" {
+		t.Fatalf("last decision must complete the batch automatically: %q", firstBatchStatus)
 	}
 	if _, err := srv.store.DB.ExecContext(t.Context(), `UPDATE proposal_batches SET created_at=datetime('now','-2 hours') WHERE id=?`, batches[0].ProposalBatchID); err != nil {
 		t.Fatal(err)
@@ -110,6 +125,66 @@ func TestRunAutomaticDiscoveryCreatesOneDurableBatchAndCreationProposal(t *testi
 		t.Fatal(err)
 	}
 	if err := srv.store.SetDiscoverySettings(t.Context(), models.DiscoverySettings{EditorialProfileID: profile.ID, Enabled: true, Provider: "fake", Model: "fake-scout", DailyLimit: 2, DebounceMinutes: 30}); err != nil {
+		t.Fatal(err)
+	}
+	// R16：新窗口经生产入口实际生成第二个成功批次与提案。
+	scout.err = nil
+	if err := srv.RunAutomaticDiscovery(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if scout.calls != 2 {
+		t.Fatalf("new window must reach the provider again, got %d calls", scout.calls)
+	}
+	proposals2, err := srv.store.ListCreationProposals(t.Context(), profile.ID)
+	if err != nil || len(proposals2) != 2 {
+		t.Fatalf("second window must create a second proposal: %d %v", len(proposals2), err)
+	}
+	// ListCreationProposals 是最新在前：按 batch/status 找第二批仍 proposed 的提案，
+	// 不依赖排序位置（首批已 accepted）。
+	var secondProposal *models.CreationProposal
+	firstBatchID := batches[0].ProposalBatchID
+	for _, p := range proposals2 {
+		if p.Status == "proposed" && p.ProposalBatchID != firstBatchID {
+			secondProposal = p
+			break
+		}
+	}
+	if secondProposal == nil {
+		t.Fatalf("应找到第二批 proposed 提案: %+v", proposals2)
+	}
+	// 完成第二批（决策唯一提案），再写第三轮新变化并注入 provider 失败。
+	if err := srv.store.DecideProposal(t.Context(), secondProposal.ID, "save", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var secondBatchStatus string
+	if err := srv.store.DB.QueryRowContext(t.Context(), `SELECT status FROM proposal_batches WHERE id=?`, secondProposal.ProposalBatchID).Scan(&secondBatchStatus); err != nil {
+		t.Fatal(err)
+	}
+	if secondBatchStatus != "completed" {
+		t.Fatalf("second batch must complete after its last decision: %q", secondBatchStatus)
+	}
+	// 让第二批成为第三轮的窗口起点（明确早于第三轮变化）。
+	if _, err := srv.store.DB.ExecContext(t.Context(), `UPDATE proposal_batches SET created_at=datetime('now','-2 hours') WHERE id=?`, secondProposal.ProposalBatchID); err != nil {
+		t.Fatal(err)
+	}
+	// 第三轮需要至少六条变化且至少两个 Source，否则调度会在 Provider 前阻断.
+	if len(keyPoints) < 6 {
+		t.Fatalf("第三轮测试需要六条重点: %d", len(keyPoints))
+	}
+	seenSources := map[string]bool{}
+	for i, kp := range keyPoints {
+		seenSources[kp.SourceID] = true
+		if _, err := srv.store.RecordMaterialChange(t.Context(), models.MaterialChange{KeyPointID: kp.ID, SourceType: string(kp.SourceType), SourceID: kp.SourceID, ChangeKind: "revised", SnapshotHash: fmt.Sprintf("third-window-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seenSources) < 2 {
+		t.Fatal("第三轮变化必须来自至少两个 Source")
+	}
+	if _, err := srv.store.DB.ExecContext(t.Context(), `UPDATE material_changes SET created_at=datetime('now','-31 minutes') WHERE snapshot_hash LIKE 'third-window-%'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetDiscoverySettings(t.Context(), models.DiscoverySettings{EditorialProfileID: profile.ID, Enabled: true, Provider: "fake", Model: "fake-scout", DailyLimit: 3, DebounceMinutes: 30}); err != nil {
 		t.Fatal(err)
 	}
 	scout.err = errors.New("provider unavailable")

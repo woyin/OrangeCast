@@ -308,3 +308,23 @@
   - `go test -race ./internal/server/` 通过（568.141s）。
 - 提交：`fix(discovery): ground new proposals in bounded historical context`。
 - 限制：召回质量依赖本地嵌入/FTS（无外部服务）；同义判定为字符 bigram 边界（≥0.65/成对），语义级同义不承诺。
+
+## R16 — 所有候选完成决策后释放批次
+
+- 状态：实现与自动验证完成，等待复核后提交（当前工作区保留 R16 原子候选改动，未混入 R17）。
+- 交付：
+  - 迁移 0050：`creation_proposals.decision_note` 稳定 JSON 决策备注；同事务回填旧库中 `ready` 且不存在 `proposed` 子提案的批次为 `completed`，保留已有 `completed_at`；仍有 proposed 候选的 ready 批次不改变。
+  - `store/proposal_batches.go`：`DecideProposal` 统一 Accept/Save/Reject 事务核心；同决策幂等，Accept 只有相同 OwnerClaim 幂等、不同主张返回冲突；Reject 保存 feedbackKind/reason JSON；Save 不丢 material/history 来历；最后一项在 batch status=ready 且 remaining=0 时同事务置 completed。三个旧 Store API 改为 wrapper，真实 HTTP handler 复用该核心。
+  - `FinalizeAutomaticProposalBatch` 零候选直接 completed，不形成 ready 背压；同快照 idempotency key 不补货，新的窗口 key 可创建新批次。
+- 验证：
+  - `TestRunAutomaticDiscoveryCreatesOneDurableBatchAndCreationProposal` 扩展：首批完成后写新变化，生产 `RunAutomaticDiscovery` 第二次 Scout 成功并生成第二批/提案；第二批决策完成后写第三轮两个 Source、六条新变化，Provider 失败仍到达 Scout 并保留 failed 批次。
+  - `proposal_batch_r16_test.go`：真实 HTTP 最后一项释放、并发两项决策 batch completed + remaining=0、零候选自动 completed、同快照不重建；同 accept+相同 OwnerClaim 303、不同 OwnerClaim 400、同 reject 不覆盖首个 decision_note；save 后材料/历史来历保持且参与 automaticCreationProposals 去重。
+  - `TestMigration0050_BackfillsReadyBatches`：zero/processed ready 批次回填 completed，open 保持 ready，已有 completed_at 保持。
+  - backup fixture 写入非空 decision_note，Restore 后按 proposed_claim 精确读取并解析一致。
+  - 直接运行通过：`go test ./internal/server/`、`go test ./internal/store/`、`go test ./internal/backup/`、`go test ./...`、`go vet ./...`、`gofmt`、`git diff --check`。
+- 限制：R16 当前尚未提交，待复核后按 `fix(proposals): complete batches atomically after owner decisions` 提交；零候选 completed 的用户提示样式属 R22/R25。
+
+## R16 follow-up — 复核收尾
+
+- `proposal_batch_r16_test.go`：重复 reject 的 `GetCreationProposal` 现在检查并传播读取错误；零候选测试新增 `HasOpenProposalBatch=false` 断言。
+- 直接验证：`go test -run 'TestProposalBatch_' ./internal/server/` 通过；`go test -race -run TestProposalBatch_ConcurrentLastTwoDecisions_R16 ./internal/server/` 通过（4.028s）。

@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -170,7 +172,12 @@ func (s *Store) FinalizeAutomaticProposalBatch(ctx context.Context, batchID, pro
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE proposal_batches SET status='ready',shortage_reason=?,provider=?,model=?,cost_cents=?,failure_reason=NULL,completed_at=datetime('now') WHERE id=? AND status='reviewing'`, shortageReason, providerName, modelName, cost, batchID)
+	// R16（复核）：零候选批次不进入 ready 背压（没有可处理项），直接 completed。
+	nextStatus := "ready"
+	if len(proposals) == 0 {
+		nextStatus = "completed"
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE proposal_batches SET status=?,shortage_reason=?,provider=?,model=?,cost_cents=?,failure_reason=NULL,completed_at=datetime('now') WHERE id=? AND status='reviewing'`, nextStatus, shortageReason, providerName, modelName, cost, batchID)
 	if err != nil {
 		return err
 	}
@@ -220,26 +227,16 @@ func (s *Store) SetProposalBatchStatus(ctx context.Context, id, status, reason s
 	return nil
 }
 
-// RejectProposal 带原因拒绝一条提案（C06）：幂等（已 rejected 不重复写入反馈）。
+// RejectProposal 带原因拒绝一条提案（C06/R16）：复用 DecideProposal 事务核心
+// （原因写 decision_note 稳定格式；最后一条决策自动释放批次）。
 func (s *Store) RejectProposal(ctx context.Context, proposalID, feedbackKind, reason string) error {
-	feedbackKind = strings.TrimSpace(feedbackKind)
-	if feedbackKind == "" {
-		feedbackKind = "NotNow"
-	}
-	if _, err := s.DB.ExecContext(ctx,
-		`UPDATE creation_proposals SET status='rejected', updated_at=datetime('now') WHERE id=? AND status='proposed'`,
-		proposalID); err != nil {
-		return err
-	}
-	return nil
+	return s.DecideProposal(ctx, proposalID, "reject", "", feedbackKind, reason)
 }
 
-// SaveProposalForLater 暂存提案（C06）：不创建作品，不触发计费，不改变素材。
+// SaveProposalForLater 暂存提案（C06/R16）：复用 DecideProposal 事务核心；
+// 不创建作品，不触发计费，material/history 来历不变。
 func (s *Store) SaveProposalForLater(ctx context.Context, proposalID string) error {
-	_, err := s.DB.ExecContext(ctx,
-		`UPDATE creation_proposals SET status='saved', updated_at=datetime('now') WHERE id=? AND status='proposed'`,
-		proposalID)
-	return err
+	return s.DecideProposal(ctx, proposalID, "save", "", "", "")
 }
 
 // CountOpenProposalsForBatch 统计批次中未处理的提案数（proposed 状态）。
@@ -248,4 +245,125 @@ func (s *Store) CountOpenProposalsForBatch(ctx context.Context, batchID string) 
 	err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM creation_proposals WHERE proposal_batch_id=? AND status='proposed'`, batchID).Scan(&n)
 	return n, err
+}
+
+// DecideProposal R16：接受/暂存/拒绝一条提案，并在**同一事务**内统计批次剩余
+// 未处理数——最后一条决策后自动把批次置为 completed（释放背压）。
+//   - 幂等：重复动作（含并发）对已同决策的提案为 no-op；不同决策在非 proposed
+//     状态下明确拒绝（不静默改写）；
+//   - accept 必须带 OwnerClaim（编辑后接受保留来历：material/history 字段不变，
+//     Owner 编辑写入 owner_claim）；
+//   - reject 保留原因（decision_note）；save 的候选仍参与后续去重（行保留）。
+//
+// decision ∈ accept | save | reject。
+func (s *Store) DecideProposal(ctx context.Context, proposalID, decision, ownerClaim, feedbackKind, reason string) error {
+	ownerClaim = strings.TrimSpace(ownerClaim)
+	var status string
+	switch decision {
+	case "accept":
+		if ownerClaim == "" {
+			return fmt.Errorf("%w: owner claim required", ErrInvalidEditorialState)
+		}
+		status = "accepted"
+	case "save":
+		status = "saved"
+	case "reject":
+		status = "rejected"
+	default:
+		return fmt.Errorf("%w: unknown proposal decision %q", ErrInvalidEditorialState, decision)
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var currentStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM creation_proposals WHERE id=?`, proposalID).Scan(&currentStatus); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if currentStatus != "proposed" {
+		// 幂等：同决策重复动作 no-op——accept 还要求相同 owner_claim；
+		// 不同主张/不同决策是明确的状态冲突。
+		if currentStatus == status {
+			if decision == "accept" {
+				var existingClaim sql.NullString
+				if err := tx.QueryRowContext(ctx, `SELECT owner_claim FROM creation_proposals WHERE id=?`, proposalID).Scan(&existingClaim); err != nil {
+					return err
+				}
+				if existingClaim.String != ownerClaim {
+					return fmt.Errorf("%w: 提案已以不同 OwnerClaim 接受", ErrInvalidEditorialState)
+				}
+			}
+			return tx.Commit()
+		}
+		return fmt.Errorf("%w: 提案已是 %s 状态，不能改为 %s", ErrInvalidEditorialState, currentStatus, status)
+	}
+	var result sql.Result
+	switch decision {
+	case "accept":
+		result, err = tx.ExecContext(ctx,
+			`UPDATE creation_proposals SET status='accepted', owner_claim=?, updated_at=datetime('now') WHERE id=? AND status='proposed'`,
+			ownerClaim, proposalID)
+	case "reject":
+		note, err := decisionNoteJSON(feedbackKind, reason)
+		if err != nil {
+			return err
+		}
+		result, err = tx.ExecContext(ctx,
+			`UPDATE creation_proposals SET status='rejected', decision_note=?, updated_at=datetime('now') WHERE id=? AND status='proposed'`,
+			note, proposalID)
+	case "save":
+		note, err := decisionNoteJSON(feedbackKind, reason)
+		if err != nil {
+			return err
+		}
+		result, err = tx.ExecContext(ctx,
+			`UPDATE creation_proposals SET status='saved', decision_note=?, updated_at=datetime('now') WHERE id=? AND status='proposed'`,
+			note, proposalID)
+	}
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrInvalidEditorialState
+	}
+
+	// 同一事务内：批次最后一条未处理提案被决策后自动 completed（释放背压）。
+	var batchID sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT proposal_batch_id FROM creation_proposals WHERE id=?`, proposalID).Scan(&batchID); err != nil {
+		return err
+	}
+	if batchID.Valid && batchID.String != "" {
+		var remaining int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM creation_proposals WHERE proposal_batch_id=? AND status='proposed'`, batchID.String).Scan(&remaining); err != nil {
+			return err
+		}
+		if remaining == 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE proposal_batches SET status='completed', completed_at=datetime('now') WHERE id=? AND status='ready'`,
+				batchID.String); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// decisionNoteJSON 决策备注的稳定可解析格式（R16）：JSON 对象，含反馈类型与原因。
+func decisionNoteJSON(feedbackKind, reason string) (string, error) {
+	feedbackKind = strings.TrimSpace(feedbackKind)
+	if feedbackKind == "" {
+		feedbackKind = "NotNow"
+	}
+	data, err := json.Marshal(map[string]string{"feedbackKind": feedbackKind, "reason": strings.TrimSpace(reason)})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
