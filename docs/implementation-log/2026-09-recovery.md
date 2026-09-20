@@ -21,6 +21,39 @@
   - Herdr tab `w7:t3` 保持开启；Pi 使用 `woyin/z.ai/glm-5.3-flash` 完成 OwnerNote 生产契约与四包初验。模型随后触发五小时额度上限，本地继续完成旅程、恢复测试、差异审计与验证。
 - 限制：模型与远程媒体均为确定性 fake，本任务不代表真实模型内容质量；未执行桌面/375/360 浏览器交互（R25），未做真实内容质量验收（R26）。
 
+## R24 — 质量门禁回到真实通过
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - evalset、provider、queue、store 的行为覆盖补齐；覆盖错误响应、恢复、重启、旧数据、数据库失败和状态转移，不降低门槛、不扩大豁免。
+  - 修复 `scripts/cover-gate.sh` 对无测试包输出和实际地板值的解析；修复 Groq Search 对畸形非 JSON choices 的 panic；抽取 queue 的文档抓取/清理边界以覆盖有效输入；修复 `GetArticleSource` 读取不存在草稿列的问题；补齐四个导出 API 注释。
+  - 关键原子提交：`37c6e8e test(evalset): cover invalid fixture references`、`1180805 fix(coverage): parse packages without test files`、`e0a35ce test(provider): cover recovery and failure contracts`、`2fca7c8 test(queue): cover recovery and failure contracts`、`b0e070b test(store): cover creation recovery contracts`、`2253d17 docs(store): satisfy exported API comment gate`。
+- 验证：
+  - `make cover-gate`：cmd 96.2、auth 100、backup 95.9、config 100、evalset 97.0、filehash 100、markdown 99.4、provider 95.0、queue 95.0、rss 96.2、safehttp 97.4、server 80.5、store 78.8；models 按既有豁免处理。
+  - `go test -count=1 ./...`、`go vet ./...`、临时目录 `go build -o <tmp>/cloudwisepod ./cmd/cloudwisepod`、`make lint` 全部通过。
+  - `go test -race -timeout 30m -count=1 ./...` 全部通过；queue/server/store 长包分别完成，无 race 报告。
+- 限制：Provider 与媒体仍为确定性 fake；真实中文/英文内容质量留在 R26。
+
+## R25 — 浏览器真实操作验收
+
+- 状态：浏览器验证完成。
+- 交付：
+  - 新增 `internal/server/browser_acceptance_test.go`：显式环境变量启用的 scratch SQLite 浏览器夹具，使用真实 router、模板、持久队列和 worker，只替换 Provider/TTS/原始媒体边界；通过 `BROWSER_ACCEPTANCE_READY` 输出可复核 URL 和 fixture 身份，stop file 优雅退出。
+  - 新增 `docs/acceptance/2026-09-recovery-browser.md` 与两张视口截图，记录版本、桌面/375/360 视口、学习与创作步骤、门禁、导出和遗留外部验收。
+  - 浏览器发现并修复 DJ 原音 `data-segments` 非 JSON、缺少稳定 `data-position/data-idx`、收藏/笔记按钮永远禁用、续听倍速选择框不回显四个问题；补充 `jsonValue` 模板函数和回归断言。
+- 验证：
+  - `agent-browser 0.26.0` + Chrome for Testing `148.0.7778.97`；桌面 `1280×900` 完成登录、自动播放、暂停/续听、倍速、收藏、个人理解、方案编辑/确认、审校门禁、Markdown 下载和历史登记。
+  - `375×812` DJ 页与 `360×800` 创作工作台均 `scrollWidth == clientWidth`，无横向溢出；浏览器 errors/console 采集为空。
+  - 修改后重新启动夹具并重测：原音进入后两个捕获按钮解除禁用、Segment JSON 可解析、续听点击后 `playbackRate` 与选择框均为 1.25。
+- 限制：Fake Narration 只证明播放器接线；不能代表真实 Kokoro 音质、手机锁屏或后台播放。
+
+## R26 — 真实质量与最终交付记录
+
+- 状态：待验收（外部条件）。
+- 已核实：本地 `.env` 的 `GROQ_API_KEY` 已设置但本轮未发起未经确认的外部/付费调用；`OPENAI_API_KEY` 未设置；`kokoro` 不在 PATH，`cloudwisepod tts-check` 明确报告不可用；本机没有真机设备；Owner 主观评分未执行。
+- 结论：真实中文长访谈、英文信息密集节目、多窗归并质量、引用支持/重复/限定条件、高光完整性、文章可读性、真实 TTS 听感和手机锁屏/后台播放均明确保留为待验收；没有把 Fake Provider、自动测试或历史状态标签写成真实质量通过。
+- 记录：详细证据与可执行缺口见 [`docs/acceptance/2026-09-recovery-browser.md`](../acceptance/2026-09-recovery-browser.md)。
+
 ## R00 — 纠正交付状态，建立可追踪执行记录
 
 - 状态：实现与自动验证完成。
