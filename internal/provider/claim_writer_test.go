@@ -123,8 +123,63 @@ func TestBuildClaimPrompt_TargetLength(t *testing.T) {
 	}
 	target := 1800
 	req.TargetLength = &target
+	req.Style = "克制"
+	req.VerifiedFacts = []ClaimVerifiedFact{{Text: "已核验事实", Citations: []string{"doc-seg-1"}}}
 	prompt := BuildClaimPrompt(req)
-	if !strings.Contains(prompt, "目标篇幅：1800 字") {
-		t.Fatalf("prompt 缺少目标篇幅: %s", prompt)
+	for _, want := range []string{"目标篇幅：1800 字", "风格：克制", "已核验事实：已核验事实（引用：doc-seg-1）"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt 缺少 %q: %s", want, prompt)
+		}
+	}
+}
+
+func TestSameStringSetRequiresExactMultiset(t *testing.T) {
+	if sameStringSet([]string{"a"}, []string{"a", "b"}) {
+		t.Fatal("不同长度不得视为同一集合")
+	}
+	if sameStringSet([]string{"a", "a"}, []string{"a", "b"}) {
+		t.Fatal("不同成员或重复次数不得视为同一集合")
+	}
+	if !sameStringSet([]string{"a", "b"}, []string{"b", "a"}) {
+		t.Fatal("顺序不应影响成员身份")
+	}
+}
+
+func TestWriteArticleRevisionWithClaimsProviders(t *testing.T) {
+	req := ClaimAwareWritingRequest{
+		ConfirmedClaim:   "确认主张",
+		ExistingMarkdown: "# 旧稿\n\n来源句。",
+		ExistingClaimMap: []ClaimMapEntry{{Excerpt: "来源句。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}, SourceTitle: "节目", CitationRefs: []string{"seg-1"}}},
+		Materials:        []ArticleMaterial{{KeyPointID: "kp-1", SourceTitle: "节目", Content: "来源句。", Citations: []string{"seg-1"}}},
+	}
+	output := `{"title":"新稿","markdown":"# 新稿\n\n来源句。","claimMap":[{"excerpt":"来源句。","claimKind":"source_claim","materialIds":["kp-1"],"sourceTitle":"节目","citationRefs":["seg-1"]}]}`
+
+	g := NewGroqProvider("key")
+	g.chatCompleteFn = func(messages []map[string]string, mode string) (string, int, error) {
+		if mode != "object" || !strings.Contains(messages[0]["content"], "修订任务") {
+			t.Fatalf("Groq 修订必须使用独立修订提示词和 JSON 模式: %v", messages)
+		}
+		return output, 200, nil
+	}
+	if result, _, err := g.WriteArticleRevisionWithClaims(context.Background(), req); err != nil || result.Title != "新稿" {
+		t.Fatalf("Groq 修订失败: result=%+v err=%v", result, err)
+	}
+	g.chatCompleteFn = func([]map[string]string, string) (string, int, error) {
+		return "", 500, context.Canceled
+	}
+	if _, _, err := g.WriteArticleRevisionWithClaims(context.Background(), req); err == nil {
+		t.Fatal("Groq 修订必须上浮模型错误")
+	}
+	g.chatCompleteFn = func([]map[string]string, string) (string, int, error) {
+		return `{"title":"坏结果","markdown":"# 新稿\n\n来源句。","claimMap":[]}`, 200, nil
+	}
+	if _, _, err := g.WriteArticleRevisionWithClaims(context.Background(), req); err == nil || !strings.Contains(err.Error(), "省略") {
+		t.Fatalf("修订保留旧句却省略身份映射必须拒绝: %v", err)
+	}
+
+	srv := newOpenAITestServer(t, output)
+	defer srv.Close()
+	if result, _, err := NewOpenAIProvider("key").WithBaseURL(srv.URL).WriteArticleRevisionWithClaims(context.Background(), req); err != nil || result.Title != "新稿" {
+		t.Fatalf("OpenAI 修订失败: result=%+v err=%v", result, err)
 	}
 }

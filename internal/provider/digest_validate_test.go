@@ -179,3 +179,47 @@ func TestDigestHasHardFact(t *testing.T) {
 		t.Fatal("百分比应判硬事实")
 	}
 }
+
+func TestDigestValidationIssueStringAndRewriteLimits(t *testing.T) {
+	issue := DigestValidationIssue{BlockIndex: 2, Rule: "citation", Detail: "缺少来源"}
+	if got := issue.String(); got != "块 2 违反 citation：缺少来源" {
+		t.Fatalf("违规说明必须包含块位置与规则: %q", got)
+	}
+	for _, tc := range []struct {
+		name       string
+		text       string
+		maxChars   int
+		maxTags    int
+		wantErrSub string
+	}{
+		{name: "valid", text: "正文 #播客", maxChars: 20, maxTags: 1},
+		{name: "empty", text: " \n", maxChars: 20, maxTags: 1, wantErrSub: "为空"},
+		{name: "too long", text: "一二三四五", maxChars: 4, maxTags: 1, wantErrSub: "超过渠道上限"},
+		{name: "too many tags", text: "正文 #播客 #学习", maxChars: 20, maxTags: 1, wantErrSub: "话题 tag"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateDigestRewrite(tc.text, tc.maxChars, tc.maxTags)
+			if tc.wantErrSub == "" && err != nil {
+				t.Fatalf("合法改写被拒绝: %v", err)
+			}
+			if tc.wantErrSub != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErrSub)) {
+				t.Fatalf("应返回含 %q 的错误，实际 %v", tc.wantErrSub, err)
+			}
+		})
+	}
+}
+
+func TestTruncateQuotedSpansEdgeCases(t *testing.T) {
+	if got := TruncateQuotedSpans("原文", 0); got != "原文" {
+		t.Fatalf("无上限时不得改写: %q", got)
+	}
+	if got := TruncateQuotedSpans("短句“原话”", 10); got != "短句“原话”" {
+		t.Fatalf("短引语不得截断: %q", got)
+	}
+	if got := TruncateQuotedSpans("前『甲乙丙丁』后", 3); got != "前“……（后文转述）”后" {
+		t.Fatalf("极小上限应只保留省略提示: %q", got)
+	}
+	if got := TruncateQuotedSpans("前”游离闭引号", 3); got != "前”游离闭引号" {
+		t.Fatalf("游离闭引号应原样保留: %q", got)
+	}
+}

@@ -199,8 +199,13 @@ func (g *GroqProvider) Search(ctx context.Context, query string) ([]DigestSearch
 		} `json:"choices"`
 	}
 	if err := parseJSONLoose(string(data), &response); err != nil {
-		// compound 返回 markdown 文本而非 JSON；从中抽取 URL。
-		return extractURLs(response.Choices[0].Message.Content), nil
+		// 部分兼容端点直接返回 markdown 文本；只在其中确实含 URL 时接受，
+		// 避免对未填充的 response.Choices 取下标导致 panic。
+		results := extractURLs(string(data))
+		if len(results) > 0 {
+			return results, nil
+		}
+		return nil, fmt.Errorf("groq 搜索响应解析失败: %w", err)
 	}
 	if len(response.Choices) == 0 {
 		return nil, fmt.Errorf("groq 搜索返回空 choices")

@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -146,6 +148,44 @@ func TestExtractURLs(t *testing.T) {
 	}
 	if len(extractURLs("无链接文本")) != 0 {
 		t.Fatal("无链接应返回空")
+	}
+}
+
+func TestGroqSearchHandlesStructuredAndRawResponses(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		wantURL   string
+		wantError string
+	}{
+		{name: "structured", status: http.StatusOK, body: `{"choices":[{"message":{"content":"来源 https://example.com/report"}}]}`, wantURL: "https://example.com/report"},
+		{name: "raw markdown compatibility", status: http.StatusOK, body: "https://example.com/raw", wantURL: "https://example.com/raw"},
+		{name: "malformed without URL", status: http.StatusOK, body: "not-json", wantError: "响应解析"},
+		{name: "empty choices", status: http.StatusOK, body: `{"choices":[]}`, wantError: "空 choices"},
+		{name: "client error", status: http.StatusBadRequest, body: "bad query", wantError: "HTTP 400"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/chat/completions" {
+					t.Fatalf("搜索路径错误: %s", r.URL.Path)
+				}
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+			results, err := NewGroqProvider("key").WithBaseURL(srv.URL).Search(context.Background(), "咖啡研究")
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("应返回含 %q 的错误，实际 results=%+v err=%v", tt.wantError, results, err)
+				}
+				return
+			}
+			if err != nil || len(results) != 1 || results[0].URL != tt.wantURL {
+				t.Fatalf("搜索结果不符: results=%+v err=%v", results, err)
+			}
+		})
 	}
 }
 

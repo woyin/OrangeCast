@@ -151,6 +151,21 @@ func TestReviewClaimsGroq(t *testing.T) {
 	}
 }
 
+func TestReviewClaimsOpenAI(t *testing.T) {
+	srv := newOpenAITestServer(t, `{"status":"passed","findings":[]}`)
+	defer srv.Close()
+	result, _, err := NewOpenAIProvider("key").WithBaseURL(srv.URL).ReviewClaims(context.Background(), reviewTestRequest())
+	if err != nil || result.Status != ClaimReviewPassed {
+		t.Fatalf("OpenAI 主张审校解析失败: result=%+v err=%v", result, err)
+	}
+
+	bad := newOpenAITestServer(t, `{"status":"pass","findings":[]}`)
+	defer bad.Close()
+	if _, _, err := NewOpenAIProvider("key").WithBaseURL(bad.URL).ReviewClaims(context.Background(), reviewTestRequest()); err == nil {
+		t.Fatal("OpenAI 主张审校不得接受旧状态值")
+	}
+}
+
 func TestWriteArticleWithClaimsOpenAI(t *testing.T) {
 	srv := newOpenAITestServer(t, `{"title":"T","markdown":"# T\n\n正文","claimMap":[{"excerpt":"正文","claimKind":"owner_claim","materialIds":[]}]}`)
 	defer srv.Close()

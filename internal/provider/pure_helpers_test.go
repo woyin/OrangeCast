@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestAppendUnique 验证 appendUnique 去重且过滤空串。
 func TestAppendUnique(t *testing.T) {
@@ -66,5 +69,21 @@ func TestValidReferenceIDs(t *testing.T) {
 	// 空检索 → 全过滤
 	if got := validReferenceIDs([]string{"seg-0001"}, nil); len(got) != 0 {
 		t.Errorf("空检索应全过滤，实际 %v", got)
+	}
+}
+
+func TestProviderHelperConfiguration(t *testing.T) {
+	if got := firstNonZero(0, 0, 7, 9); got != 7 {
+		t.Fatalf("应返回首个非零用量，实际 %d", got)
+	}
+	if got := firstNonZero(0, 0); got != 0 {
+		t.Fatalf("全零用量应返回 0，实际 %d", got)
+	}
+	reducer := func(context.Context, string) (*KnowledgeCard, TaskUsage, error) {
+		return &KnowledgeCard{Title: "归并"}, TaskUsage{}, nil
+	}
+	g := NewGroqProvider("key").WithReduceFunc(reducer)
+	if g.reduceFn == nil {
+		t.Fatal("WithReduceFunc 必须保留注入的归并器")
 	}
 }
