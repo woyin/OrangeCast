@@ -223,12 +223,6 @@ func (s *Store) ListResearchNeeds(ctx context.Context, profileID string) ([]*mod
 	return out, rows.Err()
 }
 
-// ResolveResearchNeed records the source that supplied the missing learning.
-// Research execution itself remains out of scope for V1; an Owner must first
-// create a ResearchPlan and later add the resulting Source to this workspace.
-// ResolveResearchNeed 用已处理来源解决研究缺口（C04 / ADR-0024 §1）：
-// 校验来源存在且已处理（转录/内容就绪），非空 sourceID 不再足以 resolved；
-// 来源删除或失效后由 Purge 级联重新阻断相关下游（research_needs 行保留）。
 // ResolveResearchNeedWithEvidence 用具体、版本化、Owner 确认的依据解决研究缺口
 // （C04/R14）：
 //   - 来源类型必须显式且有效；来源必须存在且已处理（仅"存在"不足以 resolved）；
@@ -666,6 +660,7 @@ func (s *Store) confirmCreationBriefVersionTx(ctx context.Context, tx *sql.Tx, b
 	return proposalID, nil
 }
 
+// ConfirmCreationBriefVersion confirms one exact immutable Brief revision.
 func (s *Store) ConfirmCreationBriefVersion(ctx context.Context, briefID string, version int) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -678,6 +673,7 @@ func (s *Store) ConfirmCreationBriefVersion(ctx context.Context, briefID string,
 	return tx.Commit()
 }
 
+// GetCreationBrief reads the current immutable revision projected onto its creation contract.
 func (s *Store) GetCreationBrief(ctx context.Context, id string) (*models.CreationBrief, error) {
 	v := &models.CreationBrief{}
 	var confirmed sql.NullString

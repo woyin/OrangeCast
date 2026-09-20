@@ -12,6 +12,7 @@ import (
 	"github.com/woyin/orangecast/internal/models"
 )
 
+// CreationArticleLink records the durable bridge between a creation contract and its article workspace.
 type CreationArticleLink struct {
 	ID                   string
 	CreationProposalID   string
