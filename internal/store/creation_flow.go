@@ -106,7 +106,7 @@ func (s *Store) CreateCreationProposal(ctx context.Context, v models.CreationPro
 	if _, err := s.GetEditorialProfile(ctx, v.EditorialProfileID); err != nil {
 		return nil, err
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO creation_proposals (id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.EditorialProfileID, optionalWorkspaceString(v.ProposalBatchID), optionalWorkspaceString(v.IdeationSessionID), optionalWorkspaceString(v.IdeationRoundID), v.Status, v.CreationForm, v.WorkingTitle, v.ProposedClaim, optionalWorkspaceString(v.OwnerClaim), v.Audience, v.Rationale, v.MaterialIDsJSON, v.HistoryRelationship)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO creation_proposals (id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.EditorialProfileID, optionalWorkspaceString(v.ProposalBatchID), optionalWorkspaceString(v.IdeationSessionID), v.IdeationRoundID, v.Status, v.CreationForm, v.WorkingTitle, v.ProposedClaim, optionalWorkspaceString(v.OwnerClaim), v.Audience, v.Rationale, v.MaterialIDsJSON, v.HistoryRelationship)
 	if err != nil {
 		return nil, err
 	}
@@ -850,8 +850,8 @@ func (s *Store) PromoteDiagnosisClaim(ctx context.Context, sessionID, roundID st
 	if claim.Claim == "" {
 		return nil, fmt.Errorf("%w: 候选主张为空", ErrInvalidEditorialState)
 	}
-	// 材料成员校验（R13 复核）：主张引用必须落在该轮冻结材料快照内——
-	// 无效历史/脏数据不进入提案；过滤后为空则显式拒绝。
+	// 材料成员校验（R13 复核）：主张引用必须全部落在该轮冻结材料快照内——
+	// 任一越界引用都拒绝，不静默改变候选依据（混合合法+非法同样拒绝）。
 	allowed := map[string]bool{}
 	var snapIDs []struct {
 		ID string `json:"id"`
@@ -863,15 +863,15 @@ func (s *Store) PromoteDiagnosisClaim(ctx context.Context, sessionID, roundID st
 			}
 		}
 	}
-	materials := make([]string, 0, len(claim.MaterialIDs))
 	for _, id := range claim.MaterialIDs {
-		if allowed[id] {
-			materials = append(materials, id)
+		if !allowed[id] {
+			return nil, fmt.Errorf("%w: 候选主张引用 %s 不在该轮材料集合内", ErrInvalidEditorialState, id)
 		}
 	}
-	if len(materials) == 0 {
-		return nil, fmt.Errorf("%w: 候选主张引用不在该轮材料集合内", ErrInvalidEditorialState)
+	if len(claim.MaterialIDs) == 0 {
+		return nil, fmt.Errorf("%w: 候选主张缺少材料依据", ErrInvalidEditorialState)
 	}
+	materials := claim.MaterialIDs
 	// 幂等：同轮同主张已提升过 → 返回既有提案。
 	existing := func() (*models.CreationProposal, error) {
 		var existingID string

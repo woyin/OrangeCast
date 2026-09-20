@@ -262,9 +262,9 @@ func (srv *Server) handleIdeationRoundsDetail(w http.ResponseWriter, r *http.Req
 		http.Error(w, "读取轮次失败", http.StatusInternalServerError)
 		return
 	}
-	// R13：每轮诊断（支持/反驳/缺口/建议主张）随轮次渲染；过期结果只在其原轮次可见。
-	diagnoses := map[string]*models.MaterialDiagnosis{}
-	claimsByRound := map[string][]provider.ProposedClaimItem{}
+	// R13：每轮诊断解析为结构化视图（支持/反驳/补充/缺口）随轮次渲染；
+	// 过期结果只在其原轮次可见。
+	diagnoses := map[string]*ideationDiagnosisView{}
 	for _, rd := range rounds {
 		if rd.OutputDiagnosisID == "" {
 			continue
@@ -273,18 +273,17 @@ func (srv *Server) handleIdeationRoundsDetail(w http.ResponseWriter, r *http.Req
 		if err != nil {
 			continue
 		}
-		diagnoses[rd.ID] = md
 		var d provider.IdeationDiagnosis
-		if json.Unmarshal([]byte(md.DiagnosisJSON), &d) == nil {
-			claimsByRound[rd.ID] = d.ProposedClaims
+		if json.Unmarshal([]byte(md.DiagnosisJSON), &d) != nil {
+			continue
 		}
+		diagnoses[rd.ID] = &ideationDiagnosisView{Supports: d.Supports, Contradicts: d.Contradicts, Supplements: d.Supplements, Gaps: d.Gaps, Claims: d.ProposedClaims}
 	}
 	srv.tmpl.Render(w, "ideation_rounds.html", map[string]any{
-		"Session":       session,
-		"Rounds":        rounds,
-		"Diagnoses":     diagnoses,
-		"ClaimsByRound": claimsByRound,
-		"CSRF":          auth.CSRFValue(r),
+		"Session":   session,
+		"Rounds":    rounds,
+		"Diagnoses": diagnoses,
+		"CSRF":      auth.CSRFValue(r),
 	})
 }
 
@@ -377,4 +376,14 @@ func (srv *Server) handleProposalDecision(w http.ResponseWriter, r *http.Request
 		return
 	}
 	http.Redirect(w, r, "/workbench", http.StatusSeeOther)
+}
+
+// ideationDiagnosisView 轮次诊断的结构化渲染视图（R13 复核）：明确的
+// 支持/反驳/补充/缺口区块与候选主张，不再原样输出 JSON。
+type ideationDiagnosisView struct {
+	Supports    []provider.DiagnosisItem
+	Contradicts []provider.DiagnosisItem
+	Supplements []provider.DiagnosisItem
+	Gaps        []string
+	Claims      []provider.ProposedClaimItem
 }

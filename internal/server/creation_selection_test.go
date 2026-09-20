@@ -719,7 +719,7 @@ func TestIdeationClaimPromote_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	diagJSON := `{"supports":[],"contradicts":[],"supplements":[],"gaps":["缺"],"proposedClaims":[{"claim":"候选主张甲","materialIds":["kp-a"]},{"claim":"脏数据主张","materialIds":["kp-ghost"]}]}`
+	diagJSON := `{"supports":[{"materialId":"kp-a","text":"观点A 支持"}],"contradicts":[{"materialId":"kp-a","text":"存在反例"}],"supplements":[{"materialId":"kp-a","text":"可补充背景"}],"gaps":["缺"],"proposedClaims":[{"claim":"候选主张甲","materialIds":["kp-a"]},{"claim":"混合主张","materialIds":["kp-a","kp-ghost"]}]}`
 	md, err := srv.store.CreateMaterialDiagnosisForRound(ctx, sess.ID, round.ID, diagJSON, `[{"id":"kp-a","content":"观点A"}]`)
 	if err != nil {
 		t.Fatal(err)
@@ -779,22 +779,22 @@ func TestIdeationClaimPromote_EndToEnd(t *testing.T) {
 	if len(proposals2) != 1 {
 		t.Fatalf("并发重复提升不得产生第二个提案: %d", len(proposals2))
 	}
-	// 脏数据主张（引用不在该轮快照内）显式拒绝。
+	// 混合合法+非法材料引用的主张：任一越界即拒绝，不静默裁剪候选依据。
 	recBad := post(url.Values{"_csrf": {csrf}, "session_id": {sess.ID}, "round_id": {round.ID}, "claim_index": {"1"}})
 	if recBad.Code != http.StatusBadRequest {
-		t.Fatalf("越界材料引用应 400: %d %s", recBad.Code, recBad.Body.String())
+		t.Fatalf("混合越界材料引用应 400: %d %s", recBad.Code, recBad.Body.String())
 	}
 	proposals3, _ := srv.store.ListCreationProposals(ctx, profile.ID)
 	if len(proposals3) != 1 {
-		t.Fatalf("脏数据主张不得进入提案: %d", len(proposals3))
+		t.Fatalf("越界引用主张不得进入提案: %d", len(proposals3))
 	}
-	// 轮次页渲染诊断与提升按钮（展示支持/反驳/建议主张）。
+	// 轮次页以明确区块渲染诊断（支持/反驳/补充/缺口）与建议主张提升按钮。
 	recPage := doWithCookie(srv, session, http.MethodGet, "/workbench/ideation/rounds?session_id="+sess.ID)
 	if recPage.Code != http.StatusOK {
 		t.Fatalf("轮次页应 200: %d", recPage.Code)
 	}
 	pageBody := recPage.Body.String()
-	for _, want := range []string{"proposedClaims", "提升为提案", "候选主张甲"} {
+	for _, want := range []string{"支持", "反驳", "补充", "缺口", "观点A 支持", "存在反例", "可补充背景", "建议主张", "提升为提案", "候选主张甲"} {
 		if !strings.Contains(pageBody, want) {
 			t.Fatalf("轮次页缺少 %q", want)
 		}

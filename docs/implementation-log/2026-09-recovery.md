@@ -245,3 +245,14 @@
   - `go test ./...` 全部通过（backup 迁移计数 47→48 跟随）；race（Ideation）通过；`go vet`、`gofmt`、`git diff --check` 通过。
 - 提交：`feat(ideation): promote grounded multi-turn diagnoses to proposals`。
 - 限制：诊断摘要以 JSON pre 形式渲染（结构化卡片样式属 R22/R25）；诊断中 supports/contradicts 的逐条渲染未拆分字段（原始 JSON 保留完整可读）。
+
+## R13 follow-up — 候选依据严格校验与诊断结构化渲染（复核修复）
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `store/creation_flow.go`（PromoteDiagnosisClaim）：主张引用改为**全部**必须落在该轮冻结材料快照内——任一越界引用即拒绝（此前过滤非法 ID 后放行剩余的作法会静默改变候选依据，不符契约）；零材料依据同样拒绝。另修复 `IdeationRoundID` 空值插入 NOT NULL 约束失败（空串直插，不走 NULL）。
+  - `server/creation_workspace.go` + `templates/ideation_rounds.html`：诊断由原样 JSON pre 改为结构化视图渲染——明确的"支持/反驳/补充/缺口"区块与"建议主张（候选，尚非 Owner 主张）"提升按钮。
+- 验证：
+  - `TestIdeationClaimPromote_EndToEnd` 扩展：混合合法+非法材料引用的主张 400 拒绝且不落库；轮次页断言实际标签（支持/反驳/补充/缺口）与诊断文本、建议主张、提升按钮。
+  - `go test ./...` 全部通过（迁移计数 47→48 跟随修复 IdeationRoundID 约束）；race（Ideation）通过；`go vet`、`gofmt`、`git diff --check` 通过。
+- 提交：`fix(ideation): reject invalid claim materials and render structured diagnosis`（R13 follow-up 原子修复）。

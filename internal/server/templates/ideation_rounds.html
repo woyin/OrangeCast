@@ -4,7 +4,7 @@
 <p class="meta">每轮冻结你当时的补充问题与材料快照；诊断结果只归属其原轮次。可把诊断中的建议主张提升为提案（尚非 Owner 主张）。</p>
 <section class="panel">
   <h2>轮次历史</h2>
-  {{$diags := .Diagnoses}}{{$claims := .ClaimsByRound}}
+  {{$diags := .Diagnoses}}
   {{range .Rounds}}
   {{$rid := .ID}}
   <article class="workflow-item">
@@ -13,23 +13,41 @@
       <p>{{.UserInput}}</p>
       {{with index $diags .ID}}
       <div class="diagnosis">
-        {{with .DiagnosisJSON}}<pre class="meta" style="white-space:pre-wrap">{{.}}</pre>{{end}}
-      </div>
-      {{end}}
-      {{$cs := index $claims .ID}}
-      {{if $cs}}
-      <div class="proposed-claims">
-        <h3>建议主张（候选，尚非 Owner 主张）</h3>
-        {{range $ci, $c := $cs}}
-        <div class="claim-candidate">
-          <p>{{$c.Claim}}</p>
-          <form method="post" action="/workbench/ideation/promote">
-            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="session_id" value="{{$.Session.ID}}">
-            <input type="hidden" name="round_id" value="{{$rid}}">
-            <input type="hidden" name="claim_index" value="{{$ci}}">
-            <button class="btn btn-secondary" type="submit">提升为提案</button>
-          </form>
+        {{if .Supports}}
+        <div class="diagnosis-supports"><h4>支持</h4>
+          <ul>{{range .Supports}}<li>{{.Text}}</li>{{end}}</ul>
+        </div>
+        {{end}}
+        {{if .Contradicts}}
+        <div class="diagnosis-contradicts"><h4>反驳</h4>
+          <ul>{{range .Contradicts}}<li>{{.Text}}</li>{{end}}</ul>
+        </div>
+        {{end}}
+        {{if .Supplements}}
+        <div class="diagnosis-supplements"><h4>补充</h4>
+          <ul>{{range .Supplements}}<li>{{.Text}}</li>{{end}}</ul>
+        </div>
+        {{end}}
+        {{if .Gaps}}
+        <div class="diagnosis-gaps"><h4>缺口</h4>
+          <ul>{{range .Gaps}}<li>{{.}}</li>{{end}}</ul>
+        </div>
+        {{end}}
+        {{if .Claims}}
+        <div class="proposed-claims">
+          <h4>建议主张（候选，尚非 Owner 主张）</h4>
+          {{range $ci, $c := .Claims}}
+          <div class="claim-candidate">
+            <p>{{$c.Claim}}</p>
+            <form method="post" action="/workbench/ideation/promote">
+              <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="session_id" value="{{$.Session.ID}}">
+              <input type="hidden" name="round_id" value="{{$rid}}">
+              <input type="hidden" name="claim_index" value="{{$ci}}">
+              <button class="btn btn-secondary" type="submit">提升为提案</button>
+            </form>
+          </div>
+          {{end}}
         </div>
         {{end}}
       </div>
