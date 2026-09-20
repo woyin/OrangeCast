@@ -280,3 +280,9 @@
 - 交付：`InvalidateSupersededTranscriptResolutions` 的 WHERE 由 `resolution_source_type IN ('episode','upload')` 改为 `resolution_source_type=?` 精确匹配——同 sourceID 的其他来源类型不被误伤；注释明确版本变更与失效传播是连续操作，失效失败向调用方返回错误（不伪装未写入）。
 - 验证：`TestResearchNeed_SameIDDifferentSourceTypeNotInvalidated`——同 ID Document 依据不被 Episode 维度失效误伤；同类型版本切换才正确失效。
 - 提交：`fix(research): match transcript invalidation by exact source type`。
+
+## 门禁事故记录与修复（0e64e71）
+
+- 事故：0e64e71（workbench resolve 表单补全）在 `go test ./...` 明确失败（backup/migrate 迁移计数断言未更新到 49）的情况下被提交——原因是验证命令经 `grep|head; echo DONE` 管道掩盖了 go test 的非零退出码。
+- 修复：补齐 migrate_test/backup_test 的 version 49 断言（列表末尾、AppliedVersion、len(applied)、失败迁移保持值、备份库版本）。重跑保留退出码的 `go test ./...` → EXIT=0；`go vet ./...`、`gofmt`、`git diff --check` 通过。
+- 规则更正（后续所有提交生效）：验证命令不得经 grep/head 管道丢失退出码；使用 `set -o pipefail` 或单独命令，非零即停止，不提交。
