@@ -99,6 +99,18 @@ func TestDJRenders_WithNarrationURLs(t *testing.T) {
 	if !strings.Contains(body, "播放这段原音") {
 		t.Error("DJ 页应保留原音手动播放按钮")
 	}
+	// R25：播放项必须把稳定位置和可解析的 Segment 身份交给浏览器，
+	// 个人收藏/理解才能在真实播放后锚定原音区间。
+	for _, want := range []string{
+		`data-position="2"`,
+		`data-segments="[&#34;seg-0001&#34;,&#34;seg-0002&#34;]"`,
+		"JSON.parse(btn.dataset.segments",
+		"pinBtn.disabled = !currentItemSegments()",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("DJ 播放项缺少可交互元数据 %q", want)
+		}
+	}
 }
 
 // TestNarrationServe_ReturnsWav (ADR-0019)

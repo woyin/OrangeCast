@@ -43,6 +43,9 @@ func TestPureWorkspaceHelpers(t *testing.T) {
 	if got := jsonArray(`not-json`); got != nil {
 		t.Fatalf("jsonArray should return nil on bad JSON: %+v", got)
 	}
+	if got := jsonValue([]string{"seg-0001", "seg-0002"}); got != `["seg-0001","seg-0002"]` {
+		t.Fatalf("jsonValue should preserve JSON array identity: %s", got)
+	}
 	if got := sourceHref(models.SourceDocument, "doc-1", 3); !strings.HasPrefix(got, "/documents/doc-1#doc-1-p") {
 		t.Fatalf("document href should anchor paragraphs: %s", got)
 	}

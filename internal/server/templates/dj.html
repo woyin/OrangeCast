@@ -37,17 +37,17 @@
 <p class="meta">清单 v{{.PlanVersion}} · 预计总时长约 {{formatTime .PlanTotal}}（目标时长、段落顺序与选择理由以持久化清单为准）</p>
 {{range .Items}}
 {{if eq .Kind "evidence"}}
-<div class="dj-item" data-start="{{.Start}}" data-end="{{.End}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}" data-segments="{{.Segments}}">
+<div class="dj-item" data-start="{{.Start}}" data-end="{{.End}}" data-position="{{.Position}}" data-idx="{{.Position}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}" data-segments="{{json .Segments}}">
   <div class="dj-gist">
     <strong>原音 {{.Position}}</strong>（{{formatTime .Start}} – {{formatTime .End}}）
     {{if .Reason}}<span class="meta">· {{.Reason}}</span>{{end}}
   </div>
   <div class="dj-controls">
-    <button class="btn dj-play" data-start="{{.Start}}" data-end="{{.End}}" type="button">▶ 播放这段原音</button>
+    <button class="btn dj-play" data-start="{{.Start}}" data-end="{{.End}}" data-position="{{.Position}}" data-idx="{{.Position}}" data-highlight-id="{{.HighlightID}}" data-segments="{{json .Segments}}" type="button">▶ 播放这段原音</button>
   </div>
 </div>
 {{else}}
-<div class="dj-item dj-script-item" data-kind="narration" data-position="{{.Position}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}">
+<div class="dj-item dj-script-item" data-kind="narration" data-position="{{.Position}}" data-idx="{{.Position}}" data-narration="{{.NarrationURL}}" data-highlight-id="{{.HighlightID}}" data-segments="{{json .Segments}}">
   <div class="dj-gist">
     <strong>AI 解说 {{.Position}}</strong>
     {{if .Reason}}<span class="meta">· {{.Reason}}</span>{{end}}
@@ -122,6 +122,8 @@
       else if (item && item.type === 'narration' && item.segmentIds && item.segmentIds.length) {
         lastEvidenceItem = item;
       }
+      if (pinBtn) pinBtn.disabled = !currentItemSegments();
+      if (noteBtn) noteBtn.disabled = !currentItemSegments();
       // D06：总进度与当前片段身份（原音/AI 解说）。
       var pos = parseInt(idx) + 1;
       if (progressEl) {
@@ -234,7 +236,10 @@
         if (target.type === 'evidence') {
           target.start = saved.item_offset_seconds || target.start; // 从片段内位置恢复
         }
-        if (saved.speed && typeof saved.speed === 'number') player.setRate(saved.speed); // 恢复倍率
+        if (saved.speed && typeof saved.speed === 'number') {
+          player.setRate(saved.speed); // 恢复倍率
+          if (rateSel) rateSel.value = String(saved.speed);
+        }
         var restIdx = items.indexOf(target) + 1;
         var queue = [target].concat(items.slice(restIdx)); // 一次加载并连播后续队列
         player.load(queue);
@@ -335,12 +340,16 @@
 
   document.querySelectorAll('.dj-play').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      player.playItems([{type: 'evidence', start: parseFloat(btn.dataset.start), end: parseFloat(btn.dataset.end), idx: btn.dataset.idx}]);
+      var segs = [];
+      try { segs = JSON.parse(btn.dataset.segments || '[]'); } catch (e) {}
+      player.playItems([{type: 'evidence', start: parseFloat(btn.dataset.start), end: parseFloat(btn.dataset.end), idx: btn.dataset.idx, position: parseInt(btn.dataset.position, 10), highlightId: btn.dataset.highlightId, segmentIds: segs}]);
     });
   });
   document.querySelectorAll('.dj-narration-play').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      player.playItems([{type: 'narration', url: btn.dataset.narration, idx: btn.dataset.idx}]);
+      var segs = [];
+      try { segs = JSON.parse(btn.dataset.segments || '[]'); } catch (e) {}
+      player.playItems([{type: 'narration', url: btn.dataset.narration, idx: btn.dataset.idx, position: parseInt(btn.dataset.position, 10), highlightId: btn.dataset.highlightId, segmentIds: segs}]);
     });
   });
 })();

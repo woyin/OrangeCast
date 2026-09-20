@@ -37,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -74,6 +74,16 @@ func jsonArray(raw string) []string {
 		return nil
 	}
 	return out
+}
+
+// jsonValue serializes template data for a data-* attribute. html/template
+// escapes the attribute boundary and the browser decodes it back to JSON.
+func jsonValue(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return string(b)
 }
 
 func sourceHref(sourceType models.SourceType, sourceID string, position float64) string {
