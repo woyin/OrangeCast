@@ -19,7 +19,7 @@
   {{range .Learning}}
   <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
     <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
-    {{if .Link}}<a class="btn btn-secondary" href="{{.Link}}">查看</a>{{end}}
+    {{if .Href}}<a class="btn btn-secondary" href="{{.Href}}">查看</a>{{end}}
   </div>
   {{else}}
   <p class="empty">暂无待处理的学习事项。</p>
@@ -34,7 +34,7 @@
   {{range .Creation}}
   <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
     <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
-    {{if .Link}}<a class="btn btn-secondary" href="{{.Link}}">查看</a>{{end}}
+    {{if .Href}}<a class="btn btn-secondary" href="{{.Href}}">查看</a>{{end}}
   </div>
   {{else}}
   <p class="empty">暂无待处理的创作事项。</p>

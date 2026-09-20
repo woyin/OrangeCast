@@ -78,8 +78,15 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if candidates, err := srv.store.ListMaterialCandidates(r.Context(), sourceType, sourceID); err == nil {
 		data["MaterialCandidates"] = candidates
 	}
-	// U02：该来源的重点被哪些精读文/文章采用。
-	if usages, err := srv.store.FindUsageByKeyPoint(r.Context(), sourceID); err == nil && len(usages) > 0 {
+	// U02/R22：该来源实际参与的精读与文章修订（按 (source_type, source_id) 与
+	// claim_map 成员精确关联；修复旧代码把 sourceID 误当 KeyPoint ID 的 bug）。
+	// 此查询是导航主数据：错误必须显式 500，不得静默空状态。
+	usages, usageErr := srv.store.FindUsageBySource(r.Context(), sourceType, sourceID)
+	if usageErr != nil {
+		http.Error(w, "读取来源使用记录失败："+usageErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(usages) > 0 {
 		data["MaterialUsage"] = usages
 	}
 	// B09：分阶段进度（知识 / DJ 高光 / 解说），失败阶段带原因与重试入口。

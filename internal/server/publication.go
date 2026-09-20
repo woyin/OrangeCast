@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"html/template"
@@ -9,7 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 // handlePublicationPackage renders or downloads a package only after the exact revision passes evidence review.
@@ -81,8 +84,25 @@ func (srv *Server) handlePublicationPackage(w http.ResponseWriter, r *http.Reque
 		_, _ = w.Write([]byte(coverSVG(packageData.CoverTitle, packageData.CoverSubtitle)))
 		return
 	}
+	// R22：登记状态回显与显式动作表单（CSRF）。历史读取错误只允许 ErrNotFound
+	// 视为未登记，其余显式 500（不得静默当作未登记）。
+	registered := ""
+	history, err := srv.store.GetArticleHistoryForRevision(r.Context(), revision.ID)
+	switch {
+	case err == nil:
+		registered = history.Status
+	case !errors.Is(err, store.ErrNotFound):
+		http.Error(w, "读取登记状态失败", http.StatusInternalServerError)
+		return
+	}
+	// ?history= 不能伪造：只有参数合法且等于数据库真实状态时才显示"刚刚完成登记"。
+	flashStatus := ""
+	if q := r.URL.Query().Get("history"); (q == "published" || q == "unpublished") && registered != "" && q == registered {
+		flashStatus = q
+	}
 	srv.tmpl.Render(w, "publication_package.html", map[string]any{
 		"Revision": revision, "Sources": sources, "RichHTML": template.HTML(wechatRichText(revision.Markdown)), "Package": packageData,
+		"CSRF": auth.CSRFValue(r), "RegisteredStatus": registered, "FlashStatus": flashStatus, "NewContract": readiness.NewContract,
 	})
 }
 
@@ -315,9 +335,10 @@ func wechatRichText(markdown string) string {
 	return b.String()
 }
 
-// handleRecordArticleHistory Owner 显式登记创作历史（C13）：
+// handleRecordArticleHistory Owner 显式登记创作历史（R22 / C13）：
 // published（已在外部渠道发布）或 unpublished（已写作未发布）。
-// 导出/预览/内容包生成不调用本方法——导出不等于发布。
+// POST 必须重新检查 exact current readiness 与来源有效性——不能绕过门禁；
+// 导出/预览/内容包 GET 绝不调用本方法。完成后回到内容包页显示已登记状态。
 func (srv *Server) handleRecordArticleHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
@@ -329,9 +350,45 @@ func (srv *Server) handleRecordArticleHistory(w http.ResponseWriter, r *http.Req
 		http.Error(w, "参数非法", http.StatusBadRequest)
 		return
 	}
-	if _, err := srv.store.RecordArticleHistory(r.Context(), revisionID, status); err != nil {
-		http.Error(w, "登记创作历史失败："+err.Error(), http.StatusBadRequest)
+	revision, err := srv.store.GetArticleRevision(r.Context(), revisionID)
+	if err != nil {
+		http.Error(w, "文章修订不存在", http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, "/workbench", http.StatusSeeOther)
+	draft, err := srv.store.GetArticleDraft(r.Context(), revision.DraftID)
+	if err != nil {
+		http.Error(w, "读取文章草稿失败", http.StatusInternalServerError)
+		return
+	}
+	// 门禁重检：exact current + readiness + 来源有效性（动态重验，不信任 GET 时的快照）。
+	if draft.CurrentRevisionID == nil || *draft.CurrentRevisionID != revision.ID {
+		http.Error(w, "只能登记当前修订；请先审校当前版本", http.StatusConflict)
+		return
+	}
+	readiness, err := srv.store.EvaluateArticlePublicationReadiness(r.Context(), revision.ID)
+	if err != nil {
+		http.Error(w, "检查交付门禁失败", http.StatusInternalServerError)
+		return
+	}
+	if !readiness.Ready {
+		http.Error(w, "当前修订尚未通过交付门禁："+strings.Join(readiness.Issues, "；"), http.StatusConflict)
+		return
+	}
+	if readiness.NewContract {
+		if _, err = srv.claimMapSources(r, revision, draft.EditorialProfileID); err != nil {
+			http.Error(w, "当前证据或素材授权已失效，不能登记："+err.Error(), http.StatusConflict)
+			return
+		}
+	} else {
+		if _, err = srv.publicationSources(r, revision.ID, draft.EditorialProfileID); err != nil {
+			http.Error(w, "当前证据或素材授权已失效，不能登记："+err.Error(), http.StatusConflict)
+			return
+		}
+	}
+	if _, err := srv.store.RecordArticleHistory(r.Context(), revision.ID, status); err != nil {
+		writeEditorialError(w, err)
+		return
+	}
+	// 回到内容包页并显示已登记状态。
+	http.Redirect(w, r, "/workbench/revisions/"+revision.ID+"/package?history="+status, http.StatusSeeOther)
 }

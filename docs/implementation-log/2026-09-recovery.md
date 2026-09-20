@@ -370,7 +370,50 @@
   - `go test -count=1 ./...`、`go vet ./...`、`gofmt -l internal`、`git diff --check` 通过。
 - 限制：R19 durable ClaimWriter 尚未开始。
 
-## R21 — 修订保留有效映射并强制重新审校（未提交候选，基于 8510ae7）
+## R22 — 发布包、准确历史与双向导航（本段记录 R22 原子变更，基于 2b97a2e）
+
+- 状态：实现、四轮独立复核与自动验证完成；真实浏览器交互按计划留待 R25。
+- 实现：
+  - migration 0055：creation_history 增加专用 `article_revision_id`（默认空）+ 非空唯一索引；安全回填旧 `source_url='revision:<id>'` 且修订真实存在的行（substr 取 ID + EXISTS 校验），外部 source_url 语义保留；指向不存在修订的行不回填。
+  - 模型/查询：CreationHistory 增加 ArticleRevisionID/ArticleDraftID/ArticleVersion；Get/List/Find 以 LEFT JOIN 带出，供准确链接。
+  - `RecordArticleHistory` 重写为单条 guarded UPSERT RETURNING（JOIN 条件 exact-current CAS + partial-index conflict target），画像/标题/内容全部从该 SQL 内 JOIN 的精确 revision/draft 取（画像=文章所属 draft 的 EditorialProfileID，不误用默认画像）；article_revision_id 唯一索引保证并发/重复单行；unpublished 可升 published，published 不被降级；source_url 保留 'revision:<id>' 兼容语义。
+  - 内容包：GET/markdown/plain/rich/cover 仍只允许 exact current ready revision 且动态重验来源，绝不自动写历史；package 页新增带 CSRF 的"保存为未发布"/"登记已发布"显式动作；POST 重新检查 exact current readiness 与来源有效性（新契约 claimMapSources / 旧文章 publicationSources），完成后回内容包显示已登记状态。
+  - 导航精确化：修复 source detail 把 sourceID 误传 FindUsageByKeyPoint 的生产 bug；新增 `FindUsageBySource`——精读按 episode_digests (source_type,source_id) 精确关联（Segment ID 跨来源可重复，不做 citation 交集猜测）、笔记导航按 digest_blocks.note_id JOIN owner_notes 按笔记归属来源关联并去重、文章按 claim_map_entries material IDs `json_each` 精确成员匹配；`FindUsageByKeyPoint` 改 json_each 精确成员（弃用 LIKE），返回确切 draft+revision anchor；`FindUsageByNote` 保持精确 note_id + 笔记归属来源；查询错误一律上抛。
+  - 文章详情为当前 revision 展示"实际来源与笔记"（material ID 先解析 KeyPoint、ErrNotFound 回退解析 OwnerNote 生成独立锚点链接；旧文章 evidence ID 严格只解析 KeyPoint）：精确 join keypoint_index、按来源去重、链接 /sources/<type>/<id>；不虚构笔记关系。
+  - 修订历史节点加稳定 anchor `id="revision-<revisionID>"`；工作台 CreationHistory 链接 `/workbench/drafts/<draft>#revision-<rev>`（内部行），外部导入作品显示外部 URL（revision: 编码不算外部）。
+  - AttentionQueue/dashboard 真实下一步：继续听（listening_progress → 来源或 /dj）、继续写（drafting/reviewing/blocked draft → 精确 draft）、失败任务（按 job 类型链接来源或 draft 并显示 last_error）；修复 dashboard 模板使用不存在的 .Link（实际 .Href）bug；GET 只读不入队不调用模型。
+- 测试：store `creation_history_r22_test.go`（TestMigration0055 回填/外部 URL/唯一索引；RecordArticleHistory 画像/CAS/升级不降级/并发单行/发现召回；两来源隔离含共享 Segment ID 与前缀子串不误匹配、json_each 精确语义、错误上抛；备份恢复保留 article_revision_id 与唯一索引）；server `workspace_r22_test.go`（GET 不登记/显式登记/回显/blocked 409/stale+未审校 409/单行升级；anchor 精确+工作台历史链接；dashboard 继续听/继续写/失败原因精确 href 且 GET 只读；来源页空状态不 500）。
+- 验证：四包 `go test -count=1` 全绿；R22 定向 race（store/server/backup）与 migrate/V01 race 通过；全仓 `go test -count=1 ./...` exit 0（13 ok）；`go vet ./...`、`go build ./...` 干净；`gofmt -l internal` 空；`git diff --check` 干净。
+- 独立审计修复（R22 第一轮）：
+  - migration 0055 改为"先确定性回填、后建唯一索引"：同 source_url 多行时按 published 优先 + updated_at/created_at/id 选 canonical 行回填，其余旧行保留且专用字段为空（TestMigration0055 覆盖重复行/外部 URL/不存在修订三态与唯一索引）。
+  - `RecordArticleHistory` 重写为单条 guarded UPSERT RETURNING（JOIN 条件 exact-current CAS + partial-index conflict target；状态单调：published 不降级）。无事务重试，跨 Store/进程首次并发也幂等单行；零行时只读查询区分 ErrNotFound/ErrConflict。回归：同一库文件两个 Store handle 并发首次登记全部成功且单行（TestRecordArticleHistory_TwoStoresConcurrentFirstRegister）。
+  - `FindUsageByNote` 移除"笔记来源=精读主来源"限制，仅按唯一 note_id + JOIN owner_notes 验证存在；补同/跨来源精读回归。
+  - source handler 对 FindUsageBySource 错误显式 500（导航主数据不得静默空状态）；补损坏 claim-map JSON 触发 json_each 错误的 handler 回归。
+  - 内容包历史读取错误只允许 ErrNotFound 视为未登记，其余 500；`?history=` 不得伪造 flash（须为合法状态且等于数据库真实状态）；published 行 POST unpublished 后页面仍显示 published；补 plain/cover 下载不写历史回归。
+  - AttentionQueue：continue_writing 按传入 profileID 过滤；失败任务单条 SQL LEFT JOIN（drafts/ideation_sessions/creation_proposals）带出画像并一次 Scan 后关闭（修复单连接下 rows 迭代中再查询的死锁）；episode/upload 失败属 learning 泳道 /sources/<type>/<id>、document 走 /documents/<id>；draft 系任务精确 draft 且按所属画像过滤；ideation diagnosis → 轮次页按 session 画像；curator brief（source_id=proposalID）→ 带画像 workbench；补真实 episode/他画像/last_error/挂起防回归。
+  - 修订历史节点稳定 anchor + 工作台历史精确 draft+revision 链接；文章页"实际来源"面板（新契约 claim_map 材料去重、旧文章 evidence_map 精确链接、OwnerNote ID 不伪造来源）；来源页隔离改为真实 A/B 双来源（共享真实 Segment ID、各自 digest、A 的 claim-map 文章）：A 页只见 A、B 页不见 A。
+- 独立审计修复（R22 第二轮，验收缺口）：
+  - TestMigration0055 构造同 source_url='revision:r55' 的 published（旧）/unpublished（新）两条旧行：迁移成功、canonical 恰为 published 行、非 canonical 行保留且专用字段为空；外部 URL/悬空行/唯一索引继续覆盖。
+  - TestPackageActionGateR22 补"审校完成后素材来源被归档"真实用例：POST 登记 409 且零行（来源有效性动态重验，不伪造 readiness）。
+  - 新增 TestPackageHistoryReadErrorR22：readiness/来源检查通过后 creation_history 表真实缺失（DROP TABLE）→ 内容包页 500，不静默显示未登记。
+  - TestDashboardNextStepsR22 改用真实 episode 保存 listening_progress，断言精确可访问 href /sources/episode/<id>；GET 前后计数不变。
+  - TestAttentionQueue_FailedJobsRouting 补真实 upload/document 来源及其失败任务（learning 泳道、精确 /sources/upload/<id> 与 /documents/<id>）；continue_writing 画像隔离（他画像草稿不得出现、所属画像精确 href）；单连接不死锁回归保留。
+  - TestActualSourcesOnArticlePage 改用数据库中真实存在的 OwnerNote（连同重复 KeyPoint ID 写入 materials）：note ID 不产生伪造来源、KeyPoint 来源去重为单链接。
+  - TestSourcePageIsolationR22 保留 seed draftID 并断言 A 来源页含确切 /workbench/drafts/<draft>#revision-<rev> 链接、B 页面不含该链接；共享 Segment ID 值取自 kpA.CitationsJSON 真实 citation。
+  - 修复模板作用域 bug：ActualSources 面板在 with CurrentRevision 块内，range 误用当前对象 dot 导致列表为空——改为 range $.ActualSources（体内 .Href/.Label）。
+- 独立审计修复（R22 第三轮，笔记双向导航与旧历史元数据）：
+  - 清理恢复痕迹：删除 epAOf helper，隔离测试直接用 kpRow.SourceID；B 页面断言不含 A digest 标题与确切 A 文章链接；AttentionQueue 测试 upload href 收紧为完整相等（未给 AttentionItem 增加任何生产字段）。
+  - 笔记锚点：source_detail.html / document_detail.html 每条 OwnerNote 加稳定 `id="note-<ID>"`。
+  - 文章页"实际来源与笔记"：actualSourcesForRevision 对 material ID 先精确解析 KeyPoint（按来源去重），ErrNotFound 再精确解析 OwnerNote，生成独立锚点链接（episode/upload `/sources/<type>/<sourceID>#note-<noteID>`；document `/documents/<sourceID>#note-<noteID>`）；两表都缺才跳过，其他 DB 错误上抛；不把 note ID 拼成 source ID。回归：真实 OwnerNote 显示锚点链接、无伪造 `/sources/<type>/<noteID>`、KeyPoint 来源去重；document 笔记路径（helper 级）覆盖。
+  - 笔记/来源 → 文章导航：articleUsagesByKeypoints 泛化为 articleUsagesByMaterials（任意 material IDs 精确查 claim_map_entries）；FindUsageBySource 同时读取来源 KeyPoint IDs 与 OwnerNote IDs 查文章；FindUsageByNote 追加引用该 note ID 的文章修订（精确 draft+revision anchor）。回归：note-only 文章可被 FindUsageByNote/FindUsageBySource 找到、相邻/前缀 ID 不误匹配。注意：该回归 fixture 直接经 SaveClaimWritingOutput 落库（AuthorizedIDs 显式含 note ID），仅验证导航查询——Writer 冻结输入/ValidateClaimMap/发布门禁对 OwnerNote 的端到端契约留给 R23。
+  - 旧历史元数据修复：migration 0055 canonical 行回填时同步校正 editorial_profile_id（对齐修订所属 draft 画像）/title（修订标题空则回退 draft 标题）/content（=修订 markdown），外部/悬空/非 canonical 行不动；RecordArticleHistory UPSERT 的 DO UPDATE 同步校正 profile/creation_form/title/content/source_url（status 单调、created_at 不变）。回归：迁移 canonical 错误画像/旧标题正文被校正、非 canonical 行原数据保留；错误元数据行再次登记后被修复。
+- 独立审计修复（R22 第四轮）：
+  - FindUsageByNote 先精确验证 OwnerNote 存在（ErrNotFound 返回空，其他错误上抛）再查 digest+article；补 ghost note ID 回归（claim_map_entries 手工放入 ghost ID，FindUsageByNote 仍为空，不伪造使用记录）。
+  - actualSourcesForRevision 的 OwnerNote 回退仅限新契约 claim-map material；旧契约 evidence_map ID 严格只解析 KeyPoint；note label 用 truncateRunes(content,80)。
+  - 真正删除 epAOf helper（无残留）；AttentionQueue 测试 upload href 断言完整相等（非 HasSuffix）；隔离测试 B 页面同时断言不含 A digest 标题与确切 A 文章链接。
+- 未验证：真实浏览器交互（R25）；真实付费模型；Writer 端到端使用 OwnerNote（留 R23 旅程验证）。
+
+## R21 — 修订保留有效映射并强制重新审校（本段记录 R21 原子变更，基于 8510ae7）
 
 - 状态：实现、独立复核（三轮审计修复）与自动验证完成；本段记录 R21 原子变更（基于 8510ae7）。
 - 第一轮独立复核修复（本轮审计）：

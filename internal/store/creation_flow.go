@@ -1122,64 +1122,79 @@ type MaterialUsage struct {
 	Link   string `json:"link"`
 }
 
-// FindUsageByKeyPoint 反查一个 KeyPoint 被哪些精读文/文章修订采用（U02）。
-// 通过该重点的引用 Segment ID 在精读文块和文章 ClaimMap 中搜索。
-func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]MaterialUsage, error) {
-	kp, err := s.GetKeyPoint(ctx, keypointID)
+// MaterialUsage 的精读/文章链接语义（R22）：
+//   - 精读按 episode_digests 的 (source_type, source_id) 精确关联（Segment ID 跨来源
+//     可重复，禁止 LIKE/citation 交集猜测）；
+//   - 文章按 claim_map_entries 的 material IDs json_each 精确成员匹配，链接到确切
+//     draft+revision anchor；
+//   - 查询错误一律上抛，不吞。
+
+// digestUsagesBySource 列出某来源实际参与的精读（按 digest 归属精确关联）。
+func (s *Store) digestUsagesBySource(ctx context.Context, sourceType models.SourceType, sourceID string) ([]MaterialUsage, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT ed.id, ed.title, ed.version FROM episode_digests ed
+		 WHERE ed.source_type=? AND ed.source_id=? ORDER BY ed.version DESC, ed.id`, string(sourceType), sourceID)
 	if err != nil {
 		return nil, err
 	}
-	var citations []string
-	if err := json.Unmarshal([]byte(kp.CitationsJSON), &citations); err != nil || len(citations) == 0 {
-		return nil, nil
-	}
+	defer rows.Close()
 	var out []MaterialUsage
-	// 1) 精读文：digest_blocks 引用该重点的 Segment ID。
-	digestRows, err := s.DB.QueryContext(ctx,
-		`SELECT ed.id, ed.title, MAX(ed.version)
-		 FROM episode_digests ed
-		 JOIN digest_blocks db ON db.digest_id = ed.id
-		 WHERE db.citations_json LIKE ?
-		 GROUP BY ed.id, ed.title
-		 ORDER BY MAX(ed.version) DESC`,
-		"%"+citations[0]+"%")
-	if err == nil {
-		defer digestRows.Close()
-		for digestRows.Next() {
-			var id, title string
-			var version int
-			if err := digestRows.Scan(&id, &title, &version); err == nil {
-				out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
-			}
+	for rows.Next() {
+		var id, title string
+		var version int
+		if err := rows.Scan(&id, &title, &version); err != nil {
+			return nil, err
 		}
+		out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
 	}
-	// 2) 文章：claim_map_entries 的 material_ids_json 包含该 KeyPoint ID。
-	articleRows, err := s.DB.QueryContext(ctx,
-		`SELECT cme.revision_id, ad.title
-		 FROM claim_map_entries cme
-		 JOIN article_drafts ad ON ad.id = cme.draft_id
-		 WHERE cme.material_ids_json LIKE ?`,
-		"%"+keypointID+"%")
-	if err == nil {
-		defer articleRows.Close()
-		for articleRows.Next() {
-			var revID, title string
-			if err := articleRows.Scan(&revID, &title); err == nil {
-				out = append(out, MaterialUsage{Kind: "article", Title: title, Detail: "文章修订", Link: "/workbench"})
-			}
-		}
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// FindUsageByNote 反查一条个人笔记被哪些精读文采用。
-func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialUsage, error) {
+// digestUsagesByNote 列出实际采用某笔记的全部精读：唯一 db.note_id=? 精确匹配，
+// JOIN owner_notes 仅验证笔记存在；不要求笔记来源等于精读主来源（跨来源精读
+// 的合法引用不得漏掉）。
+func (s *Store) digestUsagesByNote(ctx context.Context, noteID string) ([]MaterialUsage, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT ed.id, ed.title, ed.version
+		`SELECT DISTINCT ed.id, ed.title, ed.version
 		 FROM episode_digests ed
 		 JOIN digest_blocks db ON db.digest_id = ed.id
+		 JOIN owner_notes n ON n.id = db.note_id
 		 WHERE db.note_id = ?
-		 ORDER BY ed.version DESC`, noteID)
+		 ORDER BY ed.version DESC, ed.id`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MaterialUsage
+	for rows.Next() {
+		var id, title string
+		var version int
+		if err := rows.Scan(&id, &title, &version); err != nil {
+			return nil, err
+		}
+		out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+	}
+	return out, rows.Err()
+}
+
+// articleUsagesByMaterials 列出引用了给定 material IDs（KeyPoint/OwnerNote）中任一材料的文章修订
+// （json_each 精确成员匹配，禁止 LIKE 子串误匹配），链接到确切 draft+revision anchor。
+func (s *Store) articleUsagesByMaterials(ctx context.Context, materialIDs []string) ([]MaterialUsage, error) {
+	if len(materialIDs) == 0 {
+		return nil, nil
+	}
+	idsJSON, err := json.Marshal(materialIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT DISTINCT cme.revision_id, cme.draft_id, r.version, ad.title
+		 FROM claim_map_entries cme
+		 JOIN article_revisions r ON r.id = cme.revision_id
+		 JOIN article_drafts ad ON ad.id = cme.draft_id
+		 WHERE EXISTS (SELECT 1 FROM json_each(cme.material_ids_json) je
+		               WHERE je.value IN (SELECT je2.value FROM json_each(?) je2))
+		 ORDER BY ad.title, cme.revision_id`, string(idsJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -1187,14 +1202,190 @@ func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialU
 	var out []MaterialUsage
 	seen := map[string]bool{}
 	for rows.Next() {
-		var id, title string
+		var revID, draftID, title string
 		var version int
-		if err := rows.Scan(&id, &title, &version); err == nil && !seen[id] {
-			seen[id] = true
-			out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+		if err := rows.Scan(&revID, &draftID, &version, &title); err != nil {
+			return nil, err
 		}
+		if seen[revID] {
+			continue
+		}
+		seen[revID] = true
+		out = append(out, MaterialUsage{
+			Kind: "article", Title: title,
+			Detail: fmt.Sprintf("文章修订 v%d", version),
+			Link:   fmt.Sprintf("/workbench/drafts/%s#revision-%s", draftID, revID),
+		})
 	}
 	return out, rows.Err()
+}
+
+// FindUsageBySource 反查一个来源实际参与的精读与文章修订（R22 / U02）。
+// 精读按 episode_digests 归属精确关联；笔记导航按 digest_blocks.note_id JOIN
+// owner_notes 并按笔记归属来源精确关联，再与直接来源精读去重；文章按该来源
+// KeyPoint 的 claim_map 成员精确匹配。两个 Episode 的引用不会串。
+func (s *Store) FindUsageBySource(ctx context.Context, sourceType models.SourceType, sourceID string) ([]MaterialUsage, error) {
+	digests, err := s.digestUsagesBySource(ctx, sourceType, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	noteDigests, err := s.digestUsagesByNoteSource(ctx, sourceType, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []MaterialUsage
+	for _, u := range append(append([]MaterialUsage{}, digests...), noteDigests...) {
+		if !seen[u.Link] {
+			seen[u.Link] = true
+			out = append(out, u)
+		}
+	}
+	kpRows, err := s.DB.QueryContext(ctx,
+		`SELECT id FROM keypoint_index WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+	if err != nil {
+		return nil, err
+	}
+	var kpIDs []string
+	for kpRows.Next() {
+		var id string
+		if err := kpRows.Scan(&id); err != nil {
+			kpRows.Close()
+			return nil, err
+		}
+		kpIDs = append(kpIDs, id)
+	}
+	if err := kpRows.Err(); err != nil {
+		kpRows.Close()
+		return nil, err
+	}
+	kpRows.Close()
+	// 文章导航同时覆盖来源 KeyPoint 与该来源 OwnerNote（仅用个人笔记的文章也算）。
+	noteRows, err := s.DB.QueryContext(ctx,
+		`SELECT id FROM owner_notes WHERE source_type=? AND source_id=?`, string(sourceType), sourceID)
+	if err != nil {
+		return nil, err
+	}
+	var noteIDs []string
+	for noteRows.Next() {
+		var id string
+		if err := noteRows.Scan(&id); err != nil {
+			noteRows.Close()
+			return nil, err
+		}
+		noteIDs = append(noteIDs, id)
+	}
+	if err := noteRows.Err(); err != nil {
+		noteRows.Close()
+		return nil, err
+	}
+	noteRows.Close()
+	articles, err := s.articleUsagesByMaterials(ctx, append(append([]string{}, kpIDs...), noteIDs...))
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, articles...)
+	return out, nil
+}
+
+// digestUsagesByNoteSource 列出笔记归属该来源的笔记所参与的精读。
+func (s *Store) digestUsagesByNoteSource(ctx context.Context, sourceType models.SourceType, sourceID string) ([]MaterialUsage, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT DISTINCT ed.id, ed.title, ed.version
+		 FROM episode_digests ed
+		 JOIN digest_blocks db ON db.digest_id = ed.id
+		 JOIN owner_notes n ON n.id = db.note_id
+		 WHERE n.source_type = ? AND n.source_id = ?
+		 ORDER BY ed.version DESC, ed.id`, string(sourceType), sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MaterialUsage
+	for rows.Next() {
+		var id, title string
+		var version int
+		if err := rows.Scan(&id, &title, &version); err != nil {
+			return nil, err
+		}
+		out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+	}
+	return out, rows.Err()
+}
+
+// FindUsageByKeyPoint 反查一个 KeyPoint 被哪些精读文/文章修订采用（U02 / R22）。
+// 精读：episode_digests 归属该重点来源 + digest_blocks citation json_each 精确包含
+// 该重点的引用 Segment；文章：claim_map_entries material IDs json_each 精确成员匹配。
+// 查询错误一律上抛，不吞；文章链接到确切 draft+revision anchor。
+func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]MaterialUsage, error) {
+	kp, err := s.GetKeyPoint(ctx, keypointID)
+	if err != nil {
+		return nil, err
+	}
+	var citations []string
+	if err := json.Unmarshal([]byte(kp.CitationsJSON), &citations); err != nil {
+		return nil, fmt.Errorf("解析 KeyPoint 引用: %w", err)
+	}
+	var out []MaterialUsage
+	if len(citations) > 0 {
+		citationsJSON, err := json.Marshal(citations)
+		if err != nil {
+			return nil, err
+		}
+		digestRows, err := s.DB.QueryContext(ctx,
+			`SELECT DISTINCT ed.id, ed.title, ed.version
+			 FROM episode_digests ed
+			 JOIN digest_blocks db ON db.digest_id = ed.id
+			 WHERE ed.source_type=? AND ed.source_id=?
+			   AND EXISTS (SELECT 1 FROM json_each(db.citations_json) je
+			               WHERE je.value IN (SELECT je2.value FROM json_each(?) je2))
+			 ORDER BY ed.version DESC, ed.id`, string(kp.SourceType), kp.SourceID, string(citationsJSON))
+		if err != nil {
+			return nil, err
+		}
+		for digestRows.Next() {
+			var id, title string
+			var version int
+			if err := digestRows.Scan(&id, &title, &version); err != nil {
+				digestRows.Close()
+				return nil, err
+			}
+			out = append(out, MaterialUsage{Kind: "digest", Title: title, Detail: fmt.Sprintf("精读文 v%d", version), Link: "/digest/" + id})
+		}
+		if err := digestRows.Err(); err != nil {
+			digestRows.Close()
+			return nil, err
+		}
+		digestRows.Close()
+	}
+	articles, err := s.articleUsagesByMaterials(ctx, []string{keypointID})
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, articles...)
+	return out, nil
+}
+
+// FindUsageByNote 反查一条个人笔记被哪些精读与文章修订采用（R22）：
+// 先精确验证 OwnerNote 存在（ErrNotFound 返回空，其他错误上抛）；再返回精读
+// （唯一 note_id 匹配）与文章（claim_map_entries material IDs 精确匹配该 note ID，
+// 链接到确切 draft+revision anchor）。
+func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialUsage, error) {
+	if _, err := s.GetOwnerNote(ctx, noteID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil // 不存在的笔记：不给幽灵 ID 伪造使用记录
+		}
+		return nil, err
+	}
+	out, err := s.digestUsagesByNote(ctx, noteID)
+	if err != nil {
+		return nil, err
+	}
+	articles, err := s.articleUsagesByMaterials(ctx, []string{noteID})
+	if err != nil {
+		return nil, err
+	}
+	return append(out, articles...), nil
 }
 
 // GetMaterialDiagnosis 读取一轮诊断（R13：候选提升与轮次页渲染）。

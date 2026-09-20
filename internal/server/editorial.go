@@ -463,7 +463,7 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "NewContract": data.NewContract, "ReadinessIssues": data.ReadinessIssues, "ClaimJob": data.ClaimJob, "StyleJob": data.StyleJob, "LatestClaim": data.LatestClaim, "LatestStyle": data.LatestStyle, "RevisionJob": data.RevisionJob, "CSRF": auth.CSRFValue(r)})
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "NewContract": data.NewContract, "ReadinessIssues": data.ReadinessIssues, "ClaimJob": data.ClaimJob, "StyleJob": data.StyleJob, "LatestClaim": data.LatestClaim, "LatestStyle": data.LatestStyle, "RevisionJob": data.RevisionJob, "ActualSources": data.ActualSources, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {

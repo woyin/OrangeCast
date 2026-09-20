@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 // KeyPointQualityStatus controls whether a learning result is eligible for discovery.
 type KeyPointQualityStatus string
 
@@ -58,7 +60,13 @@ type ProposalBatch struct {
 type CreationProposal struct{ ID, EditorialProfileID, ProposalBatchID, IdeationSessionID, IdeationRoundID, Status, CreationForm, WorkingTitle, ProposedClaim, OwnerClaim, Audience, Rationale, MaterialIDsJSON, HistoryRelationship, DecisionNote, CreatedAt, UpdatedAt string }
 
 // CreationHistory stores internal and externally imported work for duplicate checks.
-type CreationHistory struct{ ID, EditorialProfileID, Status, CreationForm, Title, CoreClaim, Audience, Content, SourceURL, CreatedAt, UpdatedAt string }
+type CreationHistory struct {
+	ID, EditorialProfileID, Status, CreationForm, Title, CoreClaim, Audience, Content, SourceURL, CreatedAt, UpdatedAt string
+	// R22：文章历史绑定确切修订（空=外部导入/精读历史）；带出 draft/version 供准确链接。
+	ArticleRevisionID string
+	ArticleDraftID    string
+	ArticleVersion    int
+}
 
 // IdeationSession persists a directed material exploration.
 type IdeationSession struct {
@@ -207,4 +215,13 @@ type ClaimMapEntry struct {
 	MaterialIDs  []string `json:"materialIds"`
 	SourceTitle  string   `json:"sourceTitle"`
 	CitationRefs []string `json:"citationRefs"`
+}
+
+// ExternalURL R22：外部导入作品的外部链接；内部修订行（含 source_url='revision:'
+// 兼容编码）返回空，页面不得把内部身份当外部 URL 渲染。
+func (h CreationHistory) ExternalURL() string {
+	if h.ArticleRevisionID != "" || strings.HasPrefix(h.SourceURL, "revision:") {
+		return ""
+	}
+	return h.SourceURL
 }

@@ -1,7 +1,9 @@
 {{define "title"}}{{.Revision.Title}} · 公众号内容包{{end}}
 {{define "content"}}
 <div class="page-head"><h1>公众号内容包</h1><a class="btn btn-secondary" href="/workbench/drafts/{{.Revision.DraftID}}">返回文章</a></div>
-<p class="meta">Revision v{{.Revision.Version}} 已通过独立证据与风格审校。</p>
+<p class="meta">Revision v{{.Revision.Version}} 已通过交付门禁（{{if .NewContract}}主张+风格审校{{else}}证据+风格审校{{end}}），来源有效性已动态重验。</p>{{if .RegisteredStatus}}<p class="meta" data-testid="history-status">已登记创作历史：<strong>{{.RegisteredStatus}}</strong></p>{{end}}{{if .FlashStatus}}<p class="meta">刚刚完成登记：{{.FlashStatus}}</p>{{end}}
+<div style="margin-top:1rem"><form method="post" action="/workbench/record-article-history" style="display:inline"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="revision_id" value="{{.Revision.ID}}"><input type="hidden" name="status" value="unpublished"><button class="btn btn-secondary" type="submit">保存为未发布</button></form>
+<form method="post" action="/workbench/record-article-history" style="display:inline"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="revision_id" value="{{.Revision.ID}}"><input type="hidden" name="status" value="published"><button class="btn" type="submit">登记已发布</button></form></div>
 <p><a class="btn" href="/workbench/revisions/{{.Revision.ID}}/package?format=markdown">下载 Markdown</a> <a class="btn btn-secondary" href="/workbench/revisions/{{.Revision.ID}}/package?format=plain">下载纯文本</a> <a class="btn btn-secondary" href="/workbench/revisions/{{.Revision.ID}}/package?format=cover-svg">下载封面 SVG</a></p>
 <section class="panel"><h2>候选标题</h2><ol>{{range .Package.CandidateTitles}}<li>{{.}}</li>{{end}}</ol><h3>摘要</h3><p>{{.Package.Summary}}</p><h3>推荐语</h3><p>{{.Package.Recommendation}}</p><h3>封面文案</h3><p><strong>{{.Package.CoverTitle}}</strong><br>{{.Package.CoverSubtitle}}</p></section>
 <section class="panel" style="margin-top:1rem"><h2>可复制富文本</h2><div id="wechat-richtext" class="publication-richtext">{{.RichHTML}}</div><button class="btn" id="copy-richtext" type="button">复制富文本</button></section>
