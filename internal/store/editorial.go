@@ -1169,7 +1169,13 @@ func validJSON(value, fallback string) bool {
 func (s *Store) GetArticleSource(ctx context.Context, draftID string) (string, string, error) {
 	var sourceType, sourceID string
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT source_type, source_id FROM article_drafts WHERE id=?`, draftID).Scan(&sourceType, &sourceID)
+		`SELECT k.source_type, k.source_id
+		 FROM article_drafts d
+		 JOIN article_briefs b ON b.id=d.brief_id
+		 JOIN json_each(b.material_plan_json) selected
+		 JOIN keypoint_index k ON k.id=selected.value
+		 WHERE d.id=?
+		 ORDER BY selected.key LIMIT 1`, draftID).Scan(&sourceType, &sourceID)
 	if err == sql.ErrNoRows {
 		return "", "", ErrNotFound
 	}
