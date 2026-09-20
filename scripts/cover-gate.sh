@@ -55,7 +55,9 @@ echo ""
 echo "==> 覆盖率门禁（阈值 ${THRESHOLD}%，已知缺口包按登记地板值）"
 # 解析 "coverage: XX.X% of statements"
 while IFS= read -r line; do
-  pkg=$(echo "$line" | awk '{print $2}')
+  # `go test -cover` omits the leading "ok" for packages without tests, so the
+  # package path is field 1 on those lines and field 2 on ordinary result lines.
+  pkg=$(echo "$line" | awk '{ if ($1 == "ok" || $1 == "?") print $2; else print $1 }')
   pct=$(echo "$line" | grep -oE 'coverage: [0-9.]+%' | grep -oE '[0-9.]+' | head -1)
   # 跳过无测试的包（"no test files"）与豁免包
   if [[ -z "$pct" ]]; then
@@ -65,9 +67,10 @@ while IFS= read -r line; do
     echo "  (豁免) $pkg — ${pct}%"
     continue
   fi
-  below=$(awk "BEGIN{ print (${pct} < $(floor_for "$pkg")) ? 1 : 0 }")
+  floor=$(floor_for "$pkg")
+  below=$(awk "BEGIN{ print (${pct} < ${floor}) ? 1 : 0 }")
   if [[ "$below" == "1" ]]; then
-    echo "  FAIL $pkg — ${pct}% (低于 ${THRESHOLD}%)"
+    echo "  FAIL $pkg — ${pct}% (低于 ${floor}%)"
     failures="$failures $pkg:${pct}%"
   else
     echo "  ok   $pkg — ${pct}%"
