@@ -25,6 +25,8 @@ type articleDraftDetailData struct {
 	StyleJob        *models.ProcessingJob
 	LatestClaim     *models.ClaimReview
 	LatestStyle     *models.ArticleReview
+	// R21：durable AI 修订任务状态。
+	RevisionJob *models.ProcessingJob
 }
 
 func (srv *Server) loadArticleDraftDetail(ctx context.Context, draftID, fromID, toID string) (*articleDraftDetailData, error) {
@@ -59,6 +61,7 @@ func (srv *Server) loadArticleDraftDetail(ctx context.Context, draftID, fromID, 
 	var claimJob, styleJob *models.ProcessingJob
 	var latestClaim *models.ClaimReview
 	var latestStyle *models.ArticleReview
+	var revisionJobData *models.ProcessingJob
 	if currentRevision != nil {
 		// R20：统一就绪判定（旧文章内部仍走 evidence+style 兼容规则），
 		// 并加载当前修订的审校任务状态供页面展示。
@@ -73,12 +76,17 @@ func (srv *Server) loadArticleDraftDetail(ctx context.Context, draftID, fromID, 
 		if err != nil {
 			return nil, err
 		}
+		revisionJob, jerr := srv.store.ClaimRevisionJobForRevision(ctx, currentRevision.ID)
+		if jerr != nil && !errors.Is(jerr, store.ErrNotFound) {
+			return nil, internalEditorial("读取 AI 修订任务失败")
+		}
+		revisionJobData = revisionJob
 	}
 	currentMarkdown := ""
 	if len(revisions) > 0 {
 		currentMarkdown = revisions[0].Markdown
 	}
-	return &articleDraftDetailData{Draft: draft, Revisions: revisions, ReviewsByRevision: reviewsByRevision, Comparison: comparison, CurrentMarkdown: currentMarkdown, CurrentRevision: currentRevision, CurrentReady: currentReady, HasComparableRevisions: len(revisions) > 1, NewContract: newContract, ReadinessIssues: readinessIssues, ClaimJob: claimJob, StyleJob: styleJob, LatestClaim: latestClaim, LatestStyle: latestStyle}, nil
+	return &articleDraftDetailData{Draft: draft, Revisions: revisions, ReviewsByRevision: reviewsByRevision, Comparison: comparison, CurrentMarkdown: currentMarkdown, CurrentRevision: currentRevision, CurrentReady: currentReady, HasComparableRevisions: len(revisions) > 1, NewContract: newContract, ReadinessIssues: readinessIssues, ClaimJob: claimJob, StyleJob: styleJob, LatestClaim: latestClaim, LatestStyle: latestStyle, RevisionJob: revisionJobData}, nil
 }
 
 // loadDurableReviewState 读取页面所需的持久审校状态：只把 store.ErrNotFound

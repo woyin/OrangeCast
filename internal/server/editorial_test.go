@@ -227,8 +227,9 @@ func TestOwnerRevisionInheritsOnlySurvivingEvidenceMaps(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	baseID := previous.ID
 	create := func(markdown string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/workbench/revisions", strings.NewReader("draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown="+markdown))
+		req := httptest.NewRequest(http.MethodPost, "/workbench/revisions", strings.NewReader("draft_id="+draft.ID+"&base_revision_id="+baseID+"&title=%E6%96%87%E7%AB%A0&markdown="+markdown))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		srv.handleArticleRevisionCreate(rec, req)
@@ -241,6 +242,8 @@ func TestOwnerRevisionInheritsOnlySurvivingEvidenceMaps(t *testing.T) {
 	if err != nil || len(revisions) != 2 {
 		t.Fatalf("expected inherited revision: revisions=%+v err=%v", revisions, err)
 	}
+	// R21：第二次保存以新的 current 为 base（过期 base 必须 409，见冲突测试）。
+	baseID = revisions[0].ID
 	maps, err := srv.store.ListEvidenceMaps(t.Context(), revisions[0].ID)
 	if err != nil || len(maps) != 1 || maps[0].Excerpt != "保留句" {
 		t.Fatalf("only unchanged evidence should be inherited: maps=%+v err=%v", maps, err)
@@ -434,7 +437,8 @@ func TestWorkbenchDraftRevisionAndEvidenceGateFlow(t *testing.T) {
 		t.Fatalf("owner revision should persist: revisions=%+v err=%v", revisions, err)
 	}
 	firstRevisionID := revisions[0].ID
-	if rec := post("/workbench/revisions", "draft_id="+draft.ID+"&title=%E6%96%87%E7%AB%A0&markdown=%23+%E7%AC%AC%E4%BA%8C%E7%89%88"); rec.Code != http.StatusSeeOther {
+	// R21：第二次及后续修订必须携带精确 base（乐观并发 CAS）。
+	if rec := post("/workbench/revisions", "draft_id="+draft.ID+"&base_revision_id="+firstRevisionID+"&title=%E6%96%87%E7%AB%A0&markdown=%23+%E7%AC%AC%E4%BA%8C%E7%89%88"); rec.Code != http.StatusSeeOther {
 		t.Fatalf("second revision should be created: %d", rec.Code)
 	}
 	revisions, err = srv.store.ListArticleRevisions(t.Context(), draft.ID)

@@ -640,3 +640,15 @@ func check(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// R21 共享：已通过的 durable claim/style 结果（测试工具）。
+var (
+	claimPassResult = provider.ClaimReviewResult{Status: provider.ClaimReviewPassed}
+	stylePassResult = provider.StyleReviewResult{Status: "passed"}
+)
+
+// restoreCurrent 直接将 draft current 指回指定修订（仅测试用，模拟旧版本回看）。
+func (s *Store) restoreCurrent(ctx context.Context, draftID, revisionID string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE article_drafts SET current_revision_id=? WHERE id=?`, revisionID, draftID)
+	return err
+}

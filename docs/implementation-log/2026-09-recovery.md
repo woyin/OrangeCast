@@ -370,6 +370,41 @@
   - `go test -count=1 ./...`、`go vet ./...`、`gofmt -l internal`、`git diff --check` 通过。
 - 限制：R19 durable ClaimWriter 尚未开始。
 
+## R21 — 修订保留有效映射并强制重新审校（未提交候选，基于 8510ae7）
+
+- 状态：实现、独立复核（三轮审计修复）与自动验证完成；本段记录 R21 原子变更（基于 8510ae7）。
+- 第一轮独立复核修复（本轮审计）：
+  - 修订调用走专用接口：`claimRevisionWriterProvider`（WriteArticleRevisionWithClaims），doClaimRevisionJob 不再借用普通写作接口；测试 fake 分开计数并断言修订=1、普通写作=0（防再次接错）。
+  - 页面加载改用 `ClaimRevisionJobForRevision`（intent 命名空间 claim_revision:<base> 与 <kind>_review:<rev> 不同）；新增页面 queued/failed 状态与 last_error 渲染回归。
+  - AI 保存 CAS 改为 SQL 级守卫（UPDATE ... WHERE current_revision_id=base，RowsAffected=1 否则回滚+ErrConflict）；新增 AI 保存与 Owner 同 base 并发回归。
+  - 手工继承增加身份唯一维度：base ClaimMap/EvidenceMap 同 excerpt 多条映射（身份歧义）→ 该 excerpt 全部不继承；旧正文重复句场景改为真实构造并断言不继承；规则表述统一为“旧/新正文唯一且映射身份唯一”。
+  - 新增专用严格校验 `provider.ValidateClaimRevisionMap`（provider/queue/store 共用）；补重复句/身份篡改/重复映射/base 歧义拒绝测试。
+  - worker legacy taskConfigFor 补 JobClaimRevision（与 Writer 同池）；send policy 注释包含 revision；OpenAI 修订 completeFn 使用传入 user；confirmRevisionJobResultTx result payload 记录实际 providerName/modelName。
+- 第二轮独立复核修复（本轮审计）：
+  - ValidateClaimRevisionMap 补矩阵漏洞：原 excerpt 旧正文唯一时按新正文出现次数三分——0 允许删除（输出映射不得保留）、1 必须恰有一条完整同身份映射（省略即拒绝）、>1 无条件拒绝（无论是否映射）；补“正文复制旧句但输出省略映射/新正文重复旧句且省略映射/删除后映射残留”回归。
+  - 手工继承 canonical 对齐：entries 与 canonical claim_maps 对同一 excerpt 都唯一才可继承；canonical 重复全部不继承；owner_claim 只来自对齐的唯一 canonical 行（不被 map 覆盖）；补 canonical 重复回归（含唯一对照 owner_claim=确认值断言）与 EvidenceMap 重复真实回归。
+  - 删除未使用的公开 helper InheritableClaimEntries（消除两套规则表面积）；确认全仓 rg 无 ReviewKindAIRevision 引用。
+  - provider 新增公开 `ClaimAwareRevisionWriter` 接口（含编译期 Groq/OpenAI 实现断言），queue 本地接口别名之。
+  - SaveClaimRevisionOutput origin-job 重放除 title/markdown 外，逐条比较持久 claim_map_entries 完整身份集合（excerpt/kind/material IDs/source title/citation refs，集合语义），漂移返回 ErrInvalidEditorialState；补重放篡改映射回归（篡改→拒绝、恢复→幂等成功）。
+  - 测试细节：并发用例正文改为真实换行；孤儿查询移除多余占位参数并同时断言 entries/canonical 零孤儿、新增修订总数恰为 base+胜者；fixtureKpIdentity 不再吞 citation JSON 解析错误。
+- 第三轮独立复核修复（本轮审计）：
+  - canonical 对齐扩展为完整身份比较：canonicalClaimMap 解析 claim_kind/keypoint_ids_json/verified_fact_source_ids_json，entries 与 canonical 的 kind/materials/citations 完全一致才继承 owner_claim，漂移 excerpt 不继承（TestOwnerRevisionCanonicalIdentityDriftNotInherited：kind 漂移与 materials 漂移两段对照）。
+  - AI 重放比较修正：persisted entries 记录实际行数（map len 不再掩盖重复），持久重复 excerpt 显式拒绝；重放同时校验 canonical claim_maps 投影数量与 kind/materials/citations 身份与 result 一致（owner_claim 不属于 result，不比较），漂移拒绝；补 entries 重复与 canonical 漂移（kind、materials）各一项回归。
+  - 收回 API 表面积：provider.SameStringSet 改回私有 sameStringSet；store 使用私有 sameStringIdentity 做集合比较。
+- 交付：
+  - 手工修订真实保存路径（`store.SaveOwnerRevisionWithClaimLineage`，HTTP form 携带精确 base_revision_id）：单事务完成 CAS（draft.current_revision_id 仍等于 base；新草稿空基准在 SQL 级守卫 `current_revision_id IS NULL`，两个首次并发请求只有一个成功）、唯一性继承（ClaimMap 与旧 EvidenceMap 兼容投影同一规则：excerpt 非空且在旧/新正文中各恰好出现 1 次才继承——改写/删除、旧或新正文重复导致定位歧义均不继承；纯挪段在挪动前后仍可唯一定位时保持身份继承，不唯一则不继承）、immutable revision 创建 + current 指针更新；继承保留 canonical owner_claim 血缘；过期编辑返回 ErrConflict→HTTP 409 且零孤儿 revision。旧 ClaimReview/StyleReview/EvidenceReview 一律不复制：新修订天然无审校行，readiness 回到 blocked/reviewing；删除了旧的 Contains 式 `inheritedEvidenceMaps` 双规则（唯一规则统一在 Store）。
+  - 新契约 AI 修订 durable 任务（`JobClaimRevision` + `revision_review_intents(kind=ai_revision)`）：`store.EnqueueClaimRevisionForRevision` 冻结强类型 `RevisionWritingTaskInput`（精确 base revision、该修订 ClaimMap、durable Claim/Style 审核反馈（至少一条）、CreationBrief 精确确认版本/OwnerClaim/提纲/风格/篇幅、原确认 Curator 授权材料、Writer provider/model/prompt）；重复点击复用同 job、failed 重试同 job（DB 状态断言）；旧文章（无 bridge）拒绝并保持同步路径。
+  - provider：`ClaimAwareWritingRequest` 扩展 ExistingMarkdown/RevisionFeedback/ExistingClaimMap；`ClaimRevisionWriterPromptVersion`（claim-writer-v2-rev）+ 修订系统提示词补充；`WriteArticleRevisionWithClaims`（Groq/OpenAI）复用严格 ValidateClaimMap（完整新正文 + 完整 ClaimMap + 材料成员身份）。
+  - queue `doClaimRevisionJob`：只读冻结快照；逐冻结来源动态重验 publication/send policy；强类型 checkpoint（result+usage+provider/model/prompt+BaseRevisionID+RequestHash=完整 request sha256），篡改/不匹配不静默复用；usage receipt；budget 预算接入；`SaveClaimRevisionOutput` 单事务 CAS（base 仍为 current 否则 ErrConflict 不覆盖）写新 revision（origin=ai_edit、origin_job_id）+ canonical claim_maps + claim_map_entries + current 指针 + job complete result；origin_job 幂等重放校验 title/markdown 与完整 ClaimMap 身份集合一致（含 canonical 投影，见第二轮审计修复）。
+  - server：`/workbench/revise` 按持久 bridge 分叉——新契约只 durable enqueue（同步 Provider 零调用），旧文章保留同步 `runRevisionWriter`（且删除旧 Contains 式继承后唯一规则不变）；draft 页新契约面板显示 AI 修订任务状态/last_error；模板 Owner 修订表单携带 draft_id + base_revision_id（有 current）/空基准（新草稿）。
+- 测试：
+  - store `revision_lineage_r21_test.go`：唯一片段继承+旧审校不复制+新修订 blocked+重新审校恢复导出+旧修订历史保持；重复句（新侧）/删除/改写 source 片段不继承（未变 Owner 片段仍继承）；过期 base ErrConflict 零孤儿；同 base 并发恰一成功一冲突；空基准首次并发只一个成功。`revision_writing_r21_test.go`：入队冻结逐字段+重复/failed 重试同 job；无反馈/无 bridge 拒绝；Save 原子落库+重放幂等+base 过期冲突不覆盖+非法输出（nil/空/无映射/越权/片段不匹配）全拒零落库。
+  - queue `revision_writing_r21_test.go`：生产 dispatch+冻结请求断言（ExistingMarkdown/反馈/原 ClaimMap/授权材料）；checkpoint 后 trigger 注入业务失败→重试+重启恢复零额外调用；篡改 checkpoint（request_hash）不静默复用重新调用；base 被抢先推进→保存冲突失败可见、不覆盖 current；LocalOnly 动态零调用；非法输出拒绝零落库。
+  - server `revision_r21_test.go`：新契约 /workbench/revise POST 零同步 Provider+重复同 job+failed 重试；手工修订路由（唯一继承成功、过期 base 409 零孤儿）；旧文章 revise 保持同步路径特征（Provider 前拒绝、零 durable job）。provider：修订 prompt 断言+独立 prompt version。
+  - 旧测试更新仅为表单契约变化：`editorial_test.go` 第二次修订携带 base_revision_id（保留空 draft 首次修订回归）；evidence 继承测试 base 动态跟随 current。
+- 已跑验证（独立复跑）：`go test -count=1 ./internal/store ./internal/queue ./internal/provider ./internal/server` 全绿；R21 定向 race（store：Owner 修订系列/FirstOwnerRevision/Enqueue+SaveClaimRevision 全系；queue：ClaimRevisionJob/ClaimWritingJob；server：AI 修订路由/手工修订/旧文章同步）通过；直接 `go test -count=1 ./...` exit 0（13 ok）；`go vet ./...`、`go build ./...` 干净；`gofmt -l internal` 空；`git diff --check` 干净。未调用真实付费模型，未做真实浏览器验证（R25）。
+- 限制：未调用真实付费模型；页面未做真实浏览器操作（R25）。
+
 ## R20 — 新审校真正控制交付（未提交候选，基于 e36507f）
 
 - 状态：实现、独立复核与自动验证完成；本段记录 R20 原子变更（基于 e36507f）。

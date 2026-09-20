@@ -235,12 +235,34 @@ func (srv *Server) handleArticleWriterRun(w http.ResponseWriter, r *http.Request
 }
 
 // handleArticleRevisionWriterRun turns review findings into a new immutable AI edit.
+// R21：新契约文章改为 durable enqueue（claim_revision job，复用同 base 幂等、
+// failed 重试同 job），HTTP 零同步 Provider；旧文章保留同步路径。
 func (srv *Server) handleArticleRevisionWriterRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	draftID, err := srv.runRevisionWriter(r, r.FormValue("revision_id"))
+	revisionID := r.FormValue("revision_id")
+	revision, err := srv.store.GetArticleRevision(r.Context(), revisionID)
+	if err != nil {
+		writeEditorialError(w, badEditorial("读取文章修订失败"))
+		return
+	}
+	newContract, err := srv.store.IsNewContractRevision(r.Context(), revision.ID)
+	if err != nil {
+		writeEditorialError(w, internalEditorial("检查文章契约失败"))
+		return
+	}
+	if newContract {
+		job, err := srv.store.EnqueueClaimRevisionForRevision(r.Context(), revision.ID)
+		if err != nil {
+			writeEditorialError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/workbench/drafts/"+job.SourceID, http.StatusSeeOther)
+		return
+	}
+	draftID, err := srv.runRevisionWriter(r, revisionID)
 	if err != nil {
 		writeEditorialError(w, err)
 		return
@@ -441,7 +463,7 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "NewContract": data.NewContract, "ReadinessIssues": data.ReadinessIssues, "ClaimJob": data.ClaimJob, "StyleJob": data.StyleJob, "LatestClaim": data.LatestClaim, "LatestStyle": data.LatestStyle, "CSRF": auth.CSRFValue(r)})
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "NewContract": data.NewContract, "ReadinessIssues": data.ReadinessIssues, "ClaimJob": data.ClaimJob, "StyleJob": data.StyleJob, "LatestClaim": data.LatestClaim, "LatestStyle": data.LatestStyle, "RevisionJob": data.RevisionJob, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {
@@ -456,52 +478,27 @@ type revisionComparison struct {
 }
 
 // handleArticleRevisionCreate appends an immutable Owner revision; it never overwrites text.
+// R21：表单携带精确 base/current revision；单事务 CAS + 唯一定位继承，过期编辑 409。
 func (srv *Server) handleArticleRevisionCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	draftID, markdown := strings.TrimSpace(r.FormValue("draft_id")), r.FormValue("markdown")
-	inheritedMaps, err := srv.inheritedEvidenceMaps(r, draftID, markdown)
+	draftID, baseRevisionID, markdown := strings.TrimSpace(r.FormValue("draft_id")), strings.TrimSpace(r.FormValue("base_revision_id")), r.FormValue("markdown")
+	revision, err := srv.store.SaveOwnerRevisionWithClaimLineage(r.Context(), draftID, baseRevisionID, strings.TrimSpace(r.FormValue("title")), markdown)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			http.Error(w, "保存修订失败：文章草稿不存在", http.StatusBadRequest)
+		if errors.Is(err, store.ErrConflict) {
+			http.Error(w, "保存修订失败：页面已过期，文章已有更新的修订，请刷新后重试", http.StatusConflict)
 			return
 		}
-		http.Error(w, "读取当前证据映射失败", http.StatusInternalServerError)
-		return
-	}
-	revision, err := srv.store.CreateArticleRevisionWithEvidenceMaps(r.Context(), models.ArticleRevision{
-		DraftID: draftID, Title: strings.TrimSpace(r.FormValue("title")), Markdown: markdown, Origin: "owner",
-	}, inheritedMaps)
-	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "保存修订失败：文章或修订不存在", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "保存修订失败："+err.Error(), http.StatusBadRequest)
 		return
 	}
 	http.Redirect(w, r, "/workbench/drafts/"+revision.DraftID, http.StatusSeeOther)
-}
-
-// inheritedEvidenceMaps retains only mappings whose exact supported expression
-// survives an Owner edit. Changed or removed expressions intentionally lose
-// their old mapping and must be reviewed with fresh evidence rather than being
-// silently blessed by a previous revision.
-func (srv *Server) inheritedEvidenceMaps(r *http.Request, draftID, markdown string) ([]models.EvidenceMap, error) {
-	draft, err := srv.store.GetArticleDraft(r.Context(), draftID)
-	if err != nil || draft.CurrentRevisionID == nil {
-		return nil, err
-	}
-	previousMaps, err := srv.store.ListEvidenceMaps(r.Context(), *draft.CurrentRevisionID)
-	if err != nil {
-		return nil, err
-	}
-	inherited := make([]models.EvidenceMap, 0, len(previousMaps))
-	for _, mapping := range previousMaps {
-		if strings.TrimSpace(mapping.Excerpt) == "" || !strings.Contains(markdown, mapping.Excerpt) {
-			continue
-		}
-		inherited = append(inherited, models.EvidenceMap{Kind: mapping.Kind, Excerpt: mapping.Excerpt, KeyPointIDs: mapping.KeyPointIDs})
-	}
-	return inherited, nil
 }
 
 // handleEvidenceReviewRun executes an independent evidence review for the current exact revision.

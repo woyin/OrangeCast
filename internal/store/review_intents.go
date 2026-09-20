@@ -30,6 +30,8 @@ import (
 const (
 	ReviewKindClaim = "claim"
 	ReviewKindStyle = "style"
+	// 注：AI 修订（R21）的意图身份是 claimRevisionIntentID（claim_revision:<base>），
+	// 与 <kind>_review:<revision> 命名空间不同；查找请使用 ClaimRevisionJobForRevision。
 )
 
 // ReviewTaskInput 是入队时冻结的强类型完整审校输入（claim 与 style 共用一套身份，

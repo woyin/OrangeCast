@@ -154,3 +154,99 @@ func convertClaimMap(entries []provider.ClaimMapEntry) []models.ClaimMapEntry {
 	}
 	return out
 }
+
+// revisionWritingCheckpoint 是 AI 修订的强类型步骤断点（R21）：绑定 base revision
+// 与完整 request hash；复用前校验全部绑定字段 + 结果契约，篡改不静默复用。
+type revisionWritingCheckpoint struct {
+	Stage          string                            `json:"stage"`
+	Result         *provider.ClaimAwareWritingResult `json:"result"`
+	Usage          provider.TaskUsage                `json:"usage"`
+	Provider       string                            `json:"provider"`
+	Model          string                            `json:"model"`
+	PromptVersion  string                            `json:"prompt_version"`
+	BaseRevisionID string                            `json:"base_revision_id"`
+	RequestHash    string                            `json:"request_hash"`
+}
+
+// claimRevisionWriterProvider claim-aware AI 修订接口（R21）：
+// 公开能力为 provider.ClaimAwareRevisionWriter，queue 本地别名使用。
+type claimRevisionWriterProvider = provider.ClaimAwareRevisionWriter
+
+// doClaimRevisionJob 执行 durable AI 修订（R21）：只读冻结快照 → 逐冻结来源重验
+// publication/send policy → checkpoint 恢复或远端调用 → 校验 → CAS 原子落库。
+func (w *Worker) doClaimRevisionJob(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle) error {
+	prov, ok := bundle.Writer.(claimRevisionWriterProvider)
+	if !ok {
+		return fmt.Errorf("Writer Provider 不支持 claim-aware AI 修订")
+	}
+	exec, err := w.store.GetJobExecution(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	var input store.RevisionWritingTaskInput
+	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &input); err != nil {
+		return fmt.Errorf("解析冻结 AI 修订输入: %w", err)
+	}
+	if input.Kind != "ai_revision" || input.BaseRevisionID == "" || input.ExistingMarkdown == "" || len(input.Materials) == 0 {
+		return fmt.Errorf("AI 修订任务缺少冻结输入快照")
+	}
+	// 逐冻结来源动态重验策略（R04：冻结文本不绕过 Owner 撤销/LocalOnly）。
+	for _, m := range input.Materials {
+		if err := reviewMaterialPolicy(ctx, w, store.ReviewTaskInput{ProfileID: input.ProfileID, Materials: input.Materials}, m, prov.Name(), "AI 修订"); err != nil {
+			return err
+		}
+	}
+	req := provider.ClaimAwareWritingRequest{
+		Title: input.Title, Audience: input.Audience, Outline: input.Outline,
+		Style: input.Style, SourceAttribution: "轻量", ConfirmedClaim: input.OwnerClaim,
+		TargetLength: input.TargetLength, Materials: input.Materials,
+		ExistingMarkdown: input.ExistingMarkdown, RevisionFeedback: input.ReviewFeedback,
+		ExistingClaimMap: entriesToProvider(input.ExistingClaimMap),
+	}
+	requestHash := reviewRequestHash(req)
+	var result *provider.ClaimAwareWritingResult
+	if exec.CheckpointJSON != "" {
+		var cp revisionWritingCheckpoint
+		if json.Unmarshal([]byte(exec.CheckpointJSON), &cp) == nil &&
+			cp.Stage == "written" && cp.Provider == prov.Name() &&
+			cp.Model == input.Model && cp.PromptVersion == input.PromptVersion &&
+			cp.BaseRevisionID == input.BaseRevisionID && cp.RequestHash == requestHash {
+			// 绑定匹配外，还须复核结果本体（专用修订校验，与保存同契约）。
+			if validClaimWritingResult(cp.Result) && provider.ValidateClaimRevisionMap(cp.Result, req) == nil {
+				result = cp.Result
+				w.recordCallUsage(ctx, job, "claim_revision", prov.Name(), input.Model, cp.Usage)
+			}
+		}
+		// checkpoint 缺失/不完整/身份不匹配/结果非法：不静默复用，按无断点重新调用。
+	}
+	if result == nil {
+		w.markRemoteCallStarted(ctx, job)
+		r, usage, err := prov.WriteArticleRevisionWithClaims(ctx, req)
+		if err != nil {
+			return fmt.Errorf("claim-aware AI 修订: %w", err)
+		}
+		if !validClaimWritingResult(r) {
+			return fmt.Errorf("claim-aware AI 修订返回空标题、正文或 ClaimMap")
+		}
+		if err := provider.ValidateClaimRevisionMap(r, req); err != nil {
+			return fmt.Errorf("AI 修订校验失败: %w", err)
+		}
+		result = r
+		checkpoint, marshalErr := json.Marshal(revisionWritingCheckpoint{
+			Stage: "written", Result: result, Usage: usage,
+			Provider: prov.Name(), Model: input.Model, PromptVersion: input.PromptVersion,
+			BaseRevisionID: input.BaseRevisionID, RequestHash: requestHash,
+		})
+		if marshalErr != nil {
+			return fmt.Errorf("序列化 AI 修订 checkpoint: %w", marshalErr)
+		}
+		if err := w.store.SaveJobCheckpoint(ctx, job.ID, string(checkpoint)); err != nil {
+			return err
+		}
+		w.recordCallUsage(ctx, job, "claim_revision", prov.Name(), input.Model, usage)
+	}
+	if _, err := w.store.SaveClaimRevisionOutput(ctx, job.ID, result, prov.Name(), input.Model); err != nil {
+		return fmt.Errorf("保存 AI 修订: %w", err)
+	}
+	return nil
+}

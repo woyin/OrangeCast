@@ -137,3 +137,136 @@ func TestWriteArticleWithClaimsOpenAI(t *testing.T) {
 		t.Fatalf("结果不符: %+v", res)
 	}
 }
+
+// TestBuildClaimRevisionPrompt R21：修订模式请求必须携带现有正文、审校反馈与原
+// ClaimMap，且 revision prompt version 与 v2 写作不同。
+func TestBuildClaimRevisionPrompt(t *testing.T) {
+	req := ClaimAwareWritingRequest{
+		ConfirmedClaim: "Owner 主张", Audience: "读者",
+		ExistingMarkdown: "# 现有正文\n\n来源说过这句话。",
+		RevisionFeedback: []string{"片段X： misattributed — 归因错误"},
+		ExistingClaimMap: []ClaimMapEntry{{Excerpt: "来源说过这句话。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}}},
+	}
+	prompt := BuildClaimPrompt(req)
+	for _, want := range []string{"修订任务", "审校反馈", "归因错误", "现有正文", "来源说过这句话", "kp-1", "完整映射"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("修订 prompt 缺少 %q", want)
+		}
+	}
+	if ClaimRevisionWriterPromptVersion == ClaimWriterPromptVersion {
+		t.Fatal("修订写作必须有独立 prompt version")
+	}
+}
+
+// TestValidateClaimRevisionMap R21：重复句、身份篡改、重复映射、base 歧义拒绝。
+func TestValidateClaimRevisionMap(t *testing.T) {
+	base := ClaimAwareWritingRequest{
+		ConfirmedClaim:   "Owner 主张",
+		Materials:        []ArticleMaterial{{KeyPointID: "kp-1", SourceType: "episode", SourceID: "ep-1", SourceTitle: "来源", Content: "材料", Citations: []string{"seg-1"}}},
+		ExistingMarkdown: "# 旧\n\n来源说过这句话。Owner 的判断在此。",
+		ExistingClaimMap: []ClaimMapEntry{
+			{Excerpt: "来源说过这句话。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}, SourceTitle: "来源", CitationRefs: []string{"seg-1"}},
+			{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+		},
+	}
+	valid := func() *ClaimAwareWritingResult {
+		return &ClaimAwareWritingResult{
+			Title:    "新",
+			Markdown: "# 新\n\n来源说过这句话。（改）Owner 的判断在此。",
+			ClaimMap: []ClaimMapEntry{
+				{Excerpt: "来源说过这句话。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}, SourceTitle: "来源", CitationRefs: []string{"seg-1"}},
+				{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+			},
+		}
+	}
+	if err := ValidateClaimRevisionMap(valid(), base); err != nil {
+		t.Fatalf("合法修订被拒: %v", err)
+	}
+	// 重复句：保留 excerpt 在新正文出现两次。
+	dup := valid()
+	dup.Markdown = "# 新\n\n来源说过这句话。来源说过这句话。Owner 的判断在此。"
+	if err := ValidateClaimRevisionMap(dup, base); err == nil || !strings.Contains(err.Error(), "恰好出现一次") {
+		t.Fatalf("重复句必须拒绝: %v", err)
+	}
+	// 身份篡改：excerpt 保留但 kind 改变。
+	tampered := valid()
+	for i := range tampered.ClaimMap {
+		if tampered.ClaimMap[i].Excerpt == "来源说过这句话。" {
+			tampered.ClaimMap[i].ClaimKind = ClaimOwner
+		}
+	}
+	if err := ValidateClaimRevisionMap(tampered, base); err == nil || !strings.Contains(err.Error(), "身份被篡改") {
+		t.Fatalf("身份篡改必须拒绝: %v", err)
+	}
+	// 身份篡改：material IDs 变化。
+	tamperedIDs := valid()
+	for i := range tamperedIDs.ClaimMap {
+		if tamperedIDs.ClaimMap[i].Excerpt == "来源说过这句话。" {
+			tamperedIDs.ClaimMap[i].MaterialIDs = nil
+		}
+	}
+	if err := ValidateClaimRevisionMap(tamperedIDs, base); err == nil {
+		t.Fatal("材料身份篡改必须拒绝")
+	}
+	// 输出映射重复 excerpt。
+	dupMap := valid()
+	dupMap.ClaimMap = append(dupMap.ClaimMap, dupMap.ClaimMap[1])
+	if err := ValidateClaimRevisionMap(dupMap, base); err == nil || !strings.Contains(err.Error(), "重复 excerpt") {
+		t.Fatalf("重复映射必须拒绝: %v", err)
+	}
+	// base 映射自身重复（身份歧义）→ 直接拒绝。
+	ambiguous := base
+	ambiguous.ExistingClaimMap = append(ambiguous.ExistingClaimMap, base.ExistingClaimMap[0])
+	if err := ValidateClaimRevisionMap(valid(), ambiguous); err == nil || !strings.Contains(err.Error(), "身份歧义") {
+		t.Fatalf("base 歧义必须拒绝: %v", err)
+	}
+}
+
+// TestValidateClaimRevisionMap_OmittedKeptExcerpt R21：正文复制旧句（新正文唯一）
+// 但输出省略其映射 → 必须拒绝；新正文重复出现旧句 → 无论是否映射都必须拒绝；
+// excerpt 删除后输出映射仍保留 → 拒绝。
+func TestValidateClaimRevisionMap_OmittedKeptExcerpt(t *testing.T) {
+	base := ClaimAwareWritingRequest{
+		ConfirmedClaim:   "Owner 主张",
+		Materials:        []ArticleMaterial{{KeyPointID: "kp-1", SourceType: "episode", SourceID: "ep-1", SourceTitle: "来源", Content: "材料", Citations: []string{"seg-1"}}},
+		ExistingMarkdown: "# 旧\n\n来源说过这句话。Owner 的判断在此。",
+		ExistingClaimMap: []ClaimMapEntry{
+			{Excerpt: "来源说过这句话。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}, SourceTitle: "来源", CitationRefs: []string{"seg-1"}},
+			{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+		},
+	}
+	// 正文保留旧句但输出省略其映射（owner 段完整）。
+	omit := &ClaimAwareWritingResult{
+		Title:    "新",
+		Markdown: "# 新\n\n来源说过这句话。Owner 的判断在此。",
+		ClaimMap: []ClaimMapEntry{
+			{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+		},
+	}
+	if err := ValidateClaimRevisionMap(omit, base); err == nil || !strings.Contains(err.Error(), "省略") {
+		t.Fatalf("保留片段省略映射必须拒绝: %v", err)
+	}
+	// 新正文重复出现旧句（两次）且输出完全省略该 excerpt → 仍必须拒绝。
+	duplicated := &ClaimAwareWritingResult{
+		Title:    "新",
+		Markdown: "# 新\n\n来源说过这句话。来源说过这句话。Owner 的判断在此。",
+		ClaimMap: []ClaimMapEntry{
+			{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+		},
+	}
+	if err := ValidateClaimRevisionMap(duplicated, base); err == nil || !strings.Contains(err.Error(), "重复句") {
+		t.Fatalf("新正文重复旧句必须无条件拒绝: %v", err)
+	}
+	// excerpt 删除但输出映射仍保留 → 拒绝。
+	ghost := &ClaimAwareWritingResult{
+		Title:    "新",
+		Markdown: "# 新\n\n全新内容。Owner 的判断在此。",
+		ClaimMap: []ClaimMapEntry{
+			{Excerpt: "来源说过这句话。", ClaimKind: ClaimSource, MaterialIDs: []string{"kp-1"}, SourceTitle: "来源", CitationRefs: []string{"seg-1"}},
+			{Excerpt: "Owner 的判断在此。", ClaimKind: ClaimOwner},
+		},
+	}
+	if err := ValidateClaimRevisionMap(ghost, base); err == nil {
+		t.Fatal("已删除 excerpt 的输出映射必须拒绝")
+	}
+}

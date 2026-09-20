@@ -17,6 +17,10 @@ import (
 // ClaimWriterPromptVersion is the durable contract version for R19 writer jobs.
 const ClaimWriterPromptVersion = "claim-writer-v2"
 
+// ClaimRevisionWriterPromptVersion is the durable contract version for R21
+// claim-aware AI revision jobs (ExistingMarkdown + ReviewFeedback + original ClaimMap).
+const ClaimRevisionWriterPromptVersion = "claim-writer-v2-rev"
+
 // ClaimKind 主张类型（C09 / product-goal.md ClaimMap）。
 const (
 	ClaimSource    = "source_claim"    // 来源表达过什么
@@ -46,6 +50,12 @@ type ClaimAwareWritingRequest struct {
 	Materials         []ArticleMaterial   `json:"materials"`               // 授权素材
 	OwnerNotes        []ClaimOwnerNote    `json:"ownerNotes,omitempty"`    // 个人笔记快照
 	VerifiedFacts     []ClaimVerifiedFact `json:"verifiedFacts,omitempty"` // 已核验事实及引用
+
+	// R21 AI 修订扩展：ExistingMarkdown 非空时进入修订模式——基于现有正文与
+	// 原始 ClaimMap 修改，处理审校反馈；仍要求返回完整新正文 + 完整 ClaimMap。
+	ExistingMarkdown string          `json:"existingMarkdown,omitempty"`
+	RevisionFeedback []string        `json:"revisionFeedback,omitempty"`
+	ExistingClaimMap []ClaimMapEntry `json:"existingClaimMap,omitempty"`
 }
 
 // ClaimOwnerNote 个人笔记快照。
@@ -86,7 +96,7 @@ const claimSystemPrompt = `你是基于证据的写作者。根据给定的材�
 
 只输出 JSON：{"title":"...","markdown":"...","claimMap":[{"excerpt":"正文片段","claimKind":"...","materialIds":["..."],"sourceTitle":"..."}]}`
 
-// BuildClaimPrompt 构造 v2 用户消息。
+// BuildClaimPrompt 构造 v2 用户消息（R21：修订模式附带现有正文/反馈/原 ClaimMap）。
 func BuildClaimPrompt(req ClaimAwareWritingRequest) string {
 	var sb strings.Builder
 	sb.WriteString("确认主张：" + req.ConfirmedClaim + "\n")
@@ -99,6 +109,18 @@ func BuildClaimPrompt(req ClaimAwareWritingRequest) string {
 		sb.WriteString(fmt.Sprintf("目标篇幅：%d 字\n", *req.TargetLength))
 	}
 	sb.WriteString("来源标注：" + req.SourceAttribution + "\n")
+	if req.ExistingMarkdown != "" {
+		sb.WriteString("\n这是一次修订任务：基于下面的现有正文修改，处理审校反馈。\n")
+		sb.WriteString("审校反馈（逐条处理）：\n")
+		for _, f := range req.RevisionFeedback {
+			sb.WriteString("- " + f + "\n")
+		}
+		sb.WriteString("\n现有正文：\n" + req.ExistingMarkdown + "\n")
+		sb.WriteString("\n现有 ClaimMap（修改后必须重新输出完整映射；仍在正文中的片段保持身份，已删除/修改的片段移除）：\n")
+		for _, cm := range req.ExistingClaimMap {
+			sb.WriteString(fmt.Sprintf("片段：%s\n类型：%s\n材料：%s\n\n", cm.Excerpt, cm.ClaimKind, strings.Join(cm.MaterialIDs, ",")))
+		}
+	}
 	sb.WriteString("\n可用材料（引用只能用这些 KeyPoint ID）：\n")
 	for _, m := range req.Materials {
 		sb.WriteString(fmt.Sprintf("[%s] %s：%s\n", m.KeyPointID, m.SourceTitle, m.Content))
@@ -148,18 +170,7 @@ func ValidateClaimMap(result *ClaimAwareWritingResult, req ClaimAwareWritingRequ
 
 // writeClaimArticle 通用 v2 写作实现（由 Groq/OpenAI 调用方包装以获取 usage）。
 func writeClaimArticle(ctx context.Context, req ClaimAwareWritingRequest, completeFn func(ctx context.Context, system, user string) (string, TaskUsage, error)) (*ClaimAwareWritingResult, TaskUsage, error) {
-	content, usage, err := completeFn(ctx, claimSystemPrompt, BuildClaimPrompt(req))
-	if err != nil {
-		return nil, usage, err
-	}
-	result := &ClaimAwareWritingResult{}
-	if err := parseJSONLoose(content, result); err != nil {
-		return nil, usage, fmt.Errorf("解析 v2 写作输出: %w", err)
-	}
-	if errs := ValidateClaimMap(result, req); len(errs) > 0 {
-		return nil, usage, fmt.Errorf("ClaimMap 校验失败: %v", errs)
-	}
-	return result, usage, nil
+	return writeClaimArticleWithSystem(ctx, req, claimSystemPrompt, completeFn)
 }
 
 // WriteArticleWithClaims Groq v2 写作。
@@ -192,3 +203,168 @@ func (o *OpenAIProvider) WriteArticleWithClaims(ctx context.Context, req ClaimAw
 		return r.OutputText, chatUsage(data, meta), nil
 	})
 }
+
+// claimRevisionExtraPrompt R21 修订模式的系统提示词补充（与 v2 主提示词拼接使用）。
+const claimRevisionExtraPrompt = `
+
+这是一次修订任务：只允许使用给定材料（不得引入新事实/新主张），输出完整的新正文与完整的 ClaimMap。现有 ClaimMap 中仍逐字保留在正文里的片段必须保持其身份（类型与材料不变）；被删除或改写的片段从映射中移除；新增表达必须按规则标注。`
+
+// WriteArticleRevisionWithClaims Groq v2 修订写作（R21）：复用 v2 契约与严格
+// ValidateClaimMap，仅切换系统提示词（主提示词 + 修订补充）与提示词版本语义。
+func (g *GroqProvider) WriteArticleRevisionWithClaims(ctx context.Context, req ClaimAwareWritingRequest) (*ClaimAwareWritingResult, TaskUsage, error) {
+	return writeClaimArticleWithSystem(ctx, req, claimSystemPrompt+claimRevisionExtraPrompt, func(ctx context.Context, system, user string) (string, TaskUsage, error) {
+		content, _, _, usage, err := g.completeContextWithUsage(ctx, []map[string]string{
+			{"role": "system", "content": system + "\n必须只输出一个 JSON 对象。"},
+			{"role": "user", "content": user},
+		}, "object")
+		return content, usage, err
+	})
+}
+
+// WriteArticleRevisionWithClaims OpenAI v2 修订写作（R21）。
+func (o *OpenAIProvider) WriteArticleRevisionWithClaims(ctx context.Context, req ClaimAwareWritingRequest) (*ClaimAwareWritingResult, TaskUsage, error) {
+	return writeClaimArticleWithSystem(ctx, req, claimSystemPrompt+claimRevisionExtraPrompt, func(ctx context.Context, system, user string) (string, TaskUsage, error) {
+		payload := map[string]any{
+			"model":        o.effectiveAnalysisModel(),
+			"instructions": system,
+			"input":        user, // 使用传入的 user（BuildClaimPrompt 只构造一次）
+		}
+		data, meta, err := o.chatCompleteWithMeta(ctx, payload, "v2 修订写作")
+		if err != nil {
+			return "", TaskUsage{}, err
+		}
+		var r struct {
+			OutputText string `json:"output_text"`
+		}
+		if err := json.Unmarshal(data, &r); err != nil {
+			return "", TaskUsage{}, fmt.Errorf("解析 openai v2 修订写作响应: %w", err)
+		}
+		return r.OutputText, chatUsage(data, meta), nil
+	})
+}
+
+// writeClaimArticleWithSystem 与 writeClaimArticle 相同，但允许指定系统提示词；
+// 校验复用严格 ValidateClaimMap（完整正文 + 完整 ClaimMap + 材料成员身份）。
+func writeClaimArticleWithSystem(ctx context.Context, req ClaimAwareWritingRequest, system string, completeFn func(ctx context.Context, system, user string) (string, TaskUsage, error)) (*ClaimAwareWritingResult, TaskUsage, error) {
+	content, usage, err := completeFn(ctx, system, BuildClaimPrompt(req))
+	if err != nil {
+		return nil, usage, err
+	}
+	result := &ClaimAwareWritingResult{}
+	if err := parseJSONLoose(content, result); err != nil {
+		return nil, usage, fmt.Errorf("解析 v2 写作输出: %w", err)
+	}
+	if errs := ValidateClaimMap(result, req); len(errs) > 0 {
+		return nil, usage, fmt.Errorf("ClaimMap 校验失败: %v", errs)
+	}
+	if req.ExistingMarkdown != "" {
+		if err := ValidateClaimRevisionMap(result, req); err != nil {
+			return nil, usage, err
+		}
+	}
+	return result, usage, nil
+}
+
+// ValidateClaimRevisionMap R21 AI 修订输出的专用严格校验（provider/queue checkpoint
+// 复用/store 保存共用同一份契约）：
+//   - 先复用 ValidateClaimMap（完整正文 + 完整 ClaimMap + 材料成员身份）；
+//   - 输出的每个 excerpt 必须在新正文恰好出现一次（无重复句歧义）；
+//   - 输出映射不得有重复 excerpt（身份唯一）；
+//   - 原 ClaimMap 中在旧正文唯一、且在新正文也唯一保留的 excerpt（且原映射中该
+//     excerpt 身份唯一），输出必须恰有一条并完整保持原身份（claim kind、material
+//     IDs、source title、citation refs）；
+//   - 原 ClaimMap 自身存在重复 excerpt（身份歧义）视为无效修订请求，直接拒绝。
+func ValidateClaimRevisionMap(result *ClaimAwareWritingResult, req ClaimAwareWritingRequest) error {
+	if errs := ValidateClaimMap(result, req); len(errs) > 0 {
+		return fmt.Errorf("ClaimMap 校验失败: %v", errs)
+	}
+	// base 映射自身重复 excerpt = 身份歧义 → 拒绝。
+	baseCounts := map[string]int{}
+	for _, cm := range req.ExistingClaimMap {
+		baseCounts[cm.Excerpt]++
+	}
+	for excerpt, n := range baseCounts {
+		if n > 1 {
+			return fmt.Errorf("原 ClaimMap excerpt %q 存在 %d 条映射（身份歧义），不能修订", excerpt, n)
+		}
+	}
+	// 输出 excerpt：新正文唯一 + 映射无重复。
+	outCounts := map[string]int{}
+	byExcerpt := map[string]ClaimMapEntry{}
+	for _, cm := range result.ClaimMap {
+		outCounts[cm.Excerpt]++
+		if _, dup := byExcerpt[cm.Excerpt]; dup {
+			return fmt.Errorf("输出 ClaimMap 存在重复 excerpt %q", cm.Excerpt)
+		}
+		byExcerpt[cm.Excerpt] = cm
+	}
+	for excerpt, n := range outCounts {
+		if n != 1 || strings.Count(result.Markdown, excerpt) != 1 {
+			return fmt.Errorf("输出 excerpt %q 在新正文必须恰好出现一次", excerpt)
+		}
+	}
+	// 逐条原 excerpt（旧正文唯一者）按新正文出现次数矩阵校验：
+	//   count=0：允许删除/改写（输出映射也不得保留该 excerpt）；
+	//   count=1：输出必须恰有一条完整同身份映射；
+	//   count>1：直接拒绝（无论输出是否映射）。
+	for _, orig := range req.ExistingClaimMap {
+		if strings.Count(req.ExistingMarkdown, orig.Excerpt) != 1 {
+			// 旧正文不唯一（base 歧义）：输出不得引用该 excerpt。
+			if _, referenced := byExcerpt[orig.Excerpt]; referenced {
+				return fmt.Errorf("原 excerpt %q 在旧正文不唯一，修订输出不得保留", orig.Excerpt)
+			}
+			continue
+		}
+		newCount := strings.Count(result.Markdown, orig.Excerpt)
+		if newCount > 1 {
+			return fmt.Errorf("原 excerpt %q 在新正文出现 %d 次（重复句），必须改写", orig.Excerpt, newCount)
+		}
+		out, kept := byExcerpt[orig.Excerpt]
+		if newCount == 0 {
+			if kept {
+				return fmt.Errorf("excerpt %q 已从新正文删除，输出映射不得保留", orig.Excerpt)
+			}
+			continue
+		}
+		if !kept {
+			return fmt.Errorf("excerpt %q 仍在新正文唯一保留，但输出映射省略了它", orig.Excerpt)
+		}
+		if out.ClaimKind != orig.ClaimKind || out.SourceTitle != orig.SourceTitle ||
+			!sameStringSet(out.MaterialIDs, orig.MaterialIDs) ||
+			!sameStringSet(out.CitationRefs, orig.CitationRefs) {
+			return fmt.Errorf("保留 excerpt %q 的身份被篡改（kind/materials/source/citations）", orig.Excerpt)
+		}
+	}
+	return nil
+}
+
+// sameStringSet 判定两个字符串集合（顺序无关、无重复）相等。
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]int, len(a))
+	for _, v := range a {
+		set[v]++
+	}
+	for _, v := range b {
+		if set[v] == 0 {
+			return false
+		}
+		set[v]--
+	}
+	return true
+}
+
+// ClaimAwareRevisionWriter claim-aware AI 修订公开接口（R21）：与普通写作
+// （ClaimAwareWriter）分离的修订调用能力，由 Groq/OpenAI 实现。
+type ClaimAwareRevisionWriter interface {
+	WriteArticleRevisionWithClaims(ctx context.Context, req ClaimAwareWritingRequest) (*ClaimAwareWritingResult, TaskUsage, error)
+	Name() string
+}
+
+// 编译期断言：两个 provider 实现修订能力。
+var (
+	_ ClaimAwareRevisionWriter = (*GroqProvider)(nil)
+	_ ClaimAwareRevisionWriter = (*OpenAIProvider)(nil)
+)
