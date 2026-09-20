@@ -842,6 +842,8 @@ func (s *Store) ListEvidenceMaps(ctx context.Context, revisionID string) ([]*mod
 }
 
 // CreateArticleReview records an independent evidence or style review for one exact revision.
+// R20：带 origin_job_id 的持久任务产物必须为 passed|failed 且携带完整 provenance；
+// failed 必须有 issues、passed 必须无 issues。旧同步路径（origin_job_id 空）保持原语义。
 func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleReview) (*models.ArticleReview, error) {
 	review.ID = uuid.NewString()
 	review.IssuesJSON = defaultString(review.IssuesJSON, "[]")
@@ -851,9 +853,21 @@ func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleRe
 	if review.Kind == "evidence" && (review.Provider == nil || strings.TrimSpace(*review.Provider) == "" || review.Model == nil || strings.TrimSpace(*review.Model) == "") {
 		return nil, fmt.Errorf("%w: evidence review requires trusted provider provenance", ErrInvalidEditorialState)
 	}
+	if review.OriginJobID != "" {
+		if review.Provider == nil || strings.TrimSpace(*review.Provider) == "" || review.Model == nil || strings.TrimSpace(*review.Model) == "" || review.PromptVersion == nil || strings.TrimSpace(*review.PromptVersion) == "" {
+			return nil, fmt.Errorf("%w: durable review requires trusted provider provenance", ErrInvalidEditorialState)
+		}
+		var issues []string
+		if err := json.Unmarshal([]byte(review.IssuesJSON), &issues); err != nil {
+			return nil, fmt.Errorf("%w: invalid article review issues", ErrInvalidEditorialState)
+		}
+		if (review.Status == "passed" && len(issues) > 0) || (review.Status == "failed" && len(issues) == 0) {
+			return nil, fmt.Errorf("%w: durable review status must match issues", ErrInvalidEditorialState)
+		}
+	}
 	_, err := s.DB.ExecContext(ctx,
-		`INSERT INTO article_reviews (id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		review.ID, review.RevisionID, review.Kind, review.Status, review.IssuesJSON, review.Provider, review.Model, review.PromptVersion, review.CostCents)
+		`INSERT INTO article_reviews (id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents, origin_job_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		review.ID, review.RevisionID, review.Kind, review.Status, review.IssuesJSON, review.Provider, review.Model, review.PromptVersion, review.CostCents, review.OriginJobID)
 	if err != nil {
 		return nil, err
 	}
@@ -866,7 +880,7 @@ func (s *Store) CreateArticleReview(ctx context.Context, review models.ArticleRe
 // ListArticleReviews returns the audit trail for one immutable revision, newest first.
 func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*models.ArticleReview, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents, created_at
+		`SELECT id, revision_id, kind, status, issues_json, provider, model, prompt_version, cost_cents, COALESCE(origin_job_id,''), created_at
 		 FROM article_reviews WHERE revision_id=? ORDER BY created_at DESC, id DESC`, revisionID)
 	if err != nil {
 		return nil, err
@@ -875,7 +889,7 @@ func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*m
 	var out []*models.ArticleReview
 	for rows.Next() {
 		review := &models.ArticleReview{}
-		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.CreatedAt); err != nil {
+		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.OriginJobID, &review.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, review)
@@ -886,7 +900,7 @@ func (s *Store) ListArticleReviews(ctx context.Context, revisionID string) ([]*m
 // ListArticleReviewsForDraft loads the complete review history in one query,
 // avoiding one round trip per immutable revision on the detail page.
 func (s *Store) ListArticleReviewsForDraft(ctx context.Context, draftID string) (map[string][]*models.ArticleReview, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT ar.id,ar.revision_id,ar.kind,ar.status,ar.issues_json,ar.provider,ar.model,ar.prompt_version,ar.cost_cents,ar.created_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT ar.id,ar.revision_id,ar.kind,ar.status,ar.issues_json,ar.provider,ar.model,ar.prompt_version,ar.cost_cents,COALESCE(ar.origin_job_id,''),ar.created_at
 		FROM article_reviews ar JOIN article_revisions r ON r.id=ar.revision_id WHERE r.draft_id=? ORDER BY ar.created_at DESC,ar.id DESC`, draftID)
 	if err != nil {
 		return nil, err
@@ -895,7 +909,7 @@ func (s *Store) ListArticleReviewsForDraft(ctx context.Context, draftID string) 
 	out := map[string][]*models.ArticleReview{}
 	for rows.Next() {
 		review := &models.ArticleReview{}
-		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.CreatedAt); err != nil {
+		if err := rows.Scan(&review.ID, &review.RevisionID, &review.Kind, &review.Status, &review.IssuesJSON, &review.Provider, &review.Model, &review.PromptVersion, &review.CostCents, &review.OriginJobID, &review.CreatedAt); err != nil {
 			return nil, err
 		}
 		out[review.RevisionID] = append(out[review.RevisionID], review)
@@ -921,17 +935,30 @@ func (s *Store) IsRevisionReadyForPublication(ctx context.Context, revisionID st
 }
 
 func (s *Store) refreshDraftReviewState(ctx context.Context, revisionID string) error {
-	ready, err := s.IsRevisionReadyForPublication(ctx, revisionID)
+	// R20：统一使用新就绪判定（旧文章内部仍走 evidence+style 兼容规则）。
+	readiness, err := s.EvaluateArticlePublicationReadiness(ctx, revisionID)
 	if err != nil {
 		return err
 	}
 	state := "reviewing"
-	if ready {
+	if readiness.Ready {
 		state = "ready"
 	} else {
 		var failed int
-		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_reviews WHERE revision_id=? AND kind='evidence' AND status='failed'`, revisionID).Scan(&failed); err != nil {
-			return err
+		if readiness.NewContract {
+			// 新契约：任一最新审校 failed 即 blocked。
+			if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM claim_reviews WHERE work_revision_id=? AND status='failed'`, revisionID).Scan(&failed); err != nil {
+				return err
+			}
+			if failed == 0 {
+				if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_reviews WHERE revision_id=? AND kind='style' AND status='failed'`, revisionID).Scan(&failed); err != nil {
+					return err
+				}
+			}
+		} else {
+			if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_reviews WHERE revision_id=? AND kind='evidence' AND status='failed'`, revisionID).Scan(&failed); err != nil {
+				return err
+			}
 		}
 		if failed > 0 {
 			state = "blocked"

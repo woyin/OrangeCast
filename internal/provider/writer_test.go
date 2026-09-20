@@ -217,10 +217,10 @@ func TestStyleEditorRequiresProfileConstrainedValidDecision(t *testing.T) {
 	request := StyleReviewRequest{Title: "标题", Markdown: "正文", Voice: "清晰"}
 	editor := NewGroqProvider("key")
 	editor.chatCompleteFn = func([]map[string]string, string) (string, int, error) {
-		return `{"status":"advisory","issues":["标题应具体"]}`, 200, nil
+		return `{"status":"failed","issues":["标题应具体"]}`, 200, nil
 	}
 	result, err := editor.ReviewStyle(context.Background(), request)
-	if err != nil || result.Status != "advisory" || len(result.Issues) != 1 {
+	if err != nil || result.Status != "failed" || len(result.Issues) != 1 {
 		t.Fatalf("Groq StyleEditor should parse: result=%+v err=%v", result, err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

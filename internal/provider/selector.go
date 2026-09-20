@@ -86,7 +86,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.openaiBaseURL != "" {
 			oa.baseURL = sel.openaiBaseURL
 		}
-		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Writer: oa, Scout: oa, Curator: oa, EvidenceReviewer: oa, StyleEditor: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration, DigestWriter: oa, DigestSearch: oa, DigestRewriter: oa}, nil
+		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Writer: oa, Scout: oa, Curator: oa, EvidenceReviewer: oa, ClaimReviewer: oa, StyleEditor: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration, DigestWriter: oa, DigestSearch: oa, DigestRewriter: oa}, nil
 	case "groq", "":
 		if sel.groqAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
@@ -95,7 +95,7 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		if sel.groqBaseURL != "" {
 			g.baseURL = sel.groqBaseURL
 		}
-		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Writer: g, Scout: g, Curator: g, EvidenceReviewer: g, StyleEditor: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g, Narration: sel.narration, DigestWriter: g, DigestSearch: g, DigestRewriter: g}, nil
+		return &ProviderBundle{Transcription: g, Analysis: g, QA: g, Writer: g, Scout: g, Curator: g, EvidenceReviewer: g, ClaimReviewer: g, StyleEditor: g, Highlight: g, Paraphrase: g, StudyChat: g, RefChecker: g, Narration: sel.narration, DigestWriter: g, DigestSearch: g, DigestRewriter: g}, nil
 	default:
 		return nil, fmt.Errorf("未知 provider: %s", activeProvider)
 	}
@@ -141,6 +141,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Writer = custom
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
+				bundle.ClaimReviewer = custom
 				bundle.StyleEditor = custom
 				bundle.Curator = custom
 				bundle.Paraphrase = custom
@@ -156,6 +157,7 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 				bundle.Writer = custom
 				bundle.Scout = custom
 				bundle.EvidenceReviewer = custom
+				bundle.ClaimReviewer = custom
 				bundle.StyleEditor = custom
 				bundle.Curator = custom
 				bundle.Paraphrase = custom

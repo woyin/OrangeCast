@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 type articleDraftDetailData struct {
@@ -17,6 +18,13 @@ type articleDraftDetailData struct {
 	CurrentRevision        *models.ArticleRevision
 	CurrentReady           bool
 	HasComparableRevisions bool
+	// R20：新契约门禁状态。
+	NewContract     bool
+	ReadinessIssues []string
+	ClaimJob        *models.ProcessingJob
+	StyleJob        *models.ProcessingJob
+	LatestClaim     *models.ClaimReview
+	LatestStyle     *models.ArticleReview
 }
 
 func (srv *Server) loadArticleDraftDetail(ctx context.Context, draftID, fromID, toID string) (*articleDraftDetailData, error) {
@@ -46,17 +54,53 @@ func (srv *Server) loadArticleDraftDetail(ctx context.Context, draftID, fromID, 
 		return nil, badEditorial(err.Error())
 	}
 	currentReady := false
+	newContract := false
+	var readinessIssues []string
+	var claimJob, styleJob *models.ProcessingJob
+	var latestClaim *models.ClaimReview
+	var latestStyle *models.ArticleReview
 	if currentRevision != nil {
-		currentReady, err = srv.store.IsRevisionReadyForPublication(ctx, currentRevision.ID)
+		// R20：统一就绪判定（旧文章内部仍走 evidence+style 兼容规则），
+		// 并加载当前修订的审校任务状态供页面展示。
+		readiness, rerr := srv.store.EvaluateArticlePublicationReadiness(ctx, currentRevision.ID)
+		if rerr != nil {
+			return nil, internalEditorial("检查当前修订交付门禁失败")
+		}
+		newContract = readiness.NewContract
+		readinessIssues = readiness.Issues
+		currentReady = readiness.Ready
+		latestClaim, latestStyle, claimJob, styleJob, err = srv.loadDurableReviewState(ctx, currentRevision.ID)
 		if err != nil {
-			return nil, internalEditorial("检查当前修订证据门禁失败")
+			return nil, err
 		}
 	}
 	currentMarkdown := ""
 	if len(revisions) > 0 {
 		currentMarkdown = revisions[0].Markdown
 	}
-	return &articleDraftDetailData{Draft: draft, Revisions: revisions, ReviewsByRevision: reviewsByRevision, Comparison: comparison, CurrentMarkdown: currentMarkdown, CurrentRevision: currentRevision, CurrentReady: currentReady, HasComparableRevisions: len(revisions) > 1}, nil
+	return &articleDraftDetailData{Draft: draft, Revisions: revisions, ReviewsByRevision: reviewsByRevision, Comparison: comparison, CurrentMarkdown: currentMarkdown, CurrentRevision: currentRevision, CurrentReady: currentReady, HasComparableRevisions: len(revisions) > 1, NewContract: newContract, ReadinessIssues: readinessIssues, ClaimJob: claimJob, StyleJob: styleJob, LatestClaim: latestClaim, LatestStyle: latestStyle}, nil
+}
+
+// loadDurableReviewState 读取页面所需的持久审校状态：只把 store.ErrNotFound
+// 当作缺失（nil），其余数据库错误显式返回，不吞错。
+func (srv *Server) loadDurableReviewState(ctx context.Context, revisionID string) (*models.ClaimReview, *models.ArticleReview, *models.ProcessingJob, *models.ProcessingJob, error) {
+	claim, err := srv.store.LatestDurableClaimReview(ctx, revisionID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, nil, internalEditorial("读取主张审校记录失败")
+	}
+	style, err := srv.store.LatestDurableStyleReview(ctx, revisionID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, nil, internalEditorial("读取风格审校记录失败")
+	}
+	claimJob, err := srv.store.ReviewJobForRevision(ctx, revisionID, store.ReviewKindClaim)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, nil, internalEditorial("读取主张审校任务失败")
+	}
+	styleJob, err := srv.store.ReviewJobForRevision(ctx, revisionID, store.ReviewKindStyle)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil, nil, internalEditorial("读取风格审校任务失败")
+	}
+	return claim, style, claimJob, styleJob, nil
 }
 
 func articleReviewViews(allReviews map[string][]*models.ArticleReview, revisions []*models.ArticleRevision) map[string][]articleReviewView {

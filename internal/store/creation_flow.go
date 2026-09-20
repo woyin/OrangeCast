@@ -1055,6 +1055,8 @@ func (s *Store) SaveClaimMap(ctx context.Context, draftID, revisionID string, en
 }
 
 // ListClaimMap 读取一个修订的全部 ClaimMap 条目。
+// JSON 损坏不静默降级：material_ids/citation_refs 解析失败返回带上下文错误
+// （入队/读取/导出路径都不得基于部分数据继续）。
 func (s *Store) ListClaimMap(ctx context.Context, draftID, revisionID string) ([]models.ClaimMapEntry, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT excerpt, claim_kind, material_ids_json, source_title, citation_refs_json
@@ -1070,8 +1072,12 @@ func (s *Store) ListClaimMap(ctx context.Context, draftID, revisionID string) ([
 		if err := rows.Scan(&e.Excerpt, &e.ClaimKind, &materials, &e.SourceTitle, &citations); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(materials), &e.MaterialIDs)
-		_ = json.Unmarshal([]byte(citations), &e.CitationRefs)
+		if err := json.Unmarshal([]byte(materials), &e.MaterialIDs); err != nil {
+			return nil, fmt.Errorf("解析 ClaimMap 材料 ID（revision %s excerpt %q）: %w", revisionID, e.Excerpt, err)
+		}
+		if err := json.Unmarshal([]byte(citations), &e.CitationRefs); err != nil {
+			return nil, fmt.Errorf("解析 ClaimMap 引用（revision %s excerpt %q）: %w", revisionID, e.Excerpt, err)
+		}
 		out = append(out, e)
 	}
 	return out, rows.Err()

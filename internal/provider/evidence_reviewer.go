@@ -10,7 +10,12 @@ import (
 const (
 	// EvidenceReviewerPromptVersion identifies the prompt contract used by evidence review requests.
 	EvidenceReviewerPromptVersion = "evidence-reviewer-v1"
-	evidenceReviewerSystemPrompt  = `你是独立 EvidenceReviewer。只根据请求中给出的 Revision、EvidenceMap 与 KeyPoint 原始材料检查：每个转述/综合是否被材料支持、直接引语是否可追溯、是否有错误归因。不能使用外部知识。输出 JSON {"status":"passed"或"failed","issues":["..."]}。存在任何硬证据问题必须 failed。`
+
+	// ClaimReviewerPromptVersion identifies the durable prompt contract used by
+	// independent claim review jobs (R20).
+	ClaimReviewerPromptVersion = "claim-reviewer-v1"
+
+	evidenceReviewerSystemPrompt = `你是独立 EvidenceReviewer。只根据请求中给出的 Revision、EvidenceMap 与 KeyPoint 原始材料检查：每个转述/综合是否被材料支持、直接引语是否可追溯、是否有错误归因。不能使用外部知识。输出 JSON {"status":"passed"或"failed","issues":["..."]}。存在任何硬证据问题必须 failed。`
 )
 
 // ReviewEvidence asks Groq for an independent evidence decision.

@@ -128,11 +128,19 @@ type ClaimMap struct {
 }
 
 // ClaimReview is the replacement contract for evidence-only review.
+// Status 统一为 passed|failed；OriginJobID 绑定产生它的持久任务（R20 恢复/幂等）。
 type ClaimReview struct {
 	ID, WorkRevisionID, Status, IssuesJSON, CreatedAt string
 	Provider, Model, PromptVersion                    *string
 	CostCents                                         *int64
+	OriginJobID                                       string
 }
+
+// ClaimReview/StyleReview 状态枚举（Provider/Store 统一，R20）。
+const (
+	ClaimReviewStatusPassed = "passed"
+	ClaimReviewStatusFailed = "failed"
+)
 
 // CreationSelectionStatus 素材选择状态（C01）。
 const (

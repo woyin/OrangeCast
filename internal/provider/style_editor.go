@@ -9,8 +9,8 @@ import (
 
 const (
 	// StyleEditorPromptVersion identifies the prompt contract used by style review requests.
-	StyleEditorPromptVersion = "style-editor-v1"
-	styleEditorSystemPrompt  = `你是独立 StyleEditor。只依据 EditorialProfile 的目标读者、语气、风格说明和目标篇幅检查文章的标题、结构、节奏、重复、篇幅与禁用表达。不要判断事实或证据。输出 JSON {"status":"passed"或"advisory","issues":["..."]}。有建议时必须 advisory；风格审校永远不能解除或替代证据门禁。`
+	StyleEditorPromptVersion = "style-editor-v2"
+	styleEditorSystemPrompt  = `你是独立 StyleEditor。只依据 EditorialProfile 的目标读者、语气、风格说明和目标篇幅检查文章的标题、结构、节奏、重复、篇幅与禁用表达。不要判断事实或证据。输出 JSON {"status":"passed"或"failed","issues":["..."]}。完全符合风格约束时输出 passed 且 issues 为空数组；有任何风格问题时必须输出 failed 并在 issues 中逐条说明。风格审校永远不能解除或替代证据/主张门禁。`
 )
 
 // ReviewStyle asks Groq for non-blocking style findings.
@@ -71,14 +71,14 @@ func styleReviewInput(request StyleReviewRequest) (string, error) {
 }
 
 func validateStyleReviewResult(result *StyleReviewResult) (*StyleReviewResult, error) {
-	if result == nil || (result.Status != "passed" && result.Status != "advisory") {
-		return nil, fmt.Errorf("StyleEditor 必须返回 passed 或 advisory")
+	if result == nil || (result.Status != "passed" && result.Status != "failed") {
+		return nil, fmt.Errorf("StyleEditor 必须返回 passed 或 failed")
 	}
 	if result.Status == "passed" && len(result.Issues) > 0 {
-		return nil, fmt.Errorf("通过的风格审校不能包含建议")
+		return nil, fmt.Errorf("通过的风格审校不能包含问题")
 	}
-	if result.Status == "advisory" && len(result.Issues) == 0 {
-		return nil, fmt.Errorf("advisory 风格审校必须说明建议")
+	if result.Status == "failed" && len(result.Issues) == 0 {
+		return nil, fmt.Errorf("failed 风格审校必须说明问题")
 	}
 	return result, nil
 }

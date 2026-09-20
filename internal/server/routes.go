@@ -71,6 +71,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/workbench/revisions/", srv.handlePublicationPackage)
 	mux.HandleFunc("/workbench/reviews/evidence", srv.handleEvidenceReviewRun)
 	mux.HandleFunc("/workbench/reviews/style", srv.handleStyleReviewRun)
+	mux.HandleFunc("/workbench/reviews/claims", srv.handleClaimReviewRun) // R20：独立主张审校入队
 	mux.HandleFunc("/workbench/write", srv.handleArticleWriterRun)
 	mux.HandleFunc("/workbench/revise", srv.handleArticleRevisionWriterRun)
 	mux.HandleFunc("/progress", srv.handleProgress)

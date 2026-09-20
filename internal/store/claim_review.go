@@ -75,15 +75,20 @@ func (s *Store) ListClaimMaps(ctx context.Context, revisionID string) ([]*models
 }
 
 // CreateClaimReview writes an immutable review result for exactly one revision.
+// Status 统一为 passed|failed（R20）；带 origin_job_id 的持久任务产物必须携带完整
+// provider/model/prompt provenance；旧兼容路径（证据审校同步副本）不带 origin_job_id。
 func (s *Store) CreateClaimReview(ctx context.Context, v models.ClaimReview) (*models.ClaimReview, error) {
 	v.ID = uuid.NewString()
-	if v.Status != "passed" && v.Status != "failed" && v.Status != "advisory" {
+	if v.Status != models.ClaimReviewStatusPassed && v.Status != models.ClaimReviewStatusFailed {
 		return nil, fmt.Errorf("%w: invalid claim review", ErrInvalidEditorialState)
 	}
 	if v.IssuesJSON == "" {
 		v.IssuesJSON = "[]"
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status,issues_json,provider,model,prompt_version,cost_cents) VALUES (?,?,?,?,?,?,?,?)`, v.ID, v.WorkRevisionID, v.Status, v.IssuesJSON, v.Provider, v.Model, v.PromptVersion, v.CostCents)
+	if v.OriginJobID != "" && (v.Provider == nil || strings.TrimSpace(*v.Provider) == "" || v.Model == nil || strings.TrimSpace(*v.Model) == "" || v.PromptVersion == nil || strings.TrimSpace(*v.PromptVersion) == "") {
+		return nil, fmt.Errorf("%w: durable claim review requires trusted provider provenance", ErrInvalidEditorialState)
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status,issues_json,provider,model,prompt_version,cost_cents,origin_job_id) VALUES (?,?,?,?,?,?,?,?,?)`, v.ID, v.WorkRevisionID, v.Status, v.IssuesJSON, v.Provider, v.Model, v.PromptVersion, v.CostCents, v.OriginJobID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +101,7 @@ func (s *Store) LatestClaimReview(ctx context.Context, revisionID string) (*mode
 	v := &models.ClaimReview{}
 	var p, m, pv sql.NullString
 	var cost sql.NullInt64
-	err := s.DB.QueryRowContext(ctx, `SELECT id,work_revision_id,status,issues_json,provider,model,prompt_version,cost_cents,created_at FROM claim_reviews WHERE work_revision_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, revisionID).Scan(&v.ID, &v.WorkRevisionID, &v.Status, &v.IssuesJSON, &p, &m, &pv, &cost, &v.CreatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,work_revision_id,status,issues_json,provider,model,prompt_version,cost_cents,COALESCE(origin_job_id,''),created_at FROM claim_reviews WHERE work_revision_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, revisionID).Scan(&v.ID, &v.WorkRevisionID, &v.Status, &v.IssuesJSON, &p, &m, &pv, &cost, &v.OriginJobID, &v.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}

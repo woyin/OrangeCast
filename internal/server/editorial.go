@@ -428,13 +428,20 @@ func (srv *Server) handleArticleDraftDetail(w http.ResponseWriter, r *http.Reque
 			writeEditorialError(w, err)
 			return
 		}
-		claimReview, err = srv.store.LatestClaimReview(r.Context(), data.CurrentRevision.ID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			writeEditorialError(w, err)
-			return
+		// R20：新契约只展示持久任务产物的独立 ClaimReview；旧 EvidenceReview 兼容
+		// 副本（origin_job_id=''）不得误标成已完成独立审校。
+		if data.NewContract {
+			claimReview = data.LatestClaim
+		} else {
+			// 旧文章兼容语义：保留既有展示（含旧证据审校同步副本）。
+			claimReview, err = srv.store.LatestClaimReview(r.Context(), data.CurrentRevision.ID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				writeEditorialError(w, err)
+				return
+			}
 		}
 	}
-	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "CSRF": auth.CSRFValue(r)})
+	srv.tmpl.Render(w, "article_draft.html", map[string]any{"Draft": data.Draft, "Revisions": data.Revisions, "HasComparableRevisions": data.HasComparableRevisions, "ReviewsByRevision": data.ReviewsByRevision, "Comparison": data.Comparison, "CurrentMarkdown": data.CurrentMarkdown, "CurrentRevision": data.CurrentRevision, "CurrentRichHTML": template.HTML(wechatRichText(data.CurrentMarkdown)), "CurrentReady": data.CurrentReady, "ClaimMaps": claimMaps, "ClaimReview": claimReview, "NewContract": data.NewContract, "ReadinessIssues": data.ReadinessIssues, "ClaimJob": data.ClaimJob, "StyleJob": data.StyleJob, "LatestClaim": data.LatestClaim, "LatestStyle": data.LatestStyle, "CSRF": auth.CSRFValue(r)})
 }
 
 type articleReviewView struct {
@@ -498,12 +505,29 @@ func (srv *Server) inheritedEvidenceMaps(r *http.Request, draftID, markdown stri
 }
 
 // handleEvidenceReviewRun executes an independent evidence review for the current exact revision.
+// R20：新契约文章在 Provider/预算之前拒绝——EvidenceReview 不能替代独立 ClaimReview；
+// 旧文章保持原有同步审校行为。
 func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	draftID, err := srv.runEvidenceReview(r, r.FormValue("revision_id"))
+	revisionID := r.FormValue("revision_id")
+	revision, err := srv.store.GetArticleRevision(r.Context(), revisionID)
+	if err != nil {
+		writeEditorialError(w, badEditorial("读取文章修订失败"))
+		return
+	}
+	newContract, err := srv.store.IsNewContractRevision(r.Context(), revision.ID)
+	if err != nil {
+		writeEditorialError(w, internalEditorial("检查文章契约失败"))
+		return
+	}
+	if newContract {
+		http.Error(w, "新契约文章不使用证据审校：请运行主张审校（/workbench/reviews/claims），独立 ClaimReview 才能解锁导出", http.StatusConflict)
+		return
+	}
+	draftID, err := srv.runEvidenceReview(r, revisionID)
 	if err != nil {
 		writeEditorialError(w, err)
 		return
@@ -512,12 +536,34 @@ func (srv *Server) handleEvidenceReviewRun(w http.ResponseWriter, r *http.Reques
 }
 
 // handleStyleReviewRun records independent, non-blocking style advice for an exact revision.
+// R20：新契约文章改为 durable enqueue（JobStyleReview 由 worker 执行，关闭页面不
+// 取消，失败可重试同 job）；旧文章保留同步审校兼容路径。
 func (srv *Server) handleStyleReviewRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	draftID, err := srv.runStyleReview(r, r.FormValue("revision_id"))
+	revisionID := r.FormValue("revision_id")
+	revision, err := srv.store.GetArticleRevision(r.Context(), revisionID)
+	if err != nil {
+		writeEditorialError(w, badEditorial("读取文章修订失败"))
+		return
+	}
+	newContract, err := srv.store.IsNewContractRevision(r.Context(), revision.ID)
+	if err != nil {
+		writeEditorialError(w, internalEditorial("检查文章契约失败"))
+		return
+	}
+	if newContract {
+		job, err := srv.store.EnqueueRevisionReview(r.Context(), revision.ID, store.ReviewKindStyle)
+		if err != nil {
+			writeEditorialError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/workbench/drafts/"+job.SourceID, http.StatusSeeOther)
+		return
+	}
+	draftID, err := srv.runStyleReview(r, revisionID)
 	if err != nil {
 		writeEditorialError(w, err)
 		return

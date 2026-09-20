@@ -293,6 +293,7 @@ type ProviderBundle struct {
 	Scout            ScoutProvider
 	Curator          CuratorProvider
 	EvidenceReviewer EvidenceReviewerProvider
+	ClaimReviewer    ClaimReviewProvider
 	StyleEditor      StyleEditorProvider
 	Highlight        HighlightProvider
 	Paraphrase       ParaphraseProvider

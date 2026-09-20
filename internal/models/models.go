@@ -45,6 +45,8 @@ const (
 	JobClaimWriting JobType = "claim_writing"
 	// JobClaimReview 独立语义审校任务（C11）：检查主张归因与授权。
 	JobClaimReview JobType = "claim_review"
+	// JobStyleReview 独立风格审校任务（R20）：检查风格约束与目标篇幅。
+	JobStyleReview JobType = "style_review"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
@@ -505,13 +507,14 @@ type ArticleReview struct {
 	ID            string
 	RevisionID    string
 	Kind          string // evidence | style
-	Status        string // passed | failed | advisory
+	Status        string // passed | failed（advisory 仅历史行兼容读取）
 	IssuesJSON    string
 	Provider      *string
 	Model         *string
 	PromptVersion *string
 	CostCents     *int64
 	CreatedAt     string
+	OriginJobID   string // R20：产生该审校的持久任务（durable 路径非空）
 }
 
 // EditorialFeedback 是 Owner 对内容生产对象的显式编辑判断。

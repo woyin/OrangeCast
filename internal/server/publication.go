@@ -6,7 +6,10 @@ import (
 	"html"
 	"html/template"
 	"net/http"
+	"sort"
 	"strings"
+
+	"github.com/woyin/orangecast/internal/models"
 )
 
 // handlePublicationPackage renders or downloads a package only after the exact revision passes evidence review.
@@ -38,16 +41,23 @@ func (srv *Server) handlePublicationPackage(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "只能为当前修订生成内容包；请先审校当前版本", http.StatusConflict)
 		return
 	}
-	ready, err := srv.store.IsRevisionReadyForPublication(r.Context(), id)
+	// R20：统一就绪门禁（新契约 = durable ClaimReview+StyleReview 均 passed；
+	// 旧文章 = evidence+style 兼容规则）。缺失/failed/仅旧审校/其他 revision 均 409。
+	readiness, err := srv.store.EvaluateArticlePublicationReadiness(r.Context(), id)
 	if err != nil {
-		http.Error(w, "检查证据门禁失败", http.StatusInternalServerError)
+		http.Error(w, "检查交付门禁失败", http.StatusInternalServerError)
 		return
 	}
-	if !ready {
-		http.Error(w, "当前修订尚未通过证据审校，不能生成内容包", http.StatusConflict)
+	if !readiness.Ready {
+		http.Error(w, "当前修订尚未通过交付门禁："+strings.Join(readiness.Issues, "；"), http.StatusConflict)
 		return
 	}
-	sources, err := srv.publicationSources(r, id, draft.EditorialProfileID)
+	var sources []string
+	if readiness.NewContract {
+		sources, err = srv.claimMapSources(r, revision, draft.EditorialProfileID)
+	} else {
+		sources, err = srv.publicationSources(r, id, draft.EditorialProfileID)
+	}
 	if err != nil {
 		http.Error(w, "当前证据或素材授权已失效，不能生成内容包："+err.Error(), http.StatusConflict)
 		return
@@ -185,6 +195,58 @@ func (srv *Server) publicationSources(r *http.Request, revisionID, profileID str
 				seen[sourceKey] = true
 				sources = append(sources, title)
 			}
+		}
+	}
+	return sources, nil
+}
+
+// claimMapSources R20：新契约文章的导出来源从该精确 revision 的 ClaimMap 材料 ID
+// 派生；逐 KeyPoint 动态重验 CanUseSourceForPublication 与 Citation 有效性
+// （归档/撤销/失效立即阻断导出）。只有 Owner/Synthesis 无来源表达时允许空来源。
+func (srv *Server) claimMapSources(r *http.Request, revision *models.ArticleRevision, profileID string) ([]string, error) {
+	entries, err := srv.store.ListClaimMap(r.Context(), revision.DraftID, revision.ID)
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for _, entry := range entries {
+		for _, id := range entry.MaterialIDs {
+			used[id] = true
+		}
+	}
+	seen := map[string]bool{}
+	var sources []string
+	// 排序保证来源输出确定性（map 迭代无序）。
+	ids := make([]string, 0, len(used))
+	for id := range used {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		keyPoint, err := srv.store.GetKeyPoint(r.Context(), id)
+		if err != nil {
+			return nil, fmt.Errorf("材料 %s 已不存在", id)
+		}
+		usable, err := srv.store.CanUseSourceForPublication(r.Context(), profileID, keyPoint.SourceType, keyPoint.SourceID)
+		if err != nil || !usable {
+			return nil, fmt.Errorf("Source %s/%s 已归档或不可用", keyPoint.SourceType, keyPoint.SourceID)
+		}
+		var citations []string
+		if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil {
+			return nil, err
+		}
+		valid, err := srv.store.ValidateSourceCitations(r.Context(), keyPoint.SourceType, keyPoint.SourceID, citations)
+		if err != nil || !valid {
+			return nil, fmt.Errorf("KeyPoint %s 的 Citation 已失效", keyPoint.ID)
+		}
+		title := strings.TrimSpace(keyPoint.SourceTitle)
+		if title == "" {
+			title = fmt.Sprintf("%s · %s", keyPoint.SourceType, keyPoint.SourceID)
+		}
+		sourceKey := string(keyPoint.SourceType) + "\x00" + keyPoint.SourceID
+		if !seen[sourceKey] {
+			seen[sourceKey] = true
+			sources = append(sources, title)
 		}
 	}
 	return sources, nil

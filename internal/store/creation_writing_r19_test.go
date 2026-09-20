@@ -663,3 +663,86 @@ func TestMigration0053(t *testing.T) {
 		t.Fatalf("Writer 草稿映射不可读: %s %v", writerDraft, err)
 	}
 }
+
+// TestMigration0054 R20：origin_job_id 列与部分唯一索引（claim_reviews /
+// article_reviews）、revision_review_intents 主键与 (revision, kind) 幂等映射；
+// 旧数据 origin_job_id=” 不受索引约束，历史多行审校保留。
+func TestMigration0054(t *testing.T) {
+	ctx := t.Context()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "mig54.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyThrough := func(version int) error {
+		for _, m := range ms {
+			if m.version <= version {
+				if err := applyOne(ctx, db, m); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, schemaMigrationsTable); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyThrough(53); err != nil {
+		t.Fatalf("应用 1..53: %v", err)
+	}
+	// 0053 下构造历史审校行（origin_job_id 缺省 ''）。
+	if _, err = db.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status) VALUES ('cr-old','r-old','passed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO article_reviews (id,revision_id,kind,status,issues_json) VALUES ('ar-old','r-old','style','advisory','["建议"]')`); err != nil {
+		t.Fatal(err)
+	}
+	// 应用 0054（仅该条迁移）。
+	for _, m := range ms {
+		if m.version == 54 {
+			if err := applyOne(ctx, db, m); err != nil {
+				t.Fatalf("0054 升级应成功: %v", err)
+			}
+		}
+	}
+	// 旧行不受部分唯一索引约束：同修订多行历史审校保留。
+	if _, err = db.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status) VALUES ('cr-old2','r-old','failed')`); err != nil {
+		t.Fatal(err)
+	}
+	// origin_job_id 非空时同 (revision, job) 唯一。
+	if _, err = db.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status,origin_job_id) VALUES ('cr-j1','r-new','passed','job-1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO claim_reviews (id,work_revision_id,status,origin_job_id) VALUES ('cr-j2','r-new','failed','job-1')`); err == nil {
+		t.Fatal("同 (revision, origin_job_id) 重复必须被唯一索引拒绝")
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO article_reviews (id,revision_id,kind,status,issues_json,origin_job_id) VALUES ('ar-j1','r-new','style','failed','["x"]','job-2')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO article_reviews (id,revision_id,kind,status,issues_json,origin_job_id) VALUES ('ar-j2','r-new','style','passed','[]','job-2')`); err == nil {
+		t.Fatal("article_reviews 同 (revision, origin_job_id) 重复必须被唯一索引拒绝")
+	}
+	// revision_review_intents：主键幂等 + (revision, kind) 映射可读。
+	if _, err = db.ExecContext(ctx, `INSERT INTO processing_jobs (id, source_type, source_id, job_type, status, intent_id) VALUES ('jr','episode','d','claim_review','succeeded','claim_review:r-new')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO revision_review_intents (intent_id, job_id, revision_id, kind) VALUES ('claim_review:r-new','jr','r-new','claim')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO revision_review_intents (intent_id, job_id, revision_id, kind) VALUES ('claim_review:r-new','jr2','r-new','style')`); err == nil {
+		t.Fatal("同 intent 重复必须被主键拒绝")
+	}
+	var jobID, kind string
+	if err := db.QueryRowContext(ctx, `SELECT job_id,kind FROM revision_review_intents WHERE intent_id='claim_review:r-new'`).Scan(&jobID, &kind); err != nil || jobID != "jr" || kind != "claim" {
+		t.Fatalf("审校意图映射不可读: %s %s %v", jobID, kind, err)
+	}
+	// 历史审校行仍可读（含 advisory 兼容状态）。
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_reviews WHERE revision_id='r-old'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("历史 style 审校必须保留: %d err=%v", n, err)
+	}
+}

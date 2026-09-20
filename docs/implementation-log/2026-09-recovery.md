@@ -370,6 +370,28 @@
   - `go test -count=1 ./...`、`go vet ./...`、`gofmt -l internal`、`git diff --check` 通过。
 - 限制：R19 durable ClaimWriter 尚未开始。
 
+## R20 — 新审校真正控制交付（未提交候选，基于 e36507f）
+
+- 状态：实现、独立复核与自动验证完成；本段记录 R20 原子变更（基于 e36507f）。
+- 交付：
+  - migration 0054：`claim_reviews.origin_job_id`、`article_reviews.origin_job_id`（部分唯一索引 (revision, origin_job_id)，origin_job_id 非空才约束；旧数据 `''` 不受影响，历史多行/advisory 行保留可读）；`revision_review_intents(intent_id PK, job_id, revision_id, kind)`——精确 revision+kind → 持久任务映射，succeeded/queued/running 复用同 job、failed 真实重试同 job（reset queued 保留冻结输入/config/checkpoint）。TestMigration0054 覆盖索引/主键/旧数据兼容；migrate/backup/v01 版本断言 53→54。
+  - 统一状态：ClaimReview Provider/Store 全部 passed|failed（provider 校验 passed findings 空、failed 非空、issueKind 合法、excerpt 位于正文、材料不越权、Materials 不得夹带未授权 ID）；StyleEditor prompt/validation 改 passed|failed（failed 必须有 issues，prompt version bump style-editor-v2），旧文章 advisory 行兼容读取；durable style 行拒绝 advisory。
+  - `store.ReviewTaskInput` 冻结快照 + `EnqueueRevisionReview`（单事务）：claim 冻结精确 revision title/markdown、ClaimMap（引用 ID 必须全在确认快照内、AuthorizedIDs 排序稳定）、CreationBrief 精确版本/confirmed claim、授权 ArticleMaterial 全文、analysis 角色配置、ClaimReviewerPromptVersion；style 冻结画像约束/目标篇幅/材料按该 revision ClaimMap 引用过滤/StyleEditor 配置；无 bridge 拒绝 claim、无 ClaimMap 拒绝两者；marshal 错误显式处理。
+  - `SaveClaimReviewOutput`/`SaveStyleReviewOutput`：对任务冻结输入校验后单事务写审校行（实际调用 provider/model + frozen prompt + origin_job_id）+ job complete result；origin-job 幂等重放返回持久行精确 provenance；durable 行 failed 必有 issues/passed 必无；RowsAffected 全处理。
+  - `EvaluateArticlePublicationReadiness`：新契约（持久 bridge 判定 revision→draft.brief_id→creation_article_links.article_brief_id）要求 durable ClaimReview+StyleReview 均 passed 且 provenance 完整；EvidenceReview/旧拷贝不替代；缺失/failed/仅旧审校/其他 revision 均给出具体 issue；旧文章沿用 IsRevisionReadyForPublication；refreshDraftReviewState 改走统一判定。
+  - queue：`doClaimReviewJob`（bundle.ClaimReviewer 独立角色，不再借道 Analysis）与 `doStyleReviewJob`（JobStyleReview）只读冻结快照；逐冻结 material 动态 CanUseSourceForPublication+CanSendSourceToProvider（JobClaimReview/JobStyleReview 均不做单一来源 sendPolicy）；checkpoint 强类型（result+usage+provider/model/prompt+RevisionID+RequestHash=完整 provider request JSON sha256），复用校验全部绑定字段+结果契约，篡改不静默复用；usage receipt；budget/style_review 预估；failed 重试同 job。
+  - server：`POST /workbench/reviews/claims`（重复点击复用/failed 重试同 job）；style POST 新契约只 durable enqueue（同步 Provider 零调用），旧文章保留同步路径；evidence POST 新契约在 Provider 前 409 指向 ClaimReview；publication 使用新 readiness（409 携带具体 issues），新契约来源从精确 ClaimMap 材料 ID 派生并逐 KeyPoint 重验 publication+citations；draft 页新契约显示主张/风格审校按钮（运行/重试）、job 状态/last_error、最新审校结论与门禁文案，旧文章保留 Evidence+sync Style。
+- 独立复核修复（本轮审计）：
+  - 页面查询只吞 ErrNotFound：`loadDurableReviewState` 对 LatestDurableClaimReview/LatestDurableStyleReview/ReviewJobForRevision 的非 NotFound 数据库错误显式返回 internalEditorial，不再静默吞掉。
+  - 旧 claim 兼容副本不误标：新契约页面 ClaimReview 只取 durable 产物（origin_job_id 非空）；旧 EvidenceReview 同步副本仅在旧文章以“（兼容投影）”标签展示，且不解除新契约门禁（TestNewContractPageRejectsLegacyClaimRowR20）。
+  - ClaimMap JSON 损坏显式失败：ListClaimMap/listClaimMapTx 对 material_ids_json/citation_refs_json 解析错误返回带 revision+excerpt 上下文错误；损坏阻断 claim/style 入队与导出（TestCorruptedClaimMapBlocksEnqueueR20 独立 fixture 逐列验证、TestCorruptedClaimMapBlocksReviewAndExportR20），不静默降级。
+  - style ghost material 拒绝：style 入队冻结材料前校验 ClaimMap 引用的每个 material ID 都在确认 Curator 快照内，缺一即拒、不部分过滤（TestStyleEnqueueRejectsGhostMaterialR20）；claim 分支同样回归覆盖。
+  - 来源确定排序：claimMapSources 迭代前对 material IDs 排序，来源输出不随 map 迭代漂移（TestClaimMapSourcesDeterministicOrderR20 跨两真实来源断言顺序与稳定性）。
+  - 测试 fixture 全检查错误：server/store/queue R20 测试中 Enqueue/MarkJobRunning/Save/Create 等准备步骤全部显式断言错误（check/mustRunJob helper），消除吞错假阳性。
+- 测试：store `review_intents_r20_test.go`（冻结快照逐字段、无 bridge/无 ClaimMap 拒绝、复用/failed 重试 DB 状态断言、Save 校验矩阵+重放精确行、readiness 7 子测试矩阵、style 材料按 ClaimMap 过滤、legacy advisory 兼容 vs durable 拒绝）；queue `review_intents_r20_test.go`（生产 dispatch+冻结请求+usage、style dispatch+checkpoint Usage、checkpoint 后 trigger 注入业务失败→store 重试零额外调用、动态 LocalOnly/归档零调用、非法 Provider 输出不 checkpoint 不落库可重试）；server `creation_review_r20_test.go`（真实路由 claims 创建/重试同 job、style 零 Provider、evidence 409 零 Provider；导出门禁矩阵 missing/claim failed/style failed/legacy-only/valid 200+非当前修订 409；页面新/旧按钮与 failed job 文案）；TestMigration0054；migrate/backup/v01 全绿。
+- 已跑验证：`go test -count=1 ./internal/store ./internal/queue ./internal/provider ./internal/server`（全绿）；R20 定向 race：`go test -count=1 -race ./internal/server -run 'TestReviewRoutesR20|TestPublicationGateR20|TestArticleDraftPageR20'`、store/queue R20 定向 race（R20|EnqueueRevisionReview|EvaluateReadiness|SaveClaimReviewOutput|TestMigration0053|TestMigration0054|TestEnqueueClaimWriting）；`go test -count=1 -race ./internal/store -run 'TestMigrate|TestV01|TestConsistencyBackup'`、`go test -count=1 -race ./internal/backup/`（latest=54）；直接 `go test -count=1 ./...`（exit 0）；`go vet ./...`；`go build ./...`；`gofmt -l internal` 空；`git diff --check` 干净。
+- 限制：未调用真实付费模型；页面/导出未做真实浏览器操作（R25）；EvidenceReview 同步路径仅旧文章可达。
+
 ## R19 — 持久 Writer 从生成动作到正文修订原子落库
 
 - 状态：实现、独立审阅与自动验证完成；本段记录 R19 原子变更（基于 8455c09）。

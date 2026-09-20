@@ -100,6 +100,12 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 			tc = provider.TaskConfig{Provider: ptrStr(st.CuratorProvider), Model: ptrStr(st.CuratorModel)}
 		case models.JobClaimWriting:
 			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
+		case models.JobClaimReview:
+			// 独立主张审校（R20）与重点质量同池：判定用 analysis 角色配置。
+			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
+		case models.JobStyleReview:
+			// 独立风格审校（R20）使用 StyleEditor 角色配置。
+			tc = provider.TaskConfig{Provider: ptrStr(st.StyleEditorProvider), Model: ptrStr(st.StyleEditorModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -206,12 +212,12 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 
 // sendPolicyJobTypes 需要在执行时动态检查来源访问策略的任务
 // （向 Provider 发送来源内容的任务；本地组装/合成类任务不在此列）。
-// 注意 JobClaimWriting 不在此列：其 job.SourceID 是 draft 身份而非单一来源，
-// 多来源策略检查在 doClaimWritingJob 内逐冻结材料完成。
+// 注意 JobClaimWriting/JobClaimReview/JobStyleReview 不在此列：其 job.SourceID 是
+// draft 身份而非单一来源，逐冻结材料的策略检查在各自 do 内完成（R19/R20）。
 var sendPolicyJobTypes = map[models.JobType]bool{
 	models.JobTranscribe: true, models.JobAnalyze: true, models.JobDigest: true,
 	models.JobHighlight: true, models.JobKeypointQuality: true, models.JobDigestRewrite: true,
-	models.JobIdeationDiagnosis: true, models.JobClaimReview: true,
+	models.JobIdeationDiagnosis: true,
 }
 
 // enforceSourceSendPolicy 执行时动态应用来源模型数据策略（R04）：
@@ -251,6 +257,9 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 40_000, 8_000
 	case "claim_review":
 		return 50_000, 10_000
+	case "style_review":
+		// 风格审校只发送文章正文与画像约束，输入小于主张审校。
+		return 40_000, 8_000
 	case "curator_brief":
 		return 60_000, 15_000
 	case "claim_writing":
@@ -265,7 +274,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobCuratorBrief, models.JobClaimWriting:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting:
 	default:
 		return nil
 	}
@@ -392,6 +401,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doIdeationDiagnosisJob(ctx, job, bundle)
 	case models.JobClaimReview:
 		return w.doClaimReviewJob(ctx, job, bundle)
+	case models.JobStyleReview:
+		return w.doStyleReviewJob(ctx, job, bundle)
 	case models.JobCuratorBrief:
 		return w.doCuratorBriefJob(ctx, job, bundle)
 	case models.JobClaimWriting:
