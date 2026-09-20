@@ -106,7 +106,7 @@ func (s *Store) CreateCreationProposal(ctx context.Context, v models.CreationPro
 	if _, err := s.GetEditorialProfile(ctx, v.EditorialProfileID); err != nil {
 		return nil, err
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO creation_proposals (id,editorial_profile_id,proposal_batch_id,ideation_session_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.EditorialProfileID, optionalWorkspaceString(v.ProposalBatchID), optionalWorkspaceString(v.IdeationSessionID), v.Status, v.CreationForm, v.WorkingTitle, v.ProposedClaim, optionalWorkspaceString(v.OwnerClaim), v.Audience, v.Rationale, v.MaterialIDsJSON, v.HistoryRelationship)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO creation_proposals (id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.ID, v.EditorialProfileID, optionalWorkspaceString(v.ProposalBatchID), optionalWorkspaceString(v.IdeationSessionID), optionalWorkspaceString(v.IdeationRoundID), v.Status, v.CreationForm, v.WorkingTitle, v.ProposedClaim, optionalWorkspaceString(v.OwnerClaim), v.Audience, v.Rationale, v.MaterialIDsJSON, v.HistoryRelationship)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,8 @@ func (s *Store) CreateCreationProposal(ctx context.Context, v models.CreationPro
 func (s *Store) GetCreationProposal(ctx context.Context, id string) (*models.CreationProposal, error) {
 	v := &models.CreationProposal{}
 	var batch, session, owner sql.NullString
-	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt)
+	var round sql.NullString
+	err := s.DB.QueryRowContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE id=?`, id).Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -126,13 +127,14 @@ func (s *Store) GetCreationProposal(ctx context.Context, id string) (*models.Cre
 	}
 	v.ProposalBatchID = batch.String
 	v.IdeationSessionID = session.String
+	v.IdeationRoundID = round.String
 	v.OwnerClaim = owner.String
 	return v, nil
 }
 
 // ListCreationProposals lists all claim-led directions for one profile, newest first.
 func (s *Store) ListCreationProposals(ctx context.Context, profileID string) ([]*models.CreationProposal, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC,id DESC`, profileID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,editorial_profile_id,proposal_batch_id,ideation_session_id,ideation_round_id,status,creation_form,working_title,proposed_claim,owner_claim,audience,rationale,material_ids_json,history_relationship,created_at,updated_at FROM creation_proposals WHERE editorial_profile_id=? ORDER BY created_at DESC,id DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +142,11 @@ func (s *Store) ListCreationProposals(ctx context.Context, profileID string) ([]
 	var out []*models.CreationProposal
 	for rows.Next() {
 		v := &models.CreationProposal{}
-		var batch, session, owner sql.NullString
-		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		var batch, session, round, owner sql.NullString
+		if err := rows.Scan(&v.ID, &v.EditorialProfileID, &batch, &session, &round, &v.Status, &v.CreationForm, &v.WorkingTitle, &v.ProposedClaim, &owner, &v.Audience, &v.Rationale, &v.MaterialIDsJSON, &v.HistoryRelationship, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
-		v.ProposalBatchID, v.IdeationSessionID, v.OwnerClaim = batch.String, session.String, owner.String
+		v.ProposalBatchID, v.IdeationSessionID, v.IdeationRoundID, v.OwnerClaim = batch.String, session.String, round.String, owner.String
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -795,4 +797,118 @@ func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialU
 		}
 	}
 	return out, rows.Err()
+}
+
+// GetMaterialDiagnosis 读取一轮诊断（R13：候选提升与轮次页渲染）。
+func (s *Store) GetMaterialDiagnosis(ctx context.Context, id string) (*models.MaterialDiagnosis, error) {
+	v := &models.MaterialDiagnosis{}
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id, ideation_session_id, diagnosis_json, material_snapshot_json, created_at
+		 FROM material_diagnoses WHERE id=?`, id).
+		Scan(&v.ID, &v.IdeationSessionID, &v.DiagnosisJSON, &v.MaterialSnapshotJSON, &v.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// PromoteDiagnosisClaim R13：Owner 选中诊断中的建议主张 → 幂等创建关联轮次的
+// 提案（proposed_claim，尚不承担 OwnerClaim）。重复提升同一轮同一主张返回既有
+// 提案（部分唯一索引兜底并发）；主张引用的材料 ID 保留来历（仍参与后续去重）。
+func (s *Store) PromoteDiagnosisClaim(ctx context.Context, sessionID, roundID string, claimIndex int) (*models.CreationProposal, error) {
+	round, err := s.GetIdeationRoundByID(ctx, roundID)
+	if err != nil {
+		return nil, err
+	}
+	if round.SessionID != sessionID {
+		return nil, fmt.Errorf("%w: 轮次不属于该会话", ErrInvalidEditorialState)
+	}
+	if round.OutputDiagnosisID == "" {
+		return nil, fmt.Errorf("%w: 轮次尚无诊断结果", ErrInvalidEditorialState)
+	}
+	md, err := s.GetMaterialDiagnosis(ctx, round.OutputDiagnosisID)
+	if err != nil {
+		return nil, err
+	}
+	var diag struct {
+		ProposedClaims []struct {
+			Claim       string   `json:"claim"`
+			MaterialIDs []string `json:"materialIds"`
+		} `json:"proposedClaims"`
+	}
+	if err := json.Unmarshal([]byte(md.DiagnosisJSON), &diag); err != nil {
+		return nil, fmt.Errorf("%w: 诊断结果不可解析", ErrInvalidEditorialState)
+	}
+	if claimIndex < 0 || claimIndex >= len(diag.ProposedClaims) {
+		return nil, fmt.Errorf("%w: 候选序号越界", ErrInvalidEditorialState)
+	}
+	claim := diag.ProposedClaims[claimIndex]
+	claim.Claim = strings.TrimSpace(claim.Claim)
+	if claim.Claim == "" {
+		return nil, fmt.Errorf("%w: 候选主张为空", ErrInvalidEditorialState)
+	}
+	// 材料成员校验（R13 复核）：主张引用必须落在该轮冻结材料快照内——
+	// 无效历史/脏数据不进入提案；过滤后为空则显式拒绝。
+	allowed := map[string]bool{}
+	var snapIDs []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(md.MaterialSnapshotJSON), &snapIDs); err == nil {
+		for _, m := range snapIDs {
+			if m.ID != "" {
+				allowed[m.ID] = true
+			}
+		}
+	}
+	materials := make([]string, 0, len(claim.MaterialIDs))
+	for _, id := range claim.MaterialIDs {
+		if allowed[id] {
+			materials = append(materials, id)
+		}
+	}
+	if len(materials) == 0 {
+		return nil, fmt.Errorf("%w: 候选主张引用不在该轮材料集合内", ErrInvalidEditorialState)
+	}
+	// 幂等：同轮同主张已提升过 → 返回既有提案。
+	existing := func() (*models.CreationProposal, error) {
+		var existingID string
+		err := s.DB.QueryRowContext(ctx,
+			`SELECT id FROM creation_proposals WHERE ideation_round_id=? AND proposed_claim=?`,
+			roundID, claim.Claim).Scan(&existingID)
+		if err != nil {
+			return nil, err
+		}
+		return s.GetCreationProposal(ctx, existingID)
+	}
+	if p, err := existing(); err == nil {
+		return p, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	session, err := s.GetIdeationSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	materialsJSON, _ := json.Marshal(materials)
+	title := claim.Claim
+	if len([]rune(title)) > 40 {
+		title = string([]rune(title)[:40])
+	}
+	proposal, err := s.CreateCreationProposal(ctx, models.CreationProposal{
+		EditorialProfileID: session.EditorialProfileID,
+		IdeationSessionID:  sessionID,
+		IdeationRoundID:    roundID,
+		WorkingTitle:       title,
+		ProposedClaim:      claim.Claim,
+		MaterialIDsJSON:    string(materialsJSON),
+		Rationale:          fmt.Sprintf("提升自第 %d 轮诊断候选", round.RoundNo),
+	})
+	if err != nil && isUniqueConstraintErr(err) {
+		// 并发重复提升：唯一索引兜底，复用已插入提案（不报错、不产生第二个提案）。
+		return existing()
+	}
+	return proposal, err
 }

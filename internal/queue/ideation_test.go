@@ -124,3 +124,77 @@ func TestIdeationDiagnosisJob_RoundFailureMarked(t *testing.T) {
 	}
 	_ = strings.Contains
 }
+
+// TestIdeationDiagnosis_MultiRoundPriorContext R13：第二轮诊断实际读取已冻结前轮
+// （输入 + 诊断摘要），两轮请求 PriorRounds 确实不同；过期结果不进入本轮。
+func TestIdeationDiagnosis_MultiRoundPriorContext(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	profile, _ := s.EnsureDefaultEditorialProfile(ctx)
+	sess, err := s.CreateIdeationSession(ctx, models.IdeationSession{EditorialProfileID: profile.ID, Intent: "多轮"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1, _, err := s.AddIdeationRound(ctx, sess.ID, "n1", "第一轮：时间成本", "{}", `[{"id":"kp-a","content":"观点A"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qa := &qualityAnalyzer{diag: &provider.IdeationDiagnosis{
+		Supports:       []provider.DiagnosisItem{{MaterialID: "kp-a", Text: "第一轮支持结论"}},
+		Gaps:           []string{"缺少跨集证据"},
+		ProposedClaims: []provider.ProposedClaimItem{{Claim: "初步主张甲", MaterialIDs: []string{"kp-a"}}},
+	}}
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Analysis: qa}, nil
+	}
+	job1, err := w.EnqueueIdeationDiagnosisJob(ctx, sess.ID, r1.ID)
+	if err != nil || job1 == nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var req1 provider.IdeationDiagnosisRequest
+	qa2 := &qualityAnalyzer{diag: &provider.IdeationDiagnosis{Gaps: []string{"仍缺"}}}
+	diagCalls := 0
+	qa2Calls := &qualityAnalyzer{diag: &provider.IdeationDiagnosis{Gaps: []string{"二轮缺口"}}}
+	_ = qa2Calls
+	w.bundleFor = func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Analysis: &contextCapturingAnalyzer{inner: qa2, captured: &req1, onCall: func() { diagCalls++ }}}, nil
+	}
+	_ = qa
+	r2, _, err := s.AddIdeationRound(ctx, sess.ID, "n2", "第二轮：追问证据", `{"scope":"跨集"}`, `[{"id":"kp-a","content":"观点A"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job2, err := w.EnqueueIdeationDiagnosisJob(ctx, sess.ID, r2.ID)
+	if err != nil || job2 == nil {
+		t.Fatal(err)
+	}
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// 前轮上下文：第二轮请求必须含第一轮输入与诊断摘要，且与第一轮请求不同。
+	if len(req1.PriorRounds) == 0 || !strings.Contains(req1.PriorRounds[0], "第一轮：时间成本") || !strings.Contains(req1.PriorRounds[0], "初步主张甲") {
+		t.Fatalf("第二轮诊断应读取已冻结前轮（输入+诊断摘要）: %+v", req1.PriorRounds)
+	}
+}
+
+// contextCapturingAnalyzer 捕获诊断请求（前轮上下文断言用）。
+type contextCapturingAnalyzer struct {
+	inner    *qualityAnalyzer
+	captured *provider.IdeationDiagnosisRequest
+	onCall   func()
+}
+
+func (f *contextCapturingAnalyzer) DiagnoseIdeation(ctx context.Context, req provider.IdeationDiagnosisRequest) (*provider.IdeationDiagnosis, provider.TaskUsage, error) {
+	*f.captured = req
+	if f.onCall != nil {
+		f.onCall()
+	}
+	return f.inner.DiagnoseIdeation(ctx, req)
+}
+func (f *contextCapturingAnalyzer) Analyze(transcript string, segments []provider.Segment) (*provider.AnalyzeResult, error) {
+	return f.inner.Analyze(transcript, segments)
+}
+func (f *contextCapturingAnalyzer) Name() string { return "capturing" }

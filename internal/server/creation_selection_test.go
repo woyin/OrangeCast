@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -696,5 +697,106 @@ func TestFindUsageByKeyPoint(t *testing.T) {
 	}
 	if usages[0].Kind != "digest" || !strings.Contains(usages[0].Link, d.ID) {
 		t.Fatalf("使用记录应指向精读文: %+v", usages)
+	}
+}
+
+// TestIdeationClaimPromote_EndToEnd R13：生产入口（真实路由）把轮次诊断候选提升
+// 为提案；重复动作（含并发）恰好一个提案；主张材料必须在该轮快照集合内；
+// 提案不承担 OwnerClaim；过期结果不进入本轮上下文。
+func TestIdeationClaimPromote_EndToEnd(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "promote@example.com", "password123")
+	ctx := t.Context()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := srv.store.CreateIdeationSession(ctx, models.IdeationSession{EditorialProfileID: profile.ID, Intent: "提升测试"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, _, err := srv.store.AddIdeationRound(ctx, sess.ID, "n1", "问题", "{}", `[{"id":"kp-a","content":"观点A"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagJSON := `{"supports":[],"contradicts":[],"supplements":[],"gaps":["缺"],"proposedClaims":[{"claim":"候选主张甲","materialIds":["kp-a"]},{"claim":"脏数据主张","materialIds":["kp-ghost"]}]}`
+	md, err := srv.store.CreateMaterialDiagnosisForRound(ctx, sess.ID, round.ID, diagJSON, `[{"id":"kp-a","content":"观点A"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.MarkIdeationRoundDiagnosed(ctx, round.ID, md.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rec0 := doWithCookie(srv, session, http.MethodGet, "/dashboard")
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	post := func(form url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/workbench/ideation/promote", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-CSRF-Token", csrf)
+		req.AddCookie(session)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	base := url.Values{"_csrf": {csrf}, "session_id": {sess.ID}, "round_id": {round.ID}, "claim_index": {"0"}}
+	if rec := post(base); rec.Code != http.StatusSeeOther {
+		t.Fatalf("提升应 303: %d %s", rec.Code, rec.Body.String())
+	}
+	proposals, _ := srv.store.ListCreationProposals(ctx, profile.ID)
+	if len(proposals) != 1 || proposals[0].ProposedClaim != "候选主张甲" {
+		t.Fatalf("应提升一条提案: %+v", proposals)
+	}
+	if proposals[0].IdeationRoundID != round.ID || proposals[0].IdeationSessionID != sess.ID {
+		t.Fatalf("提案应关联来源轮次: %+v", proposals[0])
+	}
+	if proposals[0].OwnerClaim != "" {
+		t.Fatalf("提升尚不承担 OwnerClaim: %q", proposals[0].OwnerClaim)
+	}
+	if proposals[0].MaterialIDsJSON != `["kp-a"]` {
+		t.Fatalf("主张材料来历应保留: %s", proposals[0].MaterialIDsJSON)
+	}
+	// 重复动作（串行 + 并发）：仍恰好一个提案。
+	if rec := post(base); rec.Code != http.StatusSeeOther {
+		t.Fatalf("重复提升应幂等 303: %d %s", rec.Code, rec.Body.String())
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			post(base)
+		}()
+	}
+	wg.Wait()
+	proposals2, _ := srv.store.ListCreationProposals(ctx, profile.ID)
+	if len(proposals2) != 1 {
+		t.Fatalf("并发重复提升不得产生第二个提案: %d", len(proposals2))
+	}
+	// 脏数据主张（引用不在该轮快照内）显式拒绝。
+	recBad := post(url.Values{"_csrf": {csrf}, "session_id": {sess.ID}, "round_id": {round.ID}, "claim_index": {"1"}})
+	if recBad.Code != http.StatusBadRequest {
+		t.Fatalf("越界材料引用应 400: %d %s", recBad.Code, recBad.Body.String())
+	}
+	proposals3, _ := srv.store.ListCreationProposals(ctx, profile.ID)
+	if len(proposals3) != 1 {
+		t.Fatalf("脏数据主张不得进入提案: %d", len(proposals3))
+	}
+	// 轮次页渲染诊断与提升按钮（展示支持/反驳/建议主张）。
+	recPage := doWithCookie(srv, session, http.MethodGet, "/workbench/ideation/rounds?session_id="+sess.ID)
+	if recPage.Code != http.StatusOK {
+		t.Fatalf("轮次页应 200: %d", recPage.Code)
+	}
+	pageBody := recPage.Body.String()
+	for _, want := range []string{"proposedClaims", "提升为提案", "候选主张甲"} {
+		if !strings.Contains(pageBody, want) {
+			t.Fatalf("轮次页缺少 %q", want)
+		}
 	}
 }

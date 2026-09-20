@@ -230,3 +230,18 @@
   - `go test ./...` 全部通过（迁移计数断言 46→47 跟随）；`go vet`、`gofmt`、`git diff --check` 通过。
 - 提交：`fix(ideation): carry selected materials into persistent sessions`。
 - 限制：资格失效材料的页面级反馈样式属 R22/R25（快照错误字段已结构化可渲染）。
+
+## R13 — 多轮诊断和候选提升入口
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `queue/ideation.go`（doIdeationDiagnosisJob）：诊断实际读取已冻结前轮——遍历该会话当前轮之前的轮次（输入 + 已落库诊断的支持/反驳/缺口/候选主张摘要）作为 PriorRounds；最新约束 = 本轮 ConstraintsJSON；过期/后续轮次不进入本轮上下文。输出引用限制在材料集合内由 ValidateIdeationDiagnosis 既有校验保持（虚构引用显式失败）；空材料只出缺口（诚实，不伪造支持）。
+  - 迁移 0048：`creation_proposals.ideation_round_id` + 部分唯一索引 `(ideation_round_id, proposed_claim)`——提案绑定来源轮次，同轮同主张唯一。
+  - `store/creation_flow.go`：`PromoteDiagnosisClaim`——Owner 选中建议主张 → 创建 proposed 提案（不承担 OwnerClaim，material IDs 来历保留）；提升时对主张材料做该轮快照成员校验（脏数据/无效历史显式拒绝）；幂等（先查既有 + 唯一索引兜底并发，冲突后复用已插入提案）。`GetMaterialDiagnosis` 新增读取。
+  - `server/creation_workspace.go` + 路由：`POST /workbench/ideation/promote` 生产入口；轮次详情页渲染每轮诊断（pre 展示 JSON）与候选主张的提升按钮（旧轮次输出可读，只归属原轮次）。
+- 验证：
+  - `TestIdeationDiagnosis_MultiRoundPriorContext`（queue）：第二轮请求 PriorRounds 实际包含第一轮输入与诊断摘要（候选主张可见）。
+  - `TestIdeationClaimPromote_EndToEnd`（server，真实路由）：提升 → 1 条关联轮次的提案、无 OwnerClaim、材料来历保留；串行重复 + 4 并发重复 → 仍恰好 1 条；脏数据主张（引用不在快照）400 且不落库；轮次页渲染诊断与提升按钮。
+  - `go test ./...` 全部通过（backup 迁移计数 47→48 跟随）；race（Ideation）通过；`go vet`、`gofmt`、`git diff --check` 通过。
+- 提交：`feat(ideation): promote grounded multi-turn diagnoses to proposals`。
+- 限制：诊断摘要以 JSON pre 形式渲染（结构化卡片样式属 R22/R25）；诊断中 supports/contradicts 的逐条渲染未拆分字段（原始 JSON 保留完整可读）。

@@ -71,13 +71,44 @@ func (w *Worker) doIdeationDiagnosisJob(ctx context.Context, job *models.Process
 	}
 	_ = json.Unmarshal([]byte(round.MaterialSnapshotJSON), &materialSnap)
 	var materials []provider.IdeationMaterial
-	var prior []string
-	prior = append(prior, round.UserInput)
 	for _, m := range materialSnap {
 		if m.Error != "" || m.ID == "" {
 			continue
 		}
 		materials = append(materials, provider.IdeationMaterial{ID: m.ID, Content: m.Content})
+	}
+	// R13：实际读取已冻结前轮（输入 + 已有诊断摘要）——多轮上下文不是只有本轮问题。
+	priorRounds, err := w.store.ListIdeationRounds(ctx, round.SessionID)
+	if err != nil {
+		return fmt.Errorf("读取前轮: %w", err)
+	}
+	prior := make([]string, 0, len(priorRounds))
+	for _, pr := range priorRounds {
+		if pr.ID == round.ID || pr.RoundNo >= round.RoundNo {
+			continue // 只取当前轮之前；过期结果不进入本轮上下文
+		}
+		entry := fmt.Sprintf("第%d轮问：%s", pr.RoundNo, pr.UserInput)
+		if pr.OutputDiagnosisID != "" {
+			if md, err := w.store.GetMaterialDiagnosis(ctx, pr.OutputDiagnosisID); err == nil {
+				var d provider.IdeationDiagnosis
+				if json.Unmarshal([]byte(md.DiagnosisJSON), &d) == nil {
+					entry += "；诊断摘要："
+					for _, s := range d.Supports {
+						entry += "［支持：" + s.Text + "］"
+					}
+					for _, s := range d.Contradicts {
+						entry += "［反驳：" + s.Text + "］"
+					}
+					for _, g := range d.Gaps {
+						entry += "［缺口：" + g + "］"
+					}
+					for _, c := range d.ProposedClaims {
+						entry += "［候选主张：" + c.Claim + "］"
+					}
+				}
+			}
+		}
+		prior = append(prior, entry)
 	}
 	req := provider.IdeationDiagnosisRequest{
 		Question:    round.UserInput,

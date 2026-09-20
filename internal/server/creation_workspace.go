@@ -10,6 +10,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -261,10 +262,29 @@ func (srv *Server) handleIdeationRoundsDetail(w http.ResponseWriter, r *http.Req
 		http.Error(w, "读取轮次失败", http.StatusInternalServerError)
 		return
 	}
+	// R13：每轮诊断（支持/反驳/缺口/建议主张）随轮次渲染；过期结果只在其原轮次可见。
+	diagnoses := map[string]*models.MaterialDiagnosis{}
+	claimsByRound := map[string][]provider.ProposedClaimItem{}
+	for _, rd := range rounds {
+		if rd.OutputDiagnosisID == "" {
+			continue
+		}
+		md, err := srv.store.GetMaterialDiagnosis(r.Context(), rd.OutputDiagnosisID)
+		if err != nil {
+			continue
+		}
+		diagnoses[rd.ID] = md
+		var d provider.IdeationDiagnosis
+		if json.Unmarshal([]byte(md.DiagnosisJSON), &d) == nil {
+			claimsByRound[rd.ID] = d.ProposedClaims
+		}
+	}
 	srv.tmpl.Render(w, "ideation_rounds.html", map[string]any{
-		"Session": session,
-		"Rounds":  rounds,
-		"CSRF":    auth.CSRFValue(r),
+		"Session":       session,
+		"Rounds":        rounds,
+		"Diagnoses":     diagnoses,
+		"ClaimsByRound": claimsByRound,
+		"CSRF":          auth.CSRFValue(r),
 	})
 }
 
@@ -296,6 +316,33 @@ func (srv *Server) handleIdeationDiagnose(w http.ResponseWriter, r *http.Request
 		return
 	}
 	http.Redirect(w, r, "/workbench/ideation/rounds?session_id="+sessionID, http.StatusSeeOther)
+}
+
+// handleIdeationClaimPromote R13：Owner 选中诊断候选 → 幂等创建关联轮次的提案
+// （proposed_claim，尚不承担 OwnerClaim；重复动作一个提案）。
+func (srv *Server) handleIdeationClaimPromote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	roundID := strings.TrimSpace(r.FormValue("round_id"))
+	claimIndex, err := strconv.Atoi(strings.TrimSpace(r.FormValue("claim_index")))
+	if err != nil {
+		http.Error(w, "候选序号非法", http.StatusBadRequest)
+		return
+	}
+	proposal, err := srv.store.PromoteDiagnosisClaim(r.Context(), sessionID, roundID, claimIndex)
+	if err != nil {
+		http.Error(w, "候选提升失败："+err.Error(), http.StatusBadRequest)
+		return
+	}
+	profile, err := srv.store.GetEditorialProfile(r.Context(), proposal.EditorialProfileID)
+	if err != nil {
+		http.Redirect(w, r, "/workbench/ideation/rounds?session_id="+sessionID, http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/workbench?profile="+profile.Name, http.StatusSeeOther)
 }
 
 // handleProposalDecision C06：候选决策闭环（接受/暂存/拒绝）。

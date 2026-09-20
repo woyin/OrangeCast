@@ -55,7 +55,7 @@ type ProposalBatch struct {
 }
 
 // CreationProposal is a claim-led candidate direction, independent of a final title.
-type CreationProposal struct{ ID, EditorialProfileID, ProposalBatchID, IdeationSessionID, Status, CreationForm, WorkingTitle, ProposedClaim, OwnerClaim, Audience, Rationale, MaterialIDsJSON, HistoryRelationship, CreatedAt, UpdatedAt string }
+type CreationProposal struct{ ID, EditorialProfileID, ProposalBatchID, IdeationSessionID, IdeationRoundID, Status, CreationForm, WorkingTitle, ProposedClaim, OwnerClaim, Audience, Rationale, MaterialIDsJSON, HistoryRelationship, CreatedAt, UpdatedAt string }
 
 // CreationHistory stores internal and externally imported work for duplicate checks.
 type CreationHistory struct{ ID, EditorialProfileID, Status, CreationForm, Title, CoreClaim, Audience, Content, SourceURL, CreatedAt, UpdatedAt string }

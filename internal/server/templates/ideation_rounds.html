@@ -1,14 +1,39 @@
 {{define "title"}}构思轮次 · CloudWisePod{{end}}
 {{define "content"}}
 <div class="page-head"><h1>定向构思：{{.Session.Intent}}</h1><a class="btn btn-secondary" href="/workbench">返回工作台</a></div>
-<p class="meta">每轮冻结你当时的补充问题与材料快照；重新诊断产生新轮次，历史轮次可回看。当前仅持久化轮次与材料（AI 诊断由后续任务接入，不假装已有结论）。</p>
+<p class="meta">每轮冻结你当时的补充问题与材料快照；诊断结果只归属其原轮次。可把诊断中的建议主张提升为提案（尚非 Owner 主张）。</p>
 <section class="panel">
   <h2>轮次历史</h2>
+  {{$diags := .Diagnoses}}{{$claims := .ClaimsByRound}}
   {{range .Rounds}}
+  {{$rid := .ID}}
   <article class="workflow-item">
     <div class="workflow-item-body">
       <div class="item-kicker">第 {{.RoundNo}} 轮 · {{.Status}}</div>
       <p>{{.UserInput}}</p>
+      {{with index $diags .ID}}
+      <div class="diagnosis">
+        {{with .DiagnosisJSON}}<pre class="meta" style="white-space:pre-wrap">{{.}}</pre>{{end}}
+      </div>
+      {{end}}
+      {{$cs := index $claims .ID}}
+      {{if $cs}}
+      <div class="proposed-claims">
+        <h3>建议主张（候选，尚非 Owner 主张）</h3>
+        {{range $ci, $c := $cs}}
+        <div class="claim-candidate">
+          <p>{{$c.Claim}}</p>
+          <form method="post" action="/workbench/ideation/promote">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="session_id" value="{{$.Session.ID}}">
+            <input type="hidden" name="round_id" value="{{$rid}}">
+            <input type="hidden" name="claim_index" value="{{$ci}}">
+            <button class="btn btn-secondary" type="submit">提升为提案</button>
+          </form>
+        </div>
+        {{end}}
+      </div>
+      {{end}}
       <p class="meta">材料快照：{{.MaterialSnapshotJSON}}</p>
     </div>
   </article>
