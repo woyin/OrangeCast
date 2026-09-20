@@ -90,6 +90,33 @@ func TestValidateClaimReviewAgainstInput(t *testing.T) {
 	}
 }
 
+func TestClaimReview_OwnerNoteIdentity(t *testing.T) {
+	req := reviewTestRequest()
+	req.Markdown = "这是我的个人判断。"
+	req.ClaimMap = []ClaimMapEntry{{Excerpt: "这是我的个人判断。", ClaimKind: ClaimOwner, MaterialIDs: []string{"note-1"}}}
+	req.AuthorizedIDs = []string{"note-1"}
+	req.Materials = nil
+	req.OwnerNotes = []ClaimOwnerNote{{
+		ID: "note-1", Content: "这是我的个人判断", Kind: "owner_reflection",
+		SourceType: "episode", SourceID: "ep-1", Revision: 2,
+	}}
+	if err := ValidateClaimReviewAgainstInput(&ClaimReviewResult{Status: ClaimReviewPassed}, &req); err != nil {
+		t.Fatalf("OwnerNote-only owner_claim 应通过: %v", err)
+	}
+	bad := req
+	bad.ClaimMap = append([]ClaimMapEntry(nil), req.ClaimMap...)
+	bad.ClaimMap[0].ClaimKind = ClaimSource
+	if err := ValidateClaimReviewAgainstInput(&ClaimReviewResult{Status: ClaimReviewPassed}, &bad); err == nil {
+		t.Fatal("OwnerNote 不得支撑 source_claim")
+	}
+	prompt := BuildClaimReviewPrompt(req)
+	for _, want := range []string{"owner_reflection", "episode/ep-1", "revision：2", "这是我的个人判断"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("个人笔记审校 prompt 缺少 %q: %s", want, prompt)
+		}
+	}
+}
+
 func TestParseClaimReviewResult(t *testing.T) {
 	r, err := parseClaimReviewResult(`{"status":"failed","findings":[{"excerpt":"x","issueKind":"misattributed","detail":"d"}]}`)
 	if err != nil {

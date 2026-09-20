@@ -41,6 +41,32 @@ func claimWritingFixture(t *testing.T, s *store.Store) (*models.CreationBrief, s
 	t.Helper()
 	ctx := context.Background()
 	b, p, kpid, sourceID := curatorFixture(t, s)
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: sourceID,
+		Kind: "owner_reflection", Content: "这是 Owner 对材料的个人理解",
+		CitationsJSON: "[]", ReferencesJSON: "[]",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := s.SaveCreationSelection(ctx, &models.CreationSelection{
+		EditorialProfileID: p.EditorialProfileID, Title: "写作素材",
+		MaterialIDs: []string{kpid}, NoteIDs: []string{note.ID}, Status: models.SelectionConfirmed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionsJSON, _ := json.Marshal([]string{selection.ID})
+	session, err := s.CreateIdeationSession(ctx, models.IdeationSession{
+		EditorialProfileID: p.EditorialProfileID, Intent: "形成文章",
+		ConstraintsJSON: "{}", SelectionsJSON: string(selectionsJSON),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE creation_proposals SET ideation_session_id=? WHERE id=?`, session.ID, p.ID); err != nil {
+		t.Fatal(err)
+	}
 	kp, err := s.GetKeyPoint(ctx, kpid)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +131,10 @@ func TestClaimWritingJob_ProductionDispatch(t *testing.T) {
 	// Gap4：冻结 target_length 必须传入 Provider 请求。
 	if fake.last.TargetLength == nil || *fake.last.TargetLength != 1800 {
 		t.Fatalf("TargetLength=%v", fake.last.TargetLength)
+	}
+	if len(fake.last.OwnerNotes) != 1 || fake.last.OwnerNotes[0].Content != "这是 Owner 对材料的个人理解" ||
+		fake.last.OwnerNotes[0].Revision != 1 || fake.last.OwnerNotes[0].SourceID == "" {
+		t.Fatalf("OwnerNote 冻结身份未送入 Writer: %+v", fake.last.OwnerNotes)
 	}
 	got, err := s.GetJob(ctx, job.ID)
 	if err != nil {
@@ -195,6 +225,42 @@ func TestClaimWritingJob_ProductionDispatch(t *testing.T) {
 	s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_revisions WHERE draft_id=?`, job.SourceID).Scan(&revCount)
 	if revCount != 1 {
 		t.Fatalf("修订数=%d", revCount)
+	}
+}
+
+func TestClaimWritingJob_RejectsOwnerNoteEditedAfterEnqueue(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := context.Background()
+	_, kpid, _, job := claimWritingFixture(t, s)
+	exec, err := s.GetJobExecution(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input store.ClaimWritingTaskInput
+	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &input); err != nil {
+		t.Fatal(err)
+	}
+	if len(input.OwnerNotes) != 1 {
+		t.Fatalf("OwnerNote 快照=%+v", input.OwnerNotes)
+	}
+	note := input.OwnerNotes[0]
+	if _, err := s.UpdateOwnerNote(ctx, note.ID, "入队后被编辑", "[]", "[]", note.Revision); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeClaimWriter{result: goodClaimWritingResult(claimWritingMarkdown, kpid)}
+	w.bundleFor = bundleWithWriter(fake)
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if fake.calls != 0 {
+		t.Fatalf("笔记 revision 漂移必须在 Provider 前拦截: calls=%d", fake.calls)
+	}
+	got, err := s.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.StatusFailed || got.LastError == nil || !strings.Contains(*got.LastError, "笔记已修改") {
+		t.Fatalf("job=%+v", got)
 	}
 }
 

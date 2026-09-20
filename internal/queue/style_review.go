@@ -53,6 +53,9 @@ func (w *Worker) doStyleReviewJob(ctx context.Context, job *models.ProcessingJob
 			return err
 		}
 	}
+	if err := frozenNotesPolicy(ctx, w, input.ProfileID, input.OwnerNotes, prov.Name(), "风格审校"); err != nil {
+		return err
+	}
 
 	req := provider.StyleReviewRequest{
 		Title: input.Title, Markdown: input.Markdown,

@@ -1750,9 +1750,11 @@ type ClaimWritingTaskInput struct {
 	Style                 string                     `json:"style"`
 	TargetLength          *int                       `json:"target_length"`
 	Materials             []provider.ArticleMaterial `json:"materials"`
-	Provider              string                     `json:"provider"`
-	Model                 string                     `json:"model"`
-	PromptVersion         string                     `json:"prompt_version"`
+	// OwnerNotes R23：冻结选中的个人笔记身份（独立于 KeyPoint 授权）。
+	OwnerNotes    []provider.ClaimOwnerNote `json:"ownerNotes"`
+	Provider      string                    `json:"provider"`
+	Model         string                    `json:"model"`
+	PromptVersion string                    `json:"prompt_version"`
 }
 
 // EnqueueClaimWritingForCreationBrief 兼容 wrapper（内部用）：以当前确认版本为目标
@@ -1952,6 +1954,13 @@ func (s *Store) enqueueClaimWritingOnce(ctx context.Context, briefID string, exp
 		materials = append(materials, m)
 	}
 
+	// 5b) R23：冻结选中的 OwnerNote（个人理解身份）——从 proposal 关联的构思
+	// session 的素材选择读取 note IDs（独立于 KeyPoint 授权，不冒充来源）。
+	ownerNotes, err := freezeOwnerNotesForProposalTx(ctx, tx, proposalID)
+	if err != nil {
+		return nil, err
+	}
+
 	// 6) 冻结 Writer 配置（R04）：读取当前 settings 的 Writer 角色并写入快照。
 	var writerProvider, writerModel string
 	err = tx.QueryRowContext(ctx, `SELECT COALESCE(writer_provider,''),COALESCE(writer_model,'') FROM settings WHERE id=1`).Scan(&writerProvider, &writerModel)
@@ -1970,7 +1979,8 @@ func (s *Store) enqueueClaimWritingOnce(ctx context.Context, briefID string, exp
 		ArticleProposalID: articleProposalID, ArticleBriefID: articleBriefID,
 		DraftID: draftID, ProfileID: profileID, Audience: audience,
 		OwnerClaim: rev.OwnerClaim, Outline: rev.Outline, Style: rev.Style, TargetLength: rev.TargetLength,
-		Materials: materials, Provider: writerProvider, Model: model, PromptVersion: provider.ClaimWriterPromptVersion,
+		Materials: materials, OwnerNotes: ownerNotes,
+		Provider: writerProvider, Model: model, PromptVersion: provider.ClaimWriterPromptVersion,
 	}
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
@@ -2090,4 +2100,83 @@ func (s *Store) MapCreationBriefsToDrafts(ctx context.Context, profileID string)
 		}
 	}
 	return out, rows.Err()
+}
+
+// getOwnerNoteTx 在事务内读取一条 OwnerNote 行。
+func getOwnerNoteTx(ctx context.Context, tx *sql.Tx, id string) (*models.OwnerNote, error) {
+	note := &models.OwnerNote{}
+	err := tx.QueryRowContext(ctx,
+		`SELECT id,source_type,source_id,kind,content,revision FROM owner_notes WHERE id=?`, id).
+		Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.Revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: 选中 OwnerNote %s 不存在", ErrInvalidEditorialState, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return note, nil
+}
+
+// freezeOwnerNotesForProposalTx R23：经由 proposal → ideation session → creation
+// selections 解析选中的 OwnerNote 身份并冻结。
+//   - proposal 的 ideation_session_id 真为空 → 合法返回空；
+//   - session 行缺失、selection 行缺失或任何 JSON 损坏都显式报错，不静默变空；
+//   - selections_json 按数组顺序逐个读取 selection 的 note_ids_json，按首次出现
+//     顺序去重。
+func freezeOwnerNotesForProposalTx(ctx context.Context, tx *sql.Tx, proposalID string) ([]provider.ClaimOwnerNote, error) {
+	var sessionID string
+	err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(ideation_session_id,'') FROM creation_proposals WHERE id=?`, proposalID).Scan(&sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: creation proposal missing", ErrNotFound)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sessionID == "" {
+		return nil, nil
+	}
+	var selectionsJSON string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT selections_json FROM ideation_sessions WHERE id=?`, sessionID).Scan(&selectionsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: ideation session %s missing", ErrInvalidEditorialState, sessionID)
+		}
+		return nil, err
+	}
+	var selectionIDs []string
+	if err := json.Unmarshal([]byte(selectionsJSON), &selectionIDs); err != nil {
+		return nil, fmt.Errorf("解析构思会话素材选择: %w", err)
+	}
+	var out []provider.ClaimOwnerNote
+	seen := map[string]bool{}
+	for _, selID := range selectionIDs {
+		var noteIDsJSON string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT note_ids_json FROM creation_selections WHERE id=?`, selID).Scan(&noteIDsJSON); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("%w: 素材选择 %s missing", ErrInvalidEditorialState, selID)
+			}
+			return nil, err
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(noteIDsJSON), &ids); err != nil {
+			return nil, fmt.Errorf("解析素材选择 %s 笔记 ID: %w", selID, err)
+		}
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			note, err := getOwnerNoteTx(ctx, tx, id)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, provider.ClaimOwnerNote{
+				ID: note.ID, Content: note.Content, Kind: note.Kind,
+				SourceType: note.SourceType, SourceID: note.SourceID, Revision: note.Revision,
+			})
+		}
+	}
+	return out, nil
 }

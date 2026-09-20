@@ -262,6 +262,49 @@ func TestPublicationGateR20(t *testing.T) {
 	}
 }
 
+func TestPublicationGateRejectsOwnerNoteEditedAfterReview(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := t.Context()
+	revision, _, kpID := seedNewContractRevision(t, srv, "r23-note-edit")
+	kp, err := srv.store.GetKeyPoint(ctx, kpID)
+	check(t, err)
+	note, err := srv.store.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(kp.SourceType), SourceID: kp.SourceID,
+		Kind: "owner_reflection", Content: "审校时的个人理解",
+		CitationsJSON: "[]", ReferencesJSON: "[]",
+	})
+	check(t, err)
+	result, err := srv.store.DB.ExecContext(ctx,
+		`UPDATE claim_map_entries SET material_ids_json=? WHERE revision_id=? AND claim_kind=?`,
+		`["`+note.ID+`"]`, revision.ID, provider.ClaimOwner)
+	check(t, err)
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		t.Fatalf("更新 Owner ClaimMap: affected=%d err=%v", affected, err)
+	}
+	claimJob, err := srv.store.EnqueueRevisionReview(ctx, revision.ID, store.ReviewKindClaim)
+	check(t, err)
+	mustRunJob(t, srv, claimJob.ID)
+	_, err = srv.store.SaveClaimReviewOutput(ctx, claimJob.ID,
+		&provider.ClaimReviewResult{Status: provider.ClaimReviewPassed}, "reviewer", "m")
+	check(t, err)
+	styleJob, err := srv.store.EnqueueRevisionReview(ctx, revision.ID, store.ReviewKindStyle)
+	check(t, err)
+	mustRunJob(t, srv, styleJob.ID)
+	_, err = srv.store.SaveStyleReviewOutput(ctx, styleJob.ID,
+		&provider.StyleReviewResult{Status: "passed"}, "style", "m")
+	check(t, err)
+
+	if _, err := srv.store.UpdateOwnerNote(ctx, note.ID, "审校后被编辑", "[]", "[]", note.Revision); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/workbench/revisions/"+revision.ID+"/package?format=markdown", nil)
+	rec := httptest.NewRecorder()
+	srv.handlePublicationPackage(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "审校后已修改") {
+		t.Fatalf("笔记审校后修改必须阻断发布: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestArticleDraftPageR20 C：页面按钮与 job 文案（新契约 vs 旧文章）。
 func TestArticleDraftPageR20(t *testing.T) {
 	srv := newTestServer(t)

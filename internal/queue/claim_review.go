@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -77,7 +78,7 @@ func (w *Worker) doClaimReviewJob(ctx context.Context, job *models.ProcessingJob
 	if input.Kind != store.ReviewKindClaim || input.RevisionID == "" || input.Markdown == "" {
 		return fmt.Errorf("审校任务缺少冻结输入快照")
 	}
-	if len(input.ClaimMap) == 0 || len(input.Materials) == 0 {
+	if len(input.ClaimMap) == 0 || (len(input.Materials) == 0 && len(input.OwnerNotes) == 0) {
 		return fmt.Errorf("审校任务冻结输入缺少 ClaimMap 或授权材料")
 	}
 
@@ -87,11 +88,15 @@ func (w *Worker) doClaimReviewJob(ctx context.Context, job *models.ProcessingJob
 			return err
 		}
 	}
+	if err := frozenNotesPolicy(ctx, w, input.ProfileID, input.OwnerNotes, prov.Name(), "主张审校"); err != nil {
+		return err
+	}
 
 	req := provider.ClaimReviewRequest{
 		Markdown: input.Markdown, ClaimMap: entriesToProvider(input.ClaimMap),
 		ConfirmedClaim: input.ConfirmedClaim,
 		AuthorizedIDs:  input.AuthorizedIDs, Materials: input.Materials,
+		OwnerNotes: input.OwnerNotes,
 	}
 	requestHash := reviewRequestHash(req)
 	var result *provider.ClaimReviewResult
@@ -150,6 +155,39 @@ func entriesToProvider(entries []models.ClaimMapEntry) []provider.ClaimMapEntry 
 		})
 	}
 	return out
+}
+
+// frozenNotesPolicy R23：冻结 OwnerNote 的动态校验（写作/修订/主张审校/风格审校
+// 共用）：note 仍存在且 revision/identity 未变化；底层来源 publication/send 策略放行。
+func frozenNotesPolicy(ctx context.Context, w *Worker, profileID string, notes []provider.ClaimOwnerNote, providerName, label string) error {
+	for _, n := range notes {
+		live, err := w.store.GetOwnerNote(ctx, n.ID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return fmt.Errorf("%s 引用的个人笔记已删除（note=%s）", label, n.ID)
+			}
+			return fmt.Errorf("%s 笔记查询失败: %w", label, err)
+		}
+		if live.Revision != n.Revision || live.Kind != n.Kind || live.Content != n.Content ||
+			live.SourceType != n.SourceType || live.SourceID != n.SourceID {
+			return fmt.Errorf("%s 引用的个人笔记已修改（note=%s），请重新审校", label, n.ID)
+		}
+		usable, err := w.store.CanUseSourceForPublication(ctx, profileID, models.SourceType(n.SourceType), n.SourceID)
+		if err != nil {
+			return fmt.Errorf("%s 笔记来源可用性查询失败: %w", label, err)
+		}
+		if !usable {
+			return fmt.Errorf("%s 笔记来源已归档或不可用（note=%s source=%s）", label, n.ID, n.SourceID)
+		}
+		allowed, err := w.store.CanSendSourceToProvider(ctx, models.SourceType(n.SourceType), n.SourceID, providerName)
+		if err != nil {
+			return fmt.Errorf("%s 笔记来源策略查询失败: %w", label, err)
+		}
+		if !allowed {
+			return fmt.Errorf("%s 笔记来源策略禁止外发（note=%s source=%s）", label, n.ID, n.SourceID)
+		}
+	}
+	return nil
 }
 
 // reviewMaterialPolicy 逐冻结材料的动态策略校验（publication + send policy）。

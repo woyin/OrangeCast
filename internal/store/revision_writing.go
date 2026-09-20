@@ -44,6 +44,7 @@ type RevisionWritingTaskInput struct {
 	TargetLength    *int                       `json:"target_length"`
 	Audience        string                     `json:"audience"`
 	Materials       []provider.ArticleMaterial `json:"materials"`
+	OwnerNotes      []provider.ClaimOwnerNote  `json:"ownerNotes"`
 
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
@@ -265,6 +266,21 @@ func freezeRevisionWritingInputTx(ctx context.Context, tx *sql.Tx, baseRevisionI
 		}
 		input.Materials = append(input.Materials, m)
 	}
+	// R23：冻结 OwnerNotes（与写作同链：proposal → ideation session → selections）。
+	var proposalID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT creation_proposal_id FROM creation_briefs WHERE id=?`, creationBriefID).Scan(&proposalID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && strings.TrimSpace(proposalID) == "") {
+		return nil, fmt.Errorf("%w: confirmed Brief 缺少所属 proposal", ErrInvalidEditorialState)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ownerNotes, err := freezeOwnerNotesForProposalTx(ctx, tx, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	input.OwnerNotes = ownerNotes
 
 	// 5) 冻结 Writer 配置（R04）：与 R19 写作同池。
 	var prov, model string
@@ -330,6 +346,7 @@ func (s *Store) SaveClaimRevisionOutput(ctx context.Context, jobID string, resul
 		Title: input.Title, Audience: input.Audience, Outline: input.Outline,
 		Style: input.Style, SourceAttribution: "轻量", ConfirmedClaim: input.OwnerClaim,
 		TargetLength: input.TargetLength, Materials: input.Materials,
+		OwnerNotes:       input.OwnerNotes,
 		ExistingMarkdown: input.ExistingMarkdown, RevisionFeedback: input.ReviewFeedback,
 		ExistingClaimMap: convertEntriesToProvider(input.ExistingClaimMap),
 	}

@@ -20,9 +20,116 @@ import (
 	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/queue"
 	"github.com/woyin/orangecast/internal/store"
 	_ "modernc.org/sqlite"
 )
+
+// TestJourneyR23RestoreContinuesQueuedWork proves that a restored database is
+// operational state, not only readable state: a queued production job can be
+// claimed by the real worker and advance the pipeline after restore.
+func TestJourneyR23RestoreContinuesQueuedWork(t *testing.T) {
+	ctx := t.Context()
+	sourceDir := t.TempDir()
+	evidenceDir := filepath.Join(sourceDir, "evidence")
+	if err := os.MkdirAll(evidenceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourceStore, err := store.Open(filepath.Join(sourceDir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	podcast, err := sourceStore.CreatePodcast(ctx, "https://feed.example.com/restore.xml", "恢复后继续", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sourceStore.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: "restore-1", Title: "待处理单集", AudioURL: "https://media.example.com/restore.mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	episodes, err := sourceStore.ListEpisodes(ctx, podcast.ID)
+	if err != nil || len(episodes) != 1 {
+		t.Fatalf("episode fixture: %v %+v", err, episodes)
+	}
+	job, err := sourceStore.EnqueueJob(ctx, models.SourceEpisode, episodes[0].ID, models.JobTranscribe)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "queued.tar.gz")
+	if _, err := Create(ctx, sourceStore, evidenceDir, archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := sourceStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restoredDir := filepath.Join(t.TempDir(), "restored")
+	if _, err := Restore(ctx, archive, restoredDir, false); err != nil {
+		t.Fatal(err)
+	}
+	restoredStore, err := store.Open(filepath.Join(restoredDir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restoredStore.Close() })
+
+	rawAudio := filepath.Join(t.TempDir(), "restore.wav")
+	if err := writeRestoreJourneyWAV(rawAudio); err != nil {
+		t.Fatal(err)
+	}
+	tempDir := filepath.Join(restoredDir, "tmp")
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(restoredDir, "evidence"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	worker := queue.NewWorker(restoredStore, provider.NewSelector("fake", "fake"), tempDir, filepath.Join(restoredDir, "evidence"), filepath.Join(restoredDir, "narrations"))
+	worker.WithRawAudioResolver(func(context.Context, *models.ProcessingJob) (string, func(), error) {
+		return rawAudio, func() {}, nil
+	}).WithBundleResolver(func(*models.ProcessingJob) (*provider.ProviderBundle, error) {
+		return &provider.ProviderBundle{Transcription: restoreJourneyTranscriber{}}, nil
+	})
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restoredJob, err := restoredStore.GetJob(ctx, job.ID)
+	if err != nil || restoredJob.Status != models.StatusSucceeded {
+		t.Fatalf("restored job: %v %+v", err, restoredJob)
+	}
+	transcript, err := restoredStore.GetCurrentVersion(ctx, models.SourceEpisode, episodes[0].ID, store.KindTranscript)
+	if err != nil || !strings.Contains(transcript.Payload, "恢复后继续处理") {
+		t.Fatalf("restored transcript: %v %+v", err, transcript)
+	}
+	pending, err := restoredStore.ListQueuedOrRunning(ctx)
+	if err != nil || len(pending) != 1 || pending[0].JobType != models.JobAnalyze || pending[0].SourceID != episodes[0].ID {
+		t.Fatalf("pipeline must continue to analyze: %v %+v", err, pending)
+	}
+}
+
+type restoreJourneyTranscriber struct{}
+
+func (restoreJourneyTranscriber) Transcribe(string) (*provider.TranscriptResult, error) {
+	return &provider.TranscriptResult{
+		Language: "zh", Text: "恢复后继续处理", Model: "restore-test",
+		Segments: []provider.Segment{{ID: "seg-0001", Start: 0, End: 1, Text: "恢复后继续处理"}},
+	}, nil
+}
+func (restoreJourneyTranscriber) Name() string { return "restore-test" }
+
+func writeRestoreJourneyWAV(path string) error {
+	dataSize := uint32(800)
+	riffSize := uint32(36) + dataSize
+	buf := make([]byte, 0, 44+int(dataSize))
+	buf = append(buf, "RIFF"...)
+	buf = append(buf, byte(riffSize), byte(riffSize>>8), byte(riffSize>>16), byte(riffSize>>24))
+	buf = append(buf, "WAVEfmt "...)
+	buf = append(buf, 16, 0, 0, 0, 1, 0, 1, 0)
+	buf = append(buf, 0x40, 0x1f, 0, 0, 0x80, 0x3e, 0, 0, 2, 0, 16, 0)
+	buf = append(buf, "data"...)
+	buf = append(buf, byte(dataSize), byte(dataSize>>8), byte(dataSize>>16), byte(dataSize>>24))
+	buf = append(buf, make([]byte, dataSize)...)
+	return os.WriteFile(path, buf, 0o644)
+}
 
 // sha256Hex 返回字符串内容的 sha256 十六进制值（用于构造测试 manifest）。
 func sha256Hex(s string) string {

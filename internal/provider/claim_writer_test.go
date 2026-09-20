@@ -63,6 +63,35 @@ func TestValidateClaimMap_Contract(t *testing.T) {
 	}
 }
 
+func TestValidateClaimMap_OwnerNoteIdentity(t *testing.T) {
+	req := claimReq()
+	req.OwnerNotes[0] = ClaimOwnerNote{
+		ID: "note-1", Content: "我不同意节目中的前提", Kind: "owner_reflection",
+		SourceType: "episode", SourceID: "ep-1", Revision: 3,
+	}
+	valid := &ClaimAwareWritingResult{
+		Title: "个人理解", Markdown: "我不同意节目中的前提。",
+		ClaimMap: []ClaimMapEntry{{Excerpt: "我不同意节目中的前提。", ClaimKind: ClaimOwner, MaterialIDs: []string{"note-1"}}},
+	}
+	if errs := ValidateClaimMap(valid, req); len(errs) != 0 {
+		t.Fatalf("OwnerNote 支撑 owner_claim 应通过: %v", errs)
+	}
+	for _, kind := range []string{ClaimSource, ClaimVerified} {
+		bad := *valid
+		bad.ClaimMap = append([]ClaimMapEntry(nil), valid.ClaimMap...)
+		bad.ClaimMap[0].ClaimKind = kind
+		if errs := ValidateClaimMap(&bad, req); len(errs) == 0 {
+			t.Fatalf("OwnerNote 不得支撑 %s", kind)
+		}
+	}
+	prompt := BuildClaimPrompt(req)
+	for _, want := range []string{"owner_reflection", "episode/ep-1", "revision 3", "我不同意节目中的前提"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("个人笔记 prompt 缺少 %q: %s", want, prompt)
+		}
+	}
+}
+
 // TestWriteArticleWithClaims_Groq Groq v2 写作端到端（含校验拒绝）。
 func TestWriteArticleWithClaims_Groq(t *testing.T) {
 	g := NewGroqProvider("test")

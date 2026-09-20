@@ -12,6 +12,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -62,6 +63,11 @@ func (srv *Server) handlePublicationPackage(w http.ResponseWriter, r *http.Reque
 		sources, err = srv.publicationSources(r, id, draft.EditorialProfileID)
 	}
 	if err != nil {
+		var dbErr publicationDBError
+		if errors.As(err, &dbErr) {
+			http.Error(w, "读取来源或笔记失败："+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, "当前证据或素材授权已失效，不能生成内容包："+err.Error(), http.StatusConflict)
 		return
 	}
@@ -228,6 +234,7 @@ func (srv *Server) claimMapSources(r *http.Request, revision *models.ArticleRevi
 	if err != nil {
 		return nil, err
 	}
+	var reviewedNotes map[string]provider.ClaimOwnerNote
 	used := map[string]bool{}
 	for _, entry := range entries {
 		for _, id := range entry.MaterialIDs {
@@ -243,30 +250,94 @@ func (srv *Server) claimMapSources(r *http.Request, revision *models.ArticleRevi
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		keyPoint, err := srv.store.GetKeyPoint(r.Context(), id)
-		if err != nil {
-			return nil, fmt.Errorf("材料 %s 已不存在", id)
+		keyPoint, kpErr := srv.store.GetKeyPoint(r.Context(), id)
+		if kpErr == nil {
+			usable, err := srv.store.CanUseSourceForPublication(r.Context(), profileID, keyPoint.SourceType, keyPoint.SourceID)
+			if err != nil || !usable {
+				return nil, fmt.Errorf("Source %s/%s 已归档或不可用", keyPoint.SourceType, keyPoint.SourceID)
+			}
+			var citations []string
+			if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil {
+				return nil, err
+			}
+			valid, err := srv.store.ValidateSourceCitations(r.Context(), keyPoint.SourceType, keyPoint.SourceID, citations)
+			if err != nil || !valid {
+				return nil, fmt.Errorf("KeyPoint %s 的 Citation 已失效", keyPoint.ID)
+			}
+			title := strings.TrimSpace(keyPoint.SourceTitle)
+			if title == "" {
+				title = fmt.Sprintf("%s · %s", keyPoint.SourceType, keyPoint.SourceID)
+			}
+			sourceKey := string(keyPoint.SourceType) + "\x00" + keyPoint.SourceID
+			if !seen[sourceKey] {
+				seen[sourceKey] = true
+				sources = append(sources, title)
+			}
+			continue
 		}
-		usable, err := srv.store.CanUseSourceForPublication(r.Context(), profileID, keyPoint.SourceType, keyPoint.SourceID)
+		if !errors.Is(kpErr, store.ErrNotFound) {
+			return nil, kpErr
+		}
+		// R23：OwnerNote 材料——精确加载笔记并重验其来源归档/可发布策略与
+		// citations/references；来源按底层 source 去重，不把 note ID 当 KeyPoint。
+		// ErrNotFound（材料已不存在）→ 409 文案；真实 DB 错误 → 500（可被调用方区分）。
+		note, noteErr := srv.store.GetOwnerNote(r.Context(), id)
+		if noteErr != nil {
+			if errors.Is(noteErr, store.ErrNotFound) {
+				return nil, fmt.Errorf("材料 %s 已不存在", id)
+			}
+			return nil, publicationDBError{fmt.Errorf("读取笔记 %s 失败: %w", id, noteErr)}
+		}
+		if reviewedNotes == nil {
+			reviewInput, err := srv.store.GetPassedClaimReviewInput(r.Context(), revision.ID)
+			if err != nil {
+				return nil, publicationDBError{fmt.Errorf("读取已通过的主张审校快照失败: %w", err)}
+			}
+			reviewedNotes = make(map[string]provider.ClaimOwnerNote, len(reviewInput.OwnerNotes))
+			for _, reviewed := range reviewInput.OwnerNotes {
+				reviewedNotes[reviewed.ID] = reviewed
+			}
+		}
+		frozen, ok := reviewedNotes[note.ID]
+		if !ok {
+			return nil, fmt.Errorf("个人笔记 %s 不在该修订的主张审校快照中", note.ID)
+		}
+		if note.Revision != frozen.Revision || note.Kind != frozen.Kind || note.Content != frozen.Content ||
+			note.SourceType != frozen.SourceType || note.SourceID != frozen.SourceID {
+			return nil, fmt.Errorf("个人笔记 %s 在审校后已修改，请重新生成并审校文章", note.ID)
+		}
+		usable, err := srv.store.CanUseSourceForPublication(r.Context(), profileID, models.SourceType(note.SourceType), note.SourceID)
 		if err != nil || !usable {
-			return nil, fmt.Errorf("Source %s/%s 已归档或不可用", keyPoint.SourceType, keyPoint.SourceID)
+			return nil, fmt.Errorf("笔记来源 %s/%s 已归档或不可用", note.SourceType, note.SourceID)
 		}
-		var citations []string
-		if err := json.Unmarshal([]byte(keyPoint.CitationsJSON), &citations); err != nil {
-			return nil, err
+		if note.Kind == "source_note" {
+			var citations []string
+			if err := json.Unmarshal([]byte(note.CitationsJSON), &citations); err != nil {
+				return nil, fmt.Errorf("解析笔记引用失败: %w", err)
+			}
+			if len(citations) == 0 {
+				return nil, fmt.Errorf("来源笔记 %s 缺少 Citation", note.ID)
+			}
+			valid, err := srv.store.ValidateSourceCitations(r.Context(), models.SourceType(note.SourceType), note.SourceID, citations)
+			if err != nil || !valid {
+				return nil, fmt.Errorf("来源笔记 %s 的 Citation 已失效", note.ID)
+			}
+		} else if note.Kind == "owner_reflection" {
+			var references []string
+			if err := json.Unmarshal([]byte(note.ReferencesJSON), &references); err != nil {
+				return nil, publicationDBError{fmt.Errorf("解析个人笔记 %s 的 Reference 失败: %w", note.ID, err)}
+			}
+			if len(references) > 0 {
+				valid, err := srv.store.ValidateSourceCitations(r.Context(), models.SourceType(note.SourceType), note.SourceID, references)
+				if err != nil || !valid {
+					return nil, fmt.Errorf("个人笔记 %s 的 Reference 已失效", note.ID)
+				}
+			}
 		}
-		valid, err := srv.store.ValidateSourceCitations(r.Context(), keyPoint.SourceType, keyPoint.SourceID, citations)
-		if err != nil || !valid {
-			return nil, fmt.Errorf("KeyPoint %s 的 Citation 已失效", keyPoint.ID)
-		}
-		title := strings.TrimSpace(keyPoint.SourceTitle)
-		if title == "" {
-			title = fmt.Sprintf("%s · %s", keyPoint.SourceType, keyPoint.SourceID)
-		}
-		sourceKey := string(keyPoint.SourceType) + "\x00" + keyPoint.SourceID
+		sourceKey := string(note.SourceType) + "\x00" + note.SourceID
 		if !seen[sourceKey] {
 			seen[sourceKey] = true
-			sources = append(sources, title)
+			sources = append(sources, srv.store.SourceTitle(r.Context(), models.SourceType(note.SourceType), note.SourceID))
 		}
 	}
 	return sources, nil
@@ -335,6 +406,12 @@ func wechatRichText(markdown string) string {
 	return b.String()
 }
 
+// publicationDBError 标记来源/笔记校验中的真实数据库故障（500），与门禁冲突（409）区分。
+type publicationDBError struct{ err error }
+
+func (e publicationDBError) Error() string { return e.err.Error() }
+func (e publicationDBError) Unwrap() error { return e.err }
+
 // handleRecordArticleHistory Owner 显式登记创作历史（R22 / C13）：
 // published（已在外部渠道发布）或 unpublished（已写作未发布）。
 // POST 必须重新检查 exact current readiness 与来源有效性——不能绕过门禁；
@@ -374,8 +451,13 @@ func (srv *Server) handleRecordArticleHistory(w http.ResponseWriter, r *http.Req
 		http.Error(w, "当前修订尚未通过交付门禁："+strings.Join(readiness.Issues, "；"), http.StatusConflict)
 		return
 	}
+	var dbErr publicationDBError
 	if readiness.NewContract {
 		if _, err = srv.claimMapSources(r, revision, draft.EditorialProfileID); err != nil {
+			if errors.As(err, &dbErr) {
+				http.Error(w, "读取来源或笔记失败："+err.Error(), http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "当前证据或素材授权已失效，不能登记："+err.Error(), http.StatusConflict)
 			return
 		}

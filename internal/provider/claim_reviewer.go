@@ -47,6 +47,8 @@ type ClaimReviewRequest struct {
 	ConfirmedClaim string            `json:"confirmedClaim"`
 	AuthorizedIDs  []string          `json:"authorizedIds"`
 	Materials      []ArticleMaterial `json:"materials"`
+	// OwnerNotes R23：冻结的个人笔记完整身份（成员校验 + 审校可见）。
+	OwnerNotes []ClaimOwnerNote `json:"ownerNotes"`
 }
 
 // ClaimReviewProvider 独立审校接口（Groq/OpenAI 实现）。
@@ -113,6 +115,14 @@ func ValidateClaimReviewAgainstInput(result *ClaimReviewResult, req *ClaimReview
 		}
 		known[m.KeyPointID] = true
 	}
+	noteIDs := map[string]bool{}
+	for _, n := range req.OwnerNotes {
+		if !authorized[n.ID] {
+			return fmt.Errorf("冻结笔记集合夹带授权之外的笔记 %q", n.ID)
+		}
+		known[n.ID] = true
+		noteIDs[n.ID] = true
+	}
 	for i, cm := range req.ClaimMap {
 		if cm.Excerpt != "" && !strings.Contains(req.Markdown, cm.Excerpt) {
 			return fmt.Errorf("ClaimMap[%d] excerpt 不在被审校正文中", i)
@@ -123,6 +133,10 @@ func ValidateClaimReviewAgainstInput(result *ClaimReviewResult, req *ClaimReview
 			}
 			if !known[id] {
 				return fmt.Errorf("ClaimMap[%d] 引用的材料 %q 不在冻结材料中", i, id)
+			}
+			// R23：OwnerNote 是个人理解身份，不得支撑 source_claim/verified_fact。
+			if noteIDs[id] && (cm.ClaimKind == ClaimSource || cm.ClaimKind == ClaimVerified) {
+				return fmt.Errorf("ClaimMap[%d] OwnerNote %q 不得支撑 %s", i, id, cm.ClaimKind)
 			}
 		}
 	}
@@ -150,6 +164,14 @@ func BuildClaimReviewPrompt(req ClaimReviewRequest) string {
 	for _, m := range req.Materials {
 		sb.WriteString(fmt.Sprintf("材料 %s｜来源：%s｜类型：%s\n内容：%s\n引用：%s\n\n",
 			m.KeyPointID, m.SourceTitle, m.SourceType, m.Content, strings.Join(m.Citations, ",")))
+	}
+	if len(req.OwnerNotes) > 0 {
+		sb.WriteString("个人笔记（Owner 的个人理解，只能支撑 owner_claim/synthesis_claim，不得当作来源表达）：\n")
+		for _, n := range req.OwnerNotes {
+			sb.WriteString(fmt.Sprintf("笔记 %s｜类型：%s｜来源：%s/%s｜revision：%d\n内容：%s\n",
+				n.ID, n.Kind, n.SourceType, n.SourceID, n.Revision, n.Content))
+		}
+		sb.WriteString("\n")
 	}
 	sb.WriteString("\n全文：\n" + req.Markdown + "\n")
 	return sb.String()

@@ -49,6 +49,9 @@ type Worker struct {
 	poll         time.Duration
 	// bundleFor 选择本次任务的 provider bundle（ADR-0009 默认 Groq；测试可注入 fake）。
 	bundleFor func(*models.ProcessingJob) (*provider.ProviderBundle, error)
+	// rawAudioFor optionally substitutes the external media fetch boundary. The
+	// production default remains fetchRawAudio with safehttp validation.
+	rawAudioFor func(context.Context, *models.ProcessingJob) (string, func(), error)
 	// taskConfigFor 解析任务的 Provider/Model 配置（B04 预算检查使用）。
 	taskConfigFor func(*models.ProcessingJob) (provider.TaskConfig, error)
 }
@@ -122,6 +125,25 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		}
 		return w.selector.BundleForTask(tc)
 	}
+	return w
+}
+
+// WithBundleResolver replaces provider selection for this worker. It is useful
+// for deterministic local deployments and end-to-end tests that keep the real
+// queue/worker path while substituting external model and media providers. Call
+// it during assembly, before the worker starts processing jobs.
+func (w *Worker) WithBundleResolver(resolve func(*models.ProcessingJob) (*provider.ProviderBundle, error)) *Worker {
+	if resolve != nil {
+		w.bundleFor = resolve
+	}
+	return w
+}
+
+// WithRawAudioResolver replaces only the external media acquisition boundary.
+// The resolver returns a readable local path and a cleanup function. Call it
+// during assembly; production code should normally use the safehttp default.
+func (w *Worker) WithRawAudioResolver(resolve func(context.Context, *models.ProcessingJob) (string, func(), error)) *Worker {
+	w.rawAudioFor = resolve
 	return w
 }
 
@@ -600,7 +622,14 @@ func (w *Worker) ensureEvidence(ctx context.Context, job *models.ProcessingJob) 
 	if reusable, ok := w.reusableEvidencePath(ctx, job, path); ok {
 		return reusable, nil
 	}
-	rawPath, cleanup, err := w.fetchRawAudio(ctx, job)
+	var rawPath string
+	var cleanup func()
+	var err error
+	if w.rawAudioFor != nil {
+		rawPath, cleanup, err = w.rawAudioFor(ctx, job)
+	} else {
+		rawPath, cleanup, err = w.fetchRawAudio(ctx, job)
+	}
 	if err != nil {
 		return "", err
 	}

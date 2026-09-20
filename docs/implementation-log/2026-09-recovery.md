@@ -6,6 +6,21 @@
 约定：每个任务一条记录，含交付行为、验证命令与结果、实际限制；任务与其记录同一原子提交。提交 SHA 在下一次文档更新时补齐。
 状态标记：`实现与自动验证完成` / `浏览器验证完成` / `真实内容质量通过` / `待验收（外部条件）`。
 
+## R23 — 两条完整旅程、恢复及旧数据回归（本段记录 R23 原子变更，基于 03642e6）
+
+- 状态：实现与自动验证完成；浏览器验证和真实内容质量仍分别属于 R25、R26。
+- 交付：
+  - `server/journeys_r23_test.go` 从真实 router、持久队列和 worker 驱动两条确定性旅程，只替换外部模型与媒体边界。学习旅程覆盖订阅新集、转录、重点质量、DJ 清单/解说、续听、个人反思、精读生成、running 任务启动恢复、修订、Markdown 导出和 Purge 后失效。创作旅程覆盖两集处理、两集重点与个人理解选材、两轮诊断、候选提升、Owner 接受主张、Curator、方案编辑/确认、Writer、首次主张/风格审校失败、AI 修订、复审通过、导出和精确历史登记。
+  - `backup/backup_test.go` 增加恢复后继续处理回归：备份中保留 queued 转录任务，恢复到新目录后由真实 worker 领取，产出 Transcript 并继续入队 Analyze，证明恢复的是可运行状态。
+  - 为旅程暴露最小 worker 装配缝：`WithBundleResolver` 和 `WithRawAudioResolver`；生产默认仍使用任务配置选择器与 safehttp 媒体下载。
+  - 补齐此前未贯通的 OwnerNote 生产契约：写作与 AI 修订冻结完整 note ID/content/kind/source/revision；Writer、ClaimReview、StyleReview 运行前动态重验笔记版本和底层来源策略；ClaimMap 允许笔记支撑 owner/synthesis，拒绝笔记冒充 source/verified；通过的 ClaimReview 保存并可读取确切输入快照，发布与历史登记对照该快照，审校后编辑笔记会重新阻断交付。
+  - 永久反例覆盖：笔记入队后编辑在 Provider 前失败、写作/两类审校快照携带完整笔记身份、审校后编辑导致内容包 409；旧文章同步修订/旧交付兼容用例随全仓回归保持通过。
+- 验证：
+  - `go test -count=1 -race ./internal/provider ./internal/store ./internal/queue ./internal/server ./internal/backup -run 'Test(ValidateClaimMap_OwnerNoteIdentity|ClaimReview_OwnerNoteIdentity|OwnerNoteFlowsIntoWritingAndReviewSnapshots|ClaimWritingJob_(ProductionDispatch|RejectsOwnerNoteEditedAfterEnqueue)|PublicationGateRejectsOwnerNoteEditedAfterReview|JourneyR23)'`：五包通过。
+  - `go test -count=1 ./...`：全仓 13 个测试包通过；`go vet ./...`、临时目录 `go build ./cmd/cloudwisepod`、`gofmt -l internal`、`git diff --check` 通过。
+  - Herdr tab `w7:t3` 保持开启；Pi 使用 `woyin/z.ai/glm-5.3-flash` 完成 OwnerNote 生产契约与四包初验。模型随后触发五小时额度上限，本地继续完成旅程、恢复测试、差异审计与验证。
+- 限制：模型与远程媒体均为确定性 fake，本任务不代表真实模型内容质量；未执行桌面/375/360 浏览器交互（R25），未做真实内容质量验收（R26）。
+
 ## R00 — 纠正交付状态，建立可追踪执行记录
 
 - 状态：实现与自动验证完成。

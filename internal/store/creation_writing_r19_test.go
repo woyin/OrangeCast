@@ -154,6 +154,114 @@ func TestEnqueueClaimWriting_FrozenSnapshotExact(t *testing.T) {
 	}
 }
 
+func TestOwnerNoteFlowsIntoWritingAndReviewSnapshots(t *testing.T) {
+	s, b, episodeID, kpID := confirmBriefFixture(t)
+	ctx := t.Context()
+	proposal, err := s.GetCreationProposal(ctx, b.CreationProposalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{
+		SourceType: string(models.SourceEpisode), SourceID: episodeID,
+		Kind: "owner_reflection", Content: "这是我的个人判断",
+		CitationsJSON: "[]", ReferencesJSON: "[]",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := s.SaveCreationSelection(ctx, &models.CreationSelection{
+		EditorialProfileID: proposal.EditorialProfileID, Title: "带个人理解的素材",
+		MaterialIDs: []string{kpID}, NoteIDs: []string{note.ID}, Status: models.SelectionConfirmed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionIDs, _ := json.Marshal([]string{selection.ID})
+	session, err := s.CreateIdeationSession(ctx, models.IdeationSession{
+		EditorialProfileID: proposal.EditorialProfileID, Intent: "写作",
+		ConstraintsJSON: "{}", SelectionsJSON: string(selectionIDs),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE creation_proposals SET ideation_session_id=? WHERE id=?`, session.ID, proposal.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := s.EnqueueClaimWritingForCreationBrief(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := s.GetJobExecution(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writeInput ClaimWritingTaskInput
+	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &writeInput); err != nil {
+		t.Fatal(err)
+	}
+	if len(writeInput.OwnerNotes) != 1 || writeInput.OwnerNotes[0].ID != note.ID ||
+		writeInput.OwnerNotes[0].Revision != note.Revision || writeInput.OwnerNotes[0].SourceID != episodeID {
+		t.Fatalf("写作笔记快照不完整: %+v", writeInput.OwnerNotes)
+	}
+	link, err := s.GetCreationArticleLinkByCreationBrief(ctx, b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const markdown = "# 个人理解\n\n来源说过这句话。我的个人判断。"
+	revision, err := s.SaveClaimWritingOutput(ctx, ClaimWritingOutput{
+		DraftID: job.SourceID, JobID: job.ID,
+		CreationBriefID: b.ID, BriefVersion: b.ConfirmedVersion,
+		CreationArticleLinkID: link.ID, ArticleProposalID: link.ArticleProposalID, ArticleBriefID: link.ArticleBriefID,
+		OwnerClaim: b.OwnerClaim, Title: "个人理解", Markdown: markdown,
+		ProviderName: "test", ModelName: "m", PromptVersion: provider.ClaimWriterPromptVersion,
+		AuthorizedIDs: []string{kpID, note.ID},
+		Entries: []models.ClaimMapEntry{
+			{Excerpt: "来源说过这句话。", ClaimKind: provider.ClaimSource, MaterialIDs: []string{kpID}, SourceTitle: "R17", CitationRefs: []string{"seg-1"}},
+			{Excerpt: "我的个人判断。", ClaimKind: provider.ClaimOwner, MaterialIDs: []string{note.ID}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{ReviewKindClaim, ReviewKindStyle} {
+		reviewJob, err := s.EnqueueRevisionReview(ctx, revision.ID, kind)
+		if err != nil {
+			t.Fatalf("enqueue %s: %v", kind, err)
+		}
+		reviewExec, err := s.GetJobExecution(ctx, reviewJob.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reviewInput ReviewTaskInput
+		if err := json.Unmarshal([]byte(reviewExec.InputSnapshotJSON), &reviewInput); err != nil {
+			t.Fatal(err)
+		}
+		if len(reviewInput.OwnerNotes) != 1 || reviewInput.OwnerNotes[0].ID != note.ID || reviewInput.OwnerNotes[0].Revision != note.Revision {
+			t.Fatalf("%s 笔记快照不完整: %+v", kind, reviewInput.OwnerNotes)
+		}
+		if kind == ReviewKindClaim {
+			found := false
+			for _, id := range reviewInput.AuthorizedIDs {
+				found = found || id == note.ID
+			}
+			if !found {
+				t.Fatalf("主张审校授权集合缺少笔记: %v", reviewInput.AuthorizedIDs)
+			}
+			if _, err := s.MarkJobRunning(ctx, reviewJob.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.SaveClaimReviewOutput(ctx, reviewJob.ID, &provider.ClaimReviewResult{Status: provider.ClaimReviewPassed}, "reviewer", "m"); err != nil {
+				t.Fatal(err)
+			}
+			passedInput, err := s.GetPassedClaimReviewInput(ctx, revision.ID)
+			if err != nil || len(passedInput.OwnerNotes) != 1 || passedInput.OwnerNotes[0].ID != note.ID {
+				t.Fatalf("passed review snapshot: %+v %v", passedInput, err)
+			}
+		}
+	}
+}
+
 // TestEnqueueClaimWriting_EightConcurrentOneJob R19：8+ 并发点击安全复用，
 // 全部返回同一 draft+job；任务完成后重复点击仍复用，不创建新 job。
 func TestEnqueueClaimWriting_EightConcurrentOneJob(t *testing.T) {

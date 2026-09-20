@@ -58,10 +58,15 @@ type ClaimAwareWritingRequest struct {
 	ExistingClaimMap []ClaimMapEntry `json:"existingClaimMap,omitempty"`
 }
 
-// ClaimOwnerNote 个人笔记快照。
+// ClaimOwnerNote 个人笔记快照（R23）：独立于 KeyPoint/ArticleMaterial 的个人材料
+// 身份，保留 note ID/内容/kind/来源身份/修订版本；不得冒充来源主张或引用。
 type ClaimOwnerNote struct {
-	ID      string `json:"id"`
-	Content string `json:"content"`
+	ID         string `json:"id"`
+	Content    string `json:"content"`
+	Kind       string `json:"kind"` // source_note | owner_reflection
+	SourceType string `json:"sourceType"`
+	SourceID   string `json:"sourceId"`
+	Revision   int    `json:"revision"`
 }
 
 // ClaimVerifiedFact 已核验事实及引用。
@@ -126,7 +131,8 @@ func BuildClaimPrompt(req ClaimAwareWritingRequest) string {
 		sb.WriteString(fmt.Sprintf("[%s] %s：%s\n", m.KeyPointID, m.SourceTitle, m.Content))
 	}
 	for _, n := range req.OwnerNotes {
-		sb.WriteString(fmt.Sprintf("个人笔记 [%s]：%s\n", n.ID, n.Content))
+		sb.WriteString(fmt.Sprintf("个人笔记 [%s]（%s，%s/%s，revision %d）：%s\n",
+			n.ID, n.Kind, n.SourceType, n.SourceID, n.Revision, n.Content))
 	}
 	for _, vf := range req.VerifiedFacts {
 		sb.WriteString(fmt.Sprintf("已核验事实：%s（引用：%s）\n", vf.Text, strings.Join(vf.Citations, ",")))
@@ -142,8 +148,13 @@ func BuildClaimPrompt(req ClaimAwareWritingRequest) string {
 //   - 独立语义审校（C11）不在此处。
 func ValidateClaimMap(result *ClaimAwareWritingResult, req ClaimAwareWritingRequest) []error {
 	authorized := map[string]bool{}
+	ownerNoteIDs := map[string]bool{}
 	for _, m := range req.Materials {
 		authorized[m.KeyPointID] = true
+	}
+	for _, n := range req.OwnerNotes {
+		authorized[n.ID] = true
+		ownerNoteIDs[n.ID] = true
 	}
 	validKinds := map[string]bool{
 		ClaimSource: true, ClaimOwner: true, ClaimSynthesis: true, ClaimVerified: true,
@@ -162,6 +173,11 @@ func ValidateClaimMap(result *ClaimAwareWritingResult, req ClaimAwareWritingRequ
 		for _, id := range cm.MaterialIDs {
 			if !authorized[id] {
 				errs = append(errs, fmt.Errorf("claimMap[%d] 引用了授权材料之外 %q 的 %q", i, id, cm.ClaimKind))
+			}
+			// R23：OwnerNote 是个人理解身份，只能支撑 owner_claim/synthesis_claim，
+			// 不得冒充来源主张（source_claim）或已核验事实。
+			if ownerNoteIDs[id] && (cm.ClaimKind == ClaimSource || cm.ClaimKind == ClaimVerified) {
+				errs = append(errs, fmt.Errorf("claimMap[%d] OwnerNote %q 不得用于 %s", i, id, cm.ClaimKind))
 			}
 		}
 	}

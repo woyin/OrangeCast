@@ -54,10 +54,11 @@ func (w *Worker) doClaimWritingJob(ctx context.Context, job *models.ProcessingJo
 	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &input); err != nil {
 		return fmt.Errorf("解析冻结写作输入: %w", err)
 	}
-	if input.CreationBriefID == "" || input.DraftID == "" || input.OwnerClaim == "" || len(input.Materials) == 0 {
+	if input.CreationBriefID == "" || input.DraftID == "" || input.OwnerClaim == "" ||
+		(len(input.Materials) == 0 && len(input.OwnerNotes) == 0) {
 		return fmt.Errorf("写作任务缺少冻结输入快照")
 	}
-	authorizedIDs := make([]string, 0, len(input.Materials))
+	authorizedIDs := make([]string, 0, len(input.Materials)+len(input.OwnerNotes))
 	for _, m := range input.Materials {
 		authorizedIDs = append(authorizedIDs, m.KeyPointID)
 		sourceType := models.SourceType(m.SourceType)
@@ -79,10 +80,17 @@ func (w *Worker) doClaimWritingJob(ctx context.Context, job *models.ProcessingJo
 			return fmt.Errorf("写作来源策略禁止外发（source_type=%s source_id=%s）", sourceType, m.SourceID)
 		}
 	}
+	for _, note := range input.OwnerNotes {
+		authorizedIDs = append(authorizedIDs, note.ID)
+	}
+	if err := frozenNotesPolicy(ctx, w, input.ProfileID, input.OwnerNotes, prov.Name(), "v2 写作"); err != nil {
+		return err
+	}
 	req := provider.ClaimAwareWritingRequest{
 		Title: input.OwnerClaim, Audience: input.Audience, Outline: input.Outline,
 		Style: input.Style, SourceAttribution: "轻量", ConfirmedClaim: input.OwnerClaim,
 		TargetLength: input.TargetLength, Materials: input.Materials,
+		OwnerNotes: input.OwnerNotes,
 	}
 	var result *provider.ClaimAwareWritingResult
 	if exec.CheckpointJSON != "" {
@@ -187,7 +195,8 @@ func (w *Worker) doClaimRevisionJob(ctx context.Context, job *models.ProcessingJ
 	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &input); err != nil {
 		return fmt.Errorf("解析冻结 AI 修订输入: %w", err)
 	}
-	if input.Kind != "ai_revision" || input.BaseRevisionID == "" || input.ExistingMarkdown == "" || len(input.Materials) == 0 {
+	if input.Kind != "ai_revision" || input.BaseRevisionID == "" || input.ExistingMarkdown == "" ||
+		(len(input.Materials) == 0 && len(input.OwnerNotes) == 0) {
 		return fmt.Errorf("AI 修订任务缺少冻结输入快照")
 	}
 	// 逐冻结来源动态重验策略（R04：冻结文本不绕过 Owner 撤销/LocalOnly）。
@@ -196,10 +205,14 @@ func (w *Worker) doClaimRevisionJob(ctx context.Context, job *models.ProcessingJ
 			return err
 		}
 	}
+	if err := frozenNotesPolicy(ctx, w, input.ProfileID, input.OwnerNotes, prov.Name(), "AI 修订"); err != nil {
+		return err
+	}
 	req := provider.ClaimAwareWritingRequest{
 		Title: input.Title, Audience: input.Audience, Outline: input.Outline,
 		Style: input.Style, SourceAttribution: "轻量", ConfirmedClaim: input.OwnerClaim,
 		TargetLength: input.TargetLength, Materials: input.Materials,
+		OwnerNotes:       input.OwnerNotes,
 		ExistingMarkdown: input.ExistingMarkdown, RevisionFeedback: input.ReviewFeedback,
 		ExistingClaimMap: entriesToProvider(input.ExistingClaimMap),
 	}

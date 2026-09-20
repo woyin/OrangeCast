@@ -59,6 +59,8 @@ type ReviewTaskInput struct {
 
 	// 授权材料身份（动态来源策略检查用：publication + send policy）。
 	Materials []provider.ArticleMaterial `json:"materials"`
+	// OwnerNotes R23：ClaimMap 引用的 OwnerNote 完整身份（独立于 KeyPoint 冻结）。
+	OwnerNotes []provider.ClaimOwnerNote `json:"ownerNotes"`
 
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
@@ -295,17 +297,41 @@ func freezeReviewTaskInputTx(ctx context.Context, tx *sql.Tx, revisionID, kind s
 				authorized[id] = true
 			}
 		}
+		// 拆分 KeyPoint 与 OwnerNote 身份：note 必须真实存在（owner_notes），
+		// KeyPoint 必须在确认快照内。
+		var kpIDs, noteIDs []string
 		for id := range authorized {
-			input.AuthorizedIDs = append(input.AuthorizedIDs, id)
+			var exists int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_notes WHERE id=?`, id).Scan(&exists); err != nil {
+				return nil, err
+			}
+			if exists == 1 {
+				noteIDs = append(noteIDs, id)
+			} else {
+				kpIDs = append(kpIDs, id)
+			}
 		}
-		sort.Strings(input.AuthorizedIDs)
-		// ClaimMap 引用的每个材料 ID 都必须在确认快照内：部分缺失说明
-		// ClaimMap 与授权快照不一致，不得静默降级为部分授权。
+		sort.Strings(kpIDs)
+		sort.Strings(noteIDs)
+		input.AuthorizedIDs = append(input.AuthorizedIDs, kpIDs...)
+		input.AuthorizedIDs = append(input.AuthorizedIDs, noteIDs...)
+		for _, noteID := range noteIDs {
+			note, err := getOwnerNoteTx(ctx, tx, noteID)
+			if err != nil {
+				return nil, err
+			}
+			input.OwnerNotes = append(input.OwnerNotes, provider.ClaimOwnerNote{
+				ID: note.ID, Content: note.Content, Kind: note.Kind,
+				SourceType: note.SourceType, SourceID: note.SourceID, Revision: note.Revision,
+			})
+		}
+		// KeyPoint 引用都必须在确认快照内：部分缺失说明 ClaimMap 与授权快照
+		// 不一致，不得静默降级为部分授权。
 		snapshotIDs := make(map[string]bool, len(input.Materials))
 		for _, m := range input.Materials {
 			snapshotIDs[m.KeyPointID] = true
 		}
-		for _, id := range input.AuthorizedIDs {
+		for _, id := range kpIDs {
 			if !snapshotIDs[id] {
 				return nil, fmt.Errorf("%w: ClaimMap 引用材料 %s 不在确认快照内，不能进行独立主张审校", ErrInvalidEditorialState, id)
 			}
@@ -317,7 +343,8 @@ func freezeReviewTaskInputTx(ctx context.Context, tx *sql.Tx, revisionID, kind s
 				filtered = append(filtered, m)
 			}
 		}
-		if len(filtered) == 0 {
+		// OwnerNote-only 文章合法：无 KeyPoint 材料但有冻结笔记。
+		if len(filtered) == 0 && len(noteIDs) == 0 {
 			return nil, fmt.Errorf("%w: 授权材料不在确认快照内，不能进行独立主张审校", ErrInvalidEditorialState)
 		}
 		input.Materials = filtered
@@ -358,13 +385,34 @@ func freezeReviewTaskInputTx(ctx context.Context, tx *sql.Tx, revisionID, kind s
 					used[id] = true
 				}
 			}
-			// ClaimMap 引用的每个材料 ID 都必须在确认快照内：缺失一个也拒绝，
-			// 不得部分过滤（owner/synthesis 无 material ID 合法，不进入 used）。
+			// ClaimMap 引用的 KeyPoint ID 必须在确认快照内（缺失即拒）；OwnerNote ID
+			// 精确解析为冻结笔记身份（note-only 文章合法）。owner/synthesis 无 material
+			// ID 合法，不进入 used。
 			snapshotIDs := make(map[string]bool, len(input.Materials))
 			for _, m := range input.Materials {
 				snapshotIDs[m.KeyPointID] = true
 			}
+			usedIDs := make([]string, 0, len(used))
 			for id := range used {
+				usedIDs = append(usedIDs, id)
+			}
+			sort.Strings(usedIDs)
+			for _, id := range usedIDs {
+				var exists int
+				if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM owner_notes WHERE id=?`, id).Scan(&exists); err != nil {
+					return nil, err
+				}
+				if exists == 1 {
+					note, err := getOwnerNoteTx(ctx, tx, id)
+					if err != nil {
+						return nil, err
+					}
+					input.OwnerNotes = append(input.OwnerNotes, provider.ClaimOwnerNote{
+						ID: note.ID, Content: note.Content, Kind: note.Kind,
+						SourceType: note.SourceType, SourceID: note.SourceID, Revision: note.Revision,
+					})
+					continue
+				}
 				if !snapshotIDs[id] {
 					return nil, fmt.Errorf("%w: ClaimMap 引用材料 %s 不在确认快照内，不能进行独立风格审校", ErrInvalidEditorialState, id)
 				}
@@ -469,6 +517,34 @@ func (s *Store) reviewOutputInputTx(ctx context.Context, tx *sql.Tx, jobID strin
 	return input, nil
 }
 
+// GetPassedClaimReviewInput returns the immutable input used by the durable,
+// passed claim review for exactly one article revision. Publication uses this
+// snapshot to detect OwnerNote edits made after the review completed.
+func (s *Store) GetPassedClaimReviewInput(ctx context.Context, revisionID string) (*ReviewTaskInput, error) {
+	var snapshot string
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(j.input_snapshot_json,'')
+		FROM claim_reviews r
+		JOIN processing_jobs j ON j.id=r.origin_job_id
+		WHERE r.work_revision_id=? AND r.status='passed' AND r.origin_job_id!=''
+		ORDER BY r.created_at DESC,r.id DESC
+		LIMIT 1`, revisionID).Scan(&snapshot)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	input := &ReviewTaskInput{}
+	if err := json.Unmarshal([]byte(snapshot), input); err != nil {
+		return nil, fmt.Errorf("%w: 主张审校输入快照不可解析: %v", ErrInvalidEditorialState, err)
+	}
+	if input.Kind != ReviewKindClaim || input.RevisionID != revisionID {
+		return nil, fmt.Errorf("%w: 主张审校输入快照与文章修订不匹配", ErrInvalidEditorialState)
+	}
+	return input, nil
+}
+
 // confirmReviewJobResult 在事务内确认 job complete result（origin-job 幂等）。
 // RowsAffected=0 时必须已 complete，否则拒绝（与 SaveClaimWritingOutput 同契约）。
 func confirmReviewJobResultTx(ctx context.Context, tx *sql.Tx, jobID, revisionID, kind, status string) error {
@@ -523,7 +599,7 @@ func (s *Store) SaveClaimReviewOutput(ctx context.Context, jobID string, result 
 	req := &provider.ClaimReviewRequest{
 		Markdown: input.Markdown, ClaimMap: convertEntriesToProvider(input.ClaimMap),
 		ConfirmedClaim: input.ConfirmedClaim, AuthorizedIDs: input.AuthorizedIDs,
-		Materials: input.Materials,
+		Materials: input.Materials, OwnerNotes: input.OwnerNotes,
 	}
 	if err := provider.ValidateClaimReviewAgainstInput(result, req); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidEditorialState, err)
