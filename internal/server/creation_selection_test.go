@@ -338,33 +338,90 @@ func TestAutomaticCreationProposalsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 构造发送快照：两个 Episode 各一条素材。
-	sentMaterials := []provider.ArticleMaterial{
+	// 构造发送快照：当前窗口两个 Episode 各一条素材 + 有限历史素材（第三集）。
+	currentMaterials := []provider.ArticleMaterial{
 		{KeyPointID: "kp-ep1", SourceID: "ep-1", SourceTitle: "第一集", Content: "内容A"},
 		{KeyPointID: "kp-ep2", SourceID: "ep-2", SourceTitle: "第二集", Content: "内容B"},
 	}
-	_ = profile
+	historicalMaterials := []provider.ArticleMaterial{
+		{KeyPointID: "kp-h1", SourceID: "ep-h1", SourceTitle: "历史集一", Content: "历史内容一"},
+		{KeyPointID: "kp-h2", SourceID: "ep-h2", SourceTitle: "历史集二", Content: "历史内容二"},
+	}
+	sentMaterials := append(append([]provider.ArticleMaterial{}, currentMaterials...), historicalMaterials...)
 
 	result := &provider.ScoutResult{
 		Proposals: []provider.ScoutProposal{
 			{Title: "合法跨集候选", Thesis: "跨集论点", CandidateKeyPointIDs: []string{"kp-ep1", "kp-ep2"}},
 			{Title: "伪造素材候选", Thesis: "编造论点", CandidateKeyPointIDs: []string{"kp-fake"}},
 			{Title: "单集候选", Thesis: "单集论点", CandidateKeyPointIDs: []string{"kp-ep1"}},
-			{Title: "合法跨集候选", Thesis: "跨集论点"}, // 同义重复
+			{Title: "合法跨集候选", Thesis: "跨集论点", CandidateKeyPointIDs: []string{"kp-ep1", "kp-ep2"}}, // 精确重复
+			// 纯历史重组：只引用两个历史 Source 的素材（满足跨集、但无当前窗口新价值 → 挡）。
+			{Title: "历史重组候选", Thesis: "旧内容重述", CandidateKeyPointIDs: []string{"kp-h1", "kp-h2"}},
+			// FollowUp：引用当前窗口新证据 → 保留并标记。
+			{Kind: "follow_up", Title: "跟进新证据", Thesis: "新证据论点", CandidateKeyPointIDs: []string{"kp-ep2", "kp-h1"}},
 		},
 	}
-	proposals, err := srv.automaticCreationProposals(ctx, profile.ID, "batch-1", result, sentMaterials)
+	proposals, err := srv.automaticCreationProposals(ctx, profile.ID, "batch-1", result, currentMaterials, sentMaterials)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(proposals) != 1 {
-		t.Fatalf("应只保留 1 条合法跨集候选: %d", len(proposals))
+	if len(proposals) != 2 {
+		t.Fatalf("应保留 2 条（合法跨集 + follow_up）: %d %+v", len(proposals), proposals)
 	}
 	if proposals[0].WorkingTitle != "合法跨集候选" {
 		t.Fatalf("保留的应为合法候选: %+v", proposals[0])
 	}
 	if !strings.Contains(proposals[0].MaterialIDsJSON, "kp-ep1") || !strings.Contains(proposals[0].MaterialIDsJSON, "kp-ep2") {
 		t.Fatalf("保留候选应含两集素材: %s", proposals[0].MaterialIDsJSON)
+	}
+	if proposals[1].HistoryRelationship != "follow_up_with_new_evidence" {
+		t.Fatalf("follow_up 应标记新证据: %+v", proposals[1])
+	}
+
+	// HardDuplicate 按成对 near-match 判定（同一条既有提案/候选的标题与主张双命中
+	// 才挡；标题命中 A、主张命中 B 的不成对组合不得误判）。
+	// 同一 result 内：A、B 先保留入批；C = title≈A + claim≈B（不成对）→ 保留；
+	// D = title≈A + claim≈A（成对）→ 丢弃。
+	paired := &provider.ScoutResult{Proposals: []provider.ScoutProposal{
+		{Title: "主权基金配置深度解析", Thesis: "主权基金配置决定收益", CandidateKeyPointIDs: []string{"kp-ep1", "kp-ep2"}},
+		{Title: "利率环境影响估值", Thesis: "利率周期决定估值波动", CandidateKeyPointIDs: []string{"kp-ep2", "kp-h1"}},
+		{Title: "主权基金配置深度解析（续）", Thesis: "利率周期决定估值波动", CandidateKeyPointIDs: []string{"kp-ep1", "kp-h2"}},     // 不成对 → 保留
+		{Title: "主权基金配置深度解析（完整版）", Thesis: "主权基金配置决定收益水平", CandidateKeyPointIDs: []string{"kp-ep1", "kp-h1"}}, // 成对 → 挡
+	}}
+	proposals2, err := srv.automaticCreationProposals(ctx, profile.ID, "batch-2", paired, currentMaterials, sentMaterials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposals2) != 3 {
+		t.Fatalf("成对重复应挡、不成对应留: %d %+v", len(proposals2), proposals2)
+	}
+	last := proposals2[len(proposals2)-1]
+	if last.WorkingTitle != "主权基金配置深度解析（续）" {
+		t.Fatalf("不成对候选应被保留: %+v", last)
+	}
+
+	// follow_up 与 possible_duplicate 同时成立：组合格式保留两个事实，不互相覆盖。
+	if _, err := srv.store.CreateCreationHistory(ctx, models.CreationHistory{
+		EditorialProfileID: profile.ID, Status: "published", CreationForm: "article",
+		Title:     "完全不同的旧作标题",
+		CoreClaim: "新证据论点的最新表述",
+		Content:   "内容",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	combo := &provider.ScoutResult{Proposals: []provider.ScoutProposal{
+		{Kind: "follow_up", Title: "跟进新证据（2026）", Thesis: "新证据论点的最新表述", CandidateKeyPointIDs: []string{"kp-ep2", "kp-h1"}},
+	}}
+	proposals3, err := srv.automaticCreationProposals(ctx, profile.ID, "batch-3", combo, currentMaterials, sentMaterials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposals3) != 1 {
+		t.Fatalf("组合候选应保留: %d %+v", len(proposals3), proposals3)
+	}
+	rel := proposals3[0].HistoryRelationship
+	if !strings.Contains(rel, "follow_up_with_new_evidence") || !strings.Contains(rel, "possible_duplicate:") {
+		t.Fatalf("两个事实都应保留在关系标记中: %q", rel)
 	}
 }
 

@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 type automaticDiscoveryScout struct {
@@ -116,5 +119,184 @@ func TestRunAutomaticDiscoveryCreatesOneDurableBatchAndCreationProposal(t *testi
 	var failed int
 	if err := srv.store.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM proposal_batches WHERE editorial_profile_id=? AND status='failed' AND failure_reason LIKE '%provider unavailable%'`, profile.ID).Scan(&failed); err != nil || failed != 1 {
 		t.Fatalf("failed automatic discovery must remain visible to the Owner: count=%d err=%v", failed, err)
+	}
+}
+
+// ---- R15：历史召回与新增价值校验（自动发现）----
+
+// seedDiscoveryEpisode 为发现集成测试写一个 Episode：转录 + 卡片（供引用校验与
+// IndexKeyPoints）+ 一条重点，并置为 ready（产生发现窗口变化）。返回 epID。
+func seedDiscoveryEpisode(t *testing.T, srv *Server, guid, content, segID string) string {
+	t.Helper()
+	ctx := context.Background()
+	podcast, err := srv.store.CreatePodcast(ctx, "https://feed.example.com/"+guid+".xml", guid+" Pod", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.store.MergeEpisodes(ctx, podcast.ID, []models.Episode{{GUID: guid, Title: guid + " 单集", AudioURL: "https://cdn.example.com/" + guid + ".mp3"}}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := srv.store.ListEpisodes(ctx, podcast.ID)
+	if err != nil || len(eps) != 1 {
+		t.Fatalf("episode setup: %v", err)
+	}
+	epID := eps[0].ID
+	job, err := srv.store.EnqueueJob(ctx, models.SourceEpisode, epID, models.JobTranscribe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := provider.TranscriptPayload{
+		Language: "zh", Text: content,
+		Segments: []provider.Segment{{ID: segID, Start: 0, End: 10, Text: content}},
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	version, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, epID, "transcript", "test", "test", "1", job.ID, string(payloadBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.store.MarkJobRunning(ctx, job.ID)
+	srv.store.MarkJobSucceeded(ctx, job.ID)
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, epID, "transcript", version)
+
+	card := provider.KnowledgeCard{
+		Title:     guid + " 卡片",
+		Summary:   provider.CitedText{Text: content, Citations: []string{segID}},
+		KeyPoints: []provider.KeyPoint{{Content: content, Citations: []string{segID}}},
+		Chapters:  []provider.Chapter{{Title: "C", Citations: []string{segID}}},
+	}
+	cardBytes, _ := json.Marshal(card)
+	cardVersion, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, epID, "knowledge_card", "test", "test", "1", job.ID, string(cardBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, epID, "knowledge_card", cardVersion)
+	if _, err := srv.store.IndexKeyPoints(ctx, models.SourceEpisode, epID, guid+" 单集", 1, &card, payload.Segments); err != nil {
+		t.Fatal(err)
+	}
+	return epID
+}
+
+// TestAutomaticDiscoveryRequest_HistoricalRecall R15 集成：只把当前窗口两集的
+// MaterialChange 传给请求构造；历史 Theme 真实召回相关素材；LocalOnly 与画像
+// 不相关历史材料被逐条排除；HistoricalWorks 有界。
+func TestAutomaticDiscoveryRequest_HistoricalRecall(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+	profile, err := srv.store.EnsureDefaultEditorialProfile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 当前窗口：两个 Episode 各一条重点。
+	ep1 := seedDiscoveryEpisode(t, srv, "disc-ep1", "主讲人认为主权基金配置决定收益", "seg-d1")
+	ep2 := seedDiscoveryEpisode(t, srv, "disc-ep2", "主权基金配置的利率环境影响估值", "seg-d2")
+
+	// 历史：相关（可召回）、LocalOnly（排除）、画像不相关（排除）。
+	seedDiscoveryEpisode(t, srv, "disc-h1", "主权基金配置的历史案例回顾", "seg-h1")
+	seedDiscoveryEpisode(t, srv, "disc-h2", "完全无关的烹饪技巧合集分享", "seg-h2")
+	epLO := seedDiscoveryEpisode(t, srv, "disc-lo", "主权基金配置的地方观察记录", "seg-lo")
+	if err := srv.store.SetSourceProductionPolicy(ctx, models.SourceEpisode, epLO, "internal", models.ModelDataLocalOnly); err != nil {
+		t.Fatal(err)
+	}
+
+	kps, _, err := srv.store.ListKeyPointsFiltered(ctx, store.KeyPointFilter{}, 1, 50)
+	if err != nil || len(kps) < 5 {
+		t.Fatalf("应有足够重点: %d %v", len(kps), err)
+	}
+	for _, kp := range kps {
+		if err := srv.store.SetKeyPointQualityStatus(ctx, kp.ID, models.KeyPointReady); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 画像不相关：disc-h2 的重点显式标记 irrelevant（历史召回排除）。
+	for _, kp := range kps {
+		if strings.Contains(kp.SourceTitle, "disc-h2") {
+			if err := srv.store.SetEditorialRelevance(ctx, models.EditorialRelevance{
+				EditorialProfileID: profile.ID, KeyPointID: kp.ID, Assessment: "irrelevant", Rationale: "不相关",
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// 只取当前窗口两集的 MaterialChange（历史/LocalOnly/不相关重点仅存在于索引，
+	// 供历史召回，不进入当前窗口）。
+	allChanges, err := srv.store.ListDiscoveryWindowChanges(ctx, profile.ID, "2000-01-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	windowSources := map[string]bool{ep1: true, ep2: true}
+	var changes []*models.MaterialChange
+	for _, ch := range allChanges {
+		if windowSources[ch.SourceID] {
+			changes = append(changes, ch)
+		}
+	}
+	if len(changes) < 2 {
+		t.Fatalf("当前窗口应有两集变化: %d", len(changes))
+	}
+
+	req, err := srv.automaticDiscoveryRequest(ctx, profile, "test", changes)
+	if err != nil {
+		t.Fatalf("请求构造失败: %v", err)
+	}
+	if len(req.Themes) == 0 || req.Themes[0].ID != "automatic-discovery" || len(req.Themes[0].Materials) != 2 {
+		t.Fatalf("当前窗口主题应恰好含两集材料: %+v", req.Themes)
+	}
+	var histTheme *provider.ScoutTheme
+	for i := range req.Themes {
+		if req.Themes[i].ID == "historical-context" {
+			histTheme = &req.Themes[i]
+		}
+	}
+	if histTheme == nil {
+		t.Fatal("应召回历史主题")
+	}
+	if len(histTheme.Materials) == 0 || len(histTheme.Materials) > 6 {
+		t.Fatalf("历史召回应有界（≤6）且非空: %d", len(histTheme.Materials))
+	}
+	for _, m := range histTheme.Materials {
+		if m.SourceID == epLO {
+			t.Fatal("LocalOnly 历史材料不得进入发送快照")
+		}
+		if strings.Contains(m.Content, "烹饪") {
+			t.Fatal("画像不相关历史材料不得进入发送快照")
+		}
+	}
+	// HistoricalWorks 有界与只取最新：创建 12 条（work-00..work-11），
+	// created_at 写固定递增时间；请求应恰好 10 条，含最新 work-11、不含最旧 work-00。
+	for i := 0; i < 12; i++ {
+		w, err := srv.store.CreateCreationHistory(ctx, models.CreationHistory{
+			EditorialProfileID: profile.ID, Status: "published", CreationForm: "article",
+			Title:     fmt.Sprintf("work-%02d", i),
+			CoreClaim: fmt.Sprintf("历史主张 %02d", i),
+			Content:   "内容",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 固定递增时间：work-00 最旧 … work-11 最新。
+		if _, err := srv.store.DB.ExecContext(ctx,
+			`UPDATE creation_history SET created_at = ? WHERE id = ?`,
+			fmt.Sprintf("2026-01-01 00:00:%02d", i), w.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req2, err := srv.automaticDiscoveryRequest(ctx, profile, "test", changes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req2.HistoricalWorks) != 10 {
+		t.Fatalf("作品历史应恰好有界为 10: %d", len(req2.HistoricalWorks))
+	}
+	titles := map[string]bool{}
+	for _, w := range req2.HistoricalWorks {
+		titles[w.Title] = true
+	}
+	if !titles["work-11"] {
+		t.Fatalf("应包含最新的 work-11: %+v", titles)
+	}
+	if titles["work-00"] {
+		t.Fatalf("不应包含最旧的 work-00: %+v", titles)
 	}
 }

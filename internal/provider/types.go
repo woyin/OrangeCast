@@ -160,14 +160,23 @@ type ScoutTheme struct {
 	Materials   []ArticleMaterial `json:"materials"`
 }
 
+// ScoutHistoricalWork 精确作品历史的一条紧凑投影（R15）：用于重复检查与新价值
+// 论证，不作为候选材料来源（候选只能引用 KeyPoint 材料）。
+type ScoutHistoricalWork struct {
+	Title     string `json:"title"`
+	CoreClaim string `json:"coreClaim"`
+	Status    string `json:"status"`
+}
+
 // ScoutRequest supplies a profile's confirmed themes to the topic-discovery role.
 type ScoutRequest struct {
-	Audience      string       `json:"audience"`
-	Voice         string       `json:"voice"`
-	Mode          string       `json:"mode,omitempty"`
-	SourceID      string       `json:"sourceId,omitempty"`
-	ProposalCount int          `json:"proposalCount,omitempty"`
-	Themes        []ScoutTheme `json:"themes"`
+	Audience        string                `json:"audience"`
+	Voice           string                `json:"voice"`
+	Mode            string                `json:"mode,omitempty"`
+	SourceID        string                `json:"sourceId,omitempty"`
+	ProposalCount   int                   `json:"proposalCount,omitempty"`
+	Themes          []ScoutTheme          `json:"themes"`
+	HistoricalWorks []ScoutHistoricalWork `json:"historicalWorks,omitempty"` // R15：有界作品历史
 }
 
 // ScoutProposal is a candidate topic that remains proposed until the Owner accepts it.

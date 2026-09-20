@@ -286,3 +286,25 @@
 - 事故：0e64e71（workbench resolve 表单补全）在 `go test ./...` 明确失败（backup/migrate 迁移计数断言未更新到 49）的情况下被提交——原因是验证命令经 `grep|head; echo DONE` 管道掩盖了 go test 的非零退出码。
 - 修复：补齐 migrate_test/backup_test 的 version 49 断言（列表末尾、AppliedVersion、len(applied)、失败迁移保持值、备份库版本）。重跑保留退出码的 `go test ./...` → EXIT=0；`go vet ./...`、`gofmt`、`git diff --check` 通过。
 - 规则更正（后续所有提交生效）：验证命令不得经 grep/head 管道丢失退出码；使用 `set -o pipefail` 或单独命令，非零即停止，不提交。
+
+## R15 — 发现使用历史材料且验证新增价值
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - `server/automatic_discovery.go`（automaticDiscoveryRequest）：当前窗口材料完整发送（跨集要求保持）；以窗口材料为种子调用 `SearchKeyPointsHybrid` 做**有界历史召回**（≤6 条），逐条校验 ready/owner_confirmed、非 stale、画像资格（`IsKeyPointEligibleForProfile`，错误/false 均排除）、Provider 策略（`CanSendSourceToProvider`，LocalOnly/撤销排除）——不发送全库；新增第二 Theme `historical-context` 标注"仅供对照与延续"。`ScoutRequest` 新增 `HistoricalWorks`（≤10 条精确作品历史投影）。
+  - 当前窗口按 `theme.ID=="automatic-discovery"` 显式识别；`executeAutomaticProposalBatch` 分别传递 currentMaterials 与 sentMaterials（全集），`automaticCreationProposals` 两集合显式区分——新增价值判定只看当前窗口。
+  - 输出校验（先校验后落库）：伪造 ID（不在发送快照）丢弃；**纯历史重组**（只引用历史素材、满足跨集但无当前窗口）丢弃；跨集 ≥2 来源保持；空标题/主张显式拒绝；同义/重复复用既有可解释边界 `editorialTitleNearDuplicate`（包含且 ≥6 字符，或 bigram Jaccard ≥0.65，与手工 Scout 一致）且**成对比较**（同一条既有候选/作品的标题与主张双命中才 HardDuplicate；标题命中 A + 主张命中 B 不误判）；单边命中标记 `possible_duplicate:<ids>`；`follow_up` 引用当前窗口新证据标记 `follow_up_with_new_evidence`，两者可同时成立（组合格式 `follow_up_with_new_evidence;possible_duplicate:<ids>`）。空结果保留实际产出并记录 shortage（不凑数）。
+- 反例（测试覆盖）：
+  - 纯历史重组（两个历史 Source，满足跨集）被挡；伪造 ID 丢弃；单来源丢弃；精确重复丢弃；
+  - 成对 near-dup 挡、不成对（title≈A + claim≈B）保留；
+  - follow_up + possible_duplicate 组合标记；
+  - LocalOnly / 画像不相关历史材料不进入发送快照（集成测试 `TestAutomaticDiscoveryRequest_HistoricalRecall`：changes 按 SourceID 显式过滤为当前窗口两集，历史 Theme 召回非空且 ≤6）；
+  - HistoricalWorks 恰好 10 条且按最新截取（固定递增 created_at，含 work-11、不含 work-00）。
+- 门禁证据：
+  - `go test -run 'TestAutomaticCreationProposalsValidation|TestAutomaticDiscoveryRequest_HistoricalRecall' ./internal/server/` 通过；
+  - `go test ./internal/server/` 通过（20.9s）；
+  - `go test ./...` 全部 ok；
+  - `go vet ./internal/server/`、`go vet ./...` 通过；`gofmt` 通过；
+  - `go test -race ./internal/server/` 通过（568.141s）。
+- 提交：`fix(discovery): ground new proposals in bounded historical context`。
+- 限制：召回质量依赖本地嵌入/FTS（无外部服务）；同义判定为字符 bigram 边界（≥0.65/成对），语义级同义不承诺。
