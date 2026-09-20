@@ -80,7 +80,15 @@ func (s *Store) CreateDocumentVersion(ctx context.Context, documentID, title, co
 	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM documents WHERE series_id=?`, previous.SeriesID).Scan(&next); err != nil {
 		return nil, err
 	}
-	return s.createDocumentVersion(ctx, previous.SeriesID, next, title, "revision", previous.OriginURL, content)
+	doc, err := s.createDocumentVersion(ctx, previous.SeriesID, next, title, "revision", previous.OriginURL, content)
+	if err != nil {
+		return nil, err
+	}
+	// R14：同系列新版本出现后，以旧版本文档为依据的研究缺口重新阻断。
+	if err := s.InvalidateSupersededDocumentResolutions(ctx, previous.SeriesID, next); err != nil {
+		return nil, fmt.Errorf("失效旧版本研究依据: %w", err)
+	}
+	return doc, nil
 }
 
 // GetDocument loads one Document Source by ID.

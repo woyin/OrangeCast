@@ -256,3 +256,20 @@
   - `TestIdeationClaimPromote_EndToEnd` 扩展：混合合法+非法材料引用的主张 400 拒绝且不落库；轮次页断言实际标签（支持/反驳/补充/缺口）与诊断文本、建议主张、提升按钮。
   - `go test ./...` 全部通过（迁移计数 47→48 跟随修复 IdeationRoundID 约束）；race（Ideation）通过；`go vet`、`gofmt`、`git diff --check` 通过。
 - 提交：`fix(ideation): reject invalid claim materials and render structured diagnosis`（R13 follow-up 原子修复）。
+
+## R14 — 研究缺口用具体依据解决
+
+- 状态：实现与自动验证完成。
+- 交付：
+  - 迁移 0049：`research_needs` 新增 `resolution_source_type/version/detail/owner_confirmed/invalidated`（旧行默认值兼容）。
+  - `store/creation_flow.go`：`ResolveResearchNeedWithEvidence`——来源类型必须显式有效；来源存在且已处理；version 必须等于来源当前版本（音频=当前转录版本，文档=文档版本且必须是该 series 最新版本）；detail 必须是该版本内的具体材料位置（Segment/文档段落 ID，跨来源/虚构拒绝）；空依据拒绝；resolved 语义为"Owner 认定缺口已解决"，不宣称机器证明事实为真（Owner 确认位单独记录）。
+  - 失效传播（三条路径，同一事务内 need 重开 + 精确 proposal 集合的 confirmed Brief 标 `needs_review`，不半传播、不误伤无关 Brief；审计字段保留）：Purge/删除（`InvalidateResearchResolutions`，挂入 worker.ResumePurges）；转录重分析切换 current（`SetCurrentVersion(KindTranscript)` 后 `InvalidateSupersededTranscriptResolutions`，重分析不绕过）；同系列新文档版本（`CreateDocumentVersion` 后 `InvalidateSupersededDocumentResolutions`；旧文档 ID/版本依据此后被"系列最新版本"校验拒绝）。
+  - `ConfirmCreationBrief` 接受 `needs_review` 复核再确认；HasBlockingResearchNeed 对重开的 open 缺口自然恢复阻断。
+  - `server/creation_workspace.go`：resolve 表单扩展 `source_type/resolution_version/resolution_detail`。
+- 验证：
+  - `TestResearchNeed_ResolveRequiresEvidence`（server）：虚构来源、空依据、旧版本、跨来源 Segment 均拒绝；有效依据解决并记录类型/版本/位置/Owner 确认。
+  - `TestResearchNeed_TranscriptReanalysisReblocks`（store）：重分析切版本 → need 重开+invalidated、阻断恢复、Brief needs_review；无关提案 Brief 不受误伤；新版本有效依据再解决后 needs_review 可复核确认。
+  - `TestResearchNeed_DocumentNewVersionReblocks`（store）：新文档版本 → 旧版本依据失效传播；旧 ID/版本拒绝；新版本可再解决。
+  - 既有 brief/研究流程测试迁移到新签名；`go test ./...` 全部通过（backup 迁移计数 48→49）；race（Research/Purge）通过；`go vet`、`gofmt`、`git diff --check` 通过。
+- 提交：`fix(research): resolve gaps with versioned owner-confirmed evidence`。
+- 限制：已成文文章的"待复核"状态属 R20/R21（当前传播到 Brief 层）；研究计划执行仍为 V1 外的范围。

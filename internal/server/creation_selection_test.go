@@ -277,7 +277,7 @@ func TestResearchNeed_RequiresProcessedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 虚构来源（"new-source" 字符串占位）→ 拒绝。
-	if err := srv.store.ResolveResearchNeed(ctx, need.ID, "new-source"); err == nil {
+	if err := srv.store.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, "new-source", 1, "seg-x"); err == nil {
 		t.Fatal("虚构来源不得解决缺口")
 	}
 	// 已处理来源（有转录）→ 可解决。
@@ -308,12 +308,24 @@ func TestResearchNeed_RequiresProcessedSource(t *testing.T) {
 	if err := srv.store.SetCurrentVersion(ctx, models.SourceEpisode, srcEp, store.KindTranscript, version); err != nil {
 		t.Fatal(err)
 	}
-	if err := srv.store.ResolveResearchNeed(ctx, need.ID, srcEp); err != nil {
+	// 缺具体依据 / 旧版本 / 跨来源 Segment → 拒绝。
+	if err := srv.store.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, srcEp, version, ""); err == nil {
+		t.Fatal("空依据应拒绝")
+	}
+	if err := srv.store.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, srcEp, version-1, "seg-0001"); err == nil {
+		t.Fatal("旧版本依据应拒绝")
+	}
+	if err := srv.store.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, srcEp, version, "seg-other-ep"); err == nil {
+		t.Fatal("跨来源 Segment 应拒绝")
+	}
+	// 有效依据（当前版本的 Segment）→ 可解决，Owner 确认与版本记录在案。
+	if err := srv.store.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, srcEp, version, "seg-0001"); err != nil {
 		t.Fatalf("已处理来源应可解决: %v", err)
 	}
 	got, _ := srv.store.GetResearchNeed(ctx, need.ID)
-	if got.Status != "resolved" || got.ResolutionSourceID != srcEp {
-		t.Fatalf("缺口应已解决并记录来源: %+v", got)
+	if got.Status != "resolved" || got.ResolutionSourceID != srcEp || got.ResolutionVersion != version ||
+		got.ResolutionDetail != "seg-0001" || got.ResolutionSourceType != models.SourceEpisode || !got.ResolutionOwnerConfirm {
+		t.Fatalf("缺口应已解决并记录版本化依据: %+v", got)
 	}
 }
 

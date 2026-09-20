@@ -64,7 +64,7 @@ func TestCreationBriefConfirmationRechecksNewBlockingResearch(t *testing.T) {
 	if err := s.SetCurrentVersion(ctx, models.SourceEpisode, eps[0].ID, KindTranscript, trVersion); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResolveResearchNeed(ctx, need.ID, eps[0].ID); err != nil {
+	if err := s.ResolveResearchNeedWithEvidence(ctx, need.ID, models.SourceEpisode, eps[0].ID, trVersion, "seg-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ConfirmCreationBrief(ctx, brief.ID); err != nil {

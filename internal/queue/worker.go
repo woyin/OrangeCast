@@ -721,6 +721,11 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 				return fmt.Errorf("purge 删除素材关系（%s/%s）: %w", p.SourceType, p.SourceID, err)
 			}
 		}
+		// R14：以该来源为依据的研究缺口重新阻断（resolved → open），
+		// 受影响提案的已确认 Brief 标待复核。
+		if err := w.store.InvalidateResearchResolutions(ctx, p.SourceType, p.SourceID); err != nil {
+			return fmt.Errorf("purge 失效研究缺口依据（%s/%s）: %w", p.SourceType, p.SourceID, err)
+		}
 		// ADR-0018：删除 GeneratedDerivative 产物（Paraphrase / StudySession），
 		// 使 PersonalKnowledgeBase 中指向该 Source 的 Citation 与 Reference 一并失效。
 		if err := w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID); err != nil {

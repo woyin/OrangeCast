@@ -71,7 +71,16 @@ type IdeationSession struct {
 type MaterialDiagnosis struct{ ID, IdeationSessionID, DiagnosisJSON, MaterialSnapshotJSON, CreatedAt string }
 
 // ResearchNeed blocks or enhances a creation direction until additional learning is available.
-type ResearchNeed struct{ ID, CreationProposalID, Severity, Question, Status, ResolutionSourceID, CreatedAt, ResolvedAt string }
+type ResearchNeed struct {
+	ID, CreationProposalID, Severity, Question, Status, ResolutionSourceID, CreatedAt, ResolvedAt string
+	// R14：解决依据——来源类型、版本、具体材料位置与 Owner 确认；
+	// 依据被删除/失效时 Invalidated 置位并重新阻断（审计字段保留）。
+	ResolutionSourceType   SourceType
+	ResolutionVersion      int
+	ResolutionDetail       string
+	ResolutionOwnerConfirm bool
+	ResolutionInvalidated  bool
+}
 
 // ResearchPlan is an Owner-authorized future research contract; V1 does not execute it.
 type ResearchPlan struct {

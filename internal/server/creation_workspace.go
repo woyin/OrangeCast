@@ -145,7 +145,11 @@ func (srv *Server) handleResearchNeedResolve(w http.ResponseWriter, r *http.Requ
 		writeEditorialError(w, err)
 		return
 	}
-	if err := srv.store.ResolveResearchNeed(r.Context(), need.ID, strings.TrimSpace(r.FormValue("resolution_source_id"))); err != nil {
+	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
+	version, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("resolution_version")))
+	if err := srv.store.ResolveResearchNeedWithEvidence(r.Context(), need.ID, sourceType,
+		strings.TrimSpace(r.FormValue("resolution_source_id")), version,
+		strings.TrimSpace(r.FormValue("resolution_detail"))); err != nil {
 		writeEditorialError(w, err)
 		return
 	}

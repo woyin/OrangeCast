@@ -106,9 +106,18 @@ func (s *Store) SetCurrentVersion(ctx context.Context, sourceType models.SourceT
 	if _, err := s.GetArtifactVersion(ctx, sourceType, sourceID, kind, version); err != nil {
 		return err
 	}
-	_, err := s.DB.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE %s SET %s = ? WHERE id = ?`, table, col), version, sourceID)
-	return err
+	if _, err := s.DB.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET %s = ? WHERE id = ?`, table, col), version, sourceID); err != nil {
+		return err
+	}
+	// R14：转录 current 版本切换后，以旧版本为依据的研究缺口重新阻断
+	// （重分析不得绕过失效）。需要独立读取的调用方使用 GetArtifactVersion。
+	if kind == KindTranscript {
+		if err := s.InvalidateSupersededTranscriptResolutions(ctx, sourceType, sourceID, version); err != nil {
+			return fmt.Errorf("失效旧版本研究依据: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetCurrentVersion 读取 Source 当前采用的版本；未设置返回 ErrNotFound。

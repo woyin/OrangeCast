@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 // CreateIdeationSession starts a durable Owner-directed exploration.
@@ -196,7 +197,14 @@ func (s *Store) CreateResearchNeed(ctx context.Context, v models.ResearchNeed) (
 // GetResearchNeed retrieves one research gap by stable identifier.
 func (s *Store) GetResearchNeed(ctx context.Context, id string) (*models.ResearchNeed, error) {
 	v := &models.ResearchNeed{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,severity,question,status,COALESCE(resolution_source_id,''),created_at,COALESCE(resolved_at,'') FROM research_needs WHERE id=?`, id).Scan(&v.ID, &v.CreationProposalID, &v.Severity, &v.Question, &v.Status, &v.ResolutionSourceID, &v.CreatedAt, &v.ResolvedAt)
+	var srcType, detail string
+	var ver int
+	var confirmed, invalidated int
+	err := s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,severity,question,status,COALESCE(resolution_source_id,''),created_at,COALESCE(resolved_at,''),COALESCE(resolution_source_type,''),COALESCE(resolution_version,0),COALESCE(resolution_detail,''),COALESCE(resolution_owner_confirmed,0),COALESCE(resolution_invalidated,0) FROM research_needs WHERE id=?`, id).Scan(&v.ID, &v.CreationProposalID, &v.Severity, &v.Question, &v.Status, &v.ResolutionSourceID, &v.CreatedAt, &v.ResolvedAt, &srcType, &ver, &detail, &confirmed, &invalidated)
+	if err == nil {
+		v.ResolutionSourceType, v.ResolutionVersion, v.ResolutionDetail = models.SourceType(srcType), ver, detail
+		v.ResolutionOwnerConfirm, v.ResolutionInvalidated = confirmed == 1, invalidated == 1
+	}
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -205,7 +213,7 @@ func (s *Store) GetResearchNeed(ctx context.Context, id string) (*models.Researc
 
 // ListResearchNeeds returns unresolved and resolved research gaps for a profile.
 func (s *Store) ListResearchNeeds(ctx context.Context, profileID string) ([]*models.ResearchNeed, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.creation_proposal_id,r.severity,r.question,r.status,COALESCE(r.resolution_source_id,''),r.created_at,COALESCE(r.resolved_at,'') FROM research_needs r JOIN creation_proposals p ON p.id=r.creation_proposal_id WHERE p.editorial_profile_id=? ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.created_at DESC,r.id DESC`, profileID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.creation_proposal_id,r.severity,r.question,r.status,COALESCE(r.resolution_source_id,''),r.created_at,COALESCE(r.resolved_at,''),COALESCE(r.resolution_source_type,''),COALESCE(r.resolution_version,0),COALESCE(r.resolution_detail,''),COALESCE(r.resolution_owner_confirmed,0),COALESCE(r.resolution_invalidated,0) FROM research_needs r JOIN creation_proposals p ON p.id=r.creation_proposal_id WHERE p.editorial_profile_id=? ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.created_at DESC,r.id DESC`, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +221,13 @@ func (s *Store) ListResearchNeeds(ctx context.Context, profileID string) ([]*mod
 	var out []*models.ResearchNeed
 	for rows.Next() {
 		v := &models.ResearchNeed{}
-		if err := rows.Scan(&v.ID, &v.CreationProposalID, &v.Severity, &v.Question, &v.Status, &v.ResolutionSourceID, &v.CreatedAt, &v.ResolvedAt); err != nil {
+		var srcType, detail string
+		var ver, confirmed, invalidated int
+		if err := rows.Scan(&v.ID, &v.CreationProposalID, &v.Severity, &v.Question, &v.Status, &v.ResolutionSourceID, &v.CreatedAt, &v.ResolvedAt, &srcType, &ver, &detail, &confirmed, &invalidated); err != nil {
 			return nil, err
 		}
+		v.ResolutionSourceType, v.ResolutionVersion, v.ResolutionDetail = models.SourceType(srcType), ver, detail
+		v.ResolutionOwnerConfirm, v.ResolutionInvalidated = confirmed == 1, invalidated == 1
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -227,10 +239,27 @@ func (s *Store) ListResearchNeeds(ctx context.Context, profileID string) ([]*mod
 // ResolveResearchNeed 用已处理来源解决研究缺口（C04 / ADR-0024 §1）：
 // 校验来源存在且已处理（转录/内容就绪），非空 sourceID 不再足以 resolved；
 // 来源删除或失效后由 Purge 级联重新阻断相关下游（research_needs 行保留）。
-func (s *Store) ResolveResearchNeed(ctx context.Context, id, sourceID string) error {
+// ResolveResearchNeedWithEvidence 用具体、版本化、Owner 确认的依据解决研究缺口
+// （C04/R14）：
+//   - 来源类型必须显式且有效；来源必须存在且已处理（仅"存在"不足以 resolved）；
+//   - version 必须等于该来源当前版本（旧版本依据拒绝——依据属于确切版本才可用）；
+//   - detail 必须是该版本内的具体材料位置（音频=Segment ID；文档=段落 Segment ID），
+//     跨来源 Segment 拒绝；空依据拒绝；
+//   - resolved 语义是"Owner 认定缺口已解决"，不宣称机器证明事实为真。
+func (s *Store) ResolveResearchNeedWithEvidence(ctx context.Context, id string, sourceType models.SourceType, sourceID string, version int, detail string) error {
 	sourceID = strings.TrimSpace(sourceID)
+	detail = strings.TrimSpace(detail)
 	if sourceID == "" {
 		return fmt.Errorf("%w: resolution source required", ErrInvalidEditorialState)
+	}
+	if sourceType != models.SourceEpisode && sourceType != models.SourceUpload && sourceType != models.SourceDocument {
+		return fmt.Errorf("%w: 依据来源类型无效（%q）", ErrInvalidEditorialState, sourceType)
+	}
+	if version <= 0 {
+		return fmt.Errorf("%w: 依据缺少来源版本", ErrInvalidEditorialState)
+	}
+	if detail == "" {
+		return fmt.Errorf("%w: 依据缺少具体材料位置", ErrInvalidEditorialState)
 	}
 	need, err := s.GetResearchNeed(ctx, id)
 	if err != nil {
@@ -239,10 +268,57 @@ func (s *Store) ResolveResearchNeed(ctx context.Context, id, sourceID string) er
 	if need.Status != "open" {
 		return ErrInvalidEditorialState
 	}
-	if !s.sourceProcessed(ctx, models.SourceType(""), sourceID) {
+	if !s.sourceProcessed(ctx, sourceType, sourceID) {
 		return fmt.Errorf("%w: 来源 %s 不存在或未处理，不能解决缺口", ErrInvalidEditorialState, sourceID)
 	}
-	result, err := s.DB.ExecContext(ctx, `UPDATE research_needs SET status='resolved',resolution_source_id=?,resolved_at=datetime('now') WHERE id=? AND status='open'`, sourceID, id)
+	// 版本与具体位置校验：依据必须属于该来源的当前版本。
+	switch sourceType {
+	case models.SourceDocument:
+		doc, err := s.GetDocument(ctx, sourceID)
+		if err != nil {
+			return fmt.Errorf("%w: 文档 %s 不存在", ErrInvalidEditorialState, sourceID)
+		}
+		if doc.Version != version {
+			return fmt.Errorf("%w: 依据版本 %d 不是文档当前版本 %d", ErrInvalidEditorialState, version, doc.Version)
+		}
+		var seriesMax int
+		if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0) FROM documents WHERE series_id=?`, doc.SeriesID).Scan(&seriesMax); err != nil {
+			return err
+		}
+		if doc.Version != seriesMax {
+			return fmt.Errorf("%w: 依据版本 %d 不是该文档系列最新版本 %d（旧版本拒绝）", ErrInvalidEditorialState, version, seriesMax)
+		}
+		if !documentHasSegment(doc, detail) {
+			return fmt.Errorf("%w: 段落 %s 不属于文档 %s 的当前版本", ErrInvalidEditorialState, detail, sourceID)
+		}
+	default:
+		av, err := s.GetCurrentVersion(ctx, sourceType, sourceID, KindTranscript)
+		if err != nil {
+			return fmt.Errorf("%w: 来源 %s 无当前转录版本", ErrInvalidEditorialState, sourceID)
+		}
+		if av.Version != version {
+			return fmt.Errorf("%w: 依据版本 %d 不是转录当前版本 %d", ErrInvalidEditorialState, version, av.Version)
+		}
+		var payload provider.TranscriptPayload
+		if err := json.Unmarshal([]byte(av.Payload), &payload); err != nil {
+			return fmt.Errorf("%w: 转录载荷不可解析", ErrInvalidEditorialState)
+		}
+		found := false
+		for _, seg := range payload.Segments {
+			if seg.ID == detail {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: Segment %s 不属于来源 %s 的当前版本（跨来源或虚构）", ErrInvalidEditorialState, detail, sourceID)
+		}
+	}
+	result, err := s.DB.ExecContext(ctx,
+		`UPDATE research_needs SET status='resolved',resolution_source_id=?,resolved_at=datetime('now'),
+		        resolution_source_type=?,resolution_version=?,resolution_detail=?,resolution_owner_confirmed=1,
+		        resolution_invalidated=0
+		 WHERE id=? AND status='open'`, sourceID, string(sourceType), version, detail, id)
 	if err != nil {
 		return err
 	}
@@ -254,6 +330,101 @@ func (s *Store) ResolveResearchNeed(ctx context.Context, id, sourceID string) er
 		return ErrInvalidEditorialState
 	}
 	return nil
+}
+
+// documentHasSegment 判断段落位置 ID 是否属于该文档当前版本（R14 依据校验）。
+func documentHasSegment(doc *models.Document, segmentID string) bool {
+	for _, seg := range DocumentSegments(doc) {
+		if seg.ID == segmentID {
+			return true
+		}
+	}
+	return false
+}
+
+// reopenResolutionsTx 在同一事务内重开命中的 resolved 缺口，并把受影响提案的
+// 已确认 Brief 标为 needs_review——先收集本次精确命中的 proposal 集合（不误伤
+// 历史失效行），need 重开与 Brief 传播原子完成，不半传播。
+func (s *Store) reopenResolutionsTx(ctx context.Context, tx *sql.Tx, whereSQL string, args ...any) (int64, error) {
+	ids := []string{}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT DISTINCT creation_proposal_id FROM research_needs WHERE `+whereSQL, args...)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE research_needs SET status='open', resolved_at=NULL, resolution_invalidated=1 WHERE `+whereSQL, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 && len(ids) > 0 {
+		ph := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+		idsAny := make([]any, len(ids))
+		for i, id := range ids {
+			idsAny[i] = id
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE creation_briefs SET status='needs_review', updated_at=datetime('now')
+			 WHERE status='confirmed' AND creation_proposal_id IN (`+ph+`)`, idsAny...); err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
+}
+
+// invalidateResearchResolutionsWhere 以事务执行一次依据失效传播。
+func (s *Store) invalidateResearchResolutionsWhere(ctx context.Context, whereSQL string, args ...any) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.reopenResolutionsTx(ctx, tx, whereSQL, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// InvalidateResearchResolutions R14：来源被 Purge/删除时，以该来源为依据的
+// resolved 缺口重新置回 open 并标记 invalidated——重新阻断待确认 Brief 与写作；
+// 已确认的 Brief 标为 needs_review 待 Owner 复核（审计字段保留）。
+func (s *Store) InvalidateResearchResolutions(ctx context.Context, sourceType models.SourceType, sourceID string) error {
+	return s.invalidateResearchResolutionsWhere(ctx,
+		`resolution_source_id=? AND resolution_source_type=? AND status='resolved'`, sourceID, string(sourceType))
+}
+
+// InvalidateSupersededTranscriptResolutions R14：转录重分析切换 current 版本后，
+// 以旧版本为依据的 resolved 缺口重新阻断——重分析不得绕过失效。
+func (s *Store) InvalidateSupersededTranscriptResolutions(ctx context.Context, sourceType models.SourceType, sourceID string, currentVersion int) error {
+	return s.invalidateResearchResolutionsWhere(ctx,
+		`resolution_source_id=? AND resolution_source_type IN ('episode','upload') AND status='resolved' AND resolution_version<>?`,
+		sourceID, currentVersion)
+}
+
+// InvalidateSupersededDocumentResolutions R14：同系列出现新文档版本后，
+// 以旧版本文档为依据的 resolved 缺口重新阻断。
+func (s *Store) InvalidateSupersededDocumentResolutions(ctx context.Context, seriesID string, currentVersion int) error {
+	return s.invalidateResearchResolutionsWhere(ctx,
+		`resolution_source_type='document' AND status='resolved' AND resolution_version<? AND resolution_source_id IN (SELECT id FROM documents WHERE series_id=?)`,
+		currentVersion, seriesID)
 }
 
 // sourceProcessed 判断来源存在且已完成处理（转录或文档内容就绪）。
@@ -463,7 +634,7 @@ func (s *Store) ConfirmCreationBrief(ctx context.Context, id string) error {
 	if err := s.recheckBriefMaterials(ctx, proposalID); err != nil {
 		return err
 	}
-	r, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND status='draft'`, id)
+	r, err := s.DB.ExecContext(ctx, `UPDATE creation_briefs SET status='confirmed',confirmed_at=datetime('now'),updated_at=datetime('now') WHERE id=? AND status IN ('draft','needs_review')`, id)
 	if err != nil {
 		return err
 	}
