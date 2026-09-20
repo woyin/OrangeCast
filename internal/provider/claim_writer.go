@@ -14,6 +14,9 @@ import (
 	"strings"
 )
 
+// ClaimWriterPromptVersion is the durable contract version for R19 writer jobs.
+const ClaimWriterPromptVersion = "claim-writer-v2"
+
 // ClaimKind 主张类型（C09 / product-goal.md ClaimMap）。
 const (
 	ClaimSource    = "source_claim"    // 来源表达过什么
@@ -39,6 +42,7 @@ type ClaimAwareWritingRequest struct {
 	Style             string              `json:"style"`
 	SourceAttribution string              `json:"sourceAttribution"`
 	ConfirmedClaim    string              `json:"confirmedClaim"`          // Owner 主张
+	TargetLength      *int                `json:"targetLength,omitempty"`  // 目标篇幅（字；可空）
 	Materials         []ArticleMaterial   `json:"materials"`               // 授权素材
 	OwnerNotes        []ClaimOwnerNote    `json:"ownerNotes,omitempty"`    // 个人笔记快照
 	VerifiedFacts     []ClaimVerifiedFact `json:"verifiedFacts,omitempty"` // 已核验事实及引用
@@ -90,6 +94,9 @@ func BuildClaimPrompt(req ClaimAwareWritingRequest) string {
 	sb.WriteString("结构：\n" + req.Outline + "\n")
 	if req.Style != "" {
 		sb.WriteString("风格：" + req.Style + "\n")
+	}
+	if req.TargetLength != nil {
+		sb.WriteString(fmt.Sprintf("目标篇幅：%d 字\n", *req.TargetLength))
 	}
 	sb.WriteString("来源标注：" + req.SourceAttribution + "\n")
 	sb.WriteString("\n可用材料（引用只能用这些 KeyPoint ID）：\n")

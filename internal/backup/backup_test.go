@@ -204,7 +204,7 @@ func TestBackupRestore_EndToEnd(t *testing.T) {
 	}
 
 	var migrationVersion int
-	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 52 {
+	if err := dstDB.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&migrationVersion); err != nil || migrationVersion != 53 {
 		t.Fatalf("恢复库应保留最新迁移版本: version=%d err=%v", migrationVersion, err)
 	}
 	var profileName, themeName string

@@ -98,6 +98,8 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
 		case models.JobCuratorBrief:
 			tc = provider.TaskConfig{Provider: ptrStr(st.CuratorProvider), Model: ptrStr(st.CuratorModel)}
+		case models.JobClaimWriting:
+			tc = provider.TaskConfig{Provider: ptrStr(st.WriterProvider), Model: ptrStr(st.WriterModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -204,6 +206,8 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 
 // sendPolicyJobTypes 需要在执行时动态检查来源访问策略的任务
 // （向 Provider 发送来源内容的任务；本地组装/合成类任务不在此列）。
+// 注意 JobClaimWriting 不在此列：其 job.SourceID 是 draft 身份而非单一来源，
+// 多来源策略检查在 doClaimWritingJob 内逐冻结材料完成。
 var sendPolicyJobTypes = map[models.JobType]bool{
 	models.JobTranscribe: true, models.JobAnalyze: true, models.JobDigest: true,
 	models.JobHighlight: true, models.JobKeypointQuality: true, models.JobDigestRewrite: true,
@@ -249,6 +253,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 50_000, 10_000
 	case "curator_brief":
 		return 60_000, 15_000
+	case "claim_writing":
+		return 100_000, 30_000
 	case "digest_rewrite":
 		return 30_000, 6_000
 	default:
@@ -259,7 +265,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobCuratorBrief:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobCuratorBrief, models.JobClaimWriting:
 	default:
 		return nil
 	}
@@ -388,6 +394,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doClaimReviewJob(ctx, job, bundle)
 	case models.JobCuratorBrief:
 		return w.doCuratorBriefJob(ctx, job, bundle)
+	case models.JobClaimWriting:
+		return w.doClaimWritingJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}

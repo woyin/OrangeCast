@@ -221,6 +221,38 @@ func (srv *Server) handleResearchNeedResolve(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, "/workbench?profile="+proposal.EditorialProfileID, http.StatusSeeOther)
 }
 
+// handleCreationBriefWrite R19 生成动作（C10）：确认方案后由 Owner 明确点击生成；
+// HTTP 只持久化意图，实际写作由后台 worker 执行，关闭页面不取消。表单携带
+// expected_version（精确点击版本）：expected≠current=confirmed 返回 409；成功与
+// 重复点击幂等复用同一 draft+job，都重定向到同一 draft 页面。
+func (srv *Server) handleCreationBriefWrite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	briefID := strings.TrimSpace(r.FormValue("creation_brief_id"))
+	if briefID == "" {
+		http.Error(w, "缺少 creation_brief_id", http.StatusBadRequest)
+		return
+	}
+	expectedVersion, err := strconv.Atoi(strings.TrimSpace(r.FormValue("expected_version")))
+	if err != nil {
+		http.Error(w, "expected_version 非法", http.StatusBadRequest)
+		return
+	}
+	job, err := srv.store.EnqueueClaimWritingForCreationBriefVersion(r.Context(), briefID, expectedVersion)
+	if err != nil {
+		if errors.Is(err, store.ErrCreationBriefVersionConflict) {
+			http.Error(w, "Brief 版本已过期，请刷新后重试", http.StatusConflict)
+			return
+		}
+		writeEditorialError(w, err)
+		return
+	}
+	// job.SourceID 即 Writer 专属草稿；重复点击返回同一 job，重定向同一页面。
+	http.Redirect(w, r, "/workbench/drafts/"+job.SourceID, http.StatusSeeOther)
+}
+
 func (srv *Server) handleCreationBriefConfirm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)

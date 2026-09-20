@@ -41,6 +41,12 @@
       <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
       <button class="btn" type="submit">确认精确版本授权</button>
     </form>
+    {{else if and (eq .Status "confirmed") (eq .CurrentVersion .ConfirmedVersion)}}
+    {{$writerDraftID := index $.CreationBriefDrafts .ID}}
+    {{if $writerDraftID}}<a class="btn btn-secondary" href="/workbench/drafts/{{$writerDraftID}}">打开文章</a>{{else}}<form method="post" action="/workbench/creation-briefs/write" class="item-actions">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <button class="btn" type="submit">生成文章初稿</button>
+    </form>{{end}}
     {{end}}
   </div>
 </article>

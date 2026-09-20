@@ -93,6 +93,8 @@ func (s *Store) FreezeJobTaskConfig(ctx context.Context, jobID string, jobType m
 		tc = provider.TaskConfig{Provider: deref(st.AnalysisProvider), Model: deref(st.AnalysisModel)}
 	case models.JobDigest, models.JobDigestRewrite:
 		tc = provider.TaskConfig{Provider: deref(st.WriterProvider), Model: deref(st.WriterModel)}
+	case models.JobClaimWriting:
+		tc = provider.TaskConfig{Provider: deref(st.WriterProvider), Model: deref(st.WriterModel)}
 	case models.JobHighlight:
 		tc = provider.TaskConfig{Provider: deref(st.HighlightProvider), Model: deref(st.HighlightModel)}
 	default:
@@ -105,6 +107,9 @@ func (s *Store) FreezeJobTaskConfig(ctx context.Context, jobID string, jobType m
 	version := ""
 	if jobType == models.JobDigest {
 		version = provider.DigestWriterPromptVersion
+	}
+	if jobType == models.JobClaimWriting {
+		version = provider.ClaimWriterPromptVersion
 	}
 	_, err = s.DB.ExecContext(ctx,
 		`UPDATE processing_jobs SET configured_provider=?, configured_model=?, config_version=?

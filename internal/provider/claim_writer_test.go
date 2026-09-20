@@ -85,3 +85,17 @@ func TestWriteArticleWithClaims_Groq(t *testing.T) {
 		t.Fatalf("非法 ClaimMap 应拒绝: %v", err)
 	}
 }
+
+// TestBuildClaimPrompt_TargetLength R19：非 nil TargetLength 输出目标篇幅；nil 不输出。
+func TestBuildClaimPrompt_TargetLength(t *testing.T) {
+	req := claimReq()
+	if strings.Contains(BuildClaimPrompt(req), "目标篇幅") {
+		t.Fatal("nil TargetLength 不得输出目标篇幅")
+	}
+	target := 1800
+	req.TargetLength = &target
+	prompt := BuildClaimPrompt(req)
+	if !strings.Contains(prompt, "目标篇幅：1800 字") {
+		t.Fatalf("prompt 缺少目标篇幅: %s", prompt)
+	}
+}

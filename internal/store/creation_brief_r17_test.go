@@ -72,7 +72,12 @@ func makeConfirmFixture(t *testing.T) (*Store, *models.CreationBrief, string, st
 	p, _ := s.CreateCreationProposal(ctx, models.CreationProposal{EditorialProfileID: profile.ID, Status: "proposed", WorkingTitle: "T", ProposedClaim: "C", MaterialIDsJSON: string(ids)})
 	s.AcceptCreationProposal(ctx, p.ID, "Owner")
 	b, _ := s.CreateCreationBriefDraftFromProposal(ctx, p.ID)
-	snap, _ := json.Marshal(map[string]any{"provider": "test", "materials": []map[string]any{{"keyPointId": kp.ID, "sourceType": "episode", "sourceId": ep, "cardVersion": 1}}})
+	// R19：Curator 输入快照必须携带完整 ArticleMaterial（确认后不可变）。
+	snap, _ := json.Marshal(map[string]any{"provider": "test", "materials": []provider.ArticleMaterial{{
+		SourceType: "episode", CardVersion: kp.CardVersion, KeyPointID: kp.ID, SourceID: kp.SourceID,
+		SourceTitle: kp.SourceTitle, Content: kp.Content, Description: kp.Description,
+		Citations: []string{"seg-1"},
+	}}})
 	s.CreateCreationBriefRevisionCAS(ctx, b.ID, 1, models.CreationBriefRevision{OwnerClaim: "Owner", Outline: "Outline", MaterialPlanJSON: `{"selected":["` + kp.ID + `"]}`, CuratorPromptVersion: "curator-v1", CuratorInputSnapshotJSON: string(snap)})
 	fresh, _ := s.GetCreationBrief(ctx, b.ID)
 	return s, fresh, ep, kp.ID

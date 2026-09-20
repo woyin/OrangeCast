@@ -198,6 +198,11 @@ func (s *Store) GetCreationArticleLinkByArticleProposal(ctx context.Context, id 
 func (s *Store) GetCreationArticleLinkByArticleBrief(ctx context.Context, id string) (*CreationArticleLink, error) {
 	return s.getCreationLink(ctx, `article_brief_id=?`, id)
 }
+
+// GetCreationArticleLinkByCreationBrief reads a link by exact CreationBrief identity.
+func (s *Store) GetCreationArticleLinkByCreationBrief(ctx context.Context, id string) (*CreationArticleLink, error) {
+	return s.getCreationLink(ctx, `creation_brief_id=?`, id)
+}
 func (s *Store) getCreationLink(ctx context.Context, w, a string) (*CreationArticleLink, error) {
 	return scanCreationArticleLink(s.DB.QueryRowContext(ctx, `SELECT id,creation_proposal_id,creation_brief_id,article_proposal_id,article_brief_id,contract_version,creation_brief_version,created_at FROM creation_article_links WHERE `+w, a))
 }

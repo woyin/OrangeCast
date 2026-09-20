@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 // ErrInvalidEditorialState indicates an invalid content production transition or input.
@@ -707,9 +708,9 @@ func (s *Store) insertArticleRevisionTx(ctx context.Context, tx *sql.Tx, revisio
 	revision.ID = uuid.NewString()
 	revision.Version = maxVersion + 1
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO article_revisions (id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		revision.ID, revision.DraftID, revision.Version, revision.Title, revision.Markdown, revision.Origin, revision.Provider, revision.Model, revision.PromptVersion, revision.CostCents); err != nil {
+		`INSERT INTO article_revisions (id, draft_id, version, origin_job_id, title, markdown, origin, provider, model, prompt_version, cost_cents)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		revision.ID, revision.DraftID, revision.Version, revision.OriginJobID, revision.Title, revision.Markdown, revision.Origin, revision.Provider, revision.Model, revision.PromptVersion, revision.CostCents); err != nil {
 		return revision, err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -773,9 +774,9 @@ func (s *Store) CreateArticleRevisionWithEvidenceMaps(ctx context.Context, revis
 func (s *Store) GetArticleRevision(ctx context.Context, id string) (*models.ArticleRevision, error) {
 	r := &models.ArticleRevision{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
+		`SELECT id, draft_id, version, origin_job_id, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
 		 FROM article_revisions WHERE id=?`, id).
-		Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt)
+		Scan(&r.ID, &r.DraftID, &r.Version, &r.OriginJobID, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -785,7 +786,7 @@ func (s *Store) GetArticleRevision(ctx context.Context, id string) (*models.Arti
 // ListArticleRevisions returns newest revisions first.
 func (s *Store) ListArticleRevisions(ctx context.Context, draftID string) ([]*models.ArticleRevision, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, draft_id, version, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
+		`SELECT id, draft_id, version, origin_job_id, title, markdown, origin, provider, model, prompt_version, cost_cents, evidence_invalidated_at, evidence_invalidation_reason, created_at
 		 FROM article_revisions WHERE draft_id=? ORDER BY version DESC LIMIT 200`, draftID)
 	if err != nil {
 		return nil, err
@@ -794,7 +795,7 @@ func (s *Store) ListArticleRevisions(ctx context.Context, draftID string) ([]*mo
 	var out []*models.ArticleRevision
 	for rows.Next() {
 		r := &models.ArticleRevision{}
-		if err := rows.Scan(&r.ID, &r.DraftID, &r.Version, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.DraftID, &r.Version, &r.OriginJobID, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1157,4 +1158,231 @@ func (s *Store) GetArticleMarkdown(ctx context.Context, revisionID string) (stri
 		return "", ErrNotFound
 	}
 	return markdown, err
+}
+
+// ClaimWritingOutput 是 Writer 任务业务落库的完整输入。Store 在事务内再次校验
+// 正文/ClaimMap/材料身份，保证冻结输入与持久化输出一致。
+type ClaimWritingOutput struct {
+	DraftID               string
+	JobID                 string
+	CreationBriefID       string
+	BriefVersion          int
+	CreationArticleLinkID string
+	ArticleProposalID     string
+	ArticleBriefID        string
+	OwnerClaim            string
+	Title                 string
+	Markdown              string
+	ProviderName          string
+	ModelName             string
+	PromptVersion         string
+	AuthorizedIDs         []string // 冻结快照中的授权材料身份
+	Entries               []models.ClaimMapEntry
+}
+
+// SaveClaimWritingOutput 在单个事务中原子持久化一次 Writer 结果：不可变
+// ArticleRevision（真实 revision UUID + origin_job_id）、article_drafts current/status、
+// canonical claim_maps 与兼容 claim_map_entries（两者 revision 都是真 revision ID）、
+// 含 creation brief/version、draft/revision、title/claim_count/url 与输入身份的 job
+// complete result。重放幂等：已存在 revision 时仍补齐/确认 job result 后提交，
+// 不会 early return，也不创建第二个修订。
+func (s *Store) SaveClaimWritingOutput(ctx context.Context, out ClaimWritingOutput) (*models.ArticleRevision, error) {
+	if strings.TrimSpace(out.DraftID) == "" || strings.TrimSpace(out.JobID) == "" {
+		return nil, fmt.Errorf("%w: draft/job 身份必填", ErrInvalidEditorialState)
+	}
+	// 不可变来源身份必须完整：Brief 精确版本与全部桥接 ID 缺一不可，
+	// 否则结果无法追溯到授权链。
+	if strings.TrimSpace(out.CreationBriefID) == "" || out.BriefVersion <= 0 ||
+		strings.TrimSpace(out.CreationArticleLinkID) == "" ||
+		strings.TrimSpace(out.ArticleProposalID) == "" ||
+		strings.TrimSpace(out.ArticleBriefID) == "" {
+		return nil, fmt.Errorf("%w: Writer 结果缺少不可变来源身份（brief/version/link）", ErrInvalidEditorialState)
+	}
+	if strings.TrimSpace(out.Title) == "" || strings.TrimSpace(out.Markdown) == "" {
+		return nil, fmt.Errorf("%w: Writer 输出标题与正文不能为空", ErrInvalidEditorialState)
+	}
+	if len(out.Entries) == 0 {
+		return nil, fmt.Errorf("%w: Writer 输出必须包含 ClaimMap", ErrInvalidEditorialState)
+	}
+	// 正文/ClaimMap/材料身份再次校验（provider 校验不信任重放：任务可能恢复多次）。
+	authorized := map[string]bool{}
+	for _, id := range out.AuthorizedIDs {
+		authorized[id] = true
+	}
+	validKinds := map[string]bool{
+		provider.ClaimSource: true, provider.ClaimOwner: true,
+		provider.ClaimSynthesis: true, provider.ClaimVerified: true,
+	}
+	for i, e := range out.Entries {
+		if !validKinds[e.ClaimKind] {
+			return nil, fmt.Errorf("%w: ClaimMap[%d] 非法主张类型 %q", ErrInvalidEditorialState, i, e.ClaimKind)
+		}
+		if e.Excerpt == "" || !strings.Contains(out.Markdown, e.Excerpt) {
+			return nil, fmt.Errorf("%w: ClaimMap[%d] 正文片段不存在或不完整", ErrInvalidEditorialState, i)
+		}
+		if e.ClaimKind == provider.ClaimSource && len(e.MaterialIDs) == 0 {
+			return nil, fmt.Errorf("%w: ClaimMap[%d] SourceClaim 必须关联材料", ErrInvalidEditorialState, i)
+		}
+		for _, id := range e.MaterialIDs {
+			if !authorized[id] {
+				return nil, fmt.Errorf("%w: ClaimMap[%d] 引用了授权材料之外的 %q", ErrInvalidEditorialState, i, id)
+			}
+		}
+	}
+
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	confirmJobResult := func(revisionID string, revisionVersion, claimCount int) error {
+		var intentID string
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(intent_id,'') FROM processing_jobs WHERE id=?`, out.JobID).Scan(&intentID); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"creation_brief_id": out.CreationBriefID, "brief_version": out.BriefVersion,
+			"creation_article_link_id": out.CreationArticleLinkID,
+			"article_proposal_id":      out.ArticleProposalID, "article_brief_id": out.ArticleBriefID,
+			"draft_id": out.DraftID, "revision_id": revisionID, "revision_version": revisionVersion,
+			"title": out.Title, "claim_count": claimCount,
+			"url":      "/workbench/drafts/" + out.DraftID,
+			"provider": out.ProviderName, "model": out.ModelName, "prompt_version": out.PromptVersion,
+			"intent_id": intentID, "origin_job_id": out.JobID,
+		})
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			`UPDATE processing_jobs SET result_json=?,result_state='complete',updated_at=datetime('now')
+			 WHERE id=? AND status IN ('queued','running') AND result_state != ?`,
+			string(payload), out.JobID, models.JobResultComplete)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			var state string
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(result_state,'') FROM processing_jobs WHERE id=?`, out.JobID).Scan(&state); err != nil {
+				return err
+			}
+			if state != models.JobResultComplete {
+				return fmt.Errorf("%w: 任务 %s 不在接受结果的状态", ErrInvalidEditorialState, out.JobID)
+			}
+		}
+		return nil
+	}
+
+	scanRevision := func(row *sql.Row) (*models.ArticleRevision, error) {
+		r := &models.ArticleRevision{}
+		err := row.Scan(&r.ID, &r.DraftID, &r.Version, &r.OriginJobID, &r.Title, &r.Markdown, &r.Origin, &r.Provider, &r.Model, &r.PromptVersion, &r.CostCents, &r.EvidenceInvalidatedAt, &r.EvidenceInvalidationReason, &r.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	revisionCols := `id,draft_id,version,origin_job_id,title,markdown,origin,provider,model,prompt_version,cost_cents,evidence_invalidated_at,evidence_invalidation_reason,created_at`
+
+	// 重放路径：同 (draft, origin_job_id) 已有修订 → 补齐/确认 job result 后提交。
+	// 重放的传入 title/markdown 必须与持久 revision 完全一致；claim_count 以持久
+	// maps 为准，保证 result 与落库状态不漂移。
+	var existing *models.ArticleRevision
+	if r, err := scanRevision(tx.QueryRowContext(ctx, `SELECT `+revisionCols+` FROM article_revisions WHERE draft_id=? AND origin_job_id=?`, out.DraftID, out.JobID)); err == nil {
+		if r.Title != out.Title || r.Markdown != out.Markdown {
+			return nil, fmt.Errorf("%w: 重放输出与持久修订不一致（title/markdown）", ErrInvalidEditorialState)
+		}
+		existing = r
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	claimCount := len(out.Entries)
+	if existing != nil {
+		// 重放必须以持久 maps 为准：maps 缺失说明落库状态不一致，拒绝补齐；
+		// claim_count 无条件取持久值，保证 result 与落库状态不漂移。
+		var persisted int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM claim_map_entries WHERE draft_id=? AND revision_id=?`, out.DraftID, existing.ID).Scan(&persisted); err != nil {
+			return nil, err
+		}
+		if persisted <= 0 {
+			return nil, fmt.Errorf("%w: 已存在修订 %s 缺少持久 ClaimMap", ErrInvalidEditorialState, existing.ID)
+		}
+		claimCount = persisted
+	}
+
+	revision := existing
+	if revision == nil {
+		var version int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version),0)+1 FROM article_revisions WHERE draft_id=?`, out.DraftID).Scan(&version); err != nil {
+			return nil, err
+		}
+		revision = &models.ArticleRevision{
+			ID: uuid.NewString(), DraftID: out.DraftID, Version: version, OriginJobID: out.JobID,
+			Title: out.Title, Markdown: out.Markdown, Origin: "writer",
+		}
+		if out.ProviderName != "" {
+			revision.Provider = &out.ProviderName
+		}
+		if out.ModelName != "" {
+			revision.Model = &out.ModelName
+		}
+		if out.PromptVersion != "" {
+			revision.PromptVersion = &out.PromptVersion
+		}
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO article_revisions (id,draft_id,version,origin_job_id,title,markdown,origin,provider,model,prompt_version)
+			 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			revision.ID, revision.DraftID, revision.Version, revision.OriginJobID, revision.Title, revision.Markdown, revision.Origin, revision.Provider, revision.Model, revision.PromptVersion)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return nil, err
+		} else if n != 1 {
+			return nil, fmt.Errorf("%w: 写作修订插入未生效", ErrInvalidEditorialState)
+		}
+	}
+
+	res, err := tx.ExecContext(ctx, `UPDATE article_drafts SET current_revision_id=?,status='reviewing',updated_at=datetime('now') WHERE id=?`, revision.ID, out.DraftID)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n != 1 {
+		return nil, fmt.Errorf("%w: 文章草稿 %s 不存在", ErrInvalidEditorialState, out.DraftID)
+	}
+
+	if existing == nil {
+		// 首次写入：canonical claim_maps + 兼容 claim_map_entries，revision 都是真 ID。
+		for _, e := range out.Entries {
+			materials, err := json.Marshal(e.MaterialIDs)
+			if err != nil {
+				return nil, fmt.Errorf("序列化 ClaimMap 材料: %w", err)
+			}
+			citations, err := json.Marshal(e.CitationRefs)
+			if err != nil {
+				return nil, fmt.Errorf("序列化 ClaimMap 引用: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO claim_maps (id,work_revision_id,claim_kind,excerpt,keypoint_ids_json,owner_claim,verified_fact_source_ids_json) VALUES (?,?,?,?,?,?,?)`,
+				uuid.NewString(), revision.ID, e.ClaimKind, e.Excerpt, string(materials), out.OwnerClaim, string(citations)); err != nil {
+				return nil, err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO claim_map_entries (id,draft_id,revision_id,excerpt,claim_kind,material_ids_json,source_title,citation_refs_json) VALUES (?,?,?,?,?,?,?,?)`,
+				uuid.NewString(), out.DraftID, revision.ID, e.Excerpt, e.ClaimKind, string(materials), e.SourceTitle, string(citations)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := confirmJobResult(revision.ID, revision.Version, claimCount); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	// commit 后不依赖可能已取消的 ctx 再查询：直接返回已构造的不可变修订。
+	return revision, nil
 }

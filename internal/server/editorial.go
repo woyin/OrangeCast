@@ -171,6 +171,12 @@ func (srv *Server) handleWorkbench(w http.ResponseWriter, r *http.Request) {
 		data["ProposalBatches"] = batches
 		data["CreationProposals"] = creationProposals
 		data["CreationBriefs"] = creationBriefs
+		creationBriefDrafts, err := srv.store.MapCreationBriefsToDrafts(r.Context(), profile.ID)
+		if err != nil {
+			http.Error(w, "加载文章草稿映射失败", http.StatusInternalServerError)
+			return
+		}
+		data["CreationBriefDrafts"] = creationBriefDrafts
 		data["IdeationSessions"] = ideationSessions
 		data["ResearchNeeds"] = researchNeeds
 		data["CreationHistory"] = creationHistory

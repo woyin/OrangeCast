@@ -462,6 +462,7 @@ type ArticleDraft struct {
 type ArticleRevision struct {
 	ID                         string
 	DraftID                    string
+	OriginJobID                string
 	Version                    int
 	Title                      string
 	Markdown                   string

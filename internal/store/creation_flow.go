@@ -1530,3 +1530,367 @@ func (s *Store) recheckBriefRevisionTx(ctx context.Context, tx *sql.Tx, proposal
 	}
 	return nil
 }
+
+// ---- R19：持久 Writer 入队 ----
+
+// ClaimWritingTaskInput 是入队时冻结的强类型完整写作输入：确认 Brief 精确版本、
+// 全部文章桥接身份（link/proposal/article proposal/article brief）、草稿/画像、受众、
+// Owner 主张、提纲/风格/篇幅、不可变 Curator 快照中的完整 ArticleMaterial（来源类型/
+// ID/卡片版本/内容/引用）与 Provider/模型/提示词版本。运行时只消费该快照，
+// 不重读可变的 Brief/Proposal/KeyPoint。
+type ClaimWritingTaskInput struct {
+	CreationBriefID       string                     `json:"creation_brief_id"`
+	BriefVersion          int                        `json:"brief_version"`
+	CreationProposalID    string                     `json:"creation_proposal_id"`
+	CreationArticleLinkID string                     `json:"creation_article_link_id"`
+	ArticleProposalID     string                     `json:"article_proposal_id"`
+	ArticleBriefID        string                     `json:"article_brief_id"`
+	DraftID               string                     `json:"draft_id"`
+	ProfileID             string                     `json:"profile_id"`
+	Audience              string                     `json:"audience"`
+	OwnerClaim            string                     `json:"owner_claim"`
+	Outline               string                     `json:"outline"`
+	Style                 string                     `json:"style"`
+	TargetLength          *int                       `json:"target_length"`
+	Materials             []provider.ArticleMaterial `json:"materials"`
+	Provider              string                     `json:"provider"`
+	Model                 string                     `json:"model"`
+	PromptVersion         string                     `json:"prompt_version"`
+}
+
+// EnqueueClaimWritingForCreationBrief 兼容 wrapper（内部用）：以当前确认版本为目标
+// 调用版本化入队。生产 HTTP 路径必须使用带 expected_version 的版本化入口。
+func (s *Store) EnqueueClaimWritingForCreationBrief(ctx context.Context, briefID string) (*models.ProcessingJob, error) {
+	version, err := s.currentConfirmedBriefVersion(ctx, briefID)
+	if err != nil {
+		return nil, err
+	}
+	return s.EnqueueClaimWritingForCreationBriefVersion(ctx, briefID, version)
+}
+
+// EnqueueClaimWritingForCreationBriefVersion 在同一个 DB 事务中完成：expected==
+// current==confirmed 的精确版本验证、link version 匹配、读取不可变 Brief revision
+// 与其冻结 Curator 材料快照（不重读可变 keypoint_index 正文）、创建/复用 Writer 专属
+// ArticleDraft（claim_writing_drafts 映射）、冻结强类型输入、持久化 job 与
+// claim_writing_intents 意图。并发/完成态重复点击由 claim_writing_intents 主键幂等
+// 复用同一 draft+job，不使用进程锁。版本过期返回 ErrCreationBriefVersionConflict。
+func (s *Store) EnqueueClaimWritingForCreationBriefVersion(ctx context.Context, briefID string, expectedVersion int) (*models.ProcessingJob, error) {
+	if strings.TrimSpace(briefID) == "" {
+		return nil, fmt.Errorf("%w: creation_brief_id required", ErrInvalidEditorialState)
+	}
+	if expectedVersion <= 0 {
+		return nil, fmt.Errorf("%w: expected_version required", ErrCreationBriefVersionConflict)
+	}
+	job, err := s.enqueueClaimWritingOnce(ctx, briefID, expectedVersion)
+	if err == nil {
+		return job, nil
+	}
+	// 并发竞态：意图或映射唯一约束冲突 → 复用已存在的任务，不产生第二个 job。
+	if isUniqueConstraintErr(err) {
+		return s.getClaimWritingIntentJob(ctx, claimWritingIntentID(briefID, expectedVersion))
+	}
+	return nil, err
+}
+
+// claimWritingIntentID 写作意图身份：同一 Brief 的同一确认版本永远对应同一个
+// 持久任务；确认新版本后（编辑→重新确认）允许再次生成。任务完成后重复点击
+// 仍复用同一 job（claim_writing_intents 兜底，不依赖 processing_jobs 活跃约束）。
+func claimWritingIntentID(briefID string, version int) string {
+	return fmt.Sprintf("claim_writing:%s:v%d", briefID, version)
+}
+
+// currentConfirmedBriefVersion 读取当前精确确认版本；非精确确认状态返回错误。
+func (s *Store) currentConfirmedBriefVersion(ctx context.Context, briefID string) (int, error) {
+	var current, confirmed int
+	err := s.DB.QueryRowContext(ctx, `SELECT current_version,confirmed_version FROM creation_briefs WHERE id=? AND status='confirmed'`, briefID).Scan(&current, &confirmed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if confirmed == 0 || current != confirmed {
+		return 0, fmt.Errorf("%w: exact confirmed Brief required", ErrInvalidEditorialState)
+	}
+	return confirmed, nil
+}
+
+// getClaimWritingIntentJob 由意图身份读取复用的持久任务。
+func (s *Store) getClaimWritingIntentJob(ctx context.Context, intentID string) (*models.ProcessingJob, error) {
+	var jobID string
+	err := s.DB.QueryRowContext(ctx, `SELECT job_id FROM claim_writing_intents WHERE intent_id=?`, intentID).Scan(&jobID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetJob(ctx, jobID)
+}
+
+// scanProcessingJobRow 在给定 queryer（含打开的事务）上读取一条完整任务行，
+// 避免事务打开期间跨连接回读造成死锁（测试库常为单连接）。
+func scanProcessingJobRow(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, jobID string) (*models.ProcessingJob, error) {
+	j := &models.ProcessingJob{}
+	err := q.QueryRowContext(ctx,
+		`SELECT id, source_type, source_id, job_type, status, attempt_count, last_error, lease_until, heartbeat_at, is_automated, created_at, updated_at
+		 FROM processing_jobs WHERE id = ?`, jobID).
+		Scan(&j.ID, &j.SourceType, &j.SourceID, &j.JobType, &j.Status, &j.AttemptCount, &j.LastError, &j.LeaseUntil, &j.HeartbeatAt, &j.Automated, &j.CreatedAt, &j.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return j, nil
+}
+
+func (s *Store) enqueueClaimWritingOnce(ctx context.Context, briefID string, expectedVersion int) (*models.ProcessingJob, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// 1) 精确 confirmed + expected 验证：expected=current=confirmed 才可生成。
+	var proposalID string
+	var currentVersion, confirmedVersion int
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT creation_proposal_id,current_version,confirmed_version,status FROM creation_briefs WHERE id=?`, briefID).Scan(&proposalID, &currentVersion, &confirmedVersion, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if status != "confirmed" || confirmedVersion == 0 {
+		return nil, fmt.Errorf("%w: exact confirmed Brief required", ErrInvalidEditorialState)
+	}
+	if expectedVersion != currentVersion || expectedVersion != confirmedVersion {
+		return nil, fmt.Errorf("%w: expected v%d, current v%d, confirmed v%d", ErrCreationBriefVersionConflict, expectedVersion, currentVersion, confirmedVersion)
+	}
+	intentID := claimWritingIntentID(briefID, confirmedVersion)
+	// 完成态重复点击：意图已持久 → 直接复用同一 job（processing_jobs 的部分唯一
+	// 索引只约束活跃任务，这里由 claim_writing_intents 兜底）。
+	var existingJobID string
+	switch err := tx.QueryRowContext(ctx, `SELECT job_id FROM claim_writing_intents WHERE intent_id=?`, intentID).Scan(&existingJobID); {
+	case err == nil:
+		// 同事务内回读任务行（不跨连接，避免单连接库死锁）。
+		job, gerr := scanProcessingJobRow(ctx, tx, existingJobID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		return job, nil
+	case errors.Is(err, sql.ErrNoRows):
+		// 首次入队，继续。
+	default:
+		return nil, err
+	}
+
+	// 2) 持久文章链接：冻结全部精确桥接 ID；link 版本必须与确认版本一致。
+	var linkID, articleProposalID, articleBriefID string
+	var linkVersion int
+	err = tx.QueryRowContext(ctx, `SELECT id,article_proposal_id,article_brief_id,creation_brief_version FROM creation_article_links WHERE creation_brief_id=?`, briefID).Scan(&linkID, &articleProposalID, &articleBriefID, &linkVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: confirmed Brief 缺少持久文章链接", ErrInvalidEditorialState)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if linkVersion != confirmedVersion {
+		return nil, fmt.Errorf("%w: 文章链接版本 %d 与确认版本 %d 不一致", ErrInvalidEditorialState, linkVersion, confirmedVersion)
+	}
+
+	// 3) Proposal 保持 accepted，读取画像与受众（同一事务内一致读）。
+	var profileID, audience string
+	err = tx.QueryRowContext(ctx, `SELECT editorial_profile_id,COALESCE(audience,'') FROM creation_proposals WHERE id=? AND status='accepted'`, proposalID).Scan(&profileID, &audience)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: creation proposal 不再是 accepted", ErrInvalidEditorialState)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 4) 创建或复用 Writer 专属草稿（claim_writing_drafts 映射主键保证单草稿；
+	// 历史重复草稿不受影响，也不依赖 article_drafts 全局唯一索引）。
+	draftID, err := findOrCreateWriterDraftTx(ctx, tx, articleBriefID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5) 读取不可变 Brief revision；授权材料只来自 revision 冻结的 Curator 输入
+	// 快照（完整 ArticleMaterial），按 material plan selected IDs 保序筛选。
+	// 不读取可变 keypoint_index 正文：确认后卡片/内容变化不会静默进入授权输入。
+	rev, err := readCreationBriefRevisionTx(ctx, tx, briefID, confirmedVersion)
+	if err != nil {
+		return nil, err
+	}
+	selected, _, ok := parseMaterialPlan(rev.MaterialPlanJSON)
+	if !ok || len(selected) == 0 {
+		return nil, fmt.Errorf("%w: selected materials required", ErrInvalidEditorialState)
+	}
+	var snap struct {
+		Provider  string                     `json:"provider"`
+		Materials []provider.ArticleMaterial `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(rev.CuratorInputSnapshotJSON), &snap); err != nil {
+		return nil, fmt.Errorf("%w: 冻结 Curator 材料快照不可解析: %w", ErrInvalidEditorialState, err)
+	}
+	byID := make(map[string]provider.ArticleMaterial, len(snap.Materials))
+	for _, m := range snap.Materials {
+		byID[m.KeyPointID] = m
+	}
+	materials := make([]provider.ArticleMaterial, 0, len(selected))
+	for _, id := range selected {
+		m, found := byID[id]
+		if !found {
+			return nil, fmt.Errorf("%w: 选中材料 %s 不在确认快照内", ErrInvalidEditorialState, id)
+		}
+		if m.SourceType == "" || m.SourceID == "" || m.CardVersion <= 0 ||
+			strings.TrimSpace(m.SourceTitle) == "" || strings.TrimSpace(m.Content) == "" || len(m.Citations) == 0 {
+			return nil, fmt.Errorf("%w: 冻结材料 %s 身份/内容/引用不完整", ErrInvalidEditorialState, id)
+		}
+		materials = append(materials, m)
+	}
+
+	// 6) 冻结 Writer 配置（R04）：读取当前 settings 的 Writer 角色并写入快照。
+	var writerProvider, writerModel string
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(writer_provider,''),COALESCE(writer_model,'') FROM settings WHERE id=1`).Scan(&writerProvider, &writerModel)
+	if errors.Is(err, sql.ErrNoRows) {
+		writerProvider, writerModel = "", ""
+	} else if err != nil {
+		return nil, err
+	}
+	if writerProvider == "" {
+		writerProvider = "groq"
+	}
+	model := provider.EffectiveModel(writerProvider, writerModel, string(models.JobClaimWriting))
+	input := ClaimWritingTaskInput{
+		CreationBriefID: briefID, BriefVersion: confirmedVersion,
+		CreationProposalID: proposalID, CreationArticleLinkID: linkID,
+		ArticleProposalID: articleProposalID, ArticleBriefID: articleBriefID,
+		DraftID: draftID, ProfileID: profileID, Audience: audience,
+		OwnerClaim: rev.OwnerClaim, Outline: rev.Outline, Style: rev.Style, TargetLength: rev.TargetLength,
+		Materials: materials, Provider: writerProvider, Model: model, PromptVersion: provider.ClaimWriterPromptVersion,
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("冻结写作输入快照: %w", err)
+	}
+
+	// 7) 持久化 job 与意图（同事务）：configured_* 直接写入，R04 配置冻结不回读设置。
+	jobID := uuid.NewString()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO processing_jobs
+		   (id, source_type, source_id, job_type, status, is_automated,
+		    intent_id, input_snapshot_json, config_version, configured_provider, configured_model)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		jobID, string(models.SourceEpisode), draftID, string(models.JobClaimWriting), string(models.StatusQueued), 0,
+		intentID, string(inputJSON), provider.ClaimWriterPromptVersion, writerProvider, model); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO claim_writing_intents (intent_id, job_id, draft_id) VALUES (?,?,?)`,
+		intentID, jobID, draftID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &models.ProcessingJob{ID: jobID, SourceType: models.SourceEpisode, SourceID: draftID, JobType: models.JobClaimWriting, Status: models.StatusQueued}, nil
+}
+
+// findOrCreateWriterDraftTx 复用或建立 Writer 专属草稿映射（claim_writing_drafts，
+// article_brief_id 主键）。历史遗留的同 Brief 多草稿保持原样：映射只决定新写入路径
+// 使用哪个草稿；并发建立由映射主键兜底，冲突时回读。
+func findOrCreateWriterDraftTx(ctx context.Context, tx *sql.Tx, articleBriefID string) (string, error) {
+	var mapped string
+	err := tx.QueryRowContext(ctx, `SELECT draft_id FROM claim_writing_drafts WHERE article_brief_id=?`, articleBriefID).Scan(&mapped)
+	if err == nil {
+		// 映射存在：确认草稿行仍可读后复用（同事务内，不跨连接）。
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM article_drafts WHERE id=?`, mapped).Scan(&n); err != nil {
+			return "", err
+		}
+		if n == 1 {
+			return mapped, nil
+		}
+		return "", fmt.Errorf("%w: Writer 草稿映射指向缺失的草稿", ErrInvalidEditorialState)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var profileID, title string
+	if err := tx.QueryRowContext(ctx, `SELECT p.editorial_profile_id,COALESCE(b.thesis,'') FROM article_briefs b JOIN article_proposals p ON p.id=b.proposal_id WHERE b.id=?`, articleBriefID).Scan(&profileID, &title); err != nil {
+		return "", err
+	}
+	draftID := uuid.NewString()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO article_drafts (id, editorial_profile_id, brief_id, title, status) VALUES (?,?,?,?,?)`, draftID, profileID, articleBriefID, title, "drafting"); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO claim_writing_drafts (article_brief_id, draft_id) VALUES (?,?)`, articleBriefID, draftID); err != nil {
+		if isUniqueConstraintErr(err) {
+			// 并发建立：回读胜出映射（同事务内）。
+			var winner string
+			if qerr := tx.QueryRowContext(ctx, `SELECT draft_id FROM claim_writing_drafts WHERE article_brief_id=?`, articleBriefID).Scan(&winner); qerr != nil {
+				return "", qerr
+			}
+			return winner, nil
+		}
+		return "", err
+	}
+	return draftID, nil
+}
+
+// readCreationBriefRevisionTx 在事务内读取一个不可变 Brief revision（含冻结的
+// Curator 输入快照，作为唯一授权材料来源）。
+func readCreationBriefRevisionTx(ctx context.Context, tx *sql.Tx, briefID string, version int) (*models.CreationBriefRevision, error) {
+	r := &models.CreationBriefRevision{}
+	err := tx.QueryRowContext(ctx, `SELECT id,brief_id,version,owner_claim,claim_plan_json,material_plan_json,outline,style,target_length,curator_input_snapshot_json FROM creation_brief_revisions WHERE brief_id=? AND version=?`, briefID, version).
+		Scan(&r.ID, &r.BriefID, &r.Version, &r.OwnerClaim, &r.ClaimPlanJSON, &r.MaterialPlanJSON, &r.Outline, &r.Style, &r.TargetLength, &r.CuratorInputSnapshotJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: confirmed Brief revision missing", ErrInvalidEditorialState)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(r.OwnerClaim) == "" || strings.TrimSpace(r.Outline) == "" {
+		return nil, fmt.Errorf("%w: confirmed Brief revision incomplete", ErrInvalidEditorialState)
+	}
+	if strings.TrimSpace(r.CuratorInputSnapshotJSON) == "" {
+		return nil, fmt.Errorf("%w: confirmed Brief revision 缺少冻结材料快照", ErrInvalidEditorialState)
+	}
+	return r, nil
+}
+
+// MapCreationBriefsToDrafts 返回画像内 creation_brief_id → Writer/最新草稿 ID 的
+// 映射（工作台"打开文章"下一步）。优先 Writer 专属映射草稿，否则回退该兼容 Brief
+// 下最早的草稿（历史重复草稿兼容）。
+func (s *Store) MapCreationBriefsToDrafts(ctx context.Context, profileID string) (map[string]string, error) {
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT l.creation_brief_id, d.id
+		 FROM creation_article_links l
+		 JOIN creation_proposals p ON p.id = l.creation_proposal_id
+		 JOIN article_drafts d ON d.brief_id = l.article_brief_id
+		 LEFT JOIN claim_writing_drafts cwd ON cwd.article_brief_id = l.article_brief_id
+		 WHERE p.editorial_profile_id = ?
+		 ORDER BY l.creation_brief_id,
+		   CASE WHEN cwd.draft_id = d.id THEN 0 ELSE 1 END, d.created_at, d.id`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var briefID, draftID string
+		if err := rows.Scan(&briefID, &draftID); err != nil {
+			return nil, err
+		}
+		if _, exists := out[briefID]; !exists {
+			out[briefID] = draftID
+		}
+	}
+	return out, rows.Err()
+}
