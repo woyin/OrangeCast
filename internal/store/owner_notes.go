@@ -205,3 +205,40 @@ func (s *Store) UpdateOwnerNote(ctx context.Context, noteID, content, citationsJ
 	}
 	return s.GetOwnerNote(ctx, noteID)
 }
+
+// DeleteOwnerNote 删除一条个人笔记（R23 挂账补齐）：
+//   - 乐观并发：expectedRevision 不匹配当前版本返回 ErrConflict（K04 同契约）；
+//   - 已被精读块引用的笔记属于已发布修订的血缘（digest_blocks.note_id），删除会
+//     破坏精读笔记锚点与 FindUsageByNote 导航，明确拒绝；
+//   - 笔记不属于任何来源主张体系，删除不需要级联 KeyPoint/来源。
+func (s *Store) DeleteOwnerNote(ctx context.Context, noteID string, expectedRevision int) error {
+	if expectedRevision < 1 {
+		return fmt.Errorf("%w: invalid owner note delete", ErrInvalidEditorialState)
+	}
+	current, err := s.GetOwnerNote(ctx, noteID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != expectedRevision {
+		return ErrConflict
+	}
+	var referenced int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM digest_blocks WHERE note_id=?`, noteID).Scan(&referenced); err != nil {
+		return err
+	}
+	if referenced > 0 {
+		return fmt.Errorf("%w: 笔记已被 %d 个精读块引用，不能删除", ErrConflict, referenced)
+	}
+	res, err := s.DB.ExecContext(ctx,
+		`DELETE FROM owner_notes WHERE id=? AND revision=?`, noteID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrConflict
+	}
+	return nil
+}

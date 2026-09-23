@@ -459,7 +459,10 @@
   - FindUsageByNote 先精确验证 OwnerNote 存在（ErrNotFound 返回空，其他错误上抛）再查 digest+article；补 ghost note ID 回归（claim_map_entries 手工放入 ghost ID，FindUsageByNote 仍为空，不伪造使用记录）。
   - actualSourcesForRevision 的 OwnerNote 回退仅限新契约 claim-map material；旧契约 evidence_map ID 严格只解析 KeyPoint；note label 用 truncateRunes(content,80)。
   - 真正删除 epAOf helper（无残留）；AttentionQueue 测试 upload href 断言完整相等（非 HasSuffix）；隔离测试 B 页面同时断言不含 A digest 标题与确切 A 文章链接。
-- 未验证：真实浏览器交互（R25）；真实付费模型；Writer 端到端使用 OwnerNote（留 R23 旅程验证）。
+- 追加开发（R23 之后，队列 race 门禁与笔记删除入口）：
+  - 根因修正队列全包 race 超时：无死锁、无 data race——queue 包在 -race 下合法耗时 ~592s（90 测试 × 独立库 × 55 条迁移被探针拖慢），此前失败是默认 10m timeout 误报（180s panic 落在 TestDoNarration_CorruptHighlightPayload 开头，仅为最后一根稻草；-timeout 20m 实测 591.6s 全绿）。`make test` 目标改为 `-race -timeout 30m`（R24 已验证基线），不降低任何门禁（4cd8364）。
+  - 补齐 OwnerNote 删除入口（日志挂账"仅有创建/编辑"）：`store.DeleteOwnerNote` 乐观并发（K04 同契约，过期版本 ErrConflict）；被 digest_blocks 引用的笔记属于已发布修订血缘，显式拒绝删除；HTTP `/api/owner-notes` 新增 action=delete（CSRF 校验，409/404/303 语义区分）；source_detail/document_detail 模板为每条笔记增加删除按钮。回归 TestOwnerNoteDelete_R23 覆盖正常删除/过期 409/被引用 409 保留/404。
+- 未验证：真实浏览器交互（R25 已记录的边界保持不变）；真实付费模型；Writer 端到端使用 OwnerNote（已由 R23 旅程 TestJourneyR23KnowledgeToPublishedArticle 覆盖选材→Writer→审校→发布全链，R26 真实模型质量仍待验收）。
 
 ## R21 — 修订保留有效映射并强制重新审校（本段记录 R21 原子变更，基于 8510ae7）
 
