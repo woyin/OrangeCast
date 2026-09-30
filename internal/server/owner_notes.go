@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -28,8 +29,7 @@ func (srv *Server) handleRightsConstraint(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
 }
 
-// handleOwnerNote records either a cited source-faithful note or an explicitly
-// personal reflection without conflating the two kinds of expression.
+// handleOwnerNote preserves drafts on AJAX errors and validates note identities server-side.
 func (srv *Server) handleOwnerNote(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
@@ -37,65 +37,110 @@ func (srv *Server) handleOwnerNote(w http.ResponseWriter, r *http.Request) {
 	}
 	sourceType := models.SourceType(strings.TrimSpace(r.FormValue("source_type")))
 	sourceID := strings.TrimSpace(r.FormValue("source_id"))
-	redirectToSource := func() {
-		if sourceType == models.SourceDocument {
-			http.Redirect(w, r, "/documents/"+sourceID, http.StatusSeeOther)
-			return
-		}
-		http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
-	}
-	// R23 补齐：删除入口（乐观并发：过期删除提示冲突；被精读引用的笔记拒绝删除）。
-	if r.FormValue("action") == "delete" {
-		noteID := strings.TrimSpace(r.FormValue("note_id"))
-		expected, convErr := strconv.Atoi(strings.TrimSpace(r.FormValue("expected_revision")))
-		if noteID == "" || convErr != nil || expected < 1 {
-			http.Error(w, "缺少有效的笔记标识或版本号（请刷新页面后重试）", http.StatusBadRequest)
-			return
-		}
-		if err := srv.store.DeleteOwnerNote(r.Context(), noteID, expected); err != nil {
-			if errors.Is(err, store.ErrConflict) {
-				http.Error(w, "笔记无法删除（版本冲突或已被精读引用），请刷新后重试", http.StatusConflict)
-				return
-			}
-			if errors.Is(err, store.ErrNotFound) {
-				http.Error(w, "笔记不存在", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "删除 OwnerNote 失败："+err.Error(), http.StatusBadRequest)
-			return
-		}
-		redirectToSource()
-		return
-	}
-	// K04：带 note_id + expected_revision 的提交为编辑路径（乐观并发：过期编辑提示冲突）。
-	if noteID := strings.TrimSpace(r.FormValue("note_id")); noteID != "" {
-		expected, convErr := strconv.Atoi(strings.TrimSpace(r.FormValue("expected_revision")))
+	var note *models.OwnerNote
+	var err error
+	noteID := strings.TrimSpace(r.FormValue("note_id"))
+	if noteID != "" {
+		expected, convErr := strconv.Atoi(r.FormValue("expected_revision"))
 		if convErr != nil || expected < 1 {
 			http.Error(w, "缺少有效的笔记版本号（请刷新页面后重试）", http.StatusBadRequest)
 			return
 		}
-		if _, err := srv.store.UpdateOwnerNote(r.Context(), noteID, strings.TrimSpace(r.FormValue("content")), strings.TrimSpace(r.FormValue("citations_json")), strings.TrimSpace(r.FormValue("references_json")), expected); err != nil {
-			if errors.Is(err, store.ErrConflict) {
-				http.Error(w, "笔记已被其他编辑更新（版本冲突），请刷新后基于最新版本重试", http.StatusConflict)
-				return
-			}
-			http.Error(w, "更新 OwnerNote 失败："+err.Error(), http.StatusBadRequest)
-			return
+		current, getErr := srv.store.GetOwnerNote(r.Context(), noteID)
+		if getErr != nil {
+			err = getErr
+		} else if current.SourceID != sourceID || current.SourceType != string(sourceType) {
+			err = store.ErrInvalidEditorialState
+		} else if r.FormValue("action") == "delete" {
+			err = srv.store.DeleteOwnerNote(r.Context(), noteID, expected)
+		} else {
+			note, err = srv.store.UpdateOwnerNote(r.Context(), noteID, r.FormValue("content"), r.FormValue("citations_json"), r.FormValue("references_json"), expected)
 		}
-		if sourceType == models.SourceDocument {
-			http.Redirect(w, r, "/documents/"+sourceID, http.StatusSeeOther)
-			return
+	} else if r.FormValue("action") == "delete" {
+		err = store.ErrInvalidEditorialState
+	} else {
+		note, err = srv.store.CreateOwnerNote(r.Context(), models.OwnerNote{SourceType: string(sourceType), SourceID: sourceID, Kind: r.FormValue("kind"), Content: r.FormValue("content"), CitationsJSON: r.FormValue("citations_json"), ReferencesJSON: r.FormValue("references_json"), AnchorJSON: r.FormValue("anchor_json")})
+	}
+	if err != nil {
+		code := http.StatusBadRequest
+		message := "保存笔记失败，草稿和原位置仍保留：" + err.Error()
+		if errors.Is(err, store.ErrConflict) {
+			code = http.StatusConflict
+			message = "笔记已被其他编辑更新或已被精读引用（版本冲突）；草稿仍保留，请基于最新版本重试。"
 		}
-		http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
+		if errors.Is(err, store.ErrNotFound) {
+			code = http.StatusNotFound
+		}
+		http.Error(w, message, code)
 		return
 	}
-	if _, err := srv.store.CreateOwnerNote(r.Context(), models.OwnerNote{SourceType: string(sourceType), SourceID: sourceID, Kind: strings.TrimSpace(r.FormValue("kind")), Content: strings.TrimSpace(r.FormValue("content")), CitationsJSON: strings.TrimSpace(r.FormValue("citations_json")), ReferencesJSON: strings.TrimSpace(r.FormValue("references_json"))}); err != nil {
-		http.Error(w, "保存 OwnerNote 失败："+err.Error(), http.StatusBadRequest)
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"saved": true, "note": note})
 		return
 	}
+	target := "/sources/" + string(sourceType) + "/" + sourceID
 	if sourceType == models.SourceDocument {
-		http.Redirect(w, r, "/documents/"+sourceID, http.StatusSeeOther)
+		target = "/documents/" + sourceID
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func (srv *Server) handleNoteHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 		return
 	}
-	http.Redirect(w, r, "/sources/"+string(sourceType)+"/"+sourceID, http.StatusSeeOther)
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/notes/"), "/")
+	if len(parts) != 2 || parts[1] != "history" {
+		http.NotFound(w, r)
+		return
+	}
+	revisions, err := srv.store.ListOwnerNoteRevisions(r.Context(), parts[0])
+	if err != nil {
+		http.Error(w, "读取历史失败", http.StatusInternalServerError)
+		return
+	}
+	if len(revisions) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	srv.tmpl.Render(w, "note_history.html", map[string]any{"Revisions": revisions})
+}
+
+func (srv *Server) handleFrozenEvidence(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/evidence/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	snap, segments, docs, err := srv.store.SnapshotContent(r.Context(), id)
+	if err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, store.ErrNotFound) {
+			code = http.StatusNotFound
+		}
+		if errors.Is(err, store.ErrSnapshotInvalidated) {
+			code = http.StatusGone
+		}
+		http.Error(w, "冻结依据不可用", code)
+		return
+	}
+	data := map[string]any{"Snapshot": snap, "Segments": segments, "DocumentSegments": docs}
+	if snap.Kind == models.SnapshotKindAudio {
+		audio, err := srv.store.SnapshotAudioIdentity(r.Context(), id)
+		if err != nil {
+			http.Error(w, "读取原音身份失败", http.StatusInternalServerError)
+			return
+		}
+		data["Audio"] = audio
+		if audio.Status == models.AudioPlayable {
+			data["AudioURL"] = "/api/audio/" + string(snap.SourceType) + "/" + snap.SourceID
+		}
+	}
+	srv.tmpl.Render(w, "evidence.html", data)
 }

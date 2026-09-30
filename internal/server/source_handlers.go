@@ -69,6 +69,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if policy, err := srv.store.GetSourcePolicy(r.Context(), sourceType, sourceID); err == nil {
 		data["SourcePolicy"] = policy
 	}
+	if snap, err := srv.store.FreezeSourceSnapshot(r.Context(), sourceType, sourceID); err == nil {
+		data["NoteSnapshotID"] = snap.ID
+		data["NoteSnapshotVersion"] = snap.ContentVersion
+	}
 	if notes, err := srv.store.ListOwnerNotes(r.Context(), sourceType, sourceID); err == nil {
 		data["OwnerNotes"] = notes
 	}

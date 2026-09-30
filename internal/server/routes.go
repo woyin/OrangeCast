@@ -115,6 +115,8 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/study-chat/history", srv.handleStudyChatHistory) // StudyChat 历史回看
 	mux.HandleFunc("/api/process", srv.handleProcess)
 	mux.HandleFunc("/api/source-policy", srv.handleSourcePolicy)
+	mux.HandleFunc("/evidence/", srv.handleFrozenEvidence)
+	mux.HandleFunc("/notes/", srv.handleNoteHistory)
 	mux.HandleFunc("/api/owner-notes", srv.handleOwnerNote)
 	mux.HandleFunc("/api/material-candidates", srv.handleMaterialCandidateCreate)
 	mux.HandleFunc("/api/material-candidates/decision", srv.handleMaterialCandidateDecision)

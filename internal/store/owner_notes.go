@@ -45,7 +45,7 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 		return nil, fmt.Errorf("%w: invalid note references", ErrInvalidEditorialState)
 	}
 	if note.Kind == "source_note" {
-		if len(citations) == 0 {
+		if len(citations) == 0 || len(references) > 0 {
 			return nil, fmt.Errorf("%w: source note needs citations", ErrInvalidEditorialState)
 		}
 		valid, err := s.ValidateSourceCitations(ctx, models.SourceType(note.SourceType), note.SourceID, citations)
@@ -70,7 +70,12 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 			}
 		}
 	}
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO owner_notes (id,source_type,source_id,kind,content,citations_json,references_json) VALUES (?,?,?,?,?,?,?)`, note.ID, note.SourceType, note.SourceID, note.Kind, note.Content, note.CitationsJSON, note.ReferencesJSON); err != nil {
+	anchor, err := s.prepareNoteAnchor(ctx, &note, citations, references)
+	if err != nil {
+		return nil, err
+	}
+	note.AnchorJSON = anchor
+	if _, err := s.DB.ExecContext(ctx, `INSERT INTO owner_notes (id,source_type,source_id,kind,content,citations_json,references_json,anchor_json) VALUES (?,?,?,?,?,?,?,?)`, note.ID, note.SourceType, note.SourceID, note.Kind, note.Content, note.CitationsJSON, note.ReferencesJSON, note.AnchorJSON); err != nil {
 		return nil, err
 	}
 	return s.GetOwnerNote(ctx, note.ID)
@@ -79,7 +84,7 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 // GetOwnerNote retrieves one Owner note by stable identifier.
 func (s *Store) GetOwnerNote(ctx context.Context, id string) (*models.OwnerNote, error) {
 	note := &models.OwnerNote{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at FROM owner_notes WHERE id=?`, id).Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at,anchor_json FROM owner_notes WHERE id=?`, id).Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt, &note.AnchorJSON)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -88,7 +93,7 @@ func (s *Store) GetOwnerNote(ctx context.Context, id string) (*models.OwnerNote,
 
 // ListOwnerNotes lists the durable notes for exactly one Source.
 func (s *Store) ListOwnerNotes(ctx context.Context, sourceType models.SourceType, sourceID string) ([]*models.OwnerNote, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at FROM owner_notes WHERE source_type=? AND source_id=? ORDER BY created_at DESC,id DESC`, sourceType, sourceID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,source_type,source_id,kind,content,citations_json,references_json,revision,created_at,updated_at,anchor_json FROM owner_notes WHERE source_type=? AND source_id=? ORDER BY created_at DESC,id DESC`, sourceType, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +101,7 @@ func (s *Store) ListOwnerNotes(ctx context.Context, sourceType models.SourceType
 	var out []*models.OwnerNote
 	for rows.Next() {
 		note := &models.OwnerNote{}
-		if err := rows.Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt); err != nil {
+		if err := rows.Scan(&note.ID, &note.SourceType, &note.SourceID, &note.Kind, &note.Content, &note.CitationsJSON, &note.ReferencesJSON, &note.Revision, &note.CreatedAt, &note.UpdatedAt, &note.AnchorJSON); err != nil {
 			return nil, err
 		}
 		out = append(out, note)
@@ -169,10 +174,10 @@ func (s *Store) UpdateOwnerNote(ctx context.Context, noteID, content, citationsJ
 	}
 	switch current.Kind {
 	case "source_note":
-		if len(citations) == 0 {
+		if len(citations) == 0 || len(references) > 0 {
 			return nil, fmt.Errorf("%w: source note needs citations", ErrInvalidEditorialState)
 		}
-		valid, err := s.ValidateSourceCitations(ctx, models.SourceType(current.SourceType), current.SourceID, citations)
+		valid, err := s.validateNoteReferences(ctx, current, citations)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +189,7 @@ func (s *Store) UpdateOwnerNote(ctx context.Context, noteID, content, citationsJ
 			return nil, fmt.Errorf("%w: owner reflection must not claim citations", ErrInvalidEditorialState)
 		}
 		if len(references) > 0 {
-			valid, err := s.ValidateSourceCitations(ctx, models.SourceType(current.SourceType), current.SourceID, references)
+			valid, err := s.validateNoteReferences(ctx, current, references)
 			if err != nil {
 				return nil, err
 			}

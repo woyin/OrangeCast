@@ -39,11 +39,13 @@ type Input struct {
 
 // OwnerNoteBlock 一条 Owner 笔记的导出块。
 type OwnerNoteBlock struct {
-	Kind       string // source_note | owner_reflection
-	Body       string
-	Citations  []string
-	References []string
-	Revision   int
+	AnchorURL     string
+	AnchorVersion int
+	Kind          string // source_note | owner_reflection
+	Body          string
+	Citations     []string
+	References    []string
+	Revision      int
 }
 
 // Render 生成 KnowledgeNote Markdown。确定性：字段顺序固定、标签排序、时间格式化固定。
@@ -172,15 +174,18 @@ func writeOwnerNoteBlocks(b *strings.Builder, in Input) {
 		if n.Kind == "source_note" {
 			b.WriteString("> [!quote] 原文笔记（SourceNote，带 Citation 可核验）\n")
 			b.WriteString("> " + strings.ReplaceAll(n.Body, "\n", "\n> ") + "\n")
-			if links := citationLinks(in.SourceType, in.SourceID, in.BaseURL, n.Citations, in.Segments); links != "" {
+			if links := citationLinks(in.SourceType, in.SourceID, in.BaseURL, n.Citations, in.Segments); links != "" && n.AnchorURL == "" {
 				b.WriteString("> 引用：" + links + "\n")
 			}
 		} else {
 			b.WriteString("> [!note] 我的理解（OwnerReflection，个人文本，非原文）\n")
 			b.WriteString("> " + strings.ReplaceAll(n.Body, "\n", "\n> ") + "\n")
-			if links := referenceLinks(in.SourceType, in.SourceID, in.BaseURL, n.References, in.Segments); links != "" {
+			if links := referenceLinks(in.SourceType, in.SourceID, in.BaseURL, n.References, in.Segments); links != "" && n.AnchorURL == "" {
 				b.WriteString("> 参考：" + links + "\n")
 			}
+		}
+		if n.AnchorURL != "" {
+			fmt.Fprintf(b, "> 记录位置：[冻结依据 v%d](%s)\n", n.AnchorVersion, n.AnchorURL)
 		}
 		b.WriteString("\n")
 	}

@@ -1,0 +1,102 @@
+package store
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+
+	"github.com/woyin/orangecast/internal/models"
+)
+
+func (s *Store) prepareNoteAnchor(ctx context.Context, note *models.OwnerNote, citations, references []string) (string, error) {
+	a := models.NoteAnchor{}
+	if note.AnchorJSON != "" && json.Unmarshal([]byte(note.AnchorJSON), &a) != nil {
+		return "", ErrInvalidEditorialState
+	}
+	if math.IsNaN(a.Position) || math.IsInf(a.Position, 0) || a.Position < 0 {
+		return "", ErrInvalidEditorialState
+	}
+	ids := citations
+	if note.Kind == "owner_reflection" {
+		ids = references
+	}
+	snap, err := s.FreezeSourceSnapshot(ctx, models.SourceType(note.SourceType), note.SourceID)
+	if err != nil {
+		if len(ids) > 0 || a.SnapshotID != "" || (!errors.Is(err, ErrInvalidEditorialState) && !errors.Is(err, ErrNotFound)) {
+			return "", err
+		}
+	} else {
+		if a.SnapshotID != "" && (a.SnapshotID != snap.ID || a.Version != snap.ContentVersion) {
+			return "", fmt.Errorf("%w: 来源版本已改变，保留草稿并重新选择依据", ErrConflict)
+		}
+		a.SnapshotID = snap.ID
+		a.Version = snap.ContentVersion
+		a.SegmentIDs = ids
+		_, audio, docs, err := s.SnapshotContent(ctx, snap.ID)
+		if err != nil {
+			return "", err
+		}
+		if len(ids) > 0 && note.AnchorJSON == "" {
+			for _, seg := range audio {
+				if seg.ID == ids[0] {
+					a.Position = seg.Start
+					break
+				}
+			}
+			for _, seg := range docs {
+				if seg.ID == ids[0] {
+					a.Position = float64(seg.Position)
+					break
+				}
+			}
+		}
+	}
+	raw, err := json.Marshal(a)
+	return string(raw), err
+}
+func (s *Store) validateNoteReferences(ctx context.Context, note *models.OwnerNote, ids []string) (bool, error) {
+	var a models.NoteAnchor
+	if json.Unmarshal([]byte(note.AnchorJSON), &a) != nil || a.SnapshotID == "" {
+		return s.ValidateSourceCitations(ctx, models.SourceType(note.SourceType), note.SourceID, ids)
+	}
+	snap, audio, docs, err := s.SnapshotContent(ctx, a.SnapshotID)
+	if err != nil {
+		return false, err
+	}
+	if snap.SourceID != note.SourceID || string(snap.SourceType) != note.SourceType || snap.ContentVersion != a.Version {
+		return false, ErrInvalidEditorialState
+	}
+	valid := map[string]bool{}
+	for _, seg := range audio {
+		valid[seg.ID] = true
+	}
+	for _, seg := range docs {
+		valid[seg.ID] = true
+	}
+	for _, id := range ids {
+		if !valid[id] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// ListOwnerNoteRevisions returns only the content versions actually preserved.
+func (s *Store) ListOwnerNoteRevisions(ctx context.Context, noteID string) ([]*models.OwnerNote, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT note_id,revision,source_type,source_id,kind,content,citations_json,references_json,anchor_json,created_at FROM owner_note_revisions WHERE note_id=? ORDER BY revision DESC`, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*models.OwnerNote
+	for rows.Next() {
+		n := &models.OwnerNote{}
+		if err := rows.Scan(&n.ID, &n.Revision, &n.SourceType, &n.SourceID, &n.Kind, &n.Content, &n.CitationsJSON, &n.ReferencesJSON, &n.AnchorJSON, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}

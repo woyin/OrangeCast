@@ -25,6 +25,7 @@ type MaterialChange struct{ ID, KeyPointID, SourceType, SourceID, ChangeKind, Sn
 
 // OwnerNote separates faithful source notes from personal reflections.
 type OwnerNote struct {
+	AnchorJSON                                                                                   string
 	ID, SourceType, SourceID, Kind, Content, CitationsJSON, ReferencesJSON, CreatedAt, UpdatedAt string
 	Revision                                                                                     int // 乐观并发版本（K04）：每次编辑 +1
 }
@@ -224,4 +225,12 @@ func (h CreationHistory) ExternalURL() string {
 		return ""
 	}
 	return h.SourceURL
+}
+
+// NoteAnchor preserves a position and optional evidence identity at note creation.
+type NoteAnchor struct {
+	SnapshotID string   `json:"snapshot_id,omitempty"`
+	Version    int      `json:"version,omitempty"`
+	Position   float64  `json:"position"`
+	SegmentIDs []string `json:"segment_ids,omitempty"`
 }

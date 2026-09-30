@@ -1,0 +1,2 @@
+{{define "title"}}笔记修订历史 · CloudWisePod{{end}}
+{{define "content"}}<h1>笔记修订历史</h1><p class="meta">仅显示实际保存的版本；升级前缺失的旧正文不补造。</p>{{range .Revisions}}<article class="panel"><h2>v{{.Revision}} · {{.CreatedAt}}</h2><p>{{.Content}}</p><a href="{{noteHref .}}">查看当时位置与依据</a></article>{{end}}{{end}}

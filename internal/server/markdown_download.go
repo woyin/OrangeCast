@@ -103,7 +103,14 @@ func (srv *Server) ownerNoteBlocks(ctx context.Context, sourceType models.Source
 		var citations, references []string
 		_ = json.Unmarshal([]byte(n.CitationsJSON), &citations)
 		_ = json.Unmarshal([]byte(n.ReferencesJSON), &references)
+		var anchor models.NoteAnchor
+		_ = json.Unmarshal([]byte(n.AnchorJSON), &anchor)
+		anchorURL := ""
+		if anchor.SnapshotID != "" {
+			anchorURL = noteHref(n)
+		}
 		blocks = append(blocks, markdown.OwnerNoteBlock{
+			AnchorURL: anchorURL, AnchorVersion: anchor.Version,
 			Kind: n.Kind, Body: n.Content,
 			Citations: citations, References: references, Revision: n.Revision,
 		})

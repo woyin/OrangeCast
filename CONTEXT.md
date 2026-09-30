@@ -268,3 +268,9 @@ _避免使用：ArticleDraft、KnowledgeNote；它表达一次对外发布事实
 **PublicationPerformance（发布表现）**：
 一个 PublishedArticle 在特定渠道获得的读者反馈指标，例如阅读、点赞、在看、分享、收藏与关注增长。首版由 Owner 手工记录；它可用于分析主题、结构、篇幅和标题的长期表现并调整提案排序，但不得据此静默修改 EditorialProfile。
 _避免使用：EditorialFeedback、VanityMetrics、Analytics；它来自读者行为而非 Owner 编辑判断，并作为可解释的生产反馈而存在_
+
+## 个人听学
+
+**NoteAnchor（笔记锚点）**：笔记记录时的音频位置或文档段落，以及当时可用的来源快照。位置本身不证明来源表达；来源笔记仍须有 Citation，个人理解使用可选 Reference。
+
+**NoteRevision（笔记修订版）**：Owner 笔记某次实际保存的不可变内容与原锚点。缺失的历史正文不由修订计数推断。

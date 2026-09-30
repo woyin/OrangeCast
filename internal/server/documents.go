@@ -175,7 +175,11 @@ func (srv *Server) handleDocumentDetail(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "加载 MaterialCandidate 失败", http.StatusInternalServerError)
 		return
 	}
-	srv.tmpl.Render(w, "document_detail.html", map[string]any{"Document": doc, "Segments": store.DocumentSegments(doc), "SourcePolicy": policy, "Versions": versions, "Card": card, "OwnerNotes": notes, "RightsConstraints": constraints, "MaterialCandidates": candidates, "CSRF": auth.CSRFValue(r)})
+	noteSnapshotID := ""
+	if snap, err := srv.store.FreezeSourceSnapshot(r.Context(), models.SourceDocument, doc.ID); err == nil {
+		noteSnapshotID = snap.ID
+	}
+	srv.tmpl.Render(w, "document_detail.html", map[string]any{"SourceType": "document", "SourceID": doc.ID, "NoteSnapshotID": noteSnapshotID, "NoteSnapshotVersion": doc.Version, "Document": doc, "Segments": store.DocumentSegments(doc), "SourcePolicy": policy, "Versions": versions, "Card": card, "OwnerNotes": notes, "RightsConstraints": constraints, "MaterialCandidates": candidates, "CSRF": auth.CSRFValue(r)})
 }
 
 func (srv *Server) handleDocumentVersion(w http.ResponseWriter, r *http.Request) {

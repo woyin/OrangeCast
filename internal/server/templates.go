@@ -37,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "knowledgeStatus": knowledgeStatus}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "knowledgeStatus": knowledgeStatus, "noteHref": noteHref}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -47,13 +47,20 @@ func NewTemplates() (*Templates, error) {
 	}
 	for _, m := range matches {
 		name := filepath.Base(m)
-		if name == "layout.html" {
+		if name == "layout.html" || name == "note_panel.html" {
 			continue
 		}
 		// 每个页面 = layout + 该页面，组合成一个 template set
 		tmpl, err := template.New(name).Funcs(funcs).Parse(string(layoutData))
 		if err != nil {
 			return nil, fmt.Errorf("解析 layout for %s: %w", name, err)
+		}
+		panel, err := templateFS.ReadFile("templates/note_panel.html")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tmpl.Parse(string(panel)); err != nil {
+			return nil, err
 		}
 		pageData, err := templateFS.ReadFile(m)
 		if err != nil {
@@ -121,4 +128,15 @@ func knowledgeStatus(status string) string {
 		return label
 	}
 	return "待处理"
+}
+
+func noteHref(n *models.OwnerNote) string {
+	var a models.NoteAnchor
+	if json.Unmarshal([]byte(n.AnchorJSON), &a) == nil && a.SnapshotID != "" {
+		if n.SourceType == "document" {
+			return fmt.Sprintf("/evidence/%s?position=%.0f", url.PathEscape(a.SnapshotID), a.Position)
+		}
+		return fmt.Sprintf("/evidence/%s?t=%.1f", url.PathEscape(a.SnapshotID), a.Position)
+	}
+	return sourceHref(models.SourceType(n.SourceType), n.SourceID, 0)
 }
