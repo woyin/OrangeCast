@@ -6,11 +6,8 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"math"
-	"sort"
 	"strings"
 	"unicode"
-
-	"github.com/woyin/orangecast/internal/models"
 )
 
 const localEmbeddingDimensions = 192
@@ -58,94 +55,24 @@ func localTextEmbedding(value string) []float64 {
 	return vector
 }
 
-func cosineLocal(a, b []float64) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	score := 0.0
-	for i := 0; i < n; i++ {
-		score += a[i] * b[i]
-	}
-	return score
-}
-
-// SearchKeyPointsHybrid combines exact FTS rank with a versioned local vector
-// projection. Search ranking is derived data; returned KeyPoints retain their
-// original Citation chain.
-type hybridScoredKeyPoint struct {
-	keyPoint *KeyPointRow
-	score    float64
-}
-
-func (s *Store) scanHybridCandidates(ctx context.Context, query string, limit int, lexicalRank map[string]int) ([]hybridScoredKeyPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT ki.id,ki.source_type,ki.source_id,ki.source_title,ki.content,ki.description,ki.citations_json,ki.relation_kind,ki.time_start,ki.time_end,ki.card_version,ki.origin,ki.production_status,ki.parent_keypoint_id,ki.evidence_status,ki.quality_status,COALESCE(ki.stale_at,''),COALESCE(ki.stale_reason,''),ki.created_at,ke.vector_json
-		FROM keypoint_embeddings ke JOIN keypoint_index ki ON ki.id=ke.keypoint_id WHERE ke.provider='local' AND ke.model='char-ngram-v1' LIMIT 5000`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	queryVector := localTextEmbedding(query)
-	var candidates []hybridScoredKeyPoint
-	for rows.Next() {
-		keyPoint := &KeyPointRow{}
-		var relation, origin, status, payload string
-		if err := rows.Scan(&keyPoint.ID, &keyPoint.SourceType, &keyPoint.SourceID, &keyPoint.SourceTitle, &keyPoint.Content, &keyPoint.Description, &keyPoint.CitationsJSON, &relation, &keyPoint.TimeStart, &keyPoint.TimeEnd, &keyPoint.CardVersion, &origin, &status, &keyPoint.ParentKeyPointID, &keyPoint.EvidenceStatus, &keyPoint.QualityStatus, &keyPoint.StaleAt, &keyPoint.StaleReason, &keyPoint.CreatedAt, &payload); err != nil {
-			return nil, err
-		}
-		keyPoint.RelationKind = models.RelationKind(relation)
-		keyPoint.Origin = models.KeyPointOrigin(origin)
-		keyPoint.ProductionStatus = models.KeyPointProductionStatus(status)
-		var vector []float64
-		if json.Unmarshal([]byte(payload), &vector) != nil {
-			continue
-		}
-		score := cosineLocal(queryVector, vector)
-		if rank, ok := lexicalRank[keyPoint.ID]; ok {
-			score += 2 - float64(rank)/float64(limit+1)
-		}
-		candidates = append(candidates, hybridScoredKeyPoint{keyPoint, score})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return candidates, nil
-}
-
-func rankHybridCandidates(candidates []hybridScoredKeyPoint, limit int) []*KeyPointRow {
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
-	result := make([]*KeyPointRow, 0, limit)
-	for _, candidate := range candidates {
-		if len(result) == limit {
-			break
-		}
-		if candidate.score > 0 {
-			result = append(result, candidate.keyPoint)
-		}
-	}
-	return result
-}
-
-// SearchKeyPointsHybrid merges lexical FTS and semantic vector recall for KeyPoint search.
+// SearchKeyPointsHybrid retains the public interface while using the shared local index.
+// The legacy char-ngram projection remains an offline comparison artifact; reads
+// no longer load and sort 5000 unrelated vectors.
 func (s *Store) SearchKeyPointsHybrid(ctx context.Context, query string, limit int) ([]*KeyPointRow, error) {
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	lexical, _, lexicalErr := s.SearchKeyPoints(ctx, query, 1, limit)
-	lexicalRank := map[string]int{}
-	for i, keyPoint := range lexical {
-		lexicalRank[keyPoint.ID] = i
-	}
-	candidates, err := s.scanHybridCandidates(ctx, query, limit, lexicalRank)
+	result, err := s.SearchKnowledge(ctx, KnowledgeSearchQuery{Text: query, Kind: "keypoint", PerPage: limit, Recall: true})
 	if err != nil {
-		if lexicalErr == nil {
-			return lexical, nil
-		}
 		return nil, err
 	}
-	result := rankHybridCandidates(candidates, limit)
-	if len(result) == 0 && lexicalErr != nil {
-		return nil, lexicalErr
+	out := make([]*KeyPointRow, 0, len(result.Hits))
+	for _, hit := range result.Hits {
+		kp, err := s.GetKeyPoint(ctx, hit.ObjectID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, kp)
 	}
-	return result, nil
+	return out, nil
 }

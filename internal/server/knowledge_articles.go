@@ -257,6 +257,14 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 			http.Error(w, "文章尚未通过审校，暂不能下载", 409)
 			return
 		}
+		titleForValidation := article.Title
+		if selected != nil {
+			titleForValidation = selected.Title
+		}
+		if err := provider.ValidateKnowledgeBlocks(titleForValidation, blocks, req.Materials); err != nil {
+			http.Error(w, "正文依据契约失效："+err.Error(), 409)
+			return
+		}
 		// Archived/removed/changed sources invalidate deliverability; snapshots do
 		// not bypass a revoked source policy or changed personal note.
 		usedIDs := map[string]bool{}

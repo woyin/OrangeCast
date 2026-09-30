@@ -405,14 +405,35 @@ func (srv *Server) handleDJPlanGenerate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	var hits []store.SearchHit
-	var documents []*models.Document
-	if q != "" {
-		hits, _ = srv.store.SearchSource(r.Context(), q)
-		documents, _ = srv.store.SearchDocuments(r.Context(), q, 20)
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", 405)
+		return
 	}
-	srv.tmpl.Render(w, "search.html", map[string]any{"Query": q, "Hits": hits, "Documents": documents})
+	q := knowledgeQuery(r)
+	result, err := srv.store.SearchKnowledge(r.Context(), q)
+	if err != nil {
+		code := 500
+		if errors.Is(err, store.ErrInvalidEditorialState) {
+			code = 400
+		}
+		http.Error(w, "搜索失败："+err.Error(), code)
+		return
+	}
+	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	if err != nil {
+		http.Error(w, "读取来源范围失败", 500)
+		return
+	}
+	podcasts, err := srv.store.ListPodcasts(r.Context())
+	if err != nil {
+		http.Error(w, "读取节目范围失败", 500)
+		return
+	}
+	views := knowledgeSearchViews(result.Hits)
+	data := map[string]any{"Sources": sources, "Podcasts": podcasts, "Query": q.Text, "Filter": q, "Results": views, "Total": result.Total, "Page": result.Page, "PerPage": result.PerPage, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
+	if err := srv.tmpl.Render(w, "search.html", data); err != nil {
+		http.Error(w, "渲染搜索失败", 500)
+	}
 }
 
 // handleSourceSnapshot 按快照 ID 定位引用的只读端点（B01 / ADR-0024 §4）。

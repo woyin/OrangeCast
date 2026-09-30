@@ -192,14 +192,28 @@ func (s *Store) enqueueAnalyze(ctx context.Context, sourceType models.SourceType
 // IndexSearch 写入/更新全文搜索索引（分段粒度，Roadmap Phase 5）。
 // 每个 Transcript Segment 一行（可定位到时间点）；另写一行 Summary 供标题级检索。
 func (s *Store) IndexSearch(ctx context.Context, sourceType models.SourceType, sourceID, title, summary string, segments []provider.Segment) error {
-	// FTS5 无 ON CONFLICT，先删后插
-	if _, err := s.DB.ExecContext(ctx,
+	version := 0
+	if current, err := s.GetCurrentVersion(ctx, sourceType, sourceID, KindTranscript); err == nil {
+		version = current.Version
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM knowledge_search_docs WHERE kind='original' AND source_type=? AND source_id=?`, sourceType, sourceID); err != nil {
+		return err
+	}
+	// Legacy and unified indexes change in the same business transaction.
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM search_index WHERE source_type = ? AND source_id = ?`,
 		string(sourceType), sourceID); err != nil {
 		return err
 	}
 	// Summary 行（segment_id=''）
-	if _, err := s.DB.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO search_index (source_type, source_id, segment_id, start, end, title, body)
 		 VALUES (?, ?, '', 0, 0, ?, ?)`,
 		string(sourceType), sourceID, title, summary); err != nil {
@@ -207,14 +221,17 @@ func (s *Store) IndexSearch(ctx context.Context, sourceType models.SourceType, s
 	}
 	// 每个 Segment 一行
 	for _, seg := range segments {
-		if _, err := s.DB.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO search_index (source_type, source_id, segment_id, start, end, title, body)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			string(sourceType), sourceID, seg.ID, seg.Start, seg.End, title, seg.Text); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_search_docs(key,kind,object_id,revision,source_type,source_id,title,body,tokens,position,segment_id,snapshot_id,visibility,created_at,updated_at)VALUES(?,'original',?,?,?,?,?,?,cwp_search_tokens(?),?,?,'','current',datetime('now'),datetime('now'))`, "original:"+string(sourceType)+":"+sourceID+":"+seg.ID, sourceID, version, sourceType, sourceID, title, seg.Text, title+" "+seg.Text, seg.Start, seg.ID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // SearchSource 全文搜索，返回实际命中的 Transcript Segment（含时间范围，可跳转 EvidenceAudio）。
