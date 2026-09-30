@@ -104,11 +104,11 @@ func TestDJPageTransportControls_D06(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"dj-prev", "dj-next", "dj-pause", // 上一段/下一段/暂停
-		"dj-rate",             // 速度选择
-		"dj-full",             // 继续听原节目
-		"dj-progress",         // 总进度显示
-		"aria-label=\"播放速度\"", // 控件标签
-		"keydown",             // 键盘可达
+		"dj-rate",                        // 速度选择
+		"dj-full",                        // 继续听原节目
+		"dj-progress",                    // 总进度显示
+		"aria-label=\"播放速度\"",            // 控件标签
+		"/static/playback-controller.js", // 共用键盘控制
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("DJ 页缺少 %q", want)

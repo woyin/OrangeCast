@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{block "title" .}}CloudWisePod{{end}}</title>
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/playback-controller.js"></script>
 </head>
 <body>
 <nav class="navbar">
@@ -45,6 +46,7 @@
   });
 })();
 </script>
+<script src="/static/safe-render.js"></script>
 <script src="/static/player.js"></script>
 </body>
 </html>{{end}}

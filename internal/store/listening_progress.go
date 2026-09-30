@@ -1,7 +1,3 @@
-// listening_progress.go 听播进度持久化（D07 / ADR-0024 §3 / R11）。
-// seq 单调：单语句原子 UPSERT（UNIQUE(source_type,source_id) 冲突目标），
-// 仅当新 seq 严格更大时更新——多标签并发、同时首次保存、倒序请求都不会
-// 用旧状态覆盖新状态，也不需要应用层先读后写。
 package store
 
 import (
@@ -9,15 +5,40 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
 )
 
-// SaveListeningProgress 原子保存/更新听播进度；seq 不大于已存值时忽略。
+func progressMode(p *models.ListeningProgress) string {
+	if p.Mode != "" {
+		return p.Mode
+	}
+	if p.PlanID != "" {
+		return "dj"
+	}
+	return "original"
+}
+
+// SaveListeningProgress supports older seq-based clients. New clients use CAS.
 func (s *Store) SaveListeningProgress(ctx context.Context, p *models.ListeningProgress) error {
 	if p == nil || p.SourceID == "" || !validSourceType(p.SourceType) {
-		return fmt.Errorf("%w: invalid listening progress", ErrInvalidEditorialState)
+		return ErrInvalidEditorialState
+	}
+	// Legacy requests that omit plan_id still address their most recent row.
+	if p.Mode == "" && p.PlanID == "" {
+		old, err := s.GetListeningProgress(ctx, p.SourceType, p.SourceID)
+		if err == nil {
+			p.Mode = old.Mode
+		}
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	p.Mode = progressMode(p)
+	if p.Mode != "original" && p.Mode != "dj" {
+		return ErrInvalidEditorialState
 	}
 	if p.Seq <= 0 {
 		p.Seq = 1
@@ -25,49 +46,113 @@ func (s *Store) SaveListeningProgress(ctx context.Context, p *models.ListeningPr
 	if p.ID == "" {
 		p.ID = uuid.NewString()
 	}
-	res, err := s.DB.ExecContext(ctx,
-		`INSERT INTO listening_progress (id, source_type, source_id, plan_id, plan_version, item_position, highlight_id, item_offset_seconds, speed, seq)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)
-		 ON CONFLICT(source_type, source_id) DO UPDATE SET
-		   plan_id=excluded.plan_id, plan_version=excluded.plan_version,
-		   item_position=excluded.item_position, highlight_id=excluded.highlight_id,
-		   item_offset_seconds=excluded.item_offset_seconds, speed=excluded.speed,
-		   seq=excluded.seq, updated_at=datetime('now')
-		 WHERE excluded.seq > listening_progress.seq`,
-		p.ID, string(p.SourceType), p.SourceID, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID,
-		p.ItemOffsetSeconds, p.Speed, p.Seq)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil // 旧序号：忽略，不覆盖新状态
-	}
-	return nil
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO listening_progress
+ (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_type,source_id,mode) DO UPDATE SET
+ plan_id=excluded.plan_id,plan_version=excluded.plan_version,item_position=excluded.item_position,
+ highlight_id=excluded.highlight_id,item_offset_seconds=excluded.item_offset_seconds,speed=excluded.speed,
+ seq=excluded.seq,revision=listening_progress.revision+1,updated_at=datetime('now')
+ WHERE excluded.seq>listening_progress.seq`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq)
+	return err
 }
 
-// GetListeningProgress 读取听播进度；无记录返回 ErrNotFound。
+// SaveListeningProgressCAS saves only the expected server revision (zero creates).
+// Source and plan identities are authoritative; stale saves never overwrite.
+func (s *Store) SaveListeningProgressCAS(ctx context.Context, p *models.ListeningProgress, expected int64) (*models.ListeningProgress, error) {
+	if p == nil || p.SourceID == "" || !validSourceType(p.SourceType) || (p.Mode != "original" && p.Mode != "dj") || expected < 0 ||
+		math.IsNaN(p.ItemOffsetSeconds) || math.IsInf(p.ItemOffsetSeconds, 0) || p.ItemOffsetSeconds < 0 || p.ItemPosition < 0 ||
+		math.IsNaN(p.Speed) || math.IsInf(p.Speed, 0) || p.Speed < 0.75 || p.Speed > 2 {
+		return nil, ErrInvalidEditorialState
+	}
+	exists, err := s.sourceExists(ctx, p.SourceType, p.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	if p.Mode == "dj" {
+		plan, err := s.GetDJPlan(ctx, p.PlanID)
+		if err != nil {
+			return nil, err
+		}
+		if plan.SourceType != p.SourceType || plan.SourceID != p.SourceID || plan.Version != p.PlanVersion {
+			return nil, ErrConflict
+		}
+		valid := false
+		for _, item := range plan.Items {
+			if item.Position == p.ItemPosition && item.Kind == models.DJItemEvidence && item.HighlightID == p.HighlightID && p.ItemOffsetSeconds >= item.Start && p.ItemOffsetSeconds <= item.End {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, ErrInvalidEditorialState
+		}
+	} else if p.PlanID != "" || p.PlanVersion != 0 {
+		return nil, ErrInvalidEditorialState
+	}
+	if p.ID == "" {
+		p.ID = uuid.NewString()
+	}
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO listening_progress
+ (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision)
+ SELECT ?,?,?,?,?,?,?,?,?,?,?,1 WHERE ?=0
+ ON CONFLICT(source_type,source_id,mode) DO UPDATE SET
+ plan_id=excluded.plan_id,plan_version=excluded.plan_version,item_position=excluded.item_position,
+ highlight_id=excluded.highlight_id,item_offset_seconds=excluded.item_offset_seconds,speed=excluded.speed,
+ seq=excluded.seq,revision=listening_progress.revision+1,updated_at=datetime('now')
+ WHERE listening_progress.revision=?`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, expected, expected)
+	// INSERT SELECT cannot update an existing row for expected>0. Use a guarded UPDATE.
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if expected > 0 {
+		res, err = s.DB.ExecContext(ctx, `UPDATE listening_progress SET plan_id=?,plan_version=?,item_position=?,highlight_id=?,item_offset_seconds=?,speed=?,seq=?,revision=revision+1,updated_at=datetime('now') WHERE source_type=? AND source_id=? AND mode=? AND revision=?`, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, p.SourceType, p.SourceID, p.Mode, expected)
+		if err != nil {
+			return nil, err
+		}
+		n, err = res.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if n == 0 {
+		return nil, ErrConflict
+	}
+	return s.GetListeningProgressMode(ctx, p.SourceType, p.SourceID, p.Mode)
+}
+
+// GetListeningProgress returns the most recently saved mode for legacy clients.
 func (s *Store) GetListeningProgress(ctx context.Context, sourceType models.SourceType, sourceID string) (*models.ListeningProgress, error) {
+	return s.getProgress(ctx, sourceType, sourceID, "")
+}
+
+// GetListeningProgressMode reads original or DJ progress independently.
+func (s *Store) GetListeningProgressMode(ctx context.Context, sourceType models.SourceType, sourceID, mode string) (*models.ListeningProgress, error) {
+	if mode != "original" && mode != "dj" {
+		return nil, ErrInvalidEditorialState
+	}
+	return s.getProgress(ctx, sourceType, sourceID, mode)
+}
+func (s *Store) getProgress(ctx context.Context, sourceType models.SourceType, sourceID, mode string) (*models.ListeningProgress, error) {
 	p := &models.ListeningProgress{}
-	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, source_type, source_id, plan_id, plan_version, item_position, highlight_id,
-		        item_offset_seconds, speed, seq, updated_at
-		 FROM listening_progress WHERE source_type=? AND source_id=?`,
-		string(sourceType), sourceID).
-		Scan(&p.ID, &p.SourceType, &p.SourceID, &p.PlanID, &p.PlanVersion, &p.ItemPosition, &p.HighlightID,
-			&p.ItemOffsetSeconds, &p.Speed, &p.Seq, &p.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision,updated_at FROM listening_progress WHERE source_type=? AND source_id=? AND (?='' OR mode=?) ORDER BY updated_at DESC,seq DESC LIMIT 1`, sourceType, sourceID, mode, mode).Scan(&p.ID, &p.SourceType, &p.SourceID, &p.Mode, &p.PlanID, &p.PlanVersion, &p.ItemPosition, &p.HighlightID, &p.ItemOffsetSeconds, &p.Speed, &p.Seq, &p.Revision, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read listening progress: %w", err)
 	}
 	return p, nil
 }
 
-// DeleteListeningProgress 删除听播进度（Purge 级联：来源删除后进度无意义）。
+// DeleteListeningProgress removes both modes when the source is purged.
 func (s *Store) DeleteListeningProgress(ctx context.Context, sourceType models.SourceType, sourceID string) error {
-	_, err := s.DB.ExecContext(ctx,
-		`DELETE FROM listening_progress WHERE source_type=? AND source_id=?`,
-		string(sourceType), sourceID)
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM listening_progress WHERE source_type=? AND source_id=?`, sourceType, sourceID)
 	return err
 }

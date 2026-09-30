@@ -78,6 +78,11 @@ func TestListeningProgress_PageWiring(t *testing.T) {
 		t.Fatalf("DJ 页应 200: %d", rec.Code)
 	}
 	body := rec.Body.String()
+	controller := doWithCookie(srv, session, http.MethodGet, "/static/playback-controller.js")
+	if controller.Code != http.StatusOK {
+		t.Fatal(controller.Code)
+	}
+	body += controller.Body.String()
 	for _, want := range []string{
 		"/api/listening-progress", // 保存与恢复端点
 		"继续听",                     // 恢复提示

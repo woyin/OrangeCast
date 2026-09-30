@@ -204,3 +204,12 @@ func migrationTableExists(ctx context.Context, db *sql.DB) (bool, error) {
 	}
 	return n > 0, nil
 }
+
+// LatestMigrationVersion returns the version embedded in this executable.
+func LatestMigrationVersion() int {
+	ms, err := loadMigrations()
+	if err != nil {
+		panic(err)
+	}
+	return len(ms)
+}

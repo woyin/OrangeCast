@@ -5,6 +5,8 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
+	"github.com/woyin/orangecast/internal/store"
 	"io"
 	"net/http"
 
@@ -16,8 +18,18 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 	case http.MethodGet:
 		sourceType := models.SourceType(r.URL.Query().Get("source_type"))
 		sourceID := r.URL.Query().Get("source_id")
-		p, err := srv.store.GetListeningProgress(r.Context(), sourceType, sourceID)
+		var p *models.ListeningProgress
+		var err error
+		if mode := r.URL.Query().Get("mode"); mode != "" {
+			p, err = srv.store.GetListeningProgressMode(r.Context(), sourceType, sourceID, mode)
+		} else {
+			p, err = srv.store.GetListeningProgress(r.Context(), sourceType, sourceID)
+		}
 		if err != nil {
+			if !errors.Is(err, store.ErrNotFound) {
+				http.Error(w, "读取进度失败", http.StatusInternalServerError)
+				return
+			}
 			// 无记录：返回空对象而非错误（首次收听不是故障）。
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_, _ = w.Write([]byte(`{}`))
@@ -27,15 +39,17 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 		_ = json.NewEncoder(w).Encode(p)
 	case http.MethodPost:
 		var body struct {
-			SourceType   string  `json:"source_type"`
-			SourceID     string  `json:"source_id"`
-			PlanID       string  `json:"plan_id"`
-			PlanVersion  int     `json:"plan_version"`
-			ItemPosition int     `json:"item_position"`
-			HighlightID  string  `json:"highlight_id"`
-			Offset       float64 `json:"item_offset_seconds"`
-			Speed        float64 `json:"speed"`
-			Seq          int64   `json:"seq"`
+			Mode             string  `json:"mode"`
+			ExpectedRevision *int64  `json:"expected_revision"`
+			SourceType       string  `json:"source_type"`
+			SourceID         string  `json:"source_id"`
+			PlanID           string  `json:"plan_id"`
+			PlanVersion      int     `json:"plan_version"`
+			ItemPosition     int     `json:"item_position"`
+			HighlightID      string  `json:"highlight_id"`
+			Offset           float64 `json:"item_offset_seconds"`
+			Speed            float64 `json:"speed"`
+			Seq              int64   `json:"seq"`
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
 		if err != nil || json.Unmarshal(data, &body) != nil || body.SourceID == "" {
@@ -43,10 +57,30 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		p := &models.ListeningProgress{
-			SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
+			Mode: body.Mode, SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
 			PlanID: body.PlanID, PlanVersion: body.PlanVersion,
 			ItemPosition: body.ItemPosition, HighlightID: body.HighlightID,
 			ItemOffsetSeconds: body.Offset, Speed: body.Speed, Seq: body.Seq,
+		}
+		if body.ExpectedRevision != nil {
+			saved, err := srv.store.SaveListeningProgressCAS(r.Context(), p, *body.ExpectedRevision)
+			if err != nil {
+				code := http.StatusInternalServerError
+				if errors.Is(err, store.ErrConflict) {
+					code = http.StatusConflict
+				}
+				if errors.Is(err, store.ErrNotFound) {
+					code = http.StatusNotFound
+				}
+				if errors.Is(err, store.ErrInvalidEditorialState) {
+					code = http.StatusBadRequest
+				}
+				http.Error(w, "保存进度失败："+err.Error(), code)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(saved)
+			return
 		}
 		if err := srv.store.SaveListeningProgress(r.Context(), p); err != nil {
 			http.Error(w, "保存听播进度失败："+err.Error(), http.StatusInternalServerError)

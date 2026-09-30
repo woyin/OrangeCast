@@ -21,6 +21,7 @@
       <option value="1" selected>1×</option>
       <option value="1.25">1.25×</option>
       <option value="1.5">1.5×</option>
+      <option value="1.75">1.75×</option>
       <option value="2">2×</option>
     </select>
   </label>
@@ -160,110 +161,41 @@
   var sourceType = pl ? pl.dataset.sourceType : '';
   var sourceId = pl ? pl.dataset.sourceId : '';
   var csrfToken = '{{.CSRF}}';
-  var planVersion = {{.HighlightVersion}};
+  var planVersion = {{.PlanVersion}};
   // R11：进度身份绑定确切持久化清单（非高光版本别名）。
   var planId = '{{.PlanID}}';
-  var seq = Date.now();
-  var saveTimer = null;
-
-  function currentProgressSnapshot() {
-    var pos = player.position();
-    var item = pos.item;
-    if (!item || item.type !== 'evidence') return null; // 解说播放期间以原音位置为准
-    return {
-      source_type: sourceType,
-      source_id: sourceId,
-      plan_id: planId,
-      plan_version: planVersion,
-      item_position: typeof item.position === 'number' ? item.position : pos.index + 1,
-      highlight_id: item.highlightId || '',
-      item_offset_seconds: evidence.currentTime,
-      speed: player.getRate(),
-      seq: ++seq
-    };
-  }
-  function saveProgress() {
-    var snap = currentProgressSnapshot();
-    if (!snap) return;
-    fetch('/api/listening-progress', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify(snap)
-    }).catch(function () { /* 保存失败不阻塞收听 */ });
-  }
-  // 节流：播放中每 5 秒保存；暂停/停止/离开页面时补存。
-  evidence.addEventListener('timeupdate', function () {
-    if (saveTimer) return;
-    saveTimer = setTimeout(function () { saveTimer = null; saveProgress(); }, 5000);
+  var rateSel = document.getElementById('dj-rate');
+  // Shared progress and mediaSession controller retains the DJ state machine.
+  // visibilitychange saves item_position through the common module.
+  var transport = CWPPlayback.create({
+    sourceType:sourceType,sourceId:sourceId,mode:'dj',csrf:csrfToken,
+    adapter:{play:player.play,pause:player.pause,paused:function(){return evidence.paused && narration.paused;},
+      time:function(){return evidence.currentTime;},
+      seek:function(t){var item=player.position().item;if(item&&item.type==='evidence')evidence.currentTime=Math.max(item.start,Math.min(item.end,t));},
+      next:player.next,prev:player.prev,setRate:player.setRate,getRate:player.getRate,
+      snapshot:function(){var pos=player.position(),item=pos.item;if(!item||item.type!=='evidence')return null;
+        return {plan_id:planId,plan_version:planVersion,item_position:item.position,highlight_id:item.highlightId||'',item_offset_seconds:evidence.currentTime};},
+      restore:function(saved){
+        var items=buildItems(),index=items.findIndex(function(i){return i.type==='evidence'&&i.position===saved.item_position&&i.highlightId===saved.highlight_id;});
+        if(index<0)return;
+        var target=items[index];target.start=Math.max(target.start,Math.min(target.end,saved.item_offset_seconds));
+        player.load(items.slice(index));
+      }},
+    onRate:function(v){if(rateSel)rateSel.value=String(v);},
+    notify:function(text,action){statusEl.textContent=text;if(action){var btn=document.createElement('button');btn.type='button';btn.textContent='保存本次位置';btn.onclick=action;statusEl.appendChild(btn);}},
+    onResume:function(saved,resume){
+      if(saved.plan_id!==planId||saved.plan_version!==planVersion){statusEl.textContent='清单已更新，上次位置无法精确恢复。';return;}
+      var btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent='继续听（上次位置）';btn.onclick=resume;
+      autoplayBtn.parentNode.insertBefore(btn,autoplayBtn.nextSibling);
+    }
   });
-  evidence.addEventListener('pause', saveProgress);
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) saveProgress();
-  });
-  window.addEventListener('pagehide', saveProgress);
-
-  // R11 恢复提示：按稳定清单项位置 + 高光身份定位（不混用索引体系）；一次加载
-  // 并播放后续队列（无重复 play 竞态）；恢复倍速；越界位置不跳错片段。
-  fetch('/api/listening-progress?source_type=' + encodeURIComponent(sourceType) + '&source_id=' + encodeURIComponent(sourceId))
-    .then(function (r) { return r.json(); })
-    .then(function (saved) {
-      if (!saved || !saved.plan_id) return;
-      if (saved.plan_id !== planId) {
-        if (statusEl) statusEl.textContent = '清单已更新，上次进度无法精确恢复。';
-        return;
-      }
-      var btn = document.createElement('button');
-      btn.className = 'btn btn-secondary';
-      btn.type = 'button';
-      btn.textContent = '▶ 继续听（上次位置）';
-      btn.addEventListener('click', function () {
-        var items = buildItems();
-        // 稳定定位：优先 item_position（清单项位置），其次 highlight_id；越界则不恢复。
-        var target = null;
-        for (var k = 0; k < items.length; k++) {
-          if (items[k].position === saved.item_position) { target = items[k]; break; }
-        }
-        if (!target && saved.highlight_id) {
-          for (var j = 0; j < items.length; j++) {
-            if (items[j].type === 'evidence' && items[j].highlightId === saved.highlight_id) { target = items[j]; break; }
-          }
-        }
-        if (!target) {
-          if (statusEl) statusEl.textContent = '上次位置已不在当前清单中。';
-          btn.remove();
-          return;
-        }
-        if (target.type === 'evidence') {
-          target.start = saved.item_offset_seconds || target.start; // 从片段内位置恢复
-        }
-        if (saved.speed && typeof saved.speed === 'number') {
-          player.setRate(saved.speed); // 恢复倍率
-          if (rateSel) rateSel.value = String(saved.speed);
-        }
-        var restIdx = items.indexOf(target) + 1;
-        var queue = [target].concat(items.slice(restIdx)); // 一次加载并连播后续队列
-        player.load(queue);
-        player.playItems(queue); // 单次调用，无重复 play 竞态
-        btn.remove();
-      });
-      var bar = autoplayBtn.parentNode;
-      if (bar) bar.insertBefore(btn, autoplayBtn.nextSibling);
-    })
-    .catch(function () { /* 恢复检查失败不阻塞 */ });
-
-  // Media Session（D07）：按浏览器支持接入播放/暂停/跳段。
-  if ('mediaSession' in navigator) {
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'AI DJ · ' + (document.querySelector('h1') ? document.querySelector('h1').textContent.replace('AI DJ：', '') : ''),
-        artist: 'CloudWisePod AI 解说 + 原音'
-      });
-      navigator.mediaSession.setActionHandler('play', function () { player.play(); });
-      navigator.mediaSession.setActionHandler('pause', function () { player.pause(); });
-      navigator.mediaSession.setActionHandler('previoustrack', function () { player.prev(); });
-      navigator.mediaSession.setActionHandler('nexttrack', function () { player.next(); });
-    } catch (e) { /* 浏览器不支持的动作忽略 */ }
-  }
+  // Endpoint: /api/listening-progress (versioned original / DJ rows).
+  evidence.addEventListener('pause',function(){transport.changed();transport.save();});
+  evidence.addEventListener('seeked',function(){transport.changed();transport.save();});
+  var sleep=document.createElement('select');sleep.setAttribute('aria-label','睡眠定时');
+  [0,15,30,60].forEach(function(n){var opt=document.createElement('option');opt.value=n;opt.textContent=n?n+'分钟后暂停':'睡眠定时关闭';sleep.appendChild(opt);});
+  sleep.onchange=function(){transport.setSleep(Number(sleep.value));};autoplayBtn.parentNode.appendChild(sleep);
+  [-15,15].forEach(function(n){var btn=document.createElement('button');btn.type='button';btn.textContent=(n>0?'+':'')+n+'秒';btn.onclick=function(){transport.skip(n);};autoplayBtn.parentNode.appendChild(btn);});
 
   if (autoplayBtn) autoplayBtn.addEventListener('click', function() {
     player.load(buildItems());
@@ -323,21 +255,13 @@
 
   var rateSel = document.getElementById('dj-rate');
   if (rateSel) rateSel.addEventListener('change', function() {
-    player.setRate(parseFloat(rateSel.value));
+    transport.setRate(parseFloat(rateSel.value));
   });
   var fullBtn = document.getElementById('dj-full');
   if (fullBtn) fullBtn.addEventListener('click', function() {
     // “继续听原节目”：从当前原音实际位置播放到集尾；AI 解说暂停不丢失清单。
     player.playFullProgram();
   });
-  // 键盘可达性（D06）：空格暂停/继续、→ 下一段、← 上一段（输入焦点不在控件时）。
-  document.addEventListener('keydown', function(e) {
-    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    if (e.code === 'Space') { e.preventDefault(); player.pause(); }
-    if (e.code === 'ArrowRight') { player.next(); }
-    if (e.code === 'ArrowLeft') { player.prev(); }
-  });
-
   document.querySelectorAll('.dj-play').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var segs = [];

@@ -21,29 +21,40 @@
     return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
   }
 
-  // 深链跳转（Roadmap Phase 5）：?t=秒 或 #seg-XXXX 命中后跳转播放
-  (function deepLink() {
-    const params = new URLSearchParams(window.location.search);
-    const t = parseFloat(params.get('t'));
-    if (isFinite(t) && t >= 0 && t <= (audio.duration || Infinity)) {
-      audio.currentTime = t;
-      audio.play();
-      return;
-    }
-    const hash = window.location.hash;
-    if (hash.startsWith('#seg-')) {
-      const want = hash.slice(1);
-      const el = segs.find(sg => sg.dataset.id === want);
-      if (el) jumpTo(el);
-    }
-  })();
-
-  // 播放/暂停
-  if (playBtn) {
-    playBtn.addEventListener('click', () => {
-      if (audio.paused) audio.play(); else audio.pause();
-    });
+  const parts = window.location.pathname.split('/');
+  const feedback = document.getElementById('playback-feedback');
+  const rate = document.getElementById('playback-rate');
+  const deepTime = Number(new URLSearchParams(location.search).get('t'));
+  const hasDeepTime = new URLSearchParams(location.search).has('t') && Number.isFinite(deepTime) && deepTime >= 0;
+  const hashSeg = segs.find(el => '#' + el.dataset.id === location.hash);
+  const deepPosition = hasDeepTime ? deepTime : hashSeg ? Number(hashSeg.dataset.start) : null;
+  let ready = audio.readyState > 0;
+  function position(value) {
+    const apply = () => { audio.currentTime = Math.max(0, Math.min(Number.isFinite(audio.duration) ? audio.duration : value, value)); };
+    if (ready) apply(); else audio.addEventListener('loadedmetadata', apply, {once:true});
   }
+  const transport = window.CWPPlayback.create({
+    sourceType:parts[2], sourceId:parts[3], mode:'original', csrf:document.querySelector('[name=_csrf]')?.value || '',
+    adapter:{play:()=>audio.play(),pause:()=>audio.pause(),paused:()=>audio.paused,
+      time:()=>audio.currentTime, seek:position, setRate:v=>{audio.playbackRate=v;},getRate:()=>audio.playbackRate,
+      snapshot:()=>ready ? {item_offset_seconds:audio.currentTime} : null,
+      restore:p=>position(p.item_offset_seconds)},
+    onRate:v=>{if(rate)rate.value=String(v);},
+    notify:(text,action)=>{if(!feedback)return;feedback.textContent=text;if(action){const b=document.createElement('button');b.type='button';b.textContent='保存本次位置';b.onclick=action;feedback.append(b);}},
+    onResume:(saved,resume)=>{if(deepPosition!==null)return;const b=document.getElementById('playback-resume');if(b){b.hidden=false;b.textContent='从 '+fmt(saved.item_offset_seconds)+' 继续';b.onclick=resume;}}
+  });
+  if (deepPosition !== null) position(deepPosition);
+  audio.addEventListener('loadedmetadata',()=>{ready=true;});
+  audio.addEventListener('pause',()=>{transport.changed();transport.save();});
+  audio.addEventListener('seeked',()=>{transport.changed();transport.save();});
+  if(playBtn)playBtn.addEventListener('click',()=>transport.toggle());
+  if(rate)rate.addEventListener('change',()=>transport.setRate(Number(rate.value)));
+  document.getElementById('playback-back')?.addEventListener('click',()=>transport.skip(-15));
+  document.getElementById('playback-forward')?.addEventListener('click',()=>transport.skip(15));
+  document.getElementById('playback-sleep')?.addEventListener('change',e=>transport.setSleep(Number(e.target.value)));
+  const follow = document.getElementById('playback-follow');
+  document.getElementById('transcript')?.addEventListener('wheel',()=>{if(follow)follow.checked=false;},{passive:true});
+  document.getElementById('transcript')?.addEventListener('touchmove',()=>{if(follow)follow.checked=false;},{passive:true});
   audio.addEventListener('play', () => { if (playBtn) playBtn.textContent = '⏸'; });
   audio.addEventListener('pause', () => { if (playBtn) playBtn.textContent = '▶'; });
 
@@ -58,15 +69,15 @@
     highlightCurrentSeg();
   });
   if (seekBar) {
-    seekBar.addEventListener('input', () => { audio.currentTime = parseFloat(seekBar.value); });
+    seekBar.addEventListener('input', () => { transport.seek(parseFloat(seekBar.value)); });
   }
 
   // A 层：点击跳转 —— 任何带 data-start 的元素点击后跳转
   function jumpTo(el) {
     const start = parseFloat(el.dataset.start);
     if (isFinite(start)) {
-      audio.currentTime = start;
-      audio.play();
+      transport.seek(start);
+      transport.play();
     }
   }
   segs.forEach(s => s.addEventListener('click', () => jumpTo(s)));
@@ -85,13 +96,13 @@
       if (t >= start && t < end) { idx = i; break; }
       if (t >= start && i === segs.length - 1) { idx = i; }
     }
-    if (idx === idx && idx !== activeIdx) { // idx 变化才更新（NaN 检查：idx!==idx 为 NaN）
+    if (idx !== activeIdx) { // idx 变化才更新（NaN 检查：idx!==idx 为 NaN）
       if (activeIdx >= 0) segs[activeIdx].classList.remove('active');
       activeIdx = idx;
       if (idx >= 0) {
         segs[idx].classList.add('active');
         // 自动滚动到当前句（仅在播放时，避免打断用户浏览）
-        if (!audio.paused) segs[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (!audio.paused && (!follow || follow.checked)) segs[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
   }
@@ -113,17 +124,17 @@
         const resp = await fetch('/api/evidence-qa', { method: 'POST', body: fd });
         const data = await resp.json();
         if (data.error) {
-          qaAnswer.innerHTML = `<p class="error">${data.error}</p>`;
+          qaAnswer.innerHTML = `<p class="error">${escapeHtml(data.error)}</p>`;
           return;
         }
         // 渲染答案 + 引用列表（点击引用跳转播放器，复用 jumpTo 逻辑）
-        let html = `<p>${data.answer || '无回答'}</p>`;
+        let html = `<p>${escapeHtml(data.answer || '无回答')}</p>`;
         if (Array.isArray(data.sources) && data.sources.length) {
           html += '<ul class="qa-sources">';
           data.sources.forEach((s, i) => {
             const ts = fmt(s.start);
             const snippet = (s.content || '').slice(0, 80);
-            html += `<li class="qa-source" data-start="${s.start}" data-end="${s.end}"><span class="ts">[${ts}]</span> ${snippet}…</li>`;
+            html += `<li class="qa-source" data-start="${Number.isFinite(Number(s.start)) ? Number(s.start) : 0}" data-end="${Number.isFinite(Number(s.end)) ? Number(s.end) : 0}"><span class="ts">[${ts}]</span> ${escapeHtml(snippet)}…</li>`;
           });
           html += '</ul>';
         }
@@ -182,7 +193,7 @@
         const resp = await fetch('/api/paraphrase', { method: 'POST', body: fd });
         const data = await resp.json();
         if (data.error) {
-          paraphraseOutput.innerHTML = '<p class="error">' + data.error + '</p>';
+          paraphraseOutput.innerHTML = '<p class="error">' + escapeHtml(data.error) + '</p>';
           return;
         }
         // 渲染讲解（明确标注 AI 生成·非原文），并列出参考片段（点击跳播放器）
@@ -204,9 +215,7 @@
     });
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
+  function escapeHtml(s) { return window.CWPSafe.escapeHTML(s); }
 
 
 // ---- StudyChat 学习对话（GeneratedDerivative，ADR-0018 R3）----
@@ -215,9 +224,7 @@
   const scFeedback = document.getElementById('study-chat-feedback');
   const scSessionInput = document.getElementById('study-chat-session-id');
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
+
   function renderSCMessage(role, content, refs) {
     const cls = role === 'user' ? 'sc-msg sc-user' : 'sc-msg sc-assistant';
     let html = '<div class="' + cls + '">';
@@ -243,9 +250,9 @@
       if (!q.trim()) return;
       // 即时显示用户问题
       if (scThread) scThread.insertAdjacentHTML('beforeend', renderSCMessage('user', q, []));
+      const fd = new FormData(scForm);
       scForm.querySelector('[name=question]').value = '';
       if (scFeedback) scFeedback.innerHTML = '<p>思考中…</p>';
-      const fd = new FormData(scForm);
       const parts = window.location.pathname.split('/');
       fd.append('source_type', parts[2]);
       fd.append('source_id', parts[3]);
