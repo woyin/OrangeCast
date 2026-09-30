@@ -240,3 +240,8 @@ pre, code, .digest-block, .workflow-item-body {
 .revision-diff {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;}
 fieldset {min-width:0;margin:1rem 0;}fieldset textarea {width:100%;box-sizing:border-box;}
 @media(max-width:600px){.revision-diff{grid-template-columns:1fr;}}
+/* Personal learning entry points remain usable on narrow screens. */
+.nav-advanced{position:relative}.nav-advanced>div{position:absolute;right:0;z-index:20;background:var(--surface,#fff);border:1px solid #ddd;padding:1rem;min-width:12rem;display:flex;flex-direction:column;gap:.7rem}.panel{margin-block:1rem}select,textarea,input{max-width:100%}.article-evidence pre{white-space:pre-wrap;overflow-wrap:anywhere}.transcript-panel>summary{cursor:pointer;padding:.7rem}.source-grid:has(.transcript-panel:not([open])){grid-template-columns:1fr}.navbar .nav-links{flex-wrap:wrap}.player-controls{flex-wrap:wrap}@media(max-width:600px){.source-grid,.revision-diff{display:block}.container{padding-inline:.75rem}.navbar{align-items:flex-start}.player-bar{position:relative}fieldset{min-width:0}.article-paragraph{overflow-wrap:anywhere}}
+/* Preserve native hidden behavior even for flex/grid forms and panels. */
+[hidden]{display:none!important}
+#audio-player{width:100%}

@@ -229,8 +229,9 @@ func (w *Worker) doDJPlanJob(ctx context.Context, job *models.ProcessingJob, bun
 		return fmt.Errorf("读取任务契约: %w", err)
 	}
 	var snapshot struct {
-		HighlightVersion int     `json:"highlight_version"`
-		TargetSeconds    float64 `json:"target_seconds"`
+		HighlightVersion  int     `json:"highlight_version"`
+		TargetSeconds     float64 `json:"target_seconds"`
+		TranscriptVersion int     `json:"transcript_version"`
 	}
 	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &snapshot); err != nil || snapshot.HighlightVersion == 0 {
 		return fmt.Errorf("任务缺少高光版本快照（应经 EnqueueDJPlanJob 入队）")
@@ -244,6 +245,9 @@ func (w *Worker) doDJPlanJob(ctx context.Context, job *models.ProcessingJob, bun
 		return fmt.Errorf("解析高光载荷: %w", err)
 	}
 	segments := w.frozenSegments(ctx, job, exec)
+	if snapshot.TranscriptVersion > 0 && len(segments) == 0 {
+		return fmt.Errorf("冻结转录版本不可用，不能用当前版本替代DJ位置")
+	}
 	narrations, _ := w.store.ListCurrentNarrationsForSource(ctx, job.SourceType, job.SourceID)
 	sourceTitle := ""
 	if ep, err := w.store.GetEpisodeByID(ctx, job.SourceID); err == nil {
@@ -279,6 +283,7 @@ func (w *Worker) frozenSegments(ctx context.Context, job *models.ProcessingJob, 
 				return payload.Segments
 			}
 		}
+		return nil // A known frozen identity must never map silently to a newer version.
 	}
 	if av, err := w.store.GetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindTranscript); err == nil {
 		var payload provider.TranscriptPayload

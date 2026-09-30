@@ -141,3 +141,35 @@ func TestDJPlanJob_PersistAndPreserveOld(t *testing.T) {
 		t.Fatalf("新清单应使用新高光: %+v", planV2.Items)
 	}
 }
+
+func TestDJFrozenTranscriptNeverFallsBackToCurrent(t *testing.T) {
+	s, w := newTestWorker(t)
+	ctx := t.Context()
+	id := seedEpisode(t, s)
+	seedDigestTranscript(t, s, models.SourceEpisode, id)
+	job := &models.ProcessingJob{SourceType: models.SourceEpisode, SourceID: id}
+	if segs := w.frozenSegments(ctx, job, &models.ProcessingJobExecution{InputSnapshotJSON: `{"transcript_version":999}`}); segs != nil {
+		t.Fatal("missing frozen version mapped to current", segs)
+	}
+	hv := seedHighlightVersion(t, s, id, provider.HighlightSet{Highlights: []provider.Highlight{{ID: "h1", Gist: "来源", Citations: []string{"seg-0001"}}}})
+	completeSeedJobs(t, s)
+	queued, err := w.EnqueueDJPlanJob(ctx, models.SourceEpisode, id, hv, 600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.ExecContext(ctx, `UPDATE processing_jobs SET input_snapshot_json=json_set(input_snapshot_json,'$.transcript_version',999) WHERE id=?`, queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.doDJPlanJob(ctx, queued, &provider.ProviderBundle{}); err == nil {
+		t.Fatal("missing frozen source generated new positions")
+	}
+	if _, err = s.DB.ExecContext(ctx, `UPDATE artifact_versions SET payload='malformed' WHERE source_id=? AND kind='transcript'`, id); err != nil {
+		t.Fatal(err)
+	}
+	if segs := w.frozenSegments(ctx, job, nil); segs != nil {
+		t.Fatal("corrupt current transcript accepted")
+	}
+	if segs := w.frozenSegments(ctx, job, &models.ProcessingJobExecution{InputSnapshotJSON: `{"transcript_version":1}`}); segs != nil {
+		t.Fatal("corrupt frozen transcript accepted")
+	}
+}

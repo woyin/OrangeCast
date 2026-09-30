@@ -6,6 +6,8 @@
 <audio id="dj-evidence" src="{{.AudioURL}}" preload="metadata"></audio>
 <!-- Narration 解说音轨播放器（独立，wav） -->
 <audio id="dj-narration" preload="metadata"></audio>
+{{with .AudioWarning}}<p class="error">{{.}}</p>{{end}}
+<noscript><p>启用 JavaScript 可使用DJ顺序播放和记笔记。<a href="/sources/{{.SourceType}}/{{.SourceID}}">返回节目使用基础播放器</a>。</p></noscript>
 
 <p class="hint">AI 选取的本集高光片段。点「自动播放全集」按 <strong>AI 解说 → 原音区间</strong> 顺序连播；每段可单独试听。</p>
 
@@ -31,6 +33,8 @@
   <span id="dj-action-feedback" class="meta" aria-live="polite" style="margin-left:0.5rem"></span>
   <span id="dj-status" style="margin-left:0.5rem;color:var(--muted)"></span>
 </div>
+<form id="dj-note-form" hidden><label>我的理解（参考原音，AI解说不作为原文）<textarea id="dj-note-content" rows="4" required></textarea></label><button type="submit">保存个人理解</button><button type="button" id="dj-note-cancel">收起</button></form>
+{{if not .NoteSnapshotID}}<p class="meta">旧清单未保存来源快照，无法确认笔记依据版本。请生成新的DJ清单或回原节目记笔记。</p>{{end}}
 <p class="meta" id="dj-progress" aria-live="polite"></p>
 
 <div id="playlist" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-plan-version="{{.HighlightVersion}}">
@@ -168,7 +172,7 @@
   // Shared progress and mediaSession controller retains the DJ state machine.
   // visibilitychange saves item_position through the common module.
   var transport = CWPPlayback.create({
-    sourceType:sourceType,sourceId:sourceId,mode:'dj',csrf:csrfToken,
+    title:document.querySelector('h1').textContent,sourceType:sourceType,sourceId:sourceId,mode:'dj',csrf:csrfToken,
     adapter:{play:player.play,pause:player.pause,paused:function(){return evidence.paused && narration.paused;},
       time:function(){return evidence.currentTime;},
       seek:function(t){var item=player.position().item;if(item&&item.type==='evidence')evidence.currentTime=Math.max(item.start,Math.min(item.end,t));},
@@ -239,18 +243,22 @@
     params.set('source_title', 'DJ 精听');
     postForm('/api/pin', params, feedback);
   });
-  if (noteBtn) noteBtn.addEventListener('click', function () {
-    var segs = currentItemSegments();
-    if (!segs) { feedback.textContent = '暂无可锚定的原音区间'; return; }
-    var text = window.prompt('记下你的理解（个人理解，自动以 Reference 锚定当前片段，不会变成原文证据）：');
-    if (!text || !text.trim()) return;
-    var params = new URLSearchParams();
-    params.set('source_type', sourceType);
-    params.set('source_id', sourceId);
-    params.set('kind', 'owner_reflection');
-    params.set('content', text.trim());
-    params.set('references_json', JSON.stringify(segs));
-    postForm('/api/owner-notes', params, feedback);
+  var noteForm=document.getElementById('dj-note-form'),noteText=document.getElementById('dj-note-content');
+  var noteSnapshot='{{.NoteSnapshotID}}',noteVersion={{if .NoteSnapshotVersion}}{{.NoteSnapshotVersion}}{{else}}0{{end}},noteSegments=JSON.parse({{json .NoteSegments}})||[];
+  var noteDraftKey='cwp-dj-note:'+sourceType+':'+sourceId, noteAnchor=null;
+  try{var draft=JSON.parse(sessionStorage.getItem(noteDraftKey)||'null');if(draft){noteText.value=draft.text;noteAnchor=draft.anchor;noteForm.hidden=false;}}catch(_){}
+  function keepNoteDraft(){try{sessionStorage.setItem(noteDraftKey,JSON.stringify({text:noteText.value,anchor:noteAnchor}));}catch(_){}}
+  noteText.addEventListener('input',keepNoteDraft);
+  if(noteBtn)noteBtn.addEventListener('click',function(){
+    var segs=currentItemSegments();if(!segs||!noteSnapshot){feedback.textContent='无法确认原音依据版本，请回到原节目重新选择；草稿保留。';return;}
+    var item=player.position().item,position=item&&item.type==='evidence'?evidence.currentTime:null;
+    if(position===null){var first=(noteSegments||[]).find(function(s){return s.id===segs[0];});if(!first){feedback.textContent='无法确认解说参考的原音，草稿保留。';return;}position=first.start;}
+    noteAnchor={snapshot_id:noteSnapshot,version:noteVersion,position:position,segment_ids:segs};noteForm.hidden=false;noteText.focus();keepNoteDraft();
+  });
+  document.getElementById('dj-note-cancel').onclick=function(){keepNoteDraft();noteForm.hidden=true;};
+  noteForm.addEventListener('submit',async function(event){event.preventDefault();keepNoteDraft();if(!noteAnchor){feedback.textContent='先选择原音片段，解释草稿保留。';return;}
+    var params=new URLSearchParams({_csrf:csrfToken,source_type:sourceType,source_id:sourceId,kind:'owner_reflection',content:noteText.value,references_json:JSON.stringify(noteAnchor.segment_ids),anchor_json:JSON.stringify(noteAnchor)});
+    try{var response=await fetch('/api/owner-notes',{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded'},body:params});if(!response.ok){feedback.textContent=await response.text();return;}feedback.textContent='个人理解已保存';sessionStorage.removeItem(noteDraftKey);noteText.value='';noteForm.hidden=true;}catch(_){feedback.textContent='未保存，解释与位置草稿仍保留。';}
   });
 
   var rateSel = document.getElementById('dj-rate');

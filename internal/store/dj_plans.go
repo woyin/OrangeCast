@@ -90,10 +90,16 @@ func (s *Store) GetLatestDJPlanForSource(ctx context.Context, sourceType models.
 // EnqueueDJPlanJob 入队 DJ 清单编排任务（冻结高光版本与目标时长）；
 // worker 与页面生成动作共用同一幂等意图，重复请求不重复入队。
 func (s *Store) EnqueueDJPlanJob(ctx context.Context, sourceType models.SourceType, sourceID string, highlightVersion int, targetSeconds float64) (*models.ProcessingJob, error) {
-	snapshot, err := json.Marshal(map[string]any{
-		"highlight_version": highlightVersion,
-		"target_seconds":    targetSeconds,
-	})
+	frozen := map[string]any{}
+	snap, freezeErr := s.FreezeSourceSnapshot(ctx, sourceType, sourceID)
+	if freezeErr == nil {
+		frozen["source_snapshot_id"] = snap.ID
+		frozen["transcript_version"] = snap.ContentVersion
+	} else if !errors.Is(freezeErr, ErrInvalidEditorialState) && !errors.Is(freezeErr, ErrNotFound) {
+		return nil, freezeErr
+	}
+	frozen["highlight_version"], frozen["target_seconds"] = highlightVersion, targetSeconds
+	snapshot, err := json.Marshal(frozen)
 	if err != nil {
 		return nil, err
 	}

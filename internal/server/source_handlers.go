@@ -363,15 +363,41 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 	if cv, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err == nil {
 		json.Unmarshal([]byte(cv.Payload), &card)
 	}
+	var frozen struct {
+		ID string `json:"source_snapshot_id"`
+	}
+	_ = json.Unmarshal([]byte(plan.InputSnapshotJSON), &frozen)
+	noteSnapshotID := ""
+	noteVersion := 0
+	var noteSegments []provider.Segment
 	audioURL := "/api/audio/" + string(sourceType) + "/" + sourceID
+	audioWarning := ""
+	if frozen.ID != "" {
+		snap, segs, _, e := srv.store.SnapshotContent(r.Context(), frozen.ID)
+		if e == nil && snap.SourceID == sourceID && snap.SourceType == sourceType {
+			noteSnapshotID, noteVersion, noteSegments = snap.ID, snap.ContentVersion, segs
+			identity, e := srv.store.SnapshotAudioIdentity(r.Context(), frozen.ID)
+			if e != nil {
+				http.Error(w, "读取DJ原音身份失败", 500)
+				return
+			}
+			if identity.Status != models.AudioPlayable {
+				audioURL = ""
+				audioWarning = "此清单的原音已替换或身份无法确认，无法按旧位置回放。可回详情听当前原音。"
+			}
+		} else {
+			audioURL = ""
+			audioWarning = "此清单的来源快照已失效，无法按旧位置回放。"
+		}
+	}
 	srv.tmpl.Render(w, "dj.html", map[string]any{
-		"SourceType":  string(sourceType),
-		"SourceID":    sourceID,
-		"Title":       card.Title,
-		"Items":       items,
-		"KeyPoints":   card.KeyPoints,
-		"AudioURL":    audioURL,
-		"PlanExists":  true,
+		"SourceType": string(sourceType),
+		"SourceID":   sourceID,
+		"Title":      card.Title,
+		"Items":      items,
+		"KeyPoints":  card.KeyPoints,
+		"AudioURL":   audioURL, "AudioWarning": audioWarning,
+		"PlanExists": true, "NoteSnapshotID": noteSnapshotID, "NoteSnapshotVersion": noteVersion, "NoteSegments": noteSegments,
 		"PlanID":      plan.ID,
 		"PlanVersion": plan.Version,
 		"PlanTotal":   plan.TotalSeconds,

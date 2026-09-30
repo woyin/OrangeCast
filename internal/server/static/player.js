@@ -5,6 +5,7 @@
 (function () {
   const audio = document.getElementById('audio-player');
   if (!audio) return;
+  audio.controls = false;
 
   const playBtn = document.getElementById('play-btn');
   const seekBar = document.getElementById('seek-bar');
@@ -34,7 +35,7 @@
     if (ready) apply(); else audio.addEventListener('loadedmetadata', apply, {once:true});
   }
   const transport = window.CWPPlayback.create({
-    sourceType:parts[2], sourceId:parts[3], mode:'original', csrf:document.querySelector('[name=_csrf]')?.value || '',
+    title:document.querySelector('h1')?.textContent||'CloudWisePod',sourceType:parts[2], sourceId:parts[3], mode:'original', csrf:document.querySelector('[name=_csrf]')?.value || '',
     adapter:{play:()=>audio.play(),pause:()=>audio.pause(),paused:()=>audio.paused,
       time:()=>audio.currentTime, seek:position, setRate:v=>{audio.playbackRate=v;},getRate:()=>audio.playbackRate,
       snapshot:()=>ready ? {item_offset_seconds:audio.currentTime} : null,

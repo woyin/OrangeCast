@@ -35,12 +35,12 @@
   f.addEventListener('submit',async e=>{
    e.preventDefault();const feedback=f.querySelector('.note-feedback'),button=f.querySelector('[type=submit]');saveDraft(f);button.disabled=true;feedback.textContent='保存中…';
    try{
-    const response=await fetch(f.action,{method:'POST',body:new FormData(f),headers:{Accept:'application/json'}});
+    const response=await fetch(f.getAttribute('action'),{method:'POST',body:new FormData(f),headers:{Accept:'application/json'}});
     if(!response.ok){feedback.textContent=await response.text();return;}
     const data=await response.json();feedback.textContent='已保存';try{sessionStorage.removeItem(key(f));}catch(_){}
     if(f.elements.namedItem('action')?.value==='delete'){f.closest('article').remove();return;}
-    if(data.note&&f.elements.namedItem('expected_revision')){f.elements.namedItem('expected_revision').value=data.note.Revision;f.closest('article').querySelector('p').textContent=data.note.Content;}
-    if(f===form){const article=document.createElement('article'),p=document.createElement('p');p.textContent=(data.note.Kind==='source_note'?'来源笔记：':'我的理解：')+data.note.Content;article.appendChild(p);document.getElementById('note-list').prepend(article);field('content').value='';}
+    if(data.note&&f.elements.namedItem('expected_revision')){f.closest('article').querySelectorAll('[name=expected_revision]').forEach(el=>el.value=data.note.Revision);f.closest('article').querySelector('p').textContent=data.note.Content;const badge=f.closest('article').querySelector('[data-note-revision]');if(badge)badge.textContent='v'+data.note.Revision;}
+    if(f===form){const article=document.createElement('article'),p=document.createElement('p');p.textContent=(data.note.Kind==='source_note'?'来源笔记：':'我的理解：')+data.note.Content;article.id='note-'+data.note.ID;article.appendChild(p);const history=document.createElement('a');history.href='/notes/'+encodeURIComponent(data.note.ID)+'/history';history.textContent='修订历史与记录位置';article.appendChild(history);document.getElementById('note-list').prepend(article);field('content').value='';}
    }catch(_){feedback.textContent='未保存，草稿和位置仍保留。';}finally{button.disabled=false;}
   });
  });

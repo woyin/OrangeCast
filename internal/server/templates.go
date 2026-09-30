@@ -123,7 +123,7 @@ func formatSeconds(sec float64) string {
 }
 
 func knowledgeStatus(status string) string {
-	labels := map[string]string{"discover": "寻找选题", "write": "正在写作", "review": "正在审校", "revise": "正在修订", "review_final": "再次审校", "ready": "已成稿", "needs_review": "需要人工处理", "insufficient": "材料不足", "failed": "处理失败"}
+	labels := map[string]string{"discover": "寻找选题", "select": "检索与选材", "write": "正在写作", "review": "正在审校", "revise": "正在修订", "review_final": "再次审校", "ready": "已成稿", "needs_review": "需要人工处理", "insufficient": "材料不足", "failed": "处理失败", "complete": "已完成", "succeeded": "执行成功", "queued": "排队中", "pending": "待回答", "answered": "已回答", "later": "稍后回看", "waiting": "等待成稿", "selected": "正在成稿", "duplicate": "方向重复", "explain": "能解释", "partial": "部分理解", "revisit": "需要重看", "support": "支持", "complement": "补充", "opposition": "反方"}
 	if label, ok := labels[status]; ok {
 		return label
 	}

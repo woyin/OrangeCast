@@ -43,6 +43,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
 	mux.HandleFunc("/knowledge-articles", srv.handleKnowledgeArticles)
+	mux.HandleFunc("/knowledge-articles/candidate", srv.handleKnowledgeCandidate)
 	mux.HandleFunc("/knowledge-articles/generate", srv.handleKnowledgeArticleGenerate)
 	mux.HandleFunc("/knowledge-articles/settings", srv.handleKnowledgeArticleSettings)
 	mux.HandleFunc("/knowledge-articles/action", srv.handleKnowledgeArticleAction)
@@ -96,6 +97,9 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/documents/version", srv.handleDocumentVersion)
 	mux.HandleFunc("/documents/", srv.handleDocumentDetail)
 	mux.HandleFunc("/sources/", srv.handleSourceDetail) // /sources/{type}/{id}[/dj|/download|/versions]
+	mux.HandleFunc("/review", srv.handleLearningReview)
+	mux.HandleFunc("/review/action", srv.handleLearningReviewAction)
+	mux.HandleFunc("/notes", srv.handleNotes)
 	mux.HandleFunc("/search", srv.handleSearch)
 	mux.HandleFunc("/keypoints", srv.handleKeyPoints)
 	mux.HandleFunc("/graph", srv.handleGraph)

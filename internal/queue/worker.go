@@ -204,6 +204,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 			if job.JobType == models.JobKnowledgeArticle {
 				_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, "远端结果未知，请显式重试")
 			}
+			if job.JobType == models.JobWeeklyReview {
+				_ = w.store.FailLearningReview(ctx, job.SourceID, "远端结果未知，请显式重试")
+			}
 			return w.store.MarkJobFailed(ctx, job.ID, "远端结果未知（result_state=unknown），已阻止自动重执行；请人工确认后重新入队")
 		}
 	}
@@ -230,6 +233,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
 		if job.JobType == models.JobKnowledgeArticle {
 			_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, err.Error())
+		}
+		if job.JobType == models.JobWeeklyReview {
+			_ = w.store.FailLearningReview(ctx, job.SourceID, err.Error())
 		}
 		w.markSourceFailed(ctx, job)
 		w.finalizeJobBudgetOnFailure(ctx, job) // B02/B04：按结果已知性收尾预占
@@ -292,7 +298,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 40_000, 8_000
 	case "curator_brief":
 		return 60_000, 15_000
-	case "knowledge_article":
+	case "knowledge_article", "weekly_review":
 		return 30_000, 8192
 	case "claim_writing", "claim_revision":
 		return 100_000, 30_000
@@ -306,7 +312,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision, models.JobKnowledgeArticle:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision, models.JobKnowledgeArticle, models.JobWeeklyReview:
 	default:
 		return nil
 	}
@@ -338,7 +344,7 @@ func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64)
 // settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
 func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
 	known, actual := w.jobReceiptUsage(ctx, job.ID)
-	if job.JobType == models.JobKnowledgeArticle && known == 0 {
+	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview) && known == 0 {
 		if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.RemoteCallStarted {
 			_ = w.store.MarkBudgetPendingRemote(ctx, job.ID)
 			return
@@ -421,6 +427,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 	switch job.JobType {
 	case models.JobKnowledgeArticle:
 		return w.doKnowledgeArticle(ctx, job, bundle)
+	case models.JobWeeklyReview:
+		return w.doWeeklyReview(ctx, job, bundle)
 	case models.JobTranscribe:
 		return w.doTranscribe(ctx, job, bundle)
 	case models.JobAnalyze:

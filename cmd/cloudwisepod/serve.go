@@ -69,6 +69,7 @@ func runServe() {
 	}
 	srv.StartAutomaticDiscovery(workerCtx)
 	srv.StartKnowledgeArticles(workerCtx)
+	srv.StartLearningReviews(workerCtx)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,

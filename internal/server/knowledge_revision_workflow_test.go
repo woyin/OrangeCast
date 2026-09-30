@@ -37,7 +37,7 @@ func TestKnowledgeManualRevisionAndVersionDownload(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	path := rec.Header().Get("Location")
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		if err := srv.worker.ProcessOne(t.Context()); err != nil {
 			t.Fatal(err)
 		}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woyin/orangecast/internal/evalset"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 )
@@ -148,20 +149,20 @@ func TestKnowledgeSearchFixedRecallAndTenThousandP95(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	queries := []string{"记忆巩固", "retrieval practice", "来源归因", "间隔学习", "我的理解", "材料不足", "同义标题", "反方证据", "依据过期", "广告"}
+	queries := evalset.PersonalLearningCases
 	correct := 0
 	var durations []time.Duration
 	for round := 0; round < 10; round++ {
-		for i, q := range queries {
+		for _, q := range queries {
 			start := time.Now()
-			result, err := s.SearchKnowledge(ctx, KnowledgeSearchQuery{Text: q, PerPage: 10})
+			result, err := s.SearchKnowledge(ctx, KnowledgeSearchQuery{Text: q.Query, PerPage: 10})
 			durations = append(durations, time.Since(start))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if round == 0 {
 				for _, hit := range result.Hits {
-					if hit.ObjectID == fmt.Sprint(i) {
+					if hit.ObjectID == q.ExpectedMaterialIDs[0] {
 						correct++
 						break
 					}
@@ -184,7 +185,9 @@ func TestKnowledgeSearchFixedRecallAndTenThousandP95(t *testing.T) {
 	if recall < 0.9 {
 		t.Fatalf("recall below 90%%: %.2f", recall)
 	}
-	if p95 > 300*time.Millisecond {
+	// Race instrumentation changes SQLite/UDF timing substantially. Recall and
+	// broad-query correctness still run; the latency gate uses the normal build.
+	if !searchRaceInstrumented && p95 > 300*time.Millisecond {
 		t.Fatalf("p95 above 300ms: %s", p95)
 	}
 }

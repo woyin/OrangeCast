@@ -172,7 +172,7 @@ func (s *Store) QueueKnowledgeRevision(ctx context.Context, id string, expected 
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET status=?,stage=?,reason='',review_model=? WHERE id=? AND working_revision=? AND status NOT IN ('discover','write','review','revise','review_final')`, stage, stage, reviewModel, id, expected)
+	res, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET status=?,stage=?,reason='',review_model=? WHERE id=? AND working_revision=? AND status NOT IN ('discover','select','write','review','revise','review_final')`, stage, stage, reviewModel, id, expected)
 	if err != nil {
 		return err
 	}

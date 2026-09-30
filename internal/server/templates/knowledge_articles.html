@@ -1,19 +1,21 @@
 {{define "title"}}知识文章 · CloudWisePod{{end}}
 {{define "content"}}
 <div class="page-head"><h1>知识文章</h1><a class="btn btn-secondary" href="/podcasts">继续学习</a></div>
+{{with .Error}}<p class="error" role="alert">{{.}}，输入已保留，可调整后重新提交。</p>{{end}}
 <p>从已有重点和笔记自动寻找值得写的问题，生成有来源、可回看依据的知识文章。</p>
 {{if .Available}}<p class="meta">AI 配置：.env · {{.Model}}</p>{{else}}<p class="error">请在 .env 配置 POD_BASE_URL、POD_API_KEY、POD_MODEL 并重启服务。</p>{{end}}
-<form method="post" action="/knowledge-articles/generate"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit" {{if not .Available}}disabled{{end}}>从已有重点和笔记生成文章</button></form>
-<details class="panel" style="margin:1rem 0"><summary>自动生成与文章偏好</summary>
+<form method="post" action="/knowledge-articles/generate"><input type="hidden" name="_csrf" value="{{.CSRF}}"><details {{if eq .ErrorAction "generate"}}open{{end}}><summary>限定发现范围</summary><label>节目 <select name="podcast"><option value="">全部节目</option>{{range .Podcasts}}<option value="{{.ID}}" {{if eq ($.Form.Get "podcast") .ID}}selected{{end}}>{{.Title}}</option>{{end}}</select></label><label>来源 <select name="source"><option value="">全部来源</option>{{range .Sources}}<option value="{{.SourceType}}:{{.SourceID}}" {{if eq ($.Form.Get "source") (printf "%s:%s" .SourceType .SourceID)}}selected{{end}}>{{.Title}}</option>{{end}}</select></label><label>主题 <input name="theme" maxlength="200" value="{{.Form.Get "theme"}}"></label><label>起始日期 <input name="from" type="date" value="{{.Form.Get "from"}}"></label><label>结束日期 <input name="until" type="date" value="{{.Form.Get "until"}}"></label><label><input name="explore_history" type="checkbox" {{if eq (.Form.Get "explore_history") "on"}}checked{{end}}>从历史学习记录开始探索（每批最多20项）</label><label>具体材料（最多20项）<select name="material" multiple size="6">{{range .Materials}}<option value="{{.ObjectID}}" {{if index $.SelectedMaterials .ObjectID}}selected{{end}}>{{.Snippet}}</option>{{end}}</select></label><label><input type="radio" name="history_cursor" value="0" {{if not (.Form.Get "history_cursor")}}checked{{else if eq (.Form.Get "history_cursor") "0"}}checked{{end}}>从历史开头探索</label><label><input type="radio" name="history_cursor" value="{{.NextCursor}}" {{if and (.Form.Get "history_cursor") (ne (.Form.Get "history_cursor") "0")}}checked{{end}}>继续上次历史进度</label></details><button class="btn" type="submit" {{if not .Available}}disabled{{end}}>从已有重点和笔记生成文章</button></form>
+<details id="preferences" class="panel" style="margin:1rem 0" {{if eq .ErrorAction "settings"}}open{{end}}><summary>自动生成与文章偏好</summary>
 <form method="post" action="/knowledge-articles/settings" class="subform">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
-<label><input type="checkbox" name="enabled" {{if .Settings.Enabled}}checked{{end}}>开启后台自动生成</label>
-<label>每天最多生成几篇 <input name="daily_limit" type="number" min="1" max="10" value="{{.Settings.DailyLimit}}" required></label>
-<label>素材更新后等待（分钟）<input name="debounce_minutes" type="number" min="0" max="1440" value="{{.Settings.DebounceMinutes}}" required></label>
-<label>目标读者 <input name="audience" value="{{.Settings.Audience}}" maxlength="500" required></label>
-<label>文章风格 <textarea name="style" rows="3" maxlength="2000" required>{{.Settings.Style}}</textarea></label>
+<label><input type="checkbox" name="enabled" {{if eq .ErrorAction "settings"}}{{if eq (.Form.Get "enabled") "on"}}checked{{end}}{{else if .Settings.Enabled}}checked{{end}}>开启后台自动生成</label>
+<label>每天最多生成几篇 <input name="daily_limit" type="number" min="1" max="10" value="{{if eq .ErrorAction "settings"}}{{.Form.Get "daily_limit"}}{{else}}{{.Settings.DailyLimit}}{{end}}" required></label>
+<label>素材更新后等待（分钟）<input name="debounce_minutes" type="number" min="0" max="1440" value="{{if eq .ErrorAction "settings"}}{{.Form.Get "debounce_minutes"}}{{else}}{{.Settings.DebounceMinutes}}{{end}}" required></label>
+<label>目标读者 <input name="audience" value="{{if eq .ErrorAction "settings"}}{{.Form.Get "audience"}}{{else}}{{.Settings.Audience}}{{end}}" maxlength="500" required></label>
+<label>文章风格 <textarea name="style" rows="3" maxlength="2000" required>{{if eq .ErrorAction "settings"}}{{.Form.Get "style"}}{{else}}{{.Settings.Style}}{{end}}</textarea></label>
 <p class="meta">每5分钟检查一次。相同材料不重复生成；立即生成可跳过等待。已有月预算和价格配置继续生效。</p>
 <button class="btn" type="submit">保存偏好</button>
 </form></details>
+<section class="panel"><h2>候选方向</h2>{{range .Candidates}}<details class="card"><summary>{{.Topic.Title}} · {{knowledgeStatus .Status}}</summary><p>{{.Topic.Question}}</p><p>{{.Topic.Thesis}}</p><p>{{.Topic.Rationale}}</p><p>增量：{{.Topic.Increment}} · 成熟度 {{.Topic.Score}}</p><p>{{.Reason}}</p>{{range .Topic.Missing}}<p class="error">待补：{{.}}</p>{{end}}{{range .Topic.Selection}}<p>{{knowledgeStatus .Role}} · {{if .Selected}}采用{{else}}舍弃{{end}}：{{.Reason}}</p>{{end}}{{if .ArticleID}}<a href="/knowledge-articles/{{.ArticleID}}">查看文章</a>{{else if eq .Status "waiting"}}<form method="post" action="/knowledge-articles/candidate"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate" value="{{.ID}}"><button class="btn">从此方向成稿</button></form>{{end}}</details>{{else}}<p>尚无候选。先发现问题；材料不足时会保留缺口。</p>{{end}}</section>
 {{range .Articles}}<article class="card" style="margin:1rem 0"><h2><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}正在寻找文章方向{{end}}</a></h2><p class="meta">{{knowledgeStatus .Status}} · {{.Model}} · <span data-utc="{{.CreatedAt}}">{{.CreatedAt}}</span></p>{{if .Thesis}}<p>{{.Thesis}}</p>{{end}}{{if .Reason}}<p>{{.Reason}}</p>{{end}}</article>{{else}}<p class="empty">暂无知识文章。已有两项可用重点或笔记后，即可开始生成。</p>{{end}}
 {{end}}

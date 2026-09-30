@@ -142,5 +142,32 @@ func (srv *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	progress, err := srv.store.RecentListening(r.Context())
+	if err != nil {
+		http.Error(w, "读取续听失败", 500)
+		return
+	}
+	data["Listening"] = progress
+	notes, err := srv.store.SearchKnowledge(r.Context(), store.KnowledgeSearchQuery{Kind: "notes", PerPage: 5})
+	if err != nil {
+		http.Error(w, "读取笔记失败", 500)
+		return
+	}
+	data["Notes"] = knowledgeSearchViews(notes.Hits)
+	articles, err := srv.store.ListKnowledgeArticles(r.Context())
+	if err != nil {
+		http.Error(w, "读取文章失败", 500)
+		return
+	}
+	var ready, pending []*store.KnowledgeArticleRecord
+	for _, a := range articles {
+		if a.PassedRevision > 0 && len(ready) < 5 {
+			ready = append(ready, a)
+		}
+		if a.Status != "ready" && len(pending) < 5 {
+			pending = append(pending, a)
+		}
+	}
+	data["ReadyArticles"], data["PendingArticles"] = ready, pending
 	srv.tmpl.Render(w, "dashboard.html", data)
 }

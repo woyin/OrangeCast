@@ -91,7 +91,7 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if q.From != "" && q.Until != "" && q.From > q.Until {
 		return result, ErrInvalidEditorialState
 	}
-	allowed := map[string]bool{"": true, "original": true, "document": true, "keypoint": true, "source_note": true, "owner_reflection": true, "article": true, "notes": true}
+	allowed := map[string]bool{"": true, "original": true, "document": true, "keypoint": true, "source_note": true, "owner_reflection": true, "article": true, "notes": true, "materials": true}
 	if !allowed[q.Kind] {
 		return result, ErrInvalidEditorialState
 	}
@@ -128,7 +128,9 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 			args = append(args, extra...)
 		}
 	}
-	if q.Kind == "notes" {
+	if q.Kind == "materials" {
+		where = append(where, "d.kind IN ('keypoint','source_note','owner_reflection')")
+	} else if q.Kind == "notes" {
 		where = append(where, "d.kind IN ('source_note','owner_reflection')")
 	} else if q.Kind != "" {
 		where = append(where, "d.kind=?")
@@ -298,7 +300,7 @@ type KnowledgeSearchSource struct{ SourceType, SourceID, Title string }
 
 // ListKnowledgeSearchSources returns metadata only, never entire library bodies.
 func (s *Store) ListKnowledgeSearchSources(ctx context.Context) ([]KnowledgeSearchSource, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT source_type,source_id,MAX(title) FROM knowledge_search_docs WHERE source_id!='' GROUP BY source_type,source_id ORDER BY MAX(updated_at) DESC LIMIT 500`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT d.source_type,d.source_id,COALESCE(e.title,u.original_filename,doc.title,MAX(d.title)) FROM knowledge_search_docs d LEFT JOIN episodes e ON d.source_type='episode' AND e.id=d.source_id LEFT JOIN uploads u ON d.source_type='upload' AND u.id=d.source_id LEFT JOIN documents doc ON d.source_type='document' AND doc.id=d.source_id WHERE d.source_id!='' GROUP BY d.source_type,d.source_id ORDER BY MAX(d.updated_at) DESC LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}

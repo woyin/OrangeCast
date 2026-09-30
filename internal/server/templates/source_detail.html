@@ -30,6 +30,27 @@
 <div class="source-head">
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>
+{{if .AudioURL}}
+<!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
+<div class="player-bar">
+  <audio id="audio-player" src="{{.AudioURL}}" preload="metadata" controls></audio>
+  <div class="player-controls">
+    <button id="play-btn" type="button" aria-label="播放或暂停">▶</button>
+    <span id="current-time" class="time">0:00</span>
+    <input aria-label="播放位置" id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
+    <span id="duration" class="time">0:00</span>
+    <button id="playback-back" type="button" aria-label="后退15秒">−15秒</button>
+    <button id="playback-forward" type="button" aria-label="前进15秒">+15秒</button>
+    <label>倍速 <select id="playback-rate"><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select></label>
+    <label>睡眠 <select id="playback-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label>
+    <button id="playback-resume" type="button" hidden>继续听</button>
+    <label><input id="playback-follow" type="checkbox" checked>跟随播放</label>
+    <span id="playback-feedback" aria-live="polite"></span>
+  </div>
+</div>
+{{end}}
+
+
   {{with .Stages}}
   <section class="panel" style="margin:0.75rem 0">
     <h2>处理进度</h2>
@@ -72,56 +93,10 @@
   {{end}}
 </div>
 
-{{with .MaterialUsage}}
-<section class="panel" style="margin:1rem 0">
-  <h2>被采用为素材</h2>
-  {{range .}}
-  <div class="list-item"><a href="{{.Link}}">{{.Title}}</a> <span class="meta">{{.Detail}}</span></div>
-  {{end}}
-</section>
-{{end}}
-{{with .SourceDigests}}
-<section class="panel" style="margin:1rem 0">
-  <h2>精读文</h2>
-  {{range .}}
-  <div class="list-item"><div style="flex:1">
-    <strong><a href="/digest/{{.ID}}">{{.Title}}</a></strong>
-    <span class="meta">修订 v{{.Version}}{{if .Reason}} · {{.Reason}}{{end}} · {{.CreatedAt}}</span>
-  </div></div>
-  {{end}}
-</section>
-{{end}}
-{{with .SourcePolicy}}<section class="panel" style="margin:1rem 0"><h2>素材与模型边界</h2><form method="post" action="/api/source-policy"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="{{$.SourceType}}"><input type="hidden" name="source_id" value="{{$.SourceID}}"><p class="meta">Owner 纳入的 Source 默认可用于学习与创作；此处只配置模型数据边界和归档状态。</p><label>模型数据策略 <select name="model_data_policy"><option value="external_allowed" {{if eq .ModelDataPolicy "external_allowed"}}selected{{end}}>允许外部模型</option><option value="approved_providers_only" {{if eq .ModelDataPolicy "approved_providers_only"}}selected{{end}}>仅批准 Provider</option><option value="local_only" {{if eq .ModelDataPolicy "local_only"}}selected{{end}}>仅本地</option></select></label><label>批准的 Provider（逗号分隔）<input name="approved_providers" value="{{join .ApprovedProviders ","}}" placeholder="groq,openai"></label><label><input type="checkbox" name="archived" value="1" {{if .Archived}}checked{{end}}>归档并停止后续生产</label><button class="btn btn-secondary" type="submit">保存素材策略</button></form></section>{{end}}
-
 {{template "notePanel" .}}
-
-<section class="panel" style="margin:1rem 0"><h2>MaterialCandidate</h2><p class="meta">学习候选先由 Owner 决定，再提升为 Owner-confirmed KeyPoint；未接受的文本不会进入发现。</p>{{range .MaterialCandidates}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}}</div><p>{{.Content}}</p><p class="meta">Citation：{{.CitationsJSON}}</p>{{if .RejectionReason}}<p class="error">{{.RejectionReason}}</p>{{end}}</div>{{if eq .Status "pending"}}<div class="item-actions"><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受</button></form><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="rejected"><input name="reason" placeholder="拒绝原因"><button class="btn btn-secondary" type="submit">拒绝</button></form></div>{{else if eq .Status "accepted"}}<form class="item-actions" method="post" action="/api/material-candidates/promote"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><button class="btn" type="submit">提升为 KeyPoint</button></form>{{end}}</article>{{end}}<form method="post" action="/api/material-candidates" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>候选内容 <textarea name="content" rows="2" required></textarea></label><label>Citation ID JSON <input name="citations_json" required placeholder='["seg-1"]'></label><button class="btn btn-secondary" type="submit">记录学习候选</button></form></section>
-
-<section class="panel" style="margin:1rem 0"><h2>RightsConstraint</h2><p class="meta">这些约束限制对外复制具体表达或媒体资产，不撤销 Owner 的内部学习使用。</p>{{range .RightsConstraints}}<p><strong>{{.ConstraintKind}}</strong>：{{.Details}} {{if .Active}}<span class="meta">生效中</span>{{end}}</p>{{end}}<form method="post" action="/api/rights-constraints" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>约束类型 <input name="constraint_kind" required placeholder="expression_reuse"></label><label>说明 <input name="details" required></label><label><input type="checkbox" name="active" checked> 生效</label><button class="btn btn-secondary" type="submit">保存约束</button></form></section>
-
-{{if .AudioURL}}
-<!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
-<div class="player-bar">
-  <audio id="audio-player" src="{{.AudioURL}}" preload="metadata"></audio>
-  <div class="player-controls">
-    <button id="play-btn" type="button" aria-label="播放或暂停">▶</button>
-    <span id="current-time" class="time">0:00</span>
-    <input aria-label="播放位置" id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
-    <span id="duration" class="time">0:00</span>
-    <button id="playback-back" type="button" aria-label="后退15秒">−15秒</button>
-    <button id="playback-forward" type="button" aria-label="前进15秒">+15秒</button>
-    <label>倍速 <select id="playback-rate"><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select></label>
-    <label>睡眠 <select id="playback-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label>
-    <button id="playback-resume" type="button" hidden>继续听</button>
-    <label><input id="playback-follow" type="checkbox" checked>跟随播放</label>
-    <span id="playback-feedback" aria-live="polite"></span>
-  </div>
-</div>
-{{end}}
-
 <div class="source-grid">
   <!-- 左：转录稿（B 层联动：点句跳转 + 播放高亮当前句） -->
-  <section class="transcript-panel">
+  <details class="transcript-panel"><summary>展开转录稿（点击句子可定位）</summary>
     <h2>转录稿</h2>
     <div id="transcript" class="transcript">
     {{range $i, $seg := .Segments}}
@@ -130,7 +105,7 @@
     <p class="empty">暂无转录稿，请先点击「处理」。</p>
     {{end}}
     </div>
-  </section>
+  </details>
 
     <!-- Paraphrase 复述讲解（GeneratedDerivative，ADR-0018）：AI 用别的话重讲，挂 Reference，非原文 -->
     <section id="paraphrase-panel" hidden>
@@ -207,4 +182,32 @@
     </section>
   </aside>
 </div>
+<details class="panel"><summary>高级：处理历史、素材策略与权利</summary>{{with .MaterialUsage}}
+<section class="panel" style="margin:1rem 0">
+  <h2>被采用为素材</h2>
+  {{range .}}
+  <div class="list-item"><a href="{{.Link}}">{{.Title}}</a> <span class="meta">{{.Detail}}</span></div>
+  {{end}}
+</section>
+{{end}}
+{{with .SourceDigests}}
+<section class="panel" style="margin:1rem 0">
+  <h2>精读文</h2>
+  {{range .}}
+  <div class="list-item"><div style="flex:1">
+    <strong><a href="/digest/{{.ID}}">{{.Title}}</a></strong>
+    <span class="meta">修订 v{{.Version}}{{if .Reason}} · {{.Reason}}{{end}} · {{.CreatedAt}}</span>
+  </div></div>
+  {{end}}
+</section>
+{{end}}
+{{with .SourcePolicy}}<section class="panel" style="margin:1rem 0"><h2>素材与模型边界</h2><form method="post" action="/api/source-policy"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="{{$.SourceType}}"><input type="hidden" name="source_id" value="{{$.SourceID}}"><p class="meta">Owner 纳入的 Source 默认可用于学习与创作；此处只配置模型数据边界和归档状态。</p><label>模型数据策略 <select name="model_data_policy"><option value="external_allowed" {{if eq .ModelDataPolicy "external_allowed"}}selected{{end}}>允许外部模型</option><option value="approved_providers_only" {{if eq .ModelDataPolicy "approved_providers_only"}}selected{{end}}>仅批准 Provider</option><option value="local_only" {{if eq .ModelDataPolicy "local_only"}}selected{{end}}>仅本地</option></select></label><label>批准的 Provider（逗号分隔）<input name="approved_providers" value="{{join .ApprovedProviders ","}}" placeholder="groq,openai"></label><label><input type="checkbox" name="archived" value="1" {{if .Archived}}checked{{end}}>归档并停止后续生产</label><button class="btn btn-secondary" type="submit">保存素材策略</button></form></section>{{end}}
+
+
+
+<section class="panel" style="margin:1rem 0"><h2>MaterialCandidate</h2><p class="meta">学习候选先由 Owner 决定，再提升为 Owner-confirmed KeyPoint；未接受的文本不会进入发现。</p>{{range .MaterialCandidates}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}}</div><p>{{.Content}}</p><p class="meta">Citation：{{.CitationsJSON}}</p>{{if .RejectionReason}}<p class="error">{{.RejectionReason}}</p>{{end}}</div>{{if eq .Status "pending"}}<div class="item-actions"><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受</button></form><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="rejected"><input name="reason" placeholder="拒绝原因"><button class="btn btn-secondary" type="submit">拒绝</button></form></div>{{else if eq .Status "accepted"}}<form class="item-actions" method="post" action="/api/material-candidates/promote"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><button class="btn" type="submit">提升为 KeyPoint</button></form>{{end}}</article>{{end}}<form method="post" action="/api/material-candidates" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>候选内容 <textarea name="content" rows="2" required></textarea></label><label>Citation ID JSON <input name="citations_json" required placeholder='["seg-1"]'></label><button class="btn btn-secondary" type="submit">记录学习候选</button></form></section>
+
+<section class="panel" style="margin:1rem 0"><h2>RightsConstraint</h2><p class="meta">这些约束限制对外复制具体表达或媒体资产，不撤销 Owner 的内部学习使用。</p>{{range .RightsConstraints}}<p><strong>{{.ConstraintKind}}</strong>：{{.Details}} {{if .Active}}<span class="meta">生效中</span>{{end}}</p>{{end}}<form method="post" action="/api/rights-constraints" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>约束类型 <input name="constraint_kind" required placeholder="expression_reuse"></label><label>说明 <input name="details" required></label><label><input type="checkbox" name="active" checked> 生效</label><button class="btn btn-secondary" type="submit">保存约束</button></form></section>
+
+</details>
 {{end}}

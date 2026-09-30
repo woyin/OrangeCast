@@ -55,3 +55,28 @@ func knowledgePageURL(r *http.Request, page int) string {
 	q.Set("page", strconv.Itoa(page))
 	return r.URL.Path + "?" + q.Encode()
 }
+
+func (srv *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "方法不允许", 405)
+		return
+	}
+	q := knowledgeQuery(r)
+	if q.Kind != "keypoint" {
+		q.Kind = "notes"
+	}
+	result, err := srv.store.SearchKnowledge(r.Context(), q)
+	if err != nil {
+		http.Error(w, "读取笔记失败："+err.Error(), 500)
+		return
+	}
+	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	if err != nil {
+		http.Error(w, "读取来源失败", 500)
+		return
+	}
+	data := map[string]any{"Filter": q, "Sources": sources, "Results": knowledgeSearchViews(result.Hits), "Total": result.Total, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
+	if err := srv.tmpl.Render(w, "notes.html", data); err != nil {
+		http.Error(w, "渲染失败", 500)
+	}
+}

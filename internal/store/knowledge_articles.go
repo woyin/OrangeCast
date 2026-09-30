@@ -25,6 +25,7 @@ type KnowledgeArticleSettings struct {
 
 // KnowledgeArticleRecord is a durable automatic article and its pipeline state.
 type KnowledgeArticleRecord struct {
+	DiscoveryBatchID, CandidateID                                                                string
 	WorkingRevision, PassedRevision                                                              int
 	ReviewModel                                                                                  string
 	ID, ProfileID, InputHash, InputJSON, Status, Stage, Title, Thesis                            string
@@ -347,7 +348,7 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 		return nil, false, err
 	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_articles WHERE profile_id=? AND status IN ('discover','write','review','revise','review_final')`, profileID).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_articles WHERE profile_id=? AND status IN ('discover','select','write','review','revise','review_final')`, profileID).Scan(&active); err != nil {
 		return nil, false, err
 	}
 	if active > 0 {
@@ -367,8 +368,18 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 	}
 	id := uuid.NewString()
 	input, _ := json.Marshal(req)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,provider,model,automated,review_model) VALUES(?,?,?,?,?,?,?,?)`, id, profileID, hash, string(input), name, model, automatic, req.ReviewModel); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,provider,model,automated,review_model,discovery_batch_id) VALUES(?,?,?,?,?,?,?,?,?)`, id, profileID, hash, string(input), name, model, automatic, req.ReviewModel, req.DiscoveryBatchID); err != nil {
 		return nil, false, err
+	}
+	if req.DiscoveryBatchID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE knowledge_discovery_batches SET article_id=? WHERE id=? AND article_id=''`, id, req.DiscoveryBatchID); err != nil {
+			return nil, false, err
+		}
+		if automatic {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_discovery_cursors(profile_id,last_seq) SELECT profile_id,last_seq FROM knowledge_discovery_batches WHERE id=? ON CONFLICT(profile_id) DO UPDATE SET last_seq=MAX(last_seq,excluded.last_seq)`, req.DiscoveryBatchID); err != nil {
+				return nil, false, err
+			}
+		}
 	}
 	if err := enqueueKnowledgeStage(ctx, tx, id, "discover", name, model, req, automatic); err != nil {
 		return nil, false, err
@@ -403,11 +414,11 @@ func enqueueKnowledgeStage(ctx context.Context, tx *sql.Tx, id, stage, name, mod
 	return err
 }
 
-const knowledgeArticleColumns = `id,profile_id,input_hash,input_json,status,stage,title,thesis,topics_json,topic_json,blocks_json,issues_json,reason,provider,model,created_at,updated_at,working_revision,passed_revision,review_model`
+const knowledgeArticleColumns = `id,profile_id,input_hash,input_json,status,stage,title,thesis,topics_json,topic_json,blocks_json,issues_json,reason,provider,model,created_at,updated_at,working_revision,passed_revision,review_model,discovery_batch_id,candidate_id`
 
 func scanKnowledgeArticle(row interface{ Scan(...any) error }) (*KnowledgeArticleRecord, error) {
 	v := &KnowledgeArticleRecord{}
-	err := row.Scan(&v.ID, &v.ProfileID, &v.InputHash, &v.InputJSON, &v.Status, &v.Stage, &v.Title, &v.Thesis, &v.TopicsJSON, &v.TopicJSON, &v.BlocksJSON, &v.IssuesJSON, &v.Reason, &v.Provider, &v.Model, &v.CreatedAt, &v.UpdatedAt, &v.WorkingRevision, &v.PassedRevision, &v.ReviewModel)
+	err := row.Scan(&v.ID, &v.ProfileID, &v.InputHash, &v.InputJSON, &v.Status, &v.Stage, &v.Title, &v.Thesis, &v.TopicsJSON, &v.TopicJSON, &v.BlocksJSON, &v.IssuesJSON, &v.Reason, &v.Provider, &v.Model, &v.CreatedAt, &v.UpdatedAt, &v.WorkingRevision, &v.PassedRevision, &v.ReviewModel, &v.DiscoveryBatchID, &v.CandidateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -477,6 +488,29 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 			}
 			req.Materials = selected
 			next = "write"
+			if req.DiscoveryBatchID != "" {
+				next = "select"
+				req, err = s.RecallKnowledgeMaterials(ctx, v.ProfileID, v.Provider, req, *chosen)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	case "select":
+		req = input.Request
+		chosen := provider.SelectKnowledgeTopic(result.Topics, req.History)
+		if chosen == nil {
+			status = "insufficient"
+			reason = result.Reason
+			if reason == "" {
+				reason = "选材后依据仍不足，保留材料缺口"
+			}
+		} else {
+			req.Topic = chosen
+			req.Materials = selectedKnowledgeMaterials(req.Materials, chosen.MaterialIDs)
+			topic = jsonString(chosen)
+			title, thesis = chosen.Title, chosen.Thesis
+			next = "write"
 		}
 	case "write", "revise":
 		title = result.Title
@@ -510,7 +544,7 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 	}
 	// Only original selection remains in the immutable library input; successors
 	// receive their selected subset plus the exact current draft/review feedback.
-	if input.Stage != "discover" {
+	if input.Stage != "discover" && input.Stage != "select" {
 		var t provider.KnowledgeTopic
 		if err := json.Unmarshal([]byte(topic), &t); err != nil {
 			return err
@@ -563,6 +597,18 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_article_runs(job_id,article_id,parent_revision,stage,result_json) VALUES(?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET result_json=excluded.result_json`, job.ID, v.ID, expected, input.Stage, string(resultJSON)); err != nil {
 		return err
 	}
+	candidateID := v.CandidateID
+	if input.Stage == "discover" && req.DiscoveryBatchID != "" {
+		candidateID, err = saveKnowledgeCandidates(ctx, tx, req.DiscoveryBatchID, result.Topics, req.History)
+		if err != nil {
+			return err
+		}
+		if candidateID != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE knowledge_topic_candidates SET article_id=?,status='selected' WHERE id=?`, v.ID, candidateID); err != nil {
+				return err
+			}
+		}
+	}
 	passedRevision := v.PassedRevision
 	if status == "ready" {
 		passedRevision = newRevision
@@ -579,6 +625,18 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 		return tx.Commit()
 	}
 
+	if candidateID != "" {
+		candidateStatus := "selected"
+		if next == "" {
+			candidateStatus = status
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET candidate_id=? WHERE id=?`, candidateID, v.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE knowledge_topic_candidates SET status=?,reason=?,selection_json=CASE WHEN ?='select' THEN ? ELSE selection_json END,topic_json=CASE WHEN ?='select' THEN ? ELSE topic_json END WHERE id=?`, candidateStatus, reason, input.Stage, jsonString(result.Topics), input.Stage, topic, candidateID); err != nil {
+			return err
+		}
+	}
 	if next != "" {
 		if err := enqueueKnowledgeStage(ctx, tx, v.ID, next, v.Provider, v.Model, req, job.Automated); err != nil {
 			return err

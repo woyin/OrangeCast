@@ -60,7 +60,19 @@ func (srv *Server) enqueueKnowledgeArticle(ctx context.Context, profileID string
 	if !srv.cfg.PodAvailable() {
 		return nil, false, fmt.Errorf("请在 .env 配置 POD_BASE_URL、POD_API_KEY、POD_MODEL 并重启")
 	}
-	req, latest, err := srv.store.BuildKnowledgeArticleRequest(ctx, profileID, "pod")
+	return srv.enqueueKnowledgeArticleScope(ctx, profileID, automatic, store.KnowledgeScope{})
+}
+func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID string, automatic bool, scope store.KnowledgeScope) (*store.KnowledgeArticleRecord, bool, error) {
+	if automatic {
+		id, err := srv.store.NextAutomaticKnowledgeCandidate(ctx, profileID)
+		if err != nil {
+			return nil, false, err
+		}
+		if id != "" {
+			return srv.store.StartKnowledgeCandidate(ctx, id, true)
+		}
+	}
+	req, last, latest, err := srv.store.BuildKnowledgeDiscoveryRequest(ctx, profileID, "pod", scope, automatic)
 	if err != nil {
 		return nil, false, err
 	}
@@ -74,6 +86,19 @@ func (srv *Server) enqueueKnowledgeArticle(ctx context.Context, profileID string
 			return nil, false, nil
 		}
 	}
+	if len(req.Materials) < 2 && automatic {
+		_, err := srv.store.DB.ExecContext(ctx, `INSERT INTO knowledge_discovery_cursors(profile_id,last_seq) VALUES(?,?) ON CONFLICT(profile_id) DO UPDATE SET last_seq=MAX(last_seq,excluded.last_seq)`, profileID, last)
+		return nil, false, err
+	}
+	batch, err := srv.store.EnsureKnowledgeDiscoveryBatch(ctx, profileID, "pod", srv.cfg.PodModel, req, last, automatic)
+	if err != nil {
+		return nil, false, err
+	}
+	if batch.ArticleID != "" {
+		v, err := srv.store.GetKnowledgeArticle(ctx, batch.ArticleID)
+		return v, false, err
+	}
+	req.DiscoveryBatchID = batch.ID
 	return srv.store.ReserveKnowledgeArticle(ctx, profileID, "pod", srv.cfg.PodModel, req, automatic)
 }
 
@@ -82,6 +107,10 @@ func (srv *Server) handleKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "方法不允许", 405)
 		return
 	}
+	srv.renderKnowledgeArticles(w, r, 0, "", "")
+}
+
+func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Request, status int, message, action string) {
 	records, err := srv.store.ListKnowledgeArticles(r.Context())
 	if err != nil {
 		http.Error(w, "读取文章失败", 500)
@@ -92,7 +121,39 @@ func (srv *Server) handleKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "读取自动化设置失败", 500)
 		return
 	}
-	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"Articles": records, "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
+	materials, e := srv.store.SearchKnowledge(r.Context(), store.KnowledgeSearchQuery{Kind: "materials", PerPage: 100})
+	if e != nil {
+		http.Error(w, "读取材料失败", 500)
+		return
+	}
+	var nextCursor int64
+	if e := srv.store.DB.QueryRowContext(r.Context(), `SELECT COALESCE(MAX(last_seq),0) FROM knowledge_discovery_batches WHERE scope_json LIKE '%"ExploreHistory":true%'`).Scan(&nextCursor); e != nil {
+		http.Error(w, "读取探索进度失败", 500)
+		return
+	}
+	candidates, err := srv.store.ListKnowledgeTopicCandidates(r.Context())
+	if err != nil {
+		http.Error(w, "读取候选方向失败", 500)
+		return
+	}
+	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	if err != nil {
+		http.Error(w, "读取来源范围失败", 500)
+		return
+	}
+	podcasts, err := srv.store.ListPodcasts(r.Context())
+	if err != nil {
+		http.Error(w, "读取节目失败", 500)
+		return
+	}
+	selected := map[string]bool{}
+	for _, id := range r.Form["material"] {
+		selected[id] = true
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+	}
+	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates, "Sources": sources, "Podcasts": podcasts, "Articles": records, "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
 		http.Error(w, "渲染文章列表失败", 500)
 	}
 }
@@ -107,9 +168,16 @@ func (srv *Server) handleKnowledgeArticleGenerate(w http.ResponseWriter, r *http
 		http.Error(w, "读取默认文章偏好失败", 500)
 		return
 	}
-	article, _, err := srv.enqueueKnowledgeArticle(r.Context(), profile.ID, false)
+	scope := store.KnowledgeScope{PodcastID: r.FormValue("podcast"), Theme: r.FormValue("theme"), From: r.FormValue("from"), Until: r.FormValue("until"), ExploreHistory: r.FormValue("explore_history") == "on"}
+	if source := strings.SplitN(r.FormValue("source"), ":", 2); len(source) == 2 {
+		scope.SourceType, scope.SourceID = source[0], source[1]
+	}
+	scope.HistoryCursor, _ = strconv.ParseInt(r.FormValue("history_cursor"), 10, 64)
+	_ = r.ParseForm()
+	scope.MaterialIDs = r.Form["material"]
+	article, _, err := srv.enqueueKnowledgeArticleScope(r.Context(), profile.ID, false, scope)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		srv.renderKnowledgeArticles(w, r, 400, err.Error(), "generate")
 		return
 	}
 	http.Redirect(w, r, "/knowledge-articles/"+article.ID, http.StatusSeeOther)
@@ -124,15 +192,15 @@ func (srv *Server) handleKnowledgeArticleSettings(w http.ResponseWriter, r *http
 	debounce, e2 := strconv.Atoi(r.FormValue("debounce_minutes"))
 	settings := store.KnowledgeArticleSettings{Enabled: r.FormValue("enabled") == "on", DailyLimit: daily, DebounceMinutes: debounce, Audience: r.FormValue("audience"), Style: r.FormValue("style")}
 	if e1 != nil || e2 != nil {
-		http.Error(w, "频率必须为整数", 400)
+		srv.renderKnowledgeArticles(w, r, 400, "频率必须为整数", "settings")
 		return
 	}
 	if settings.Enabled && !srv.cfg.PodAvailable() {
-		http.Error(w, "POD_* 配置不完整，无法开启自动生成", 400)
+		srv.renderKnowledgeArticles(w, r, 400, "POD_* 配置不完整，无法开启自动生成", "settings")
 		return
 	}
 	if err := srv.store.SetKnowledgeArticleSettings(r.Context(), settings); err != nil {
-		http.Error(w, err.Error(), 400)
+		srv.renderKnowledgeArticles(w, r, 400, err.Error(), "settings")
 		return
 	}
 	http.Redirect(w, r, "/knowledge-articles", http.StatusSeeOther)
@@ -186,7 +254,11 @@ func knowledgeArticleViews(req provider.KnowledgeArticleRequest, blocks []provid
 			} else {
 				href = sourceHref(models.SourceType(m.SourceType), m.SourceID, 0)
 			}
-			v.Links = append(v.Links, knowledgeMaterialLink{Label: title, Href: href, Preview: m.Evidence, Kind: m.Kind})
+			preview := m.Content + "\n\n" + m.Evidence
+			if m.PreviousContent != "" {
+				preview = "先前个人记录：" + m.PreviousContent + "\n\n当前记录：" + preview
+			}
+			v.Links = append(v.Links, knowledgeMaterialLink{Label: title, Href: href, Preview: preview, Kind: m.Kind})
 		}
 		views = append(views, v)
 	}
@@ -364,7 +436,7 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 		editBlocks = append(editBlocks, knowledgeEditBlock{Block: block, Materials: choices})
 	}
 	diffs := knowledgeDiffs(revisions)
-	data := map[string]any{"Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
+	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
 	if err := srv.tmpl.Render(w, "knowledge_article.html", data); err != nil {
 		http.Error(w, "渲染文章失败", 500)
 	}
@@ -531,4 +603,17 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 		return
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func (srv *Server) handleKnowledgeCandidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "方法不允许", 405)
+		return
+	}
+	v, _, err := srv.store.StartKnowledgeCandidate(r.Context(), r.FormValue("candidate"), false)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	http.Redirect(w, r, "/knowledge-articles/"+v.ID, 303)
 }

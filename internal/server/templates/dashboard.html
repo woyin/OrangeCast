@@ -3,7 +3,12 @@
 <p>欢迎，{{.Email}}。</p>
 <p class="meta">仪表盘</p>
 
-<div class="cards">
+<section class="panel"><h2>继续听</h2>{{range .Listening}}<p><a href="/sources/{{.SourceType}}/{{.SourceID}}{{if eq .Mode "dj"}}/dj{{end}}">{{.Title}} · {{if eq .Mode "dj"}}DJ{{else}}原音{{end}} · {{formatTime .Position}}</a></p>{{else}}<p>还没有收听记录。<a class="btn" href="/podcasts">选择播客开始听</a></p>{{end}}</section>
+<section class="panel"><h2>最近笔记</h2>{{range .Notes}}<p><a href="{{.Href}}">{{.Hit.Snippet}}</a> <span class="meta">{{.Label}}</span></p>{{else}}<p>收听时记录当前位置或选中的原文。<a href="/podcasts">打开播客</a></p>{{end}}<a href="/notes">全部笔记与重点</a></section>
+<section class="panel"><h2>新生成文章</h2>{{range .ReadyArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{.Title}}</a></p>{{else}}<p>已有重点和笔记后，<a href="/knowledge-articles">发现值得写的问题</a>。</p>{{end}}</section>
+<section class="panel"><h2>待审与失败事项</h2>{{range .PendingArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}文章发现{{end}}</a> · {{knowledgeStatus .Status}} · {{.Reason}}</p>{{else}}<p>暂无待处理文章。</p>{{end}}</section>
+<section class="panel"><h2>本周回顾</h2><p>先尝试用自己的话解释，再查看冻结依据。</p><a class="btn" href="/review">打开学习回顾</a></section>
+<details class="panel"><summary>高级学习与创作入口</summary><div class="cards">
   <a class="card" href="/knowledge-articles"><h3>生成知识文章</h3><p>从已有重点和笔记自动选题、写作与审校</p></a>
   <a class="card" href="/digests"><h3>单集精读</h3><p>一键生成与管理单源精读文与小红书笔记</p></a>
   <a class="card" href="/workbench"><h3>内容工作台</h3><p>管理内容品牌、选题与文章修订</p></a>
@@ -64,4 +69,5 @@
   <a class="btn btn-secondary" href="/creation/selections">管理素材选择</a>
 </section>
 {{end}}
+</details>
 {{end}}

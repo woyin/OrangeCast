@@ -49,6 +49,12 @@ func knowledgeStepResult(req provider.KnowledgeArticleRequest, reviewFail, final
 			ids = append(ids, m.ID)
 		}
 		return &provider.KnowledgeArticleResult{Topics: []provider.KnowledgeTopic{{Title: "怎样区分来源与个人理解", Question: "怎样避免把理解混同为原文？", Thesis: "先辨认来源，再清楚标识综合解释", Rationale: "已有来源整理与个人笔记", Outline: "来源、个人理解、综合应用", Score: 92, Sufficient: true, MaterialIDs: ids}}}
+	case "select":
+		topic := *req.Topic
+		for _, m := range req.Materials {
+			topic.Selection = append(topic.Selection, provider.KnowledgeSelection{MaterialID: m.ID, Selected: true, Role: "support", Reason: "与问题相关"})
+		}
+		return &provider.KnowledgeArticleResult{Topics: []provider.KnowledgeTopic{topic}}
 	case "write", "revise":
 		var source, note string
 		for _, m := range req.Materials {
@@ -77,7 +83,7 @@ func TestKnowledgeArticleRealTransportJourney(t *testing.T) {
 		status                              string
 		calls                               int
 	}{
-		{"ready", false, false, false, "ready", 3}, {"bounded-revision", true, false, false, "ready", 5}, {"needs-review", true, true, false, "needs_review", 5}, {"insufficient", false, false, true, "insufficient", 1},
+		{"ready", false, false, false, "ready", 4}, {"bounded-revision", true, false, false, "ready", 6}, {"needs-review", true, true, false, "needs_review", 6}, {"insufficient", false, false, true, "insufficient", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(t)
@@ -234,11 +240,11 @@ func TestKnowledgeArticleSchedulerFailureAndRetry(t *testing.T) {
 	if rec := postForm(t, srv, session, "/knowledge-articles/retry", "article_id="+records[0].ID); rec.Code != 303 {
 		t.Fatalf("retry: %d %s", rec.Code, rec.Body.String())
 	}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		srv.worker.ProcessOne(t.Context())
 	}
 	records, _ = srv.store.ListKnowledgeArticles(t.Context())
-	if records[0].Status != "ready" || fake.calls != 4 {
+	if records[0].Status != "ready" || fake.calls != 5 {
 		t.Fatalf("retry journey %+v calls=%d", records[0], fake.calls)
 	}
 	if rec := doWithCookie(srv, session, "GET", "/knowledge-articles"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "开启后台自动生成") {

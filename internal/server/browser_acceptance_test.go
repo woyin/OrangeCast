@@ -38,6 +38,20 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 	}
 	session := claimOwnerAndLogin(t, srv, browserAcceptanceEmail, browserAcceptancePassword)
 	fixture := seedBrowserAcceptanceFixture(t, srv, session)
+	_, _ = seedKnowledgeLearning(t, srv)
+	srv.cfg.PodBaseURL, srv.cfg.PodAPIKey, srv.cfg.PodModel = "https://example.test/v1", "test", "browser-text"
+	srv.worker.WithBundleResolver(func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
+		bundle := journeyLearningBundle()
+		if job.JobType == models.JobWeeklyReview {
+			bundle.KnowledgeArticle = &weeklyFake{}
+		} else {
+			bundle.KnowledgeArticle = &knowledgeStageFake{}
+		}
+		return bundle, nil
+	})
+	workerCtx, workerCancel := context.WithCancel(t.Context())
+	defer workerCancel()
+	go srv.worker.Run(workerCtx)
 
 	addr := os.Getenv("CWP_BROWSER_ADDR")
 	if addr == "" {

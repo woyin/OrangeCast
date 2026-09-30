@@ -52,6 +52,8 @@ const (
 	JobClaimRevision JobType = "claim_revision"
 	// JobKnowledgeArticle executes one durable automatic-article stage.
 	JobKnowledgeArticle JobType = "knowledge_article"
+	// JobWeeklyReview generates frozen explanation questions for one week.
+	JobWeeklyReview JobType = "weekly_review"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
