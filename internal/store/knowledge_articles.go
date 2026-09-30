@@ -25,15 +25,18 @@ type KnowledgeArticleSettings struct {
 
 // KnowledgeArticleRecord is a durable automatic article and its pipeline state.
 type KnowledgeArticleRecord struct {
+	WorkingRevision, PassedRevision                                                              int
+	ReviewModel                                                                                  string
 	ID, ProfileID, InputHash, InputJSON, Status, Stage, Title, Thesis                            string
 	TopicsJSON, TopicJSON, BlocksJSON, IssuesJSON, Reason, Provider, Model, CreatedAt, UpdatedAt string
 }
 
 // KnowledgeStageInput freezes the request and article identity for one queued stage.
 type KnowledgeStageInput struct {
-	ArticleID string                           `json:"article_id"`
-	Stage     string                           `json:"stage"`
-	Request   provider.KnowledgeArticleRequest `json:"request"`
+	ExpectedRevision *int                             `json:"expected_revision,omitempty"`
+	ArticleID        string                           `json:"article_id"`
+	Stage            string                           `json:"stage"`
+	Request          provider.KnowledgeArticleRequest `json:"request"`
 }
 
 // GetKnowledgeArticleSettings reads the singleton automatic-article policy.
@@ -58,7 +61,7 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 	if err != nil {
 		return provider.KnowledgeArticleRequest{}, "", err
 	}
-	req := provider.KnowledgeArticleRequest{Stage: "discover", Audience: prefs.Audience, Style: prefs.Style}
+	req := provider.KnowledgeArticleRequest{PromptVersion: provider.KnowledgeArticlePromptVersion, Stage: "discover", Audience: prefs.Audience, Style: prefs.Style}
 	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE quality_status IN ('ready','owner_confirmed') AND stale_at IS NULL AND evidence_status!='stale' AND production_status!='dismissed' ORDER BY created_at DESC,id LIMIT 40`)
 	if err != nil {
 		return req, "", err
@@ -130,6 +133,11 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 			return req, "", err
 		}
 		m := provider.KnowledgeMaterial{ID: n.ID, Kind: n.Kind, SourceType: n.SourceType, SourceID: n.SourceID, Version: n.Revision, Content: n.Content}
+		var anchor models.NoteAnchor
+		if json.Unmarshal([]byte(n.AnchorJSON), &anchor) == nil {
+			m.SnapshotID = anchor.SnapshotID
+			m.Position = anchor.Position
+		}
 		refs := n.CitationsJSON
 		if n.Kind == "owner_reflection" {
 			refs = n.ReferencesJSON
@@ -210,7 +218,12 @@ func (s *Store) prepareKnowledgeMaterial(ctx context.Context, profileID, name st
 	if len(m.Citations) == 0 {
 		return false, nil
 	}
-	snap, err := s.FreezeSourceSnapshot(ctx, st, m.SourceID)
+	var snap *models.SourceSnapshot
+	if m.SnapshotID != "" {
+		snap, err = s.GetSourceSnapshot(ctx, m.SnapshotID)
+	} else {
+		snap, err = s.FreezeSourceSnapshot(ctx, st, m.SourceID)
+	}
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -223,13 +236,13 @@ func (s *Store) prepareKnowledgeMaterial(ctx context.Context, profileID, name st
 	}
 	segs := map[string]string{}
 	for _, seg := range audio {
-		if len(m.Citations) > 0 && seg.ID == m.Citations[0] {
+		if m.Kind == "keypoint" && len(m.Citations) > 0 && seg.ID == m.Citations[0] {
 			m.Position = seg.Start
 		}
 		segs[seg.ID] = seg.Text
 	}
 	for _, seg := range docs {
-		if len(m.Citations) > 0 && seg.ID == m.Citations[0] {
+		if m.Kind == "keypoint" && len(m.Citations) > 0 && seg.ID == m.Citations[0] {
 			m.Position = float64(seg.Position)
 		}
 		segs[seg.ID] = seg.Text
@@ -256,14 +269,14 @@ func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name str
 			return err
 		}
 		if !usable {
-			return fmt.Errorf("材料来源已归档或不可用")
+			return fmt.Errorf("%w: 材料来源已归档或不可用", ErrConflict)
 		}
 		allowed, err := s.CanSendSourceToProvider(ctx, models.SourceType(m.SourceType), m.SourceID, name)
 		if err != nil {
 			return err
 		}
 		if !allowed {
-			return fmt.Errorf("材料策略已禁止发送至 %s", name)
+			return fmt.Errorf("%w: 材料策略已禁止发送至 %s", ErrConflict, name)
 		}
 		if m.Kind == "keypoint" {
 			kp, err := s.GetKeyPoint(ctx, m.ID)
@@ -275,7 +288,7 @@ func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name str
 				return err
 			}
 			if !eligible || kp.StaleAt != "" || kp.EvidenceStatus == "stale" || kp.ProductionStatus == models.KeyPointDismissed || (kp.QualityStatus != models.KeyPointReady && kp.QualityStatus != models.KeyPointOwnerConfirmed) || kp.Content != m.Content || kp.Description != m.Description || kp.CardVersion != m.Version {
-				return fmt.Errorf("重点已修改或失效，请基于新材料生成")
+				return fmt.Errorf("%w: 重点已修改或失效，请基于新材料生成", ErrConflict)
 			}
 		} else {
 			n, err := s.GetOwnerNote(ctx, m.ID)
@@ -283,12 +296,25 @@ func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name str
 				return err
 			}
 			if n.Revision != m.Version || n.Content != m.Content || n.Kind != m.Kind {
-				return fmt.Errorf("笔记已修改或删除，请基于新材料生成")
+				return fmt.Errorf("%w: 笔记已修改或删除，请基于新材料生成", ErrConflict)
 			}
 		}
 		if m.SnapshotID != "" {
-			if _, _, _, err := s.SnapshotContent(ctx, m.SnapshotID); err != nil {
+			snap, _, _, err := s.SnapshotContent(ctx, m.SnapshotID)
+			if err != nil {
 				return err
+			}
+			if snap.SourceID != m.SourceID || string(snap.SourceType) != m.SourceType {
+				return ErrConflict
+			}
+			if snap.Kind == models.SnapshotKindAudio {
+				current, err := s.GetCurrentVersion(ctx, snap.SourceType, snap.SourceID, KindTranscript)
+				if err != nil {
+					return err
+				}
+				if current.Version != snap.ContentVersion {
+					return fmt.Errorf("%w: 来源转录版本已变化，冻结依据仍可阅读但需重新审校", ErrConflict)
+				}
 			}
 		}
 	}
@@ -341,7 +367,7 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 	}
 	id := uuid.NewString()
 	input, _ := json.Marshal(req)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,provider,model,automated) VALUES(?,?,?,?,?,?,?)`, id, profileID, hash, string(input), name, model, automatic); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,provider,model,automated,review_model) VALUES(?,?,?,?,?,?,?,?)`, id, profileID, hash, string(input), name, model, automatic, req.ReviewModel); err != nil {
 		return nil, false, err
 	}
 	if err := enqueueKnowledgeStage(ctx, tx, id, "discover", name, model, req, automatic); err != nil {
@@ -356,16 +382,32 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 
 func enqueueKnowledgeStage(ctx context.Context, tx *sql.Tx, id, stage, name, model string, req provider.KnowledgeArticleRequest, automatic bool) error {
 	req.Stage = stage
-	input, _ := json.Marshal(KnowledgeStageInput{ArticleID: id, Stage: stage, Request: req})
-	_, err := tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,is_automated,intent_id,input_snapshot_json,config_version,configured_provider,configured_model) VALUES(?,?,?,?,'queued',?,?,?,?,?,?)`, uuid.NewString(), "knowledge_article", id, string(models.JobKnowledgeArticle), automatic, "knowledge-article:"+id+":"+stage, string(input), provider.KnowledgeArticlePromptVersion, name, model)
+	var revision int
+	if err := tx.QueryRowContext(ctx, `SELECT working_revision FROM knowledge_articles WHERE id=?`, id).Scan(&revision); err != nil {
+		return err
+	}
+	if (stage == "review" || stage == "review_final") && req.ReviewModel != "" {
+		model = req.ReviewModel
+	}
+	input, _ := json.Marshal(KnowledgeStageInput{ArticleID: id, Stage: stage, Request: req, ExpectedRevision: &revision})
+	version := req.PromptVersion
+	if version == "" {
+		version = "knowledge-article-v1"
+	}
+	jobID := uuid.NewString()
+	_, err := tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,is_automated,intent_id,input_snapshot_json,config_version,configured_provider,configured_model) VALUES(?,?,?,?,'queued',?,?,?,?,?,?)`, jobID, "knowledge_article", id, string(models.JobKnowledgeArticle), automatic, "knowledge-article:"+id+":"+stage, string(input), version, name, model)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO knowledge_article_runs(job_id,article_id,parent_revision,stage) VALUES(?,?,?,?)`, jobID, id, revision, stage)
 	return err
 }
 
-const knowledgeArticleColumns = `id,profile_id,input_hash,input_json,status,stage,title,thesis,topics_json,topic_json,blocks_json,issues_json,reason,provider,model,created_at,updated_at`
+const knowledgeArticleColumns = `id,profile_id,input_hash,input_json,status,stage,title,thesis,topics_json,topic_json,blocks_json,issues_json,reason,provider,model,created_at,updated_at,working_revision,passed_revision,review_model`
 
 func scanKnowledgeArticle(row interface{ Scan(...any) error }) (*KnowledgeArticleRecord, error) {
 	v := &KnowledgeArticleRecord{}
-	err := row.Scan(&v.ID, &v.ProfileID, &v.InputHash, &v.InputJSON, &v.Status, &v.Stage, &v.Title, &v.Thesis, &v.TopicsJSON, &v.TopicJSON, &v.BlocksJSON, &v.IssuesJSON, &v.Reason, &v.Provider, &v.Model, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.ProfileID, &v.InputHash, &v.InputJSON, &v.Status, &v.Stage, &v.Title, &v.Thesis, &v.TopicsJSON, &v.TopicJSON, &v.BlocksJSON, &v.IssuesJSON, &v.Reason, &v.Provider, &v.Model, &v.CreatedAt, &v.UpdatedAt, &v.WorkingRevision, &v.PassedRevision, &v.ReviewModel)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -493,19 +535,55 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 	if state == models.JobResultComplete {
 		return nil
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET status=?,stage=?,title=?,thesis=?,topics_json=?,topic_json=?,blocks_json=?,issues_json=?,reason=?,updated_at=datetime('now') WHERE id=? AND stage=?`, status, chooseStage(next, input.Stage), title, thesis, topics, topic, blocks, issues, reason, v.ID, input.Stage)
+	expected := v.WorkingRevision
+	if input.ExpectedRevision != nil {
+		expected = *input.ExpectedRevision
+	}
+	actualProvider, actualModel, promptVersion := v.Provider, v.Model, provider.KnowledgeArticlePromptVersion
+	if err := tx.QueryRowContext(ctx, `SELECT configured_provider,configured_model,config_version FROM processing_jobs WHERE id=?`, job.ID).Scan(&actualProvider, &actualModel, &promptVersion); err != nil {
+		return err
+	}
+	newRevision := v.WorkingRevision
+	if input.Stage == "write" || input.Stage == "revise" {
+		newRevision, err = appendKnowledgeRevision(ctx, tx, v.ID, expected, title, req, result.Blocks, "ai:"+job.ID, actualProvider, actualModel, promptVersion)
+		if err != nil {
+			return err
+		}
+	}
+	if (input.Stage == "review" || input.Stage == "review_final") && expected > 0 {
+		var fingerprint string
+		if err := tx.QueryRowContext(ctx, `SELECT content_hash FROM knowledge_article_revisions WHERE article_id=? AND revision=?`, v.ID, expected).Scan(&fingerprint); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO knowledge_article_reviews(id,article_id,revision,job_id,content_hash,passed,issues_json,provider,model,prompt_version) VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), v.ID, expected, job.ID, fingerprint, *result.Passed, issues, actualProvider, actualModel, promptVersion); err != nil {
+			return err
+		}
+	}
+	resultJSON, _ := json.Marshal(result)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_article_runs(job_id,article_id,parent_revision,stage,result_json) VALUES(?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET result_json=excluded.result_json`, job.ID, v.ID, expected, input.Stage, string(resultJSON)); err != nil {
+		return err
+	}
+	passedRevision := v.PassedRevision
+	if status == "ready" {
+		passedRevision = newRevision
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET status=?,stage=?,title=?,thesis=?,topics_json=?,topic_json=?,blocks_json=?,issues_json=?,reason=?,working_revision=?,passed_revision=?,updated_at=datetime('now') WHERE id=? AND stage=? AND working_revision=?`, status, chooseStage(next, input.Stage), title, thesis, topics, topic, blocks, issues, reason, newRevision, passedRevision, v.ID, input.Stage, expected)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("文章阶段已变化")
+		// A late result remains auditable, without selecting its body as working/passed.
+		if _, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET result_json=?,result_state='complete' WHERE id=?`, string(resultJSON), job.ID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
+
 	if next != "" {
 		if err := enqueueKnowledgeStage(ctx, tx, v.ID, next, v.Provider, v.Model, req, job.Automated); err != nil {
 			return err
 		}
 	}
-	resultJSON, _ := json.Marshal(result)
 	if _, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET result_json=?,result_state='complete' WHERE id=?`, string(resultJSON), job.ID); err != nil {
 		return err
 	}

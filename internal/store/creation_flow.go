@@ -1281,7 +1281,11 @@ func (s *Store) FindUsageBySource(ctx context.Context, sourceType models.SourceT
 		return nil, err
 	}
 	out = append(out, articles...)
-	return out, nil
+	automatic, err := s.KnowledgeMaterialUsages(ctx, string(sourceType), sourceID, "")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, automatic...), nil
 }
 
 // digestUsagesByNoteSource 列出笔记归属该来源的笔记所参与的精读。
@@ -1359,7 +1363,11 @@ func (s *Store) FindUsageByKeyPoint(ctx context.Context, keypointID string) ([]M
 		return nil, err
 	}
 	out = append(out, articles...)
-	return out, nil
+	automatic, err := s.KnowledgeMaterialUsages(ctx, "", "", keypointID)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, automatic...), nil
 }
 
 // FindUsageByNote 反查一条个人笔记被哪些精读与文章修订采用（R22）：
@@ -1381,7 +1389,11 @@ func (s *Store) FindUsageByNote(ctx context.Context, noteID string) ([]MaterialU
 	if err != nil {
 		return nil, err
 	}
-	return append(out, articles...), nil
+	automatic, err := s.KnowledgeMaterialUsages(ctx, "", "", noteID)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(out, articles...), automatic...), nil
 }
 
 // GetMaterialDiagnosis 读取一轮诊断（R13：候选提升与轮次页渲染）。

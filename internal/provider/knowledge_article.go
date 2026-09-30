@@ -10,7 +10,12 @@ import (
 )
 
 // KnowledgeArticlePromptVersion identifies the grounded automatic-article contract.
-const KnowledgeArticlePromptVersion = "knowledge-article-v1"
+const KnowledgeArticlePromptVersion = "knowledge-article-v2"
+
+// KnowledgeArticlePromptSupported preserves frozen v1 tasks through upgrades.
+func KnowledgeArticlePromptSupported(version string) bool {
+	return version == "knowledge-article-v1" || version == KnowledgeArticlePromptVersion
+}
 
 // KnowledgeMaterial is a frozen learning item with its original identity and evidence.
 type KnowledgeMaterial struct {
@@ -68,21 +73,25 @@ func (t *KnowledgeTopic) UnmarshalJSON(data []byte) error {
 
 // KnowledgeBlock is a grounded paragraph; kind keeps attribution visible.
 type KnowledgeBlock struct {
-	Kind        string   `json:"kind"` // source | reflection | synthesis
-	Text        string   `json:"text"`
-	MaterialIDs []string `json:"material_ids"`
+	Kind        string           `json:"kind"` // source | reflection | synthesis
+	Text        string           `json:"text"`
+	MaterialIDs []string         `json:"material_ids"`
+	Quotes      []KnowledgeQuote `json:"quotes,omitempty"`
 }
 
 // KnowledgeArticleRequest freezes the inputs to one independent model step.
 type KnowledgeArticleRequest struct {
-	Stage     string              `json:"stage"`
-	Audience  string              `json:"audience"`
-	Style     string              `json:"style"`
-	Materials []KnowledgeMaterial `json:"materials"`
-	History   []KnowledgeTopic    `json:"history,omitempty"`
-	Topic     *KnowledgeTopic     `json:"topic,omitempty"`
-	Blocks    []KnowledgeBlock    `json:"blocks,omitempty"`
-	Issues    []string            `json:"issues,omitempty"`
+	PromptVersion string              `json:"prompt_version,omitempty"`
+	ReviewModel   string              `json:"review_model,omitempty"`
+	Instructions  string              `json:"instructions,omitempty"`
+	Stage         string              `json:"stage"`
+	Audience      string              `json:"audience"`
+	Style         string              `json:"style"`
+	Materials     []KnowledgeMaterial `json:"materials"`
+	History       []KnowledgeTopic    `json:"history,omitempty"`
+	Topic         *KnowledgeTopic     `json:"topic,omitempty"`
+	Blocks        []KnowledgeBlock    `json:"blocks,omitempty"`
+	Issues        []string            `json:"issues,omitempty"`
 }
 
 // KnowledgeArticleResult carries typed topics, draft blocks, or a review verdict.
@@ -111,6 +120,13 @@ const knowledgeArticlePrompt = `你是个人知识文章助手。只使用提供
 
 // KnowledgeArticleStep runs through the existing OpenAI-compatible transport.
 func (o *OpenAIProvider) KnowledgeArticleStep(ctx context.Context, req KnowledgeArticleRequest) (*KnowledgeArticleResult, TaskUsage, error) {
+	instructions := knowledgeArticlePrompt
+	if req.PromptVersion == KnowledgeArticlePromptVersion {
+		instructions += "\n直接引语须另加 quotes:[{material_id,text}]，text 必须逐字来自该来源材料的证据，并在段落中出现；个人笔记不可作来源直接引语。修订时按 instructions 的明确要求修改，审校问题注明段落序号。"
+	}
+	if req.PromptVersion != "" && !KnowledgeArticlePromptSupported(req.PromptVersion) {
+		return nil, TaskUsage{}, fmt.Errorf("未知文章提示版本")
+	}
 	input, err := json.Marshal(req)
 	if err != nil {
 		return nil, TaskUsage{}, err
@@ -120,7 +136,7 @@ func (o *OpenAIProvider) KnowledgeArticleStep(ctx context.Context, req Knowledge
 		model = openaiAnalysisModel
 	}
 	data, retries, err := o.chatCompleteWithMeta(ctx, map[string]any{
-		"model": model, "instructions": knowledgeArticlePrompt, "input": string(input),
+		"model": model, "instructions": instructions, "input": string(input),
 		"max_completion_tokens": 8192,
 		"text":                  map[string]any{"format": map[string]any{"type": "json_object"}},
 	}, "knowledge_article_"+req.Stage)
@@ -254,6 +270,27 @@ func ValidateKnowledgeBlocks(title string, blocks []KnowledgeBlock, materials []
 		if b.Kind != "source" && b.Kind != "reflection" && b.Kind != "synthesis" {
 			return fmt.Errorf("未知段落身份")
 		}
+		for _, quote := range b.Quotes {
+			m, ok := ids[quote.MaterialID]
+			used := false
+			for _, id := range b.MaterialIDs {
+				if id == quote.MaterialID {
+					used = true
+				}
+			}
+			if !ok || !used || m.Kind == "owner_reflection" || strings.TrimSpace(quote.Text) == "" || !strings.Contains(b.Text, quote.Text) {
+				return fmt.Errorf("直接引语缺少来源身份或正文不含引语")
+			}
+			exact := false
+			for _, line := range strings.Split(m.Evidence, "\n") {
+				if end := strings.Index(line, "] "); end >= 0 && strings.Contains(line[end+2:], quote.Text) {
+					exact = true
+				}
+			}
+			if !exact {
+				return fmt.Errorf("直接引语未逐字匹配冻结原文")
+			}
+		}
 		for _, id := range b.MaterialIDs {
 			m, ok := ids[id]
 			if !ok {
@@ -300,4 +337,10 @@ func ValidateKnowledgeResult(req KnowledgeArticleRequest, result *KnowledgeArtic
 		return fmt.Errorf("未知自动文章阶段")
 	}
 	return nil
+}
+
+// KnowledgeQuote is an explicit direct quotation, checked against frozen evidence.
+type KnowledgeQuote struct {
+	MaterialID string `json:"material_id"`
+	Text       string `json:"text"`
 }

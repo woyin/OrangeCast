@@ -180,3 +180,20 @@ func TestKnowledgeResultWritingAndDuplicateIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestKnowledgeDirectQuotationContract(t *testing.T) {
+	materials := []KnowledgeMaterial{{ID: "source", Kind: "keypoint", Citations: []string{"seg-1"}, Evidence: "[seg-1] 保留来源上下文可以避免误读。"}, {ID: "note", Kind: "owner_reflection", Content: "我认为需要更多例子"}}
+	blocks := []KnowledgeBlock{{Kind: "source", Text: "来源说：保留来源上下文可以避免误读。", MaterialIDs: []string{"source"}, Quotes: []KnowledgeQuote{{MaterialID: "source", Text: "保留来源上下文可以避免误读。"}}}, {Kind: "reflection", Text: "我认为需要更多例子", MaterialIDs: []string{"note"}}}
+	if err := ValidateKnowledgeBlocks("引语核查", blocks, materials); err != nil {
+		t.Fatal(err)
+	}
+	blocks[0].Quotes[0].Text = "保证绝不会误读"
+	if err := ValidateKnowledgeBlocks("引语核查", blocks, materials); err == nil {
+		t.Fatal("fabricated quote accepted")
+	}
+	blocks[0].Quotes[0] = KnowledgeQuote{MaterialID: "note", Text: "我认为需要更多例子"}
+	blocks[0].Text = "我认为需要更多例子"
+	if err := ValidateKnowledgeBlocks("引语核查", blocks, materials); err == nil {
+		t.Fatal("reflection quoted as primary source")
+	}
+}

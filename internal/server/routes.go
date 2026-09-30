@@ -45,6 +45,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/knowledge-articles", srv.handleKnowledgeArticles)
 	mux.HandleFunc("/knowledge-articles/generate", srv.handleKnowledgeArticleGenerate)
 	mux.HandleFunc("/knowledge-articles/settings", srv.handleKnowledgeArticleSettings)
+	mux.HandleFunc("/knowledge-articles/action", srv.handleKnowledgeArticleAction)
 	mux.HandleFunc("/knowledge-articles/retry", srv.handleKnowledgeArticleRetry)
 	mux.HandleFunc("/knowledge-articles/", srv.handleKnowledgeArticleDetail)
 	mux.HandleFunc("/workbench", srv.handleWorkbench)

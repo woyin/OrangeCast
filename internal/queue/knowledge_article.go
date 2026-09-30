@@ -33,7 +33,7 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 	if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &input); err != nil {
 		return err
 	}
-	if input.ArticleID != job.SourceID || input.Stage != input.Request.Stage || exec.ConfigVersion != provider.KnowledgeArticlePromptVersion {
+	if input.ArticleID != job.SourceID || input.Stage != input.Request.Stage || !provider.KnowledgeArticlePromptSupported(exec.ConfigVersion) {
 		return fmt.Errorf("自动文章任务快照或提示词版本无效")
 	}
 	article, err := w.store.GetKnowledgeArticle(ctx, input.ArticleID)
@@ -52,6 +52,9 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 		if cp.InputHash != hash || cp.Provider != exec.ConfiguredProvider || cp.Model != exec.ConfiguredModel || cp.Version != exec.ConfigVersion || cp.Result == nil {
 			return fmt.Errorf("自动文章断点与冻结配置不匹配")
 		}
+	}
+	if cp.Result == nil && (article.Stage != input.Stage || (input.ExpectedRevision != nil && article.WorkingRevision != *input.ExpectedRevision)) {
+		return w.store.SaveJobResult(ctx, job.ID, `{"superseded":true}`, models.JobResultComplete)
 	}
 	if cp.Result == nil {
 		if exec.RemoteCallStarted {

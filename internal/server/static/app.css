@@ -235,3 +235,8 @@ pre, code, .digest-block, .workflow-item-body {
   overflow-wrap: break-word;
   word-break: break-word;
 }
+.article-paragraph {margin:1.8rem auto;max-width:760px;line-height:1.9;overflow-wrap:anywhere;}
+.article-evidence pre, .revision-diff pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+.revision-diff {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;}
+fieldset {min-width:0;margin:1rem 0;}fieldset textarea {width:100%;box-sizing:border-box;}
+@media(max-width:600px){.revision-diff{grid-template-columns:1fr;}}

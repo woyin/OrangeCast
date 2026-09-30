@@ -202,7 +202,7 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 			log.Printf("任务 %s 结果未知，阻断自动重执行（需人工确认）", job.ID)
 			w.finalizeJobBudgetOnFailure(ctx, job)
 			if job.JobType == models.JobKnowledgeArticle {
-				_ = w.store.FailKnowledgeArticle(ctx, job.SourceID, "远端结果未知，请显式重试")
+				_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, "远端结果未知，请显式重试")
 			}
 			return w.store.MarkJobFailed(ctx, job.ID, "远端结果未知（result_state=unknown），已阻止自动重执行；请人工确认后重新入队")
 		}
@@ -229,7 +229,7 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		log.Printf("任务 %s 处理失败: %v", job.ID, err)
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
 		if job.JobType == models.JobKnowledgeArticle {
-			_ = w.store.FailKnowledgeArticle(ctx, job.SourceID, err.Error())
+			_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, err.Error())
 		}
 		w.markSourceFailed(ctx, job)
 		w.finalizeJobBudgetOnFailure(ctx, job) // B02/B04：按结果已知性收尾预占

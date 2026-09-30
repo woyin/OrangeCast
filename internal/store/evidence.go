@@ -100,8 +100,8 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
-		`DELETE FROM processing_jobs WHERE source_type='knowledge_article' AND source_id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,
-		`DELETE FROM knowledge_articles WHERE id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,
+		`DELETE FROM processing_jobs WHERE source_type='knowledge_article' AND source_id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=? UNION SELECT article_id FROM knowledge_article_material_refs WHERE source_type=?1 AND source_id=?2)`,
+		`DELETE FROM knowledge_articles WHERE id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=? UNION SELECT article_id FROM knowledge_article_material_refs WHERE source_type=?1 AND source_id=?2)`,
 		`DELETE FROM owner_note_revisions WHERE source_type = ? AND source_id = ?`,
 		`DELETE FROM owner_notes WHERE source_type = ? AND source_id = ?`,
 		`DELETE FROM editorial_source_scopes WHERE source_type = ? AND source_id = ?`,

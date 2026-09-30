@@ -25,6 +25,7 @@ type Config struct {
 	OpenAIAPIKey         string
 	PodBaseURL           string // 自动知识文章的独立 OpenAI 兼容文本连接。
 	PodAPIKey            string
+	PodReviewModel       string
 	PodModel             string
 	PublicURL            string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
 	TrustedProxies       []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
@@ -42,14 +43,15 @@ type Config struct {
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
-		Port:          envOrDefault("PORT", "8080"),
-		SessionSecret: os.Getenv("SESSION_SECRET"),
-		GroqAPIKey:    os.Getenv("GROQ_API_KEY"),
-		OpenAIAPIKey:  os.Getenv("OPENAI_API_KEY"),
-		PodBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
-		PodAPIKey:     strings.TrimSpace(os.Getenv("POD_API_KEY")),
-		PodModel:      strings.TrimSpace(os.Getenv("POD_MODEL")),
-		PublicURL:     envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
+		Port:           envOrDefault("PORT", "8080"),
+		SessionSecret:  os.Getenv("SESSION_SECRET"),
+		GroqAPIKey:     os.Getenv("GROQ_API_KEY"),
+		OpenAIAPIKey:   os.Getenv("OPENAI_API_KEY"),
+		PodBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
+		PodAPIKey:      strings.TrimSpace(os.Getenv("POD_API_KEY")),
+		PodModel:       strings.TrimSpace(os.Getenv("POD_MODEL")),
+		PodReviewModel: strings.TrimSpace(os.Getenv("POD_REVIEW_MODEL")),
+		PublicURL:      envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
 	}
 	// 统一数据目录（ADR-0010）：DB/evidence/tmp/backups 全部落在 DATA_DIR 之下。
 	c.DataDir = envOrDefault("DATA_DIR", envOrDefault("DB_PATH_DIR", "./data"))
@@ -111,4 +113,12 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// KnowledgeReviewModel chooses the optional review model on the existing POD connection.
+func (c *Config) KnowledgeReviewModel() string {
+	if c.PodReviewModel != "" {
+		return c.PodReviewModel
+	}
+	return c.PodModel
 }

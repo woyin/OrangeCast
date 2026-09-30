@@ -105,7 +105,12 @@ func (srv *Server) handleNoteHistory(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	srv.tmpl.Render(w, "note_history.html", map[string]any{"Revisions": revisions})
+	usages, err := srv.store.KnowledgeMaterialUsages(r.Context(), "", "", parts[0])
+	if err != nil {
+		http.Error(w, "读取采用位置失败", 500)
+		return
+	}
+	srv.tmpl.Render(w, "note_history.html", map[string]any{"Revisions": revisions, "Usages": usages})
 }
 
 func (srv *Server) handleFrozenEvidence(w http.ResponseWriter, r *http.Request) {
