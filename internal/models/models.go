@@ -50,6 +50,8 @@ const (
 	// JobClaimRevision claim-aware AI 修订任务（R21）：基于原授权范围与审校反馈
 	// 修改现有修订，输出完整新正文 + 完整 ClaimMap。
 	JobClaimRevision JobType = "claim_revision"
+	// JobKnowledgeArticle executes one durable automatic-article stage.
+	JobKnowledgeArticle JobType = "knowledge_article"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

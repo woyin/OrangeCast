@@ -23,6 +23,9 @@ type Config struct {
 	TempDir              string // 临时文件目录（下载/转码中间产物）
 	GroqAPIKey           string
 	OpenAIAPIKey         string
+	PodBaseURL           string // 自动知识文章的独立 OpenAI 兼容文本连接。
+	PodAPIKey            string
+	PodModel             string
 	PublicURL            string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
 	TrustedProxies       []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
 	DataDir              string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
@@ -43,6 +46,9 @@ func Load() (*Config, error) {
 		SessionSecret: os.Getenv("SESSION_SECRET"),
 		GroqAPIKey:    os.Getenv("GROQ_API_KEY"),
 		OpenAIAPIKey:  os.Getenv("OPENAI_API_KEY"),
+		PodBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
+		PodAPIKey:     strings.TrimSpace(os.Getenv("POD_API_KEY")),
+		PodModel:      strings.TrimSpace(os.Getenv("POD_MODEL")),
 		PublicURL:     envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
 	}
 	// 统一数据目录（ADR-0010）：DB/evidence/tmp/backups 全部落在 DATA_DIR 之下。
@@ -65,6 +71,9 @@ func Load() (*Config, error) {
 
 	if c.SessionSecret == "" {
 		return nil, fmt.Errorf("SESSION_SECRET 必须设置")
+	}
+	if err := c.ValidatePod(); err != nil {
+		return nil, err
 	}
 	// 受信任代理：逗号分隔的 CIDR（如 127.0.0.1/32, 10.0.0.0/8）
 	if raw := os.Getenv("TRUSTED_PROXIES"); raw != "" {

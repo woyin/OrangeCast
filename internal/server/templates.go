@@ -37,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "knowledgeStatus": knowledgeStatus}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -113,4 +113,12 @@ func formatSeconds(sec float64) string {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func knowledgeStatus(status string) string {
+	labels := map[string]string{"discover": "寻找选题", "write": "正在写作", "review": "正在审校", "revise": "正在修订", "review_final": "再次审校", "ready": "已成稿", "needs_review": "需要人工处理", "insufficient": "材料不足", "failed": "处理失败"}
+	if label, ok := labels[status]; ok {
+		return label
+	}
+	return "待处理"
 }

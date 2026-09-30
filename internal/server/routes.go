@@ -42,6 +42,11 @@ func (srv *Server) registerPublicRoutes(mux *http.ServeMux) {
 func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
+	mux.HandleFunc("/knowledge-articles", srv.handleKnowledgeArticles)
+	mux.HandleFunc("/knowledge-articles/generate", srv.handleKnowledgeArticleGenerate)
+	mux.HandleFunc("/knowledge-articles/settings", srv.handleKnowledgeArticleSettings)
+	mux.HandleFunc("/knowledge-articles/retry", srv.handleKnowledgeArticleRetry)
+	mux.HandleFunc("/knowledge-articles/", srv.handleKnowledgeArticleDetail)
 	mux.HandleFunc("/workbench", srv.handleWorkbench)
 	mux.HandleFunc("/attention", srv.handleAttentionQueue)
 	mux.HandleFunc("/themes", srv.handleThemes)

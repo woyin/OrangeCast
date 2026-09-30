@@ -19,6 +19,9 @@ import (
 
 // runServe 启动 HTTP 服务（默认命令）。
 func runServe() {
+	if err := config.LoadEnvironmentFile(".env"); err != nil {
+		log.Fatalf("加载环境配置失败: %v", err)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("配置错误: %v", err)
@@ -38,6 +41,7 @@ func runServe() {
 
 	// provider 选择器 + worker + cron 刷新器
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
+	selector.WithPod(cfg.PodAPIKey, cfg.PodBaseURL, cfg.PodModel)
 	// 从 SQLite settings 覆盖 key/URL（可页面配置，ADR-0009 扩展）
 	if st, err := s.GetSettings(context.Background()); err == nil {
 		selector.ApplySettingsFrom(st)
@@ -64,6 +68,7 @@ func runServe() {
 		log.Fatalf("初始化 server: %v", err)
 	}
 	srv.StartAutomaticDiscovery(workerCtx)
+	srv.StartKnowledgeArticles(workerCtx)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.Port,

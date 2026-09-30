@@ -201,6 +201,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		case models.JobResultUnknown:
 			log.Printf("任务 %s 结果未知，阻断自动重执行（需人工确认）", job.ID)
 			w.finalizeJobBudgetOnFailure(ctx, job)
+			if job.JobType == models.JobKnowledgeArticle {
+				_ = w.store.FailKnowledgeArticle(ctx, job.SourceID, "远端结果未知，请显式重试")
+			}
 			return w.store.MarkJobFailed(ctx, job.ID, "远端结果未知（result_state=unknown），已阻止自动重执行；请人工确认后重新入队")
 		}
 	}
@@ -225,6 +228,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		}
 		log.Printf("任务 %s 处理失败: %v", job.ID, err)
 		_ = w.store.MarkJobFailed(ctx, job.ID, err.Error())
+		if job.JobType == models.JobKnowledgeArticle {
+			_ = w.store.FailKnowledgeArticle(ctx, job.SourceID, err.Error())
+		}
 		w.markSourceFailed(ctx, job)
 		w.finalizeJobBudgetOnFailure(ctx, job) // B02/B04：按结果已知性收尾预占
 		return nil                             // 已标记失败，不算周期错误
@@ -286,6 +292,8 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 40_000, 8_000
 	case "curator_brief":
 		return 60_000, 15_000
+	case "knowledge_article":
+		return 30_000, 8192
 	case "claim_writing", "claim_revision":
 		return 100_000, 30_000
 	case "digest_rewrite":
@@ -298,7 +306,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision, models.JobKnowledgeArticle:
 	default:
 		return nil
 	}
@@ -329,7 +337,13 @@ func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64)
 
 // settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
 func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
-	_, actual := w.jobReceiptUsage(ctx, job.ID)
+	known, actual := w.jobReceiptUsage(ctx, job.ID)
+	if job.JobType == models.JobKnowledgeArticle && known == 0 {
+		if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.RemoteCallStarted {
+			_ = w.store.MarkBudgetPendingRemote(ctx, job.ID)
+			return
+		}
+	}
 	if err := w.store.SettleBudget(ctx, job.ID, actual); err != nil && !errors.Is(err, store.ErrNotFound) {
 		log.Printf("任务 %s 预算结算失败: %v", job.ID, err)
 	}
@@ -405,6 +419,8 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return err
 	}
 	switch job.JobType {
+	case models.JobKnowledgeArticle:
+		return w.doKnowledgeArticle(ctx, job, bundle)
 	case models.JobTranscribe:
 		return w.doTranscribe(ctx, job, bundle)
 	case models.JobAnalyze:

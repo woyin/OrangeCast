@@ -1,0 +1,12 @@
+{{define "title"}}{{if .Article.Title}}{{.Article.Title}}{{else}}生成知识文章{{end}} · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>{{if .Article.Title}}{{.Article.Title}}{{else}}正在寻找文章方向{{end}}</h1><a class="btn btn-secondary" href="/knowledge-articles">全部知识文章</a></div>
+<p class="meta">状态：{{with .Article.Status}}{{knowledgeStatus .}}{{else}}尚未加载{{end}} · 模型：{{.Article.Model}}</p>
+{{with .Article.Reason}}<p class="error">{{.}}</p>{{end}}
+{{if eq .Article.Status "ready"}}<a class="btn" href="/knowledge-articles/{{.Article.ID}}/download">下载 Markdown</a>{{end}}
+{{if eq .Article.Status "failed"}}<form method="post" action="/knowledge-articles/retry"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="article_id" value="{{.Article.ID}}"><button class="btn" type="submit">重试失败阶段</button></form>{{end}}
+{{if or (eq .Article.Status "discover") (eq .Article.Status "write") (eq .Article.Status "review") (eq .Article.Status "revise") (eq .Article.Status "review_final")}}<p>后台正在处理，关闭页面不会取消。页面每5秒刷新状态。</p><script>setTimeout(function(){window.location.reload();},5000);</script>{{end}}
+{{with .Issues}}<section class="panel"><h2>审校发现</h2><ul>{{range .}}<li>{{.}}</li>{{end}}</ul></section>{{end}}
+{{with .Topics}}<details class="panel" style="margin:1rem 0"><summary>选题与材料判断</summary>{{range .}}<h3>{{.Title}}</h3><p>{{.Question}}</p><p>{{.Rationale}}</p><p class="meta">评分 {{.Score}} · {{if .Sufficient}}材料充分{{else}}材料不足{{end}}</p>{{with .Missing}}<ul>{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}{{end}}</details>{{end}}
+{{range .Blocks}}<section class="panel" style="margin:1rem 0"><p class="meta">{{.Kind}}</p><div style="overflow-wrap:anywhere">{{.RichHTML}}</div><p class="meta">{{range .Links}}<a href="{{.Href}}" target="_blank" rel="noopener">{{.Label}} · 查看依据</a> {{end}}</p></section>{{end}}
+{{end}}

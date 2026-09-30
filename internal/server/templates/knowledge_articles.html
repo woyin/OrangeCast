@@ -1,0 +1,19 @@
+{{define "title"}}知识文章 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>知识文章</h1><a class="btn btn-secondary" href="/podcasts">继续学习</a></div>
+<p>从已有重点和笔记自动寻找值得写的问题，生成有来源、可回看依据的知识文章。</p>
+{{if .Available}}<p class="meta">AI 配置：.env · {{.Model}}</p>{{else}}<p class="error">请在 .env 配置 POD_BASE_URL、POD_API_KEY、POD_MODEL 并重启服务。</p>{{end}}
+<form method="post" action="/knowledge-articles/generate"><input type="hidden" name="_csrf" value="{{.CSRF}}"><button class="btn" type="submit" {{if not .Available}}disabled{{end}}>从已有重点和笔记生成文章</button></form>
+<details class="panel" style="margin:1rem 0"><summary>自动生成与文章偏好</summary>
+<form method="post" action="/knowledge-articles/settings" class="subform">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<label><input type="checkbox" name="enabled" {{if .Settings.Enabled}}checked{{end}}>开启后台自动生成</label>
+<label>每天最多生成几篇 <input name="daily_limit" type="number" min="1" max="10" value="{{.Settings.DailyLimit}}" required></label>
+<label>素材更新后等待（分钟）<input name="debounce_minutes" type="number" min="0" max="1440" value="{{.Settings.DebounceMinutes}}" required></label>
+<label>目标读者 <input name="audience" value="{{.Settings.Audience}}" maxlength="500" required></label>
+<label>文章风格 <textarea name="style" rows="3" maxlength="2000" required>{{.Settings.Style}}</textarea></label>
+<p class="meta">每5分钟检查一次。相同材料不重复生成；立即生成可跳过等待。已有月预算和价格配置继续生效。</p>
+<button class="btn" type="submit">保存偏好</button>
+</form></details>
+{{range .Articles}}<article class="card" style="margin:1rem 0"><h2><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}正在寻找文章方向{{end}}</a></h2><p class="meta">{{knowledgeStatus .Status}} · {{.Model}} · <span data-utc="{{.CreatedAt}}">{{.CreatedAt}}</span></p>{{if .Thesis}}<p>{{.Thesis}}</p>{{end}}{{if .Reason}}<p>{{.Reason}}</p>{{end}}</article>{{else}}<p class="empty">暂无知识文章。已有两项可用重点或笔记后，即可开始生成。</p>{{end}}
+{{end}}

@@ -1,8 +1,8 @@
 # CloudWisePod
 
-> 单 Owner、自托管、证据优先的播客内容生产工作台。
+> 单 Owner、自托管的播客学习与知识文章工作空间。
 
-把播客与文档转化为可核验素材，在统一 KeyPoint Inbox 中策展，由 Scout、Curator、Writer、EvidenceReviewer 和 StyleEditor 协作生成可交付的微信公众号内容包。学习与回听能力继续保留，但不再是产品终点。
+把播客与文档转化为可回听、可检索的学习重点与个人笔记，再自动发现选题、写作与审校知识文章。需要承担个人主张和制作发布包时，继续使用现有创作工作台。
 
 ---
 
@@ -22,6 +22,15 @@
 - **标注 / 收藏 / 集合**：对任意 Citation 加个人标注、收藏、归入跨 Source 主题集合
 - **知识图谱**：KeyPoint 粒度的力导向可视化——同一集合的要点成簇，文本相似度建议跨 Episode 关联
 - **版本历史**：查看 Transcript / KnowledgeCard 的全部不可变版本，一键回退
+
+### 自动知识文章
+
+- **存量素材选题**：从已就绪重点、来源笔记和个人反思中寻找文章方向；支持单集、上传与文档。
+- **自动成稿**：一次触发后后台选题、写作、独立审校，必要时最多修订一次；关闭页面后继续。
+- **明确归因**：来源整理、个人笔记与 AI 综合分开显示，来源链接由程序生成；不自动承担个人主张。
+- **可控自动化**：`/knowledge-articles` 可立即生成或开启后台自动生成；默认每天最多一篇，素材更新等待30分钟。
+- **独立 AI 配置**：读取 `.env` 的 `POD_BASE_URL`、`POD_API_KEY`、`POD_MODEL`，不会覆盖转录和学习模型。
+- **恢复与导出**：同一输入复用结果、按阶段恢复、失败可重试；通过审校的文章可下载 Markdown。
 
 ### 内容生产
 
@@ -58,6 +67,8 @@
 - ffmpeg（音频转码，适配 Groq Whisper 上传限制）
 - Groq API key（https://console.groq.com/keys，免费）
 - Kokoro TTS（可选，仅 Narration 解说音轨需要；未安装时 Narration 自动跳过、不影响其他功能）
+
+直接启动二进制也会读取当前目录 `.env`（已有进程环境变量优先）。`POD_*` 必须三项同时填写；已有月预算时，需要在内容工作台的模型价格表中登记 `pod` Provider 对应模型的价格。
 
 ### 本地运行
 
@@ -103,6 +114,9 @@ docker compose up -d
 |---|---|---|---|
 | `SESSION_SECRET` | ✅ | 会话密钥，`openssl rand -hex 32` | — |
 | `GROQ_API_KEY` | ✅ | Groq API key（默认零成本 Provider） | — |
+| `POD_BASE_URL` | 否 | 自动知识文章的 OpenAI 兼容基础地址（含 `/v1` 等路径） | — |
+| `POD_API_KEY` | 否 | 自动知识文章的独立密钥 | — |
+| `POD_MODEL` | 否 | 自动知识文章使用的文本模型 | — |
 | `OPENAI_API_KEY` | 否 | OpenAI key；仅按单次任务显式授权使用 | — |
 | `PORT` | 否 | 监听端口 | 8080 |
 | `DATA_DIR` | 否 | 统一数据目录（DB/evidence/tmp/backups） | ./data |
@@ -163,7 +177,7 @@ cmd/cloudwisepod/        入口（serve / backup / restore）
 internal/
   config/                环境变量 + DATA_DIR 布局
   store/                 SQLite + FTS5 + 迁移系统 + 全部仓储
-    migrations/          有序 SQL 迁移（0001–0024）
+    migrations/          有序 SQL 迁移（0001–0056）
   auth/                  argon2id 密码 + cookie session + CSRF + 限流
   models/                领域类型
   provider/              Groq/OpenAI 实现 + Citation 校验 + Highlight

@@ -12,17 +12,24 @@ import (
 // Selector 按 Provider 名称构造 provider bundle。
 // key 和 baseURL 可在运行时从 SQLite settings 覆盖（ADR-0009 扩展）。
 type Selector struct {
-	groqAPIKey    string
-	groqBaseURL   string
-	openaiAPIKey  string
-	openaiBaseURL string
-	narration     NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
+	groqAPIKey                      string
+	groqBaseURL                     string
+	openaiAPIKey                    string
+	openaiBaseURL                   string
+	podAPIKey, podBaseURL, podModel string
+	narration                       NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
 }
 
 // NewSelector 构造一个 Selector，初始 key 来自环境变量；URL/baseURL 留空走各 Provider 默认。
 // 调用 ApplySettings / ApplySettingsFrom 在运行时用 SQLite settings 覆盖 key/URL。
 func NewSelector(groqAPIKey, openaiAPIKey string) *Selector {
 	return &Selector{groqAPIKey: groqAPIKey, openaiAPIKey: openaiAPIKey}
+}
+
+// WithPod configures an independent text-only automatic-article connection.
+func (sel *Selector) WithPod(key, baseURL, model string) *Selector {
+	sel.podAPIKey, sel.podBaseURL, sel.podModel = key, baseURL, model
+	return sel
 }
 
 // WithNarration 注入 Narration Provider（自托管 Kokoro，独立于 groq/openai 切换）。
@@ -78,6 +85,13 @@ func (sel *Selector) ApplySettingsFrom(st *models.Settings) {
 // Bundle 按 provider 名返回对应的全套实现。
 func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 	switch activeProvider {
+	case "pod":
+		if sel.podAPIKey == "" || sel.podBaseURL == "" || sel.podModel == "" {
+			return nil, fmt.Errorf("自动文章 POD_* 配置不完整")
+		}
+		p := NewOpenAIProvider(sel.podAPIKey).WithBaseURL(sel.podBaseURL).WithModel(sel.podModel)
+		p.providerName = "pod"
+		return &ProviderBundle{KnowledgeArticle: p}, nil
 	case "openai":
 		if sel.openaiAPIKey == "" {
 			return nil, fmt.Errorf("active_provider=openai 但 OPENAI_API_KEY 未配置")
@@ -129,6 +143,11 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 	bundle, err := sel.Bundle(tc.Provider)
 	if err != nil {
 		return nil, err
+	}
+	if tc.Provider == "pod" && tc.Model != "" {
+		if p, ok := bundle.KnowledgeArticle.(*OpenAIProvider); ok {
+			bundle.KnowledgeArticle = p.WithModel(tc.Model)
+		}
 	}
 	if tc.Model != "" {
 		switch tc.Provider {

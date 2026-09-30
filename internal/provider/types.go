@@ -286,6 +286,7 @@ type StyleEditorProvider interface {
 
 // ProviderBundle 一个 provider 的全套实现。
 type ProviderBundle struct {
+	KnowledgeArticle KnowledgeArticleProvider
 	Transcription    TranscriptionProvider
 	Analysis         AnalysisProvider
 	QA               QAProvider

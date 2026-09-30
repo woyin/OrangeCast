@@ -23,6 +23,7 @@ type OpenAIProvider struct {
 	apiKey        string
 	baseURL       string // 空则用默认
 	analysisModel string // 空则用默认
+	providerName  string
 }
 
 const (
@@ -38,16 +39,25 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 }
 
 // Name 返回 Provider 标识（"openai"）。
-func (o *OpenAIProvider) Name() string { return "openai" }
+func (o *OpenAIProvider) Name() string {
+	if o.providerName != "" {
+		return o.providerName
+	}
+	return "openai"
+}
 
 // WithBaseURL 返回指向自定义 base URL 的新实例（测试/兼容 API 用）。
 func (o *OpenAIProvider) WithBaseURL(url string) *OpenAIProvider {
-	return &OpenAIProvider{apiKey: o.apiKey, baseURL: url, analysisModel: o.analysisModel}
+	clone := *o
+	clone.baseURL = url
+	return &clone
 }
 
 // WithModel 返回使用指定分析模型的新实例。
 func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
-	return &OpenAIProvider{apiKey: o.apiKey, baseURL: o.baseURL, analysisModel: model}
+	clone := *o
+	clone.analysisModel = model
+	return &clone
 }
 
 // chatComplete 发送一次 POST /chat/completions，返回合成后的响应体。
@@ -88,6 +98,9 @@ func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[s
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
 		},
+	}
+	if limit, ok := payload["max_completion_tokens"]; ok {
+		chatPayload["max_completion_tokens"] = limit
 	}
 	buf, _ := json.Marshal(chatPayload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bURL+"/chat/completions", bytes.NewReader(buf))
