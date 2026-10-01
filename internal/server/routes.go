@@ -133,6 +133,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/review/action", srv.handleLearningReviewAction)
 	mux.HandleFunc("/notes", srv.handleNotes)
 	mux.HandleFunc("/search", srv.handleSearch)
+	mux.HandleFunc("/search/settings", srv.handleKnowledgeSearchSettings)
 	mux.HandleFunc("/keypoints", srv.handleKeyPoints)
 	mux.HandleFunc("/graph", srv.handleGraph)
 	mux.HandleFunc("/api/graph", srv.handleGraphAPI)

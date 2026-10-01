@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -99,6 +100,24 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 		}
 		srv.store.MarkJobRunning(t.Context(), batch.JobID)
 		srv.store.MarkJobSucceeded(t.Context(), batch.JobID)
+	}
+	if os.Getenv("CWP_BROWSER_STAGE") == "p10" {
+		embeddingStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var input struct {
+				Input []string `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				http.Error(w, "invalid", 400)
+				return
+			}
+			data := make([]map[string]any, len(input.Input))
+			for i := range data {
+				data[i] = map[string]any{"index": i, "embedding": []float64{1, 0}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"model": "browser-vector", "data": data, "usage": map[string]int{"prompt_tokens": 31, "total_tokens": 31}})
+		}))
+		t.Cleanup(embeddingStub.Close)
+		srv.selector.WithEmbedding("test-only-embedding", embeddingStub.URL, "browser-vector", 0)
 	}
 	workerCtx, workerCancel := context.WithCancel(t.Context())
 	defer workerCancel()

@@ -10,7 +10,7 @@
 <form method="post" action="/api/knowledge-semantic" id="semantic-retry-form" hidden><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="job_id"><input type="hidden" name="expected_revision"><input type="hidden" name="request_key" value="{{runRequestKey}}"><label id="semantic-unknown-confirm" hidden><input type="checkbox" name="allow_unknown" value="1">我已核对远端调用，同意重新发送，可能再次计费</label><button type="submit">明确恢复任务</button><p aria-live="polite"></p></form>
 {{else}}<p>索引尚无可用的授权材料；查询不会外发，本次继续使用FTS。</p>{{end}}
 <p id="semantic-search-status" aria-live="polite">{{if .SemanticReady}}当前查询向量已准备。{{else}}尚无有效查询缓存。{{end}}</p><a id="semantic-use-results" href="" {{if not .SemanticReady}}hidden{{end}}>使用已准备的语义结果</a> <a id="semantic-job-link" href="/automation/{{.SemanticJobID}}" {{if not .SemanticJobID}}hidden{{end}}>查看任务与费用</a>
-</section>{{else}}<p class="meta">语义索引默认关闭；可在搜索设置中明确配置与开启。</p>{{end}}
+</section>{{else}}<p class="meta">语义索引默认关闭；可在<a href="/search/settings">搜索设置</a>查看连接与验收状态。</p>{{end}}
 {{if eq .Retrieval.Method "rrf"}}<p class="meta">{{.Retrieval.Coverage}} 当前筛选范围已索引 {{.Retrieval.IndexedCount}} 个对象 / {{.Retrieval.IndexedWindows}} 个窗口；语义候选最多 {{.Retrieval.CandidateLimit}}，词项命中总数 {{.Retrieval.LexicalTotal}}。</p>{{end}}
 {{if .Retrieval.Degradation}}<p class="meta">{{.Retrieval.Degradation}}</p>{{end}}
 <p class="meta">{{.Total}} 条结果 · 第 {{.Page}} 页</p>{{range .Results}}<article class="search-hit"><p class="meta">{{.Label}} · {{.Hit.Visibility}} · {{.Hit.CreatedAt}}</p><h2><a href="{{.Href}}">{{.Hit.Title}}</a></h2><p class="snippet">{{.Hit.Snippet}}</p><p class="meta">{{.Hit.Reason}}</p></article>{{else}}<p class="empty">无匹配结果。可以减少关键词或切换内容范围。</p>{{end}}

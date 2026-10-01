@@ -156,3 +156,49 @@ func TestKnowledgeQueryEmbeddingHTTPGetDoesNotCallOrWrite(t *testing.T) {
 		}
 	}
 }
+
+func TestKnowledgeSearchSettingsReadonlyAndExplicitPreflight(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "embedding-settings@example.com", "password123")
+	page := doWithCookie(srv, cookie, "GET", "/search/settings")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "独立 embedding 连接尚未配置") {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	calls := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+	defer remote.Close()
+	srv.selector.WithEmbedding("secret-sentinel", remote.URL, "vector", 0)
+	var before, after int
+	if err := srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	page = doWithCookie(srv, cookie, "GET", "/search/settings")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "明确预检连接") || strings.Contains(page.Body.String(), remote.URL) || strings.Contains(page.Body.String(), "secret-sentinel") {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	if err := srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after); err != nil || before != after || calls != 0 {
+		t.Fatal("settings GET mutated or called provider", before, after, calls, err)
+	}
+	key := uuid.NewString()
+	body := `{"action":"preflight","request_key":"` + key + `"}`
+	for _, csrf := range []bool{false, true, true} {
+		result := semanticPost(srv, cookie, body, csrf)
+		if !csrf {
+			if result.Code != http.StatusForbidden {
+				t.Fatal(result.Code)
+			}
+			continue
+		}
+		if result.Code != 200 {
+			t.Fatal(result.Code, result.Body.String())
+		}
+	}
+	result := doWithCookie(srv, cookie, "GET", "/api/knowledge-semantic?request_action=preflight&request_key="+key)
+	if result.Code != 200 {
+		t.Fatal(result.Code, result.Body.String())
+	}
+	var count int
+	if err := srv.store.DB.QueryRow(`SELECT COUNT(*) FROM processing_jobs WHERE job_type='knowledge_embedding'`).Scan(&count); err != nil || count != 1 || calls != 0 {
+		t.Fatal(count, calls, err)
+	}
+}

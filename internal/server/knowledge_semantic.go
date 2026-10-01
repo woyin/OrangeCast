@@ -73,6 +73,8 @@ func (srv *Server) handleKnowledgeSemantic(w http.ResponseWriter, r *http.Reques
 			var jobID sql.NullString
 			if r.URL.Query().Get("request_action") == "query" {
 				err = srv.store.DB.QueryRowContext(r.Context(), `SELECT job_id FROM knowledge_query_requests WHERE request_key=?`, key).Scan(&jobID)
+			} else if r.URL.Query().Get("request_action") == "preflight" {
+				err = srv.store.DB.QueryRowContext(r.Context(), `SELECT job_id FROM knowledge_embedding_requests WHERE request_key=?`, "preflight:"+key).Scan(&jobID)
 			} else if r.URL.Query().Get("request_action") == "retry" {
 				err = srv.store.DB.QueryRowContext(r.Context(), `SELECT job_id FROM knowledge_embedding_requests WHERE request_key=?`, "retry:"+key).Scan(&jobID)
 			} else {
@@ -103,6 +105,13 @@ func (srv *Server) handleKnowledgeSemantic(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		switch command.Action {
+		case "preflight":
+			client, e := srv.selector.Embedding()
+			if e != nil {
+				semanticHTTPError(w, e)
+				return
+			}
+			job, _, err = srv.store.ReserveKnowledgeEmbeddingPreflight(r.Context(), command.RequestKey, client.Config())
 		case "query":
 			cfg, e := srv.currentKnowledgeEmbeddingConfig(r.Context(), command.ConfigID)
 			if e != nil {

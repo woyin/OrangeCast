@@ -1,0 +1,11 @@
+{{define "title"}}搜索设置 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>搜索设置</h1><p><a href="/search">返回搜索</a></p>
+<p>FTS 始终可用。语义索引默认关闭；预检只发送固定测试短句，成功后登记连接和实际维度，不自动开启索引。</p>
+<p>容量上限：{{.Capacity}} 个完整窗口，向量最多 {{.MaxDimensions}} 维。质量与目标机性能验收尚未完成，开启入口暂不提供。</p>
+{{with .Connection}}<section id="embedding-settings" class="panel"><h2>独立语义连接</h2><p>模型：{{.Model}} · 连接身份：{{.Provider}}</p>
+<form id="embedding-preflight-form" method="post" action="/api/knowledge-semantic"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="request_key" value="{{runRequestKey}}"><button type="submit">明确预检连接（可能计费）</button><p aria-live="polite"></p></form><a id="embedding-preflight-job" hidden>查看任务、恢复操作与费用</a></section>
+{{else}}<p>独立 embedding 连接尚未配置。需同时设置 LEARNING_EMBEDDING_BASE_URL、LEARNING_EMBEDDING_API_KEY、LEARNING_EMBEDDING_MODEL。密钥只保留在服务端配置中。</p>{{end}}
+{{range .Statuses}}<section class="panel"><h2>已测量配置</h2><p>模型 {{.Config.Model}} · {{.Config.Dimensions}} 维 · {{if .Config.Enabled}}索引已授权{{else}}索引关闭{{end}} · 配置版本 {{.Config.Revision}}</p><p>已索引 {{.IndexedWindows}} 个窗口，待更新 {{.PendingObjects}} 个对象，完整段落超过输入容量而跳过 {{.SkippedObjects}} 个对象。{{if .CapacityBlocked}}容量阻断，继续使用 FTS。{{end}}</p><h3>明确选择的来源范围</h3>{{range .Sources}}<p><a href="/sources/{{.SourceType}}/{{.SourceID}}">{{.SourceType}} · {{.SourceID}}</a></p>{{else}}<p>尚未选择来源。</p>{{end}}</section>{{end}}
+<p>价格未知不等于免费；实际供应商用量、冻结估价与预算状态见各任务记录。月预算可在<a href="/settings">设置</a>中核对。</p>
+{{end}}
