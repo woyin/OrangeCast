@@ -56,6 +56,14 @@ type Worker struct {
 	rawAudioFor func(context.Context, *models.ProcessingJob) (string, func(), error)
 	// taskConfigFor 解析任务的 Provider/Model 配置（B04 预算检查使用）。
 	taskConfigFor func(*models.ProcessingJob) (provider.TaskConfig, error)
+	// localExport applies the export result with its own transactional control recheck.
+	localExport func(context.Context, *models.ProcessingJob) error
+}
+
+// WithLearningExporter installs the local bundle assembler; it cannot enable model calls.
+func (w *Worker) WithLearningExporter(assemble func(context.Context, *models.ProcessingJob) error) *Worker {
+	w.localExport = assemble
+	return w
 }
 
 // NewWorker 构造一个 worker。tempDir 存放下载数据与转码中间产物；evidenceDir 持久保存
@@ -521,6 +529,15 @@ func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
 
 // processJob 执行一个已领取任务（不处理终态写回）。
 func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) error {
+	if job.JobType == models.JobLearningExport {
+		if err := w.store.CheckRunControl(ctx, job.ID); err != nil {
+			return err
+		}
+		if w.localExport == nil {
+			return fmt.Errorf("学习成果导出执行器未配置")
+		}
+		return w.localExport(ctx, job)
+	}
 	// A paid response can be applied without an API key, a new budget hold or a
 	// reachable endpoint. Validate its identity in the transcription module.
 	if job.JobType == models.JobTranscribe {

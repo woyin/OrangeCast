@@ -15,6 +15,23 @@ import (
 // ErrRunControlled blocks new calls and application, while preserving response facts.
 var ErrRunControlled = errors.New("Owner已暂停方向或请求停止；原调用、响应和用量保留")
 
+// LearningRunLanes lists durable learning categories shared by filtering and the control panel.
+func LearningRunLanes() []string {
+	return []string{"knowledge", "updates", "review", "voice", "study", "index", "export"}
+}
+
+func validRunLane(lane string) bool {
+	if lane == "" {
+		return true
+	}
+	for _, known := range LearningRunLanes() {
+		if lane == known {
+			return true
+		}
+	}
+	return false
+}
+
 // RunControl is the Owner's persistent admission decision, independent of execution state.
 type RunControl struct {
 	Kind, Target, Reason, UpdatedAt string
@@ -185,7 +202,7 @@ func (s *Store) ListRuns(ctx context.Context, status, lane string, offset int) (
 	if offset < 0 || offset > 1000000 {
 		return nil, false, ErrInvalidEditorialState
 	}
-	if lane != "" && lane != "knowledge" && lane != "updates" && lane != "review" && lane != "voice" {
+	if !validRunLane(lane) {
 		return nil, false, ErrInvalidEditorialState
 	}
 	switch status {

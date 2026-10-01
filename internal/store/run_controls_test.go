@@ -225,18 +225,9 @@ func TestRunMetadataCostsPaginationAndInvalidControls(t *testing.T) {
 }
 
 func TestRunControlsSurviveReopenAndUpgradeOldJobs(t *testing.T) {
-	s, _, _, _ := knowledgeStoreFixture(t)
+	s, path := historicalTestStore(t, 68)
 	ctx := t.Context()
 	id := seedRun(t, s, "restart", `{"stage":"update_propose","request":{"update":{"proposal_id":"old"}}}`)
-	var seq int
-	var name, path string
-	s.DB.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path)
-	// Reconstruct 0068 schema and verify migration backfills recorded lanes only.
-	for _, sql := range []string{`DROP TRIGGER run_control_admission`, `DROP TRIGGER run_control_lane`, `DROP TABLE run_control_actions`, `DROP TABLE run_controls`, `DROP INDEX run_control_claim`, `ALTER TABLE processing_jobs DROP COLUMN run_lane`, `ALTER TABLE processing_jobs DROP COLUMN priority`, `ALTER TABLE processing_jobs DROP COLUMN stop_requested`, `ALTER TABLE processing_jobs DROP COLUMN control_revision`, `DELETE FROM schema_migrations WHERE version=69`} {
-		if _, e := s.DB.Exec(sql); e != nil {
-			t.Fatal(e)
-		}
-	}
 	s.Close()
 	up, err := Open(path)
 	if err != nil {

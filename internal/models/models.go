@@ -54,6 +54,12 @@ const (
 	JobKnowledgeArticle JobType = "knowledge_article"
 	// JobWeeklyReview generates frozen explanation questions for one week.
 	JobWeeklyReview JobType = "weekly_review"
+	// JobQuestionStudy executes a frozen study generation or review stage.
+	JobQuestionStudy JobType = "question_study"
+	// JobKnowledgeEmbedding prepares a versioned content or query embedding.
+	JobKnowledgeEmbedding JobType = "knowledge_embedding"
+	// JobLearningExport assembles a local learning bundle without a model.
+	JobLearningExport JobType = "learning_export"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed

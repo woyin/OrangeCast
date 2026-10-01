@@ -31,6 +31,15 @@ func runHref(v store.RunRecord) string {
 		return "/review"
 	case "voice":
 		return "/voice-notes"
+	case "study":
+		if v.SourceType == "question_study" {
+			return "/questions/" + url.PathEscape(v.SourceID) + "/study"
+		}
+		return "/automation/" + url.PathEscape(v.ID)
+	case "index":
+		return "/search"
+	case "export":
+		return "/learning-exports"
 	}
 	return "/progress"
 }
@@ -70,7 +79,7 @@ func (srv *Server) handleAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var controls []store.RunControl
-	for _, lane := range []string{"knowledge", "updates", "review", "voice"} {
+	for _, lane := range store.LearningRunLanes() {
 		c, e := srv.store.GetRunControl(r.Context(), "lane", lane)
 		if e != nil {
 			http.Error(w, "无法读取控制状态", 500)
