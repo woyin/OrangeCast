@@ -454,3 +454,42 @@ func TestKnowledgeQueryEmbeddingLateEpochKeepsUsageButNoCache(t *testing.T) {
 		t.Fatal("late query applied to changed scope", err)
 	}
 }
+
+func TestKnowledgeEmbeddingInvalidVectorPreservesPaidReceipt(t *testing.T) {
+	s, w, job, cfg, calls := embeddingJobFixture(t, func(resp http.ResponseWriter, req *http.Request, _ int) {
+		var body struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		data := make([]map[string]any, len(body.Input))
+		for i := range data {
+			data[i] = map[string]any{"index": i, "embedding": []float64{1}}
+		}
+		_ = json.NewEncoder(resp).Encode(map[string]any{"model": "vector", "data": data, "usage": map[string]int{"prompt_tokens": 31, "total_tokens": 31}})
+	})
+	if err := w.ProcessOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.GetJob(t.Context(), job.ID)
+	if err != nil || failed.Status != models.StatusFailed {
+		t.Fatal(failed, err)
+	}
+	assertEmbeddingReceipt(t, s, job.ID, true)
+	usage, _ := s.ListRunUsage(t.Context(), job.ID)
+	if usage[0].InputUnits != 31 {
+		t.Fatal(usage)
+	}
+	ex, _ := s.GetJobExecution(t.Context(), job.ID)
+	status, err := s.KnowledgeEmbeddingStatus(t.Context(), cfg.ID)
+	if err != nil || ex.CheckpointJSON != "" || status.IndexedWindows != 0 {
+		t.Fatal(ex, status, err)
+	}
+	if err = w.ScheduleKnowledgeEmbeddings(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ProcessOne(t.Context()); err != nil || calls.Load() != 1 {
+		t.Fatal("invalid paid response automatically retried", err, calls.Load())
+	}
+}

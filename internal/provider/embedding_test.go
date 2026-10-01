@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -136,5 +137,24 @@ func TestEmbeddingBoundsAndUnknownUsage(t *testing.T) {
 		if _, err = NewEmbeddingClient("key", url, "vector", 1); err == nil {
 			t.Fatal("unsafe endpoint")
 		}
+	}
+}
+
+func TestEmbeddingInvalidVectorPreservesUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"model":"vector","data":[{"index":0,"embedding":[1]}],"usage":{"prompt_tokens":31,"total_tokens":31}}`)
+	}))
+	defer srv.Close()
+	p, err := NewEmbeddingClient("secret-sentinel", srv.URL, "vector", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.Embed(context.Background(), []string{"材料"})
+	var responseErr *EmbeddingResponseError
+	if result != nil || !errors.As(err, &responseErr) || responseErr.Receipt.InputTokens != 31 || !responseErr.Receipt.UsageKnown || len(responseErr.Receipt.Vectors) != 0 {
+		t.Fatalf("invalid response lost paid facts: result=%+v err=%v", result, err)
+	}
+	if strings.Contains(err.Error(), "secret-sentinel") || strings.Contains(err.Error(), srv.URL) {
+		t.Fatal("unsafe error")
 	}
 }

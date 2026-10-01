@@ -102,7 +102,23 @@ func embeddingInputs(inputs []string) error {
 }
 
 // Embed only runs when explicitly called by preflight or an admitted persistent job.
-func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (*EmbeddingResult, error) {
+// EmbeddingResponseError preserves supplier-reported numeric usage when the
+// returned vectors are unusable. It never retains response bodies or vectors.
+type EmbeddingResponseError struct {
+	Cause   error
+	Receipt *EmbeddingResult
+}
+
+func (e *EmbeddingResponseError) Error() string { return e.Cause.Error() }
+func (e *EmbeddingResponseError) Unwrap() error { return e.Cause }
+
+func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *EmbeddingResult, err error) {
+	var receipt *EmbeddingResult
+	defer func() {
+		if err != nil && receipt != nil {
+			err = &EmbeddingResponseError{Cause: err, Receipt: receipt}
+		}
+	}()
 	if err := embeddingInputs(inputs); err != nil {
 		return nil, err
 	}
@@ -145,7 +161,13 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (*Embeddin
 			Total  *int `json:"total_tokens"`
 		} `json:"usage"`
 	}
-	if json.Unmarshal(raw, &wire) != nil || len(wire.Data) != len(inputs) || wire.Model != p.model {
+	if json.Unmarshal(raw, &wire) != nil {
+		return nil, errors.New("invalid embedding response JSON")
+	}
+	if wire.Model == p.model && wire.Usage != nil && wire.Usage.Prompt != nil && wire.Usage.Total != nil && *wire.Usage.Prompt >= 0 && *wire.Usage.Total == *wire.Usage.Prompt {
+		receipt = &EmbeddingResult{Model: p.model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
+	}
+	if len(wire.Data) != len(inputs) || wire.Model != p.model {
 		return nil, errors.New("invalid embedding response identity or batch")
 	}
 	result := &EmbeddingResult{Vectors: make([][]float32, len(inputs)), Model: wire.Model}

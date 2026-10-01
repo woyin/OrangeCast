@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,6 +86,18 @@ func (w *Worker) doKnowledgeEmbedding(ctx context.Context, job *models.Processin
 		}
 		result, err := p.Embed(ctx, in.Inputs())
 		if err != nil {
+			var responseErr *provider.EmbeddingResponseError
+			if errors.As(err, &responseErr) {
+				saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				origin := in.OriginJobID
+				if origin == "" {
+					origin = job.ID
+				}
+				if receiptErr := w.store.RecordEmbeddingReceipt(saveCtx, origin, in, responseErr.Receipt); receiptErr != nil {
+					return fmt.Errorf("embedding响应不可用且实际用量未持久化；不能自动重发")
+				}
+			}
 			return err
 		}
 		cp = embeddingCheckpoint{Version: in.Version, JobID: job.ID, InputFingerprint: fingerprint, Result: result}
