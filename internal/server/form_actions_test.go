@@ -37,3 +37,23 @@ func TestAutomationFormsPreserveReasonAndOnlyPollVisibleStatus(t *testing.T) {
 		t.Fatal(e, string(out))
 	}
 }
+
+func TestKnowledgeGenerationPreservesListeningNavigationAndScope(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, e := exec.Command(node, filepath.Join("testdata", "knowledge-generation.cjs")).CombinedOutput(); e != nil {
+		t.Fatal(e, string(out))
+	}
+}
+
+func TestVoiceRecoveredDraftOpensEditorWithoutPaidRequest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, e := exec.Command(node, filepath.Join("testdata", "voice-recovery.cjs")).CombinedOutput(); e != nil {
+		t.Fatal(e, string(out))
+	}
+}

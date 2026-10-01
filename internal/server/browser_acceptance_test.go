@@ -80,7 +80,7 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if os.Getenv("CWP_BROWSER_STAGE") == "p7" || os.Getenv("CWP_BROWSER_STAGE") == "p8" {
+	if os.Getenv("CWP_BROWSER_STAGE") == "p7" || os.Getenv("CWP_BROWSER_STAGE") == "p8" || os.Getenv("CWP_BROWSER_STAGE") == "p9" {
 		profile, err := srv.store.EnsureDefaultEditorialProfile(t.Context())
 		if err != nil {
 			t.Fatal(err)

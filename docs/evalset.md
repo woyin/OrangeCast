@@ -93,3 +93,18 @@ go test ./internal/store -run '^$' -bench '^BenchmarkKnowledgeWideRecall$' -benc
 ```
 
 该基准为1万/5万合成投影、100%词项命中、最多200项元数据，包含来源外发策略过滤；不评估文章语义质量。实际运行见第三轮验收记录。
+
+### 私人录音真实接口技术检查（P9）
+
+下列入口默认跳过，显式启用后会向既有音频连接发送一段自建中文短音频。当前工具使用macOS `say`与ffmpeg合成样本；它验证真实ASR、草稿编辑、响应断点和用量契约，不代表Owner麦克风或手机验收。
+
+```bash
+CWP_VOICE_LIVE=1 \
+CWP_VOICE_SETTINGS_DB=/absolute/path/to/data/cloudwisepod.db \
+CWP_VOICE_LIVE_REPORT=/private/path/asr-report \
+go test ./internal/server -run '^TestVoiceLiveAcceptance$' -count=1 -v -timeout 3m
+```
+
+该测试从指定既有数据库以`mode=ro`读取站内转录连接，在独立测试数据库执行，不修改默认库，也不复制密钥进入测试库。已有月预算时读取用量与预占，按剩余额度和确切音频价格准入；旧结构没有预算字段时明确记录该事实，不伪造已设预算。此入口验证站内配置回退；语音专用`.env`配置契约另由config/queue测试覆盖。
+
+私有目录保存自建音频和脱敏报告，`human`保持缺省，实际价格未知继续标记未知。2026-10-01实测Groq `whisper-large-v3`技术通过：5.3289375秒、3个预期用语命中、Owner文字保留、1条receipt及响应断点。真实语音质量仍需不同设备、噪声和自然表达样本；当前结果只适用于这一次样本和连接。

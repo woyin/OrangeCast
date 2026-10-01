@@ -233,6 +233,15 @@ func (srv *Server) handleKnowledgeArticleGenerate(w http.ResponseWriter, r *http
 		http.Error(w, "方法不允许", 405)
 		return
 	}
+	if !srv.cfg.PodAvailable() {
+		message := "请在 .env 配置 POD_BASE_URL、POD_API_KEY、POD_MODEL 并重启"
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			http.Error(w, message, 400)
+		} else {
+			srv.renderKnowledgeArticles(w, r, 400, message, "generate")
+		}
+		return
+	}
 	profile, err := srv.store.EnsureDefaultEditorialProfile(r.Context())
 	if err != nil {
 		http.Error(w, "读取默认文章偏好失败", 500)
@@ -247,7 +256,16 @@ func (srv *Server) handleKnowledgeArticleGenerate(w http.ResponseWriter, r *http
 	scope.MaterialIDs = r.Form["material"]
 	article, _, err := srv.enqueueKnowledgeArticleScope(r.Context(), profile.ID, false, scope)
 	if err != nil {
-		srv.renderKnowledgeArticles(w, r, 400, err.Error(), "generate")
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			http.Error(w, runPublicError(err.Error()), 400)
+		} else {
+			srv.renderKnowledgeArticles(w, r, 400, err.Error(), "generate")
+		}
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"redirect": "/knowledge-articles/" + article.ID})
 		return
 	}
 	http.Redirect(w, r, "/knowledge-articles/"+article.ID, http.StatusSeeOther)

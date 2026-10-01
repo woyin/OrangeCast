@@ -10,6 +10,7 @@
 DATA_DIR/
 ├── cloudwisepod.db     # SQLite 数据库
 ├── evidence/           # 持久 EvidenceAudio（播放/引用只依赖它）
+├── voice-notes/        # 私有录音（目录0700，文件0600，鉴权下载）
 ├── tmp/                # 下载/转码中间产物
 └── backups/            # 备份输出目录（CLI 写入）
 ```
@@ -21,8 +22,11 @@ DATA_DIR/
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `SESSION_SECRET` | ✅ | 会话密钥，`openssl rand -hex 32` |
-| `GROQ_API_KEY` | ✅ | 默认零成本 Provider（ADR-0009） |
+| `GROQ_API_KEY` | ✅ | 默认转录 Provider（ADR-0009） |
 | `OPENAI_API_KEY` | 否 | 仅按单次任务显式授权时使用 |
+| `POD_BASE_URL` / `POD_API_KEY` / `POD_MODEL` | 否 | 自动文章文本连接，三项齐全才可用；阶段模型配置见[README](../README.md#配置) |
+| `VOICE_ASR_PROVIDER` / `VOICE_ASR_MODEL` | 否 | groq/openai音频转录选择；缺省沿用站内设置 |
+| `VOICE_ASR_BASE_URL` / `VOICE_ASR_API_KEY` | 否 | 独立音频连接须成对配置，POD文本端点不能替代 |
 | `DATA_DIR` | 否 | 统一数据目录（默认 `./data`） |
 | `PORT` | 否 | 监听端口（默认 8080） |
 | `PUBLIC_URL` | ✅（公网） | 公网 https URL；决定 Secure Cookie 与 Markdown Citation 链接 |
@@ -82,6 +86,16 @@ TLS 由 Caddy 或 Nginx 终止（ADR-0013：CloudWisePod 不管理证书）。
 
 公网部署必须设置 `PUBLIC_URL=https://cwp.example.com`，并把代理地址加入 `TRUSTED_PROXIES`（否则登录限流按错误 IP 计，Secure Cookie 也不会启用）。
 
+## 手机录音与个人任务
+
+手机通过实际HTTPS地址访问并授予麦克风权限；局域网HTTP地址不能当作已验收的录音部署。需要浏览器提供MediaRecorder，以及服务端ffmpeg/ffprobe。设置`PUBLIC_URL`并不能代替TLS反向代理。
+
+原音、私人录音与生成的解说音轨分别保存。`voice-notes`不映射为公开静态目录，录音下载保留登录校验；私有文件纳入数据卷。环境配置改变后重启，旧任务冻结的模型或端点不匹配时需处理阻断，不会隐式改用别的连接。
+
+新方向发现、文章更新和每周题目生成的自动开关独立且默认关闭。Owner在界面明确启用；暂停类别/方向仍在重启后保留。任务面板说明已知响应、未知结果、预算和恢复动作。停止运行任务不能保证供应商停止计费。
+
+文本价格使用确切provider/model；音频价格使用每分钟美元分。有月预算而无确切音频估价时阻止调用；未知实际费用继续显示未知，不当作零。手机真机记录模板见[综合验收报告](acceptance/2026-10-personal-learning-v3.md)。
+
 ## Docker（单一持久卷）
 
 ```bash
@@ -94,7 +108,7 @@ docker compose up -d
 ## 备份与恢复（CLI）
 
 ```bash
-# 备份（一致性 SQLite 快照 + EvidenceAudio + manifest；不含 API key/Session secret）
+# 备份（一致性 SQLite 快照 + EvidenceAudio + 明确保留的私有录音 + manifest）
 ./cloudwisepod backup /backup/cwp-2026-08-01.tar.gz
 
 # 恢复到全新目录（默认目标必须为空）
@@ -104,7 +118,11 @@ DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz
 DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz --force
 ```
 
-恢复会校验 manifest 格式版本、数据库 SHA256 与每个证据文件的 SHA256；校验失败不会污染目标目录。
+当前备份格式为v2，增加已保存且明确保留的私有录音，继续恢复v1。清单校验路径、长度及SHA256；恢复录音文件为0600。临时草稿录音不进入备份，草稿文字仍随数据库保存；缺失录音不制造可播放状态。校验失败不会污染目标目录。
+
+备份数据库包含settings中的Provider API key，因此备份包是敏感文件；manifest不包含密钥，不能据此认为整个包不含密钥。使用私有权限及加密通道传输。SESSION_SECRET由新实例另行配置或生成。
+
+升级前备份并先在独立目录恢复验证，再以新程序升级该副本。需要回退时恢复升级前完整备份及对应程序，旧程序不能直接读取0069结构。来源彻底删除会清理队列/问题/回顾关系并安排私人录音清理，已经发生的用量仍保留。
 
 ## 首次启动
 

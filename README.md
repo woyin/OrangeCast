@@ -34,13 +34,17 @@
 
 ### 个人听学与回顾
 
-- **可靠续听**：原音与 DJ 分别保存进度，支持倍速、±15秒、睡眠定时和媒体控制。
+- **连续收听**：主要学习页面切换保留播放；持久队列支持排序、续听和显式连播。原音与 DJ 分别保存进度，支持倍速、±15秒、睡眠定时和媒体控制。
 - **随听笔记**：自动捕获来源快照与位置，区分来源笔记和我的理解，保留修订与冲突草稿。
 - **统一搜索与首页**：优先继续听、最近笔记、新文章和待处理，统一找回原文、文档、重点与文章段落。
 - **多方向文章**：从新材料召回历史笔记，分别保存候选、选材、修订与审校；工作稿保留旧通过版。
-- **每周解释回顾**：独立开关和时区，最多5题，答后展示依据，显式保存个人理解。
+- **学习问题**：明确记录问题、目标与进展，确认材料关联，围绕当时的问题版本生成文章。
+- **文章增量更新**：新材料形成更新提案，接受后修订同一篇文章，旧通过版继续可读。
+- **私有语音笔记**：冻结实际播放位置，录音转成独立建议；编辑不会被转写覆盖，明确保存才成为笔记。
+- **每日与每周回顾**：每周生成最多5题；日常短会话复用已有题目，个人自评安排1/3/7/14个日历日后再看。
+- **任务与成本**：查看冻结模型、材料和费用状态，持久暂停类别/方向、停止任务及调整排队优先级。
 
-详见[使用说明](docs/personal-learning-v2.md)与[本轮验收记录](docs/superpowers/plans/2026-10-01-personal-learning-and-knowledge-articles-v2-validation.md)。
+详见[第三轮使用说明](docs/personal-learning-v3.md)、[开发与验证记录](docs/superpowers/plans/2026-10-01-personal-learning-and-knowledge-articles-v3-validation.md)和[综合验收报告](docs/acceptance/2026-10-personal-learning-v3.md)。真实个人笔记质量与手机后台体验仍待验证。
 
 ### 内容生产
 
@@ -75,7 +79,7 @@
 
 - Go 1.25+
 - ffmpeg（音频转码，适配 Groq Whisper 上传限制）
-- Groq API key（https://console.groq.com/keys，免费）
+- Groq API key（https://console.groq.com/keys）
 - Kokoro TTS（可选，仅 Narration 解说音轨需要；未安装时 Narration 自动跳过、不影响其他功能）
 
 直接启动二进制也会读取当前目录 `.env`（已有进程环境变量优先）。`POD_*` 必须三项同时填写；已有月预算时，需要在内容工作台的模型价格表中登记 `pod` Provider 对应模型的价格。
@@ -109,7 +113,7 @@ docker run -d --name orangecast --restart unless-stopped \
   ghcr.io/woyin/orangecast:latest
 ```
 
-`/app/data` 单一持久卷承载全部数据（数据库 + EvidenceAudio + 临时文件 + 备份）。
+`/app/data` 单一持久卷承载全部数据（数据库 + EvidenceAudio + 私有录音 + 临时文件 + 备份）。
 
 ```bash
 # 或用 Compose 从源码构建
@@ -123,7 +127,7 @@ docker compose up -d
 | 变量 | 必填 | 说明 | 默认 |
 |---|---|---|---|
 | `SESSION_SECRET` | ✅ | 会话密钥，`openssl rand -hex 32` | — |
-| `GROQ_API_KEY` | ✅ | Groq API key（默认零成本 Provider） | — |
+| `GROQ_API_KEY` | ✅ | Groq API key（默认转录 Provider） | — |
 | `POD_BASE_URL` | 否 | 自动知识文章的 OpenAI 兼容基础地址（含 `/v1` 等路径） | — |
 | `POD_API_KEY` | 否 | 自动知识文章的独立密钥 | — |
 | `POD_MODEL` | 否 | 自动知识文章使用的文本模型 | — |
@@ -132,9 +136,11 @@ docker compose up -d
 | `POD_SELECTION_MODEL` | 否 | 检索后选材模型 | `POD_MODEL` |
 | `POD_WRITE_MODEL` | 否 | 写作及定向修订模型 | `POD_MODEL` |
 | `POD_LEARNING_REVIEW_MODEL` | 否 | 学习回顾模型 | `POD_MODEL` |
+| `VOICE_ASR_PROVIDER` / `VOICE_ASR_MODEL` | 否 | 个人语音转录选择；支持 groq/openai，未设沿用站内转录配置 | 站内转录配置 |
+| `VOICE_ASR_BASE_URL` / `VOICE_ASR_API_KEY` | 否 | 独立音频连接，成对填写，不能复用 POD 文本端点 | — |
 | `OPENAI_API_KEY` | 否 | OpenAI key；仅按单次任务显式授权使用 | — |
 | `PORT` | 否 | 监听端口 | 8080 |
-| `DATA_DIR` | 否 | 统一数据目录（DB/evidence/tmp/backups） | ./data |
+| `DATA_DIR` | 否 | 统一数据目录（DB/evidence/voice-notes/tmp/backups） | ./data |
 | `PUBLIC_URL` | 否 | 公网 URL；决定 Secure Cookie 与 Citation 链接 | http://localhost:8080 |
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
@@ -156,7 +162,7 @@ cloudwisepod tts-check --output /tmp/a.wav # 预检 + 真实合成试听
 ## 备份与恢复
 
 ```bash
-# 备份（一致性快照 + 证据音频 + manifest）
+# 备份（一致性快照 + 证据音频 + 明确保留的私人录音 + manifest）
 ./cloudwisepod backup /path/backup.tar.gz
 
 # 恢复到全新目录
@@ -166,7 +172,7 @@ DATA_DIR=/new/instance ./cloudwisepod restore /path/backup.tar.gz
 DATA_DIR=/new/instance ./cloudwisepod restore /path/backup.tar.gz --force
 ```
 
-恢复会校验 manifest 格式版本、数据库 SHA256 与每个证据文件的 SHA256。
+新备份为 v2，包含已保存笔记且明确保留的私人录音，恢复仍兼容旧 v1。恢复校验数据库及音频的长度、SHA256和清单路径，私有录音保持0600权限。临时未保存录音不进入长期备份；恢复后文字与历史锚点仍在，缺失音频明确提示。Narration音轨仍不进入备份。
 
 ### 跨机器迁移
 
@@ -192,7 +198,7 @@ cmd/cloudwisepod/        入口（serve / backup / restore）
 internal/
   config/                环境变量 + DATA_DIR 布局
   store/                 SQLite + FTS5 + 迁移系统 + 全部仓储
-    migrations/          有序 SQL 迁移（0001–0056）
+    migrations/          有序 SQL 迁移（0001–0069）
   auth/                  argon2id 密码 + cookie session + CSRF + 限流
   models/                领域类型
   provider/              Groq/OpenAI 实现 + Citation 校验 + Highlight
