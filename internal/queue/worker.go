@@ -192,6 +192,9 @@ func (w *Worker) Run(ctx context.Context) {
 	if err := w.CleanupVoiceFiles(ctx); err != nil {
 		log.Printf("清理语音草稿失败: %v", err)
 	}
+	if err := w.store.ExpireListeningReflections(ctx, time.Now()); err != nil {
+		log.Printf("清理听后整理草稿失败: %v", err)
+	}
 	// 恢复中断的 Purge（文件删除 + DB 删除，ADR-0012）
 	if err := w.ResumePurges(ctx); err != nil {
 		log.Printf("启动恢复 Purge 失败: %v", err)
@@ -205,6 +208,9 @@ func (w *Worker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-cleanupTicker.C:
+			if err := w.store.ExpireListeningReflections(ctx, time.Now()); err != nil {
+				log.Printf("清理听后整理草稿失败: %v", err)
+			}
 			if err := w.CleanupVoiceFiles(ctx); err != nil {
 				log.Printf("清理语音草稿失败: %v", err)
 			}

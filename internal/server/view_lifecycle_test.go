@@ -49,7 +49,7 @@ func TestLogoutClearsPersistentListeningDraftDOMAndStorage(t *testing.T) {
 const nodes=new Map();class Element extends EventTarget{constructor(){super();this.value='';this.textContent='';this.hidden=false;this.paused=true;this.currentTime=0;this.duration=120;this.playbackRate=1;this.dataset={};}append(){}appendChild(){}removeAttribute(){}load(){}pause(){this.paused=true;}play(){this.paused=false;return Promise.resolve();}focus(){}querySelector(){return new Element();}}
 globalThis.document={createElement:()=>new Element(),getElementById:id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},querySelector:()=>null,addEventListener:()=>{},removeEventListener:()=>{}};
 const values=new Map();const storage={get length(){return values.size},key:i=>Array.from(values.keys())[i],getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};globalThis.localStorage=storage;globalThis.sessionStorage=storage;
-globalThis.location={pathname:'/dashboard'};globalThis.fetch=async()=>({ok:true,json:async()=>({})});globalThis.setInterval=()=>1;globalThis.clearInterval=()=>{};globalThis.addEventListener=()=>{};globalThis.removeEventListener=()=>{};Object.defineProperty(globalThis,'navigator',{value:{mediaSession:{setActionHandler:()=>{}}},configurable:true});
+const privateEvents={};globalThis.location={pathname:'/dashboard'};globalThis.fetch=async()=>({ok:true,json:async()=>({})});globalThis.setInterval=()=>1;globalThis.clearInterval=()=>{};globalThis.addEventListener=(name,fn)=>{privateEvents[name]=fn;};globalThis.removeEventListener=()=>{};Object.defineProperty(globalThis,'navigator',{value:{mediaSession:{setActionHandler:()=>{}}},configurable:true});
 `
 	for _, name := range []string{"private-state.js", "playback-controller.js", "listening-session.js"} {
 		source, err := os.ReadFile(filepath.Join("static", name))
@@ -62,6 +62,8 @@ globalThis.location={pathname:'/dashboard'};globalThis.fetch=async()=>({ok:true,
 (async()=>{CWPListening.install({title:'私有播放标题',sourceType:'episode',sourceId:'s',mode:'original',planId:'',planVersion:0,audioSHA:'sha',audioURL:'/private-audio',csrf:'test',snapshot:'snapshot',snapshotVersion:1,segments:[],items:[]});
 nodes.get('listening-note-content').value='未保存的私有笔记';CWPListening.captureNote();assert.equal(nodes.get('listening-note-form').hidden,false);assert(values.size>0);
 CWPPrivate.clear();await Promise.resolve();await Promise.resolve();assert.equal(CWPListening.state().spec,null);assert.equal(nodes.get('listening-title').textContent,'');assert.equal(nodes.get('listening-note-content').value,'');assert.equal(nodes.get('listening-note-form').hidden,true);assert.equal(values.size,0);assert.equal(navigator.mediaSession.metadata,null);
+CWPListening.install({title:'另一窗口退出前的播放',sourceType:'episode',sourceId:'s',mode:'original',planId:'',planVersion:0,audioSHA:'sha',audioURL:'/private-audio',csrf:'test',snapshot:'snapshot',snapshotVersion:1,segments:[],items:[]});
+privateEvents.storage({key:'cwp-private-reset',newValue:'other-tab'});assert.equal(CWPListening.state().spec,null);assert.equal(values.size,0,'cross-tab clear does not leave or rebroadcast a reset key');
 })().catch(error=>{console.error(error);process.exitCode=1});`
 	file := filepath.Join(t.TempDir(), "private-state-test.js")
 	if err = os.WriteFile(file, []byte(harness), 0600); err != nil {

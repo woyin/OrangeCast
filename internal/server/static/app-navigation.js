@@ -4,8 +4,8 @@
  const allowed=/^\/(?:dashboard|automation(?:\/[^/]+)?|voice-notes|listening-reflections(?:\/[^/]+)?|podcasts(?:\/[^/]+)?|sources\/(?:episode|upload)\/[^/]+(?:\/dj)?|search|notes(?:\/[^/]+\/history)?|questions(?:\/[^/]+)?|knowledge-updates(?:\/[^/]+)?|knowledge-articles(?:\/[^/]+(?:\/revisions\/[^/]+)?)?|review(?:\/daily)?|listening-queue|documents(?:\/[^/]+)?|uploads)$/;
  let seq=0,pending=null,expired=false;
  const feedback=document.getElementById('navigation-feedback');
- const privateClear=()=>root.CWPPrivate.clear();
- function expire(){if(expired)return;expired=true;++seq;pending?.abort();root.CWPViews.unmount();root.CWPListening.stop();privateClear();document.getElementById('page-view').replaceChildren();feedback.hidden=false;feedback.textContent='登录已失效，收听已停止。';root.location.assign('/login');}
+ const privateClear=(broadcast=true)=>root.CWPPrivate.clear(broadcast);
+ function expire(broadcast=true){if(expired)return;expired=true;++seq;pending?.abort();root.CWPViews.unmount();root.CWPListening.stop();privateClear(broadcast);document.getElementById('page-view').replaceChildren();feedback.hidden=false;feedback.textContent='登录已失效，收听已停止。';root.location.assign('/login');}
  function rememberScroll(){history.replaceState({...history.state,cwp:true,scroll:[root.scrollX,root.scrollY]},'',location.href);}
  function fail(url,error){feedback.hidden=false;feedback.replaceChildren();const text=document.createElement('span');text.textContent='页面未切换，当前收听继续。'+error.message+' ';const retry=document.createElement('button');retry.type='button';retry.textContent='重试';retry.onclick=()=>visit(url);const full=document.createElement('a');full.href=url;full.dataset.fullNavigation='1';full.textContent='完整打开（会离开当前播放器）';feedback.append(text,retry,full);}
  async function visit(value,options={}){

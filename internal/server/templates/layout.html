@@ -52,7 +52,7 @@
 <label>我还不确定什么<textarea id="reflection-uncertain" name="uncertain" rows="3" maxlength="12000"></textarea></label>
 <label>我准备如何使用<textarea id="reflection-apply" name="apply" rows="3" maxlength="12000"></textarea></label>
 <button id="reflection-save" type="submit">保存为一条个人理解笔记</button><button id="reflection-sync" type="button">同步草稿</button><button id="reflection-hide" type="button">收起并保留草稿</button><button id="reflection-cancel" type="button">丢弃整理草稿</button>
-<p id="reflection-feedback" aria-live="polite"></p>
+<p id="reflection-feedback" aria-live="polite"></p><button id="reflection-reload" type="button">核对并读取服务器版本（保留本地文字副本）</button><details id="reflection-conflict" hidden><summary>冲突前的本地文字（可复制，未自动采用）</summary><textarea id="reflection-conflict-text" readonly rows="5" aria-label="冲突前的本地文字"></textarea></details>
 </form><a href="/listening-reflections">整理记录</a>
 </aside>
 <aside id="reflection-prompt" class="container panel" hidden aria-live="polite"><p>听完了，可以用三句话整理这次收获。</p><button id="reflection-prompt-start" type="button">开始整理刚听完的节目</button><button id="reflection-prompt-dismiss" type="button">稍后再说</button></aside>

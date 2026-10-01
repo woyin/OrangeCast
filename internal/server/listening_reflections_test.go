@@ -2,12 +2,17 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/woyin/orangecast/internal/backup"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -137,5 +142,79 @@ func TestVoiceReflectionHTTPUsesExplicitTextAndRejectsSecondSave(t *testing.T) {
 	got, err := srv.store.GetListeningReflection(t.Context(), r.ID)
 	if err != nil || got.Answers.Apply != "我的录音草稿文字" || got.Answers.Remember != "" {
 		t.Fatal(got, err)
+	}
+}
+
+func TestListeningReflectionSaveV2BackupRestoresReceiptsAndRelations(t *testing.T) {
+	srv, _, _, capture := voiceHTTPFixture(t)
+	ctx := t.Context()
+	var c store.ListeningCapture
+	if err := json.Unmarshal([]byte(capture), &c); err != nil {
+		t.Fatal(err)
+	}
+	q, err := srv.store.CreateLearningQuestion(ctx, store.LearningQuestion{Body: "备份后如何保留理解？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedDraft, err := srv.store.StartListeningReflection(ctx, uuid.NewString(), c, q.ID, q.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := uuid.NewString()
+	answers := store.ReflectionAnswers{Remember: "自建保存记录", Apply: "检查唯一关系"}
+	saved, err := srv.store.SaveListeningReflection(ctx, savedDraft.ID, key, 1, answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := srv.store.StartListeningReflection(ctx, uuid.NewString(), c, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err = srv.store.ChangeListeningReflection(ctx, draft.ID, uuid.NewString(), "edit", 1, store.ReflectionAnswers{Uncertain: "未保存的私人理解"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "reflections.tar.gz")
+	if err = os.MkdirAll(srv.cfg.EvidenceDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = backup.Create(ctx, srv.store, srv.cfg.EvidenceDir, archive, srv.cfg.VoiceDir); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "restored")
+	if _, err = backup.Restore(ctx, archive, dir, false); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := store.Open(filepath.Join(dir, "cloudwisepod.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	replay, err := restored.SaveListeningReflection(ctx, saved.ID, key, 1, answers)
+	if err != nil || replay.SavedNoteID != saved.SavedNoteID {
+		t.Fatal(replay, err)
+	}
+	got, err := restored.GetListeningReflection(ctx, draft.ID)
+	if err != nil || got.Answers != draft.Answers || got.Revision != draft.Revision {
+		t.Fatal(got, err)
+	}
+	links, err := restored.ListLearningQuestionRelations(ctx, q.ID)
+	if err != nil || len(links) != 1 || links[0].ObjectID != saved.SavedNoteID {
+		t.Fatal(links, err)
+	}
+	if err = restored.DeleteSourceRows(ctx, models.SourceEpisode, c.SourceID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = restored.GetListeningReflection(ctx, draft.ID)
+	if err != nil || got.State != "unavailable" || got.Answers.Uncertain != "" {
+		t.Fatal(got, err)
+	}
+	if _, err = restored.GetOwnerNote(ctx, saved.SavedNoteID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal(err)
+	}
+	var receipts int
+	restored.DB.QueryRow(`SELECT count(*) FROM listening_reflection_actions`).Scan(&receipts)
+	if receipts != 0 {
+		t.Fatal(receipts)
 	}
 }

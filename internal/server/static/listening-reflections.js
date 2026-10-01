@@ -11,8 +11,9 @@
  function answers(){return Object.fromEntries(fields.map(f=>[f,byId('reflection-'+f).value]));}
  function storeLocal(){if(!current||!session)return;current.answers=answers();try{localStorage.setItem(key,JSON.stringify({sessionId:session.session_id,current}));}catch(error){say('本地保存失败，请复制文字：'+error.message);}}
  function render(fill=false){
-  panel.hidden=!current;if(!current)return;
+  panel.hidden=!current;if(!current){byId('reflection-conflict').hidden=true;byId('reflection-conflict-text').value='';return;}
   const c=current.capture,a=c.anchor;byId('reflection-anchor').textContent=(c.title||'原节目')+' · '+(a.mode==='dj'?'DJ映射原音':'原音')+' '+Number(a.position).toFixed(1)+'秒（已固定）';
+  byId('reflection-conflict').hidden=!current.conflictCopy;byId('reflection-conflict-text').value=current.conflictCopy?JSON.stringify(current.conflictCopy,null,2):'';
   if(fill)for(const f of fields)byId('reflection-'+f).value=current.answers?.[f]||'';
   select.value=current.question_id||'';select.disabled=busy||current.revision>0||!!current.pending;
   for(const f of fields)byId('reflection-'+f).disabled=busy||['save','cancel'].includes(current.pending?.action);
@@ -73,7 +74,13 @@
   try{if(token!==epoch||current?.id!==id)return;if(current.revision>0||current.pending){await ensureStarted();if(token!==epoch||current?.id!==id)return;const cmd=current.pending?.action==='cancel'?current.pending:{action:'cancel',id,request_key:crypto.randomUUID(),expected_revision:current.revision,answers:{}};current.pending=cmd;storeLocal();await command(cmd);}if(token!==epoch)return;current=null;localStorage.removeItem(key);for(const f of fields)byId('reflection-'+f).value='';panel.hidden=true;}
   catch(error){say(error.message);}finally{if(token===epoch){busy=false;render();}}
  };
- function clearPrivate(){epoch++;setPrompt(false);promptCapture=null;promptKey=null;sessionPromise=null;lifetime.abort();lifetime=new AbortController();clearTimeout(timer);requests.forEach(c=>c.abort());current=null;session=null;busy=false;panel.hidden=true;feedback.textContent='';byId('reflection-anchor').textContent='';for(const f of fields)byId('reflection-'+f).value='';select.replaceChildren(new Option('不关联',''));try{localStorage.removeItem(key);}catch(_){} }
+ byId('reflection-reload').onclick=async()=>{if(!current||busy)return;if(current.pending?.action==='save'){form.requestSubmit();return;}clearTimeout(timer);await serial;if(!current||busy)return;busy=true;render();const token=epoch,id=current.id,local=answers();
+  try{const response=await scope.fetch('/api/listening-reflections?id='+encodeURIComponent(id));if(response.status===401||response.redirected){root.CWPNavigation?.expire();return;}if(!response.ok)throw Error('尚未读取到服务器记录，请保留原文字');const result=await response.json();if(token!==epoch)return;
+   if(result.state!=='draft'){clearPrivate();root.CWPListening?.notify(result.state==='saved'?'原整理已保存，请到整理记录核对笔记。':'原整理已过期、丢弃或来源已清理，已清除本地副本。');return;}
+   current={...result,createdAt:Date.parse(result.created_at+'Z'),conflictCopy:local};render(true);storeLocal();say('已明确读取服务器版本；原本地文字保留在下方副本，请核对后手动采用。');
+  }catch(error){if(token===epoch)say(error.message);}finally{if(token===epoch){busy=false;render();}}
+ };
+ function clearPrivate(){byId('reflection-conflict').hidden=true;byId('reflection-conflict-text').value='';epoch++;setPrompt(false);promptCapture=null;promptKey=null;sessionPromise=null;lifetime.abort();lifetime=new AbortController();clearTimeout(timer);requests.forEach(c=>c.abort());current=null;session=null;busy=false;panel.hidden=true;feedback.textContent='';byId('reflection-anchor').textContent='';for(const f of fields)byId('reflection-'+f).value='';select.replaceChildren(new Option('不关联',''));try{localStorage.removeItem(key);}catch(_){} }
  byId('reflection-start').onclick=()=>start();
  async function adoptVoice(voice,field,target){
   if(!current||busy||current.pending?.action==='save'||(target&&target!==current.id)||(voice.reflection_id&&voice.reflection_id!==current.id))throw Error('请先打开录音所属的原整理草稿');
