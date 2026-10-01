@@ -16,6 +16,10 @@ import (
 const KnowledgeEmbeddingJobVersion = "knowledge-embedding-v1"
 
 type KnowledgeEmbeddingJobInput struct {
+	Query         string                      `json:"query,omitempty"`
+	QueryHash     string                      `json:"query_hash,omitempty"`
+	DeleteEpoch   int64                       `json:"delete_epoch,omitempty"`
+	ScopeRevision int                         `json:"scope_revision,omitempty"`
 	UnknownRetry  bool                        `json:"unknown_retry,omitempty"`
 	RetryOfID     string                      `json:"retry_of_id,omitempty"`
 	RetryRevision int                         `json:"retry_revision,omitempty"`
@@ -28,6 +32,9 @@ type KnowledgeEmbeddingJobInput struct {
 }
 
 func (in KnowledgeEmbeddingJobInput) Inputs() []string {
+	if in.Kind == "query" {
+		return []string{in.Query}
+	}
 	if in.Kind == "preflight" {
 		return []string{"个人学习连接预检：保留来源与适用条件。"}
 	}
@@ -86,10 +93,10 @@ func (s *Store) ReserveKnowledgeEmbeddingPreflight(ctx context.Context, key stri
 }
 
 func (s *Store) reserveKnowledgeEmbeddingJob(ctx context.Context, key string, in KnowledgeEmbeddingJobInput, checkpoints ...string) (*models.ProcessingJob, bool, error) {
-	if in.Version != KnowledgeEmbeddingJobVersion || (in.Kind != "content" && in.Kind != "preflight") || in.Config.Provider == "" || in.Config.Model == "" || in.Estimate == nil {
+	if in.Version != KnowledgeEmbeddingJobVersion || (in.Kind != "content" && in.Kind != "preflight" && in.Kind != "query") || in.Config.Provider == "" || in.Config.Model == "" || in.Estimate == nil {
 		return nil, false, ErrInvalidEditorialState
 	}
-	payload, _ := json.Marshal([]any{in.Version, in.Kind, in.Config, in.Windows, in.RetryOfID, in.RetryRevision, in.OriginJobID, in.UnknownRetry})
+	payload, _ := json.Marshal([]any{in.Version, in.Kind, in.Config, in.Windows, in.RetryOfID, in.RetryRevision, in.OriginJobID, in.UnknownRetry, in.Query, in.QueryHash, in.DeleteEpoch, in.ScopeRevision})
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
 	raw, _ := json.Marshal(in)
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -97,6 +104,39 @@ func (s *Store) reserveKnowledgeEmbeddingJob(ctx context.Context, key string, in
 		return nil, false, err
 	}
 	defer tx.Rollback()
+
+	// Cache hit / pending task / expired generation admission is ONE transaction.
+	// Counting after an unlocked latest-state read creates duplicate paid queries.
+	if in.Kind == "query" && in.RetryOfID == "" {
+		if err = validateKnowledgeQueryEmbedding(ctx, tx, in); err != nil {
+			return nil, false, err
+		}
+		var cached string
+		e := tx.QueryRowContext(ctx, `SELECT job_id FROM knowledge_query_embeddings WHERE config_id=? AND query_hash=? AND delete_epoch=? AND scope_revision=? AND expires_at>datetime('now')`, in.Config.ID, in.QueryHash, in.DeleteEpoch, in.ScopeRevision).Scan(&cached)
+		if e == nil {
+			tx.Rollback()
+			job, e := s.GetJob(ctx, cached)
+			return job, false, e
+		}
+		if !errors.Is(e, sql.ErrNoRows) {
+			return nil, false, e
+		}
+		var latest, status string
+		e = tx.QueryRowContext(ctx, `SELECT id,status FROM processing_jobs WHERE source_type='knowledge_index' AND source_id=? AND json_extract(CASE WHEN json_valid(input_snapshot_json) THEN input_snapshot_json ELSE '{}' END,'$.kind')='query' AND json_extract(input_snapshot_json,'$.query_hash')=? AND COALESCE(json_extract(input_snapshot_json,'$.delete_epoch'),0)=? ORDER BY rowid DESC LIMIT 1`, in.Config.ID, in.QueryHash, in.DeleteEpoch).Scan(&latest, &status)
+		if e == nil && status != "succeeded" {
+			tx.Rollback()
+			job, e := s.GetJob(ctx, latest)
+			return job, false, e
+		}
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return nil, false, e
+		}
+		var generation int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM processing_jobs WHERE source_type='knowledge_index' AND source_id=? AND json_extract(CASE WHEN json_valid(input_snapshot_json) THEN input_snapshot_json ELSE '{}' END,'$.kind')='query' AND json_extract(input_snapshot_json,'$.query_hash')=? AND COALESCE(json_extract(input_snapshot_json,'$.delete_epoch'),0)=?`, in.Config.ID, in.QueryHash, in.DeleteEpoch).Scan(&generation); err != nil {
+			return nil, false, err
+		}
+		key = fmt.Sprintf("query:%s:%s:%d:%d", in.Config.ID, in.QueryHash, in.DeleteEpoch, generation+1)
+	}
 	var prior, priorHash string
 	err = tx.QueryRowContext(ctx, `SELECT job_id,payload_hash FROM knowledge_embedding_requests WHERE request_key=?`, key).Scan(&prior, &priorHash)
 	if err == nil {
@@ -122,6 +162,11 @@ func (s *Store) reserveKnowledgeEmbeddingJob(ctx context.Context, key string, in
 	}
 	if in.Kind == "content" && len(checkpoints) == 0 {
 		if err = validateEmbeddingWindows(ctx, tx, in); err != nil {
+			return nil, false, err
+		}
+	}
+	if in.Kind == "query" && len(checkpoints) == 0 {
+		if err = validateKnowledgeQueryEmbedding(ctx, tx, in); err != nil {
 			return nil, false, err
 		}
 	}
@@ -204,6 +249,11 @@ func (s *Store) MarkKnowledgeEmbeddingCallStarted(ctx context.Context, id string
 			return err
 		}
 	}
+	if in.Kind == "query" {
+		if err = validateKnowledgeQueryEmbedding(ctx, tx, in); err != nil {
+			return err
+		}
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET remote_call_started=1,updated_at=datetime('now') WHERE id=? AND status IN('queued','running') AND remote_call_started=0`, id)
 	if err != nil {
 		return err
@@ -218,6 +268,9 @@ func (s *Store) MarkKnowledgeEmbeddingCallStarted(ctx context.Context, id string
 // CommitKnowledgeEmbeddingResponse saves the application result together with
 // the index transaction. Paid checkpoints and receipts exist before this call.
 func (s *Store) CommitKnowledgeEmbeddingResponse(ctx context.Context, id string, in KnowledgeEmbeddingJobInput, result *provider.EmbeddingResult) error {
+	if in.Kind == "query" {
+		return s.commitKnowledgeQueryEmbedding(ctx, id, in, result)
+	}
 	if in.Kind == "content" {
 		_, err := s.adoptKnowledgeEmbeddings(ctx, in.Config.ID, in.Windows, result, id)
 		return err

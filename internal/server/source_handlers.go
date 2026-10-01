@@ -482,7 +482,12 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := knowledgeQuery(r)
-	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal})
+	semanticID := r.URL.Query().Get("embedding_config")
+	semanticConfig, _ := srv.currentKnowledgeEmbeddingConfig(r.Context(), semanticID)
+	if semanticConfig != nil {
+		semanticID = semanticConfig.ID
+	}
+	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal, Semantic: r.URL.Query().Get("semantic") == "1", EmbeddingConfigID: semanticID})
 	if err != nil {
 		code := 500
 		if errors.Is(err, store.ErrInvalidEditorialState) {
@@ -503,6 +508,20 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	views := knowledgeSearchViews(result.Hits)
 	data := map[string]any{"Sources": sources.Items, "SourcePage": sourceNavigation, "SourceQuery": r.URL.Query().Get("source_query"), "SourceMissing": sources.SelectedUnavailable, "SelectedSource": q.SourceType + ":" + q.SourceID, "Podcasts": podcasts, "Query": q.Text, "Filter": q, "Results": views, "Total": result.Total, "Page": result.Page, "PerPage": result.PerPage, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
+	data["CSRF"] = auth.CSRFValue(r)
+	data["Retrieval"] = result
+	if semanticConfig != nil {
+		data["SemanticConfig"] = semanticConfig
+		status, e := srv.store.KnowledgeEmbeddingStatus(r.Context(), semanticConfig.ID)
+		if e == nil {
+			data["SemanticAvailable"] = status.IndexedWindows > 0
+		}
+		_, e = srv.store.KnowledgeQueryEmbedding(r.Context(), semanticConfig.ID, q.Text)
+		data["SemanticReady"] = e == nil
+		if job, e := srv.store.FindKnowledgeQueryEmbeddingJob(r.Context(), semanticConfig.ID, q.Text); e == nil {
+			data["SemanticJobID"] = job.ID
+		}
+	}
 	if err := srv.tmpl.Render(w, "search.html", data); err != nil {
 		http.Error(w, "渲染搜索失败", 500)
 	}

@@ -382,3 +382,75 @@ func TestKnowledgeEmbeddingJobChangedConnectionBlocksBeforeCall(t *testing.T) {
 		t.Fatal(ex, err)
 	}
 }
+
+func TestKnowledgeQueryEmbeddingExplicitTaskAndReadonlyReuse(t *testing.T) {
+	s, w, _, cfg, calls := embeddingJobFixture(t, nil)
+	ctx := t.Context()
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatal(calls.Load())
+	}
+	if _, err := s.KnowledgeQueryEmbedding(ctx, cfg.ID, "如何应用"); !errors.Is(err, store.ErrNotFound) || calls.Load() != 1 {
+		t.Fatal("read called embedding", err)
+	}
+	query, created, err := s.ReserveKnowledgeQueryEmbedding(ctx, cfg.ID, " 如何应用 ")
+	if err != nil || !created || calls.Load() != 1 {
+		t.Fatal(query, err)
+	}
+	if err = w.ProcessOne(ctx); err != nil || calls.Load() != 2 {
+		t.Fatal(err)
+	}
+	vector, err := s.KnowledgeQueryEmbedding(ctx, cfg.ID, "如何应用")
+	if err != nil || vector[0] != 1 || calls.Load() != 2 {
+		t.Fatal(vector, err)
+	}
+	repeat, created, err := s.ReserveKnowledgeQueryEmbedding(ctx, cfg.ID, "如何应用")
+	if err != nil || created || repeat.ID != query.ID {
+		t.Fatal("query not reused", err)
+	}
+	assertEmbeddingReceipt(t, s, query.ID, true)
+	if err = w.ProcessOne(ctx); err != nil || calls.Load() != 2 {
+		t.Fatal("cached read became call", err)
+	}
+}
+
+func TestKnowledgeQueryEmbeddingLateEpochKeepsUsageButNoCache(t *testing.T) {
+	var s *store.Store
+	var config provider.EmbeddingConfig
+	fixture, w, _, cfg, calls := embeddingJobFixture(t, func(resp http.ResponseWriter, req *http.Request, n int) {
+		if n == 2 {
+			current, err := s.GetKnowledgeEmbeddingConfig(t.Context(), config.ID)
+			if err != nil {
+				t.Error(err)
+			}
+			if _, err = s.ChangeKnowledgeEmbeddingScope(t.Context(), config.ID, current.Revision, false, nil); err != nil {
+				t.Error(err)
+			}
+		}
+		embeddingJobReply(t, resp, req, true)
+	})
+	s = fixture
+	config = cfg
+	ctx := t.Context()
+	if err := w.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	query, _, err := s.ReserveKnowledgeQueryEmbedding(ctx, cfg.ID, "如何应用")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ProcessOne(ctx); err != nil || calls.Load() != 2 {
+		t.Fatal(err)
+	}
+	assertEmbeddingReceipt(t, s, query.ID, true)
+	ex, err := s.GetJobExecution(ctx, query.ID)
+	if err != nil || ex.CheckpointJSON == "" {
+		t.Fatal(ex, err)
+	}
+	var count int
+	if err = s.DB.QueryRow(`SELECT COUNT(*) FROM knowledge_query_embeddings`).Scan(&count); err != nil || count != 0 {
+		t.Fatal("late query applied to changed scope", err)
+	}
+}

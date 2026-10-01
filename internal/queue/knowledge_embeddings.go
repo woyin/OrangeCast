@@ -44,7 +44,7 @@ func (w *Worker) doKnowledgeEmbedding(ctx context.Context, job *models.Processin
 		return err
 	}
 	var in store.KnowledgeEmbeddingJobInput
-	if json.Unmarshal([]byte(ex.InputSnapshotJSON), &in) != nil || in.Version != store.KnowledgeEmbeddingJobVersion || ex.ConfigVersion != in.Version || (in.Kind != "content" && in.Kind != "preflight") || in.Config.ID != job.SourceID || in.Config.Provider != ex.ConfiguredProvider || in.Config.Model != ex.ConfiguredModel || in.Estimate == nil {
+	if json.Unmarshal([]byte(ex.InputSnapshotJSON), &in) != nil || in.Version != store.KnowledgeEmbeddingJobVersion || ex.ConfigVersion != in.Version || (in.Kind != "content" && in.Kind != "preflight" && in.Kind != "query") || in.Config.ID != job.SourceID || in.Config.Provider != ex.ConfiguredProvider || in.Config.Model != ex.ConfiguredModel || in.Estimate == nil {
 		return store.ErrInvalidEditorialState
 	}
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(ex.InputSnapshotJSON)))

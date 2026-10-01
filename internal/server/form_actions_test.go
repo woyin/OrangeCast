@@ -87,3 +87,13 @@ func TestListeningReflectionRootEditor(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 }
+
+func TestKnowledgeQueryEmbeddingController(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if output, err := exec.Command(node, filepath.Join("testdata", "knowledge-semantic.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(output))
+	}
+}

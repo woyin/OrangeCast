@@ -1,6 +1,10 @@
 package server
 
 import (
+	"encoding/json"
+	"github.com/woyin/orangecast/internal/store"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -29,5 +33,126 @@ func TestKnowledgeEmbeddingJobAutomationProjectionIsReadonly(t *testing.T) {
 	}
 	if err = srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after); err != nil || before != after {
 		t.Fatal("GET changed index", before, after, err)
+	}
+}
+
+func semanticPost(srv *Server, cookie *http.Cookie, body string, csrf bool) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", "/api/knowledge-semantic", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if csrf {
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: "semantic-csrf"})
+		req.Header.Set("X-CSRF-Token", "semantic-csrf")
+	}
+	rec := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	return rec
+}
+func TestKnowledgeQueryEmbeddingHTTPGetDoesNotCallOrWrite(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "semantic-http@example.com", "password123")
+	calls := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var payload struct {
+			Input []string `json:"input"`
+		}
+		json.NewDecoder(r.Body).Decode(&payload)
+		data := make([]map[string]any, len(payload.Input))
+		for i := range data {
+			data[i] = map[string]any{"index": i, "embedding": []float64{1, 0}}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"model": "vector", "data": data, "usage": map[string]int{"prompt_tokens": 4, "total_tokens": 4}})
+	}))
+	defer remote.Close()
+	srv.selector.WithEmbedding("secret-sentinel", remote.URL, "vector", 2)
+	client, _ := srv.selector.Embedding()
+	cfg := client.Config()
+	if err := srv.store.RegisterKnowledgeEmbeddingConfig(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := srv.store.CreatePastedDocument(t.Context(), "学习原文", "主动回忆保留完整语境。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = srv.store.ChangeKnowledgeEmbeddingScope(t.Context(), cfg.ID, 1, true, []store.EmbeddingSource{{SourceType: "document", SourceID: doc.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	windows, err := srv.store.PrepareKnowledgeEmbeddingBatch(t.Context(), cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vectors := make([][]float32, len(windows))
+	for i := range vectors {
+		vectors[i] = []float32{1, 0}
+	}
+	if _, err = srv.store.AdoptKnowledgeEmbeddings(t.Context(), cfg.ID, windows, &provider.EmbeddingResult{Model: "vector", Dimensions: 2, Vectors: vectors}); err != nil {
+		t.Fatal(err)
+	}
+	var before, after int
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
+	page := doWithCookie(srv, cookie, "GET", "/search?q=主动回忆&semantic=1")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "semantic-query-form") || !strings.Contains(page.Body.String(), "本次使用本地词项检索") {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
+	if calls != 0 || before != after {
+		t.Fatal("GET paid or wrote", calls, before, after)
+	}
+	command := knowledgeSemanticCommand{Action: "query", ConfigID: cfg.ID, Query: "如何应用", RequestKey: uuid.NewString()}
+	raw, _ := json.Marshal(command)
+	if rec := semanticPost(srv, nil, string(raw), true); rec.Code != 401 {
+		t.Fatal(rec.Code)
+	}
+	if rec := semanticPost(srv, cookie, string(raw), false); rec.Code != 403 {
+		t.Fatal(rec.Code)
+	}
+	rec := semanticPost(srv, cookie, string(raw), true)
+	if rec.Code != 200 || calls != 0 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var state knowledgeSemanticJobState
+	json.Unmarshal(rec.Body.Bytes(), &state)
+	if state.JobID == "" || state.QueryReady {
+		t.Fatal(state)
+	}
+	duplicate := semanticPost(srv, cookie, string(raw), true)
+	if duplicate.Code != 200 || !strings.Contains(duplicate.Body.String(), state.JobID) {
+		t.Fatal(duplicate.Code, duplicate.Body.String())
+	}
+	changed := command
+	changed.Query = "不同问题"
+	changedRaw, _ := json.Marshal(changed)
+	if rec := semanticPost(srv, cookie, string(changedRaw), true); rec.Code != 409 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
+	for _, path := range []string{"/api/knowledge-semantic?job_id=" + state.JobID, "/api/knowledge-semantic?request_action=query&request_key=" + command.RequestKey, "/api/knowledge-semantic?config_id=" + cfg.ID + "&query=如何应用", "/search?q=如何应用&semantic=1"} {
+		page = doWithCookie(srv, cookie, "GET", path)
+		if page.Code != 200 || strings.Contains(page.Body.String(), "secret-sentinel") || strings.Contains(page.Body.String(), remote.URL) {
+			t.Fatal(path, page.Code, page.Body.String())
+		}
+	}
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
+	if before != after || calls != 0 {
+		t.Fatal("poll wrote/called")
+	}
+	if err = srv.worker.ProcessOne(t.Context()); err != nil || calls != 1 {
+		t.Fatal(err, calls)
+	}
+	ready := doWithCookie(srv, cookie, "GET", "/api/knowledge-semantic?job_id="+state.JobID)
+	json.Unmarshal(ready.Body.Bytes(), &state)
+	if !state.QueryReady || state.Status != "succeeded" {
+		t.Fatal(state)
+	}
+	if rec := semanticPost(srv, cookie, strings.Repeat("x", 65537), true); rec.Code != 400 {
+		t.Fatal("unbounded request", rec.Code)
+	}
+	for _, bad := range []string{`{"action":"query","secret":"x"}`, `{} {}`, `{"action":"unknown"}`} {
+		if rec := semanticPost(srv, cookie, bad, true); rec.Code != 400 {
+			t.Fatal(rec.Code)
+		}
 	}
 }
