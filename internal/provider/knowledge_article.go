@@ -118,8 +118,47 @@ type FrozenLearningQuestion struct {
 	Links      []LearningQuestionLink `json:"confirmed_links"`
 }
 
+// KnowledgeMaterialChange describes identity/version changes without asserting factual usefulness.
+type KnowledgeMaterialChange struct {
+	MaterialID     string `json:"material_id"`
+	Kind           string `json:"kind"`
+	BeforeVersion  int    `json:"before_version,omitempty"`
+	AfterVersion   int    `json:"after_version,omitempty"`
+	BeforeSnapshot string `json:"before_snapshot,omitempty"`
+	AfterSnapshot  string `json:"after_snapshot,omitempty"`
+	Reason         string `json:"reason"`
+}
+
+// KnowledgeUpdateContext binds incremental work to an exact immutable parent.
+type KnowledgeUpdateContext struct {
+	ProposalID     string                    `json:"proposal_id,omitempty"`
+	ParentRevision int                       `json:"parent_revision"`
+	ParentHash     string                    `json:"parent_hash"`
+	ParentTitle    string                    `json:"parent_title"`
+	Changes        []KnowledgeMaterialChange `json:"material_changes"`
+	Analysis       *KnowledgeUpdateAnalysis  `json:"analysis,omitempty"`
+}
+
+// KnowledgeUpdateChange is a reasoned edit to a parent paragraph or an added section.
+type KnowledgeUpdateChange struct {
+	Action      string   `json:"action"` // keep | add | remove | refute
+	BlockID     string   `json:"block_id,omitempty"`
+	Reason      string   `json:"reason"`
+	MaterialIDs []string `json:"material_ids"`
+}
+
+// KnowledgeUpdateAnalysis distinguishes evidence increments from a different direction or insufficient support.
+type KnowledgeUpdateAnalysis struct {
+	Decision     string                  `json:"decision"` // update | new_direction | insufficient | no_change
+	Reason       string                  `json:"reason"`
+	Missing      []string                `json:"missing"`
+	Changes      []KnowledgeUpdateChange `json:"changes"`
+	NewDirection *KnowledgeTopic         `json:"new_direction,omitempty"`
+}
+
 // KnowledgeArticleRequest freezes the inputs to one independent model step.
 type KnowledgeArticleRequest struct {
+	Update           *KnowledgeUpdateContext         `json:"update,omitempty"`
 	Question         *FrozenLearningQuestion         `json:"learning_question,omitempty"`
 	Candidates       []KnowledgeRecallCandidate      `json:"candidates,omitempty"`
 	Coverage         *KnowledgeRecallCoverage        `json:"coverage,omitempty"`
@@ -150,6 +189,7 @@ type LearningReviewQuestion struct {
 
 // KnowledgeArticleResult carries topics, drafts, review verdicts or explanation questions.
 type KnowledgeArticleResult struct {
+	Update    *KnowledgeUpdateAnalysis `json:"update,omitempty"`
 	Questions []LearningReviewQuestion `json:"questions,omitempty"`
 	Topics    []KnowledgeTopic         `json:"topics,omitempty"`
 	Title     string                   `json:"title,omitempty"`
@@ -176,6 +216,19 @@ const knowledgeArticlePrompt = `你是个人知识文章助手。只使用提供
 // KnowledgeArticleStep runs through the existing OpenAI-compatible transport.
 func knowledgeArticleInstructions(req KnowledgeArticleRequest) string {
 	instructions := knowledgeArticlePrompt
+	if req.Update != nil {
+		instructions += "\nupdate表明这是已有文章的增量更新。父稿只属于待核对上下文，不是事实证据。所有新稿事实、引语和归因只允许由当前materials支持。不得将父稿补充为缺失依据；同名段落或新版本不等于旧引语仍成立。保留反方与适用边界，明确保留、补充、删除、反驳的依据和理由。"
+		instructions += "\n来源笔记的旧总结可能与当前evidence矛盾，必须对照当前来源片段重新判断，不能把旧总结本身当成新版本的证据。个人理解的历史Reference只说明当时所指，不变成当前来源事实。"
+		if req.Stage == "update_propose" || req.Stage == "revise" {
+			instructions += "\n本步blocks为冻结的待修改正文。"
+		} else {
+			instructions += "\n本步blocks为本次更新产生的新工作稿，审校仅针对该稿及当前materials。"
+		}
+	}
+	if req.Stage == "update_propose" {
+		instructions += "\n本阶段只判断更新提案，不写全文。返回 {\"update\":{\"decision\":\"update|new_direction|insufficient|no_change\",\"reason\":\"理由\",\"missing\":[],\"changes\":[{\"action\":\"keep|add|remove|refute\",\"block_id\":\"父稿确切段落ID（新增章节可留空）\",\"reason\":\"依据与修改原因\",\"material_ids\":[\"当前真实材料ID\"]}]}}。只有问题或用途实质不同才给new_direction并提供new_direction选题；材料不足给出缺口，风格变化不算知识增量，材料版本变化本身不证明有实质更新。"
+	}
+
 	if req.Question != nil {
 		instructions += "\nlearning_question 是Owner的学习问题与目标，不是事实或已经解决的结论。只围绕该问题发现、选材和写作；资料不足说明缺口，不补外部事实，不决定问题是否解决。confirmed_links只表达组织范围，不是来源证据。"
 	}
@@ -434,6 +487,12 @@ func ValidateKnowledgeBlocks(title string, blocks []KnowledgeBlock, materials []
 
 // ValidateKnowledgeResult validates a step before it can advance the pipeline.
 func ValidateKnowledgeResult(req KnowledgeArticleRequest, result *KnowledgeArticleResult) error {
+	if req.Stage == "update_propose" {
+		if result == nil {
+			return fmt.Errorf("模型返回空更新判断")
+		}
+		return ValidateKnowledgeUpdate(req, result.Update)
+	}
 	if result == nil {
 		return fmt.Errorf("模型返回空结果")
 	}

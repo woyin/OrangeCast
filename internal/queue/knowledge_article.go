@@ -41,10 +41,27 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 	if err != nil {
 		return err
 	}
+	if input.Stage == "update_propose" {
+		return w.doKnowledgeUpdateAnalysis(ctx, job, bundle, exec, input, article)
+	}
 	if exec.CheckpointJSON == "" && (article.Stage != input.Stage || (input.ExpectedRevision != nil && article.WorkingRevision != *input.ExpectedRevision)) {
+		if input.Request.Update != nil {
+			if e := w.store.MarkKnowledgeUpdateParentChanged(ctx, input.Request.Update.ProposalID); e != nil {
+				return e
+			}
+		}
 		return w.store.SaveJobResult(ctx, job.ID, `{"superseded":true}`, models.JobResultComplete)
 	}
 	result, err := w.groundedTextStep(ctx, job, bundle, input.Request, exec, func() error {
+		if input.Request.Update != nil {
+			p, e := w.store.GetKnowledgeUpdateProposal(ctx, input.Request.Update.ProposalID)
+			if e != nil {
+				return e
+			}
+			if e = w.store.CheckKnowledgeUpdateExecution(ctx, p, input.Request, job.Automated); e != nil {
+				return e
+			}
+		}
 		if err := w.store.CheckLearningQuestionExecution(ctx, input.Request.Question, job.Automated); err != nil {
 			return err
 		}

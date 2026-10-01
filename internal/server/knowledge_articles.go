@@ -22,6 +22,9 @@ import (
 // StartKnowledgeArticles runs the explicitly enabled automatic-article scheduler.
 func (srv *Server) StartKnowledgeArticles(ctx context.Context) {
 	go func() {
+		if err := srv.RunKnowledgeUpdates(ctx); err != nil {
+			log.Printf("文章更新: %v", err)
+		}
 		if err := srv.RunKnowledgeArticles(ctx); err != nil {
 			log.Printf("自动知识文章: %v", err)
 		}
@@ -32,6 +35,9 @@ func (srv *Server) StartKnowledgeArticles(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if err := srv.RunKnowledgeUpdates(ctx); err != nil {
+					log.Printf("文章更新: %v", err)
+				}
 				if err := srv.RunKnowledgeArticles(ctx); err != nil {
 					log.Printf("自动知识文章: %v", err)
 				}
@@ -73,6 +79,27 @@ func (srv *Server) enqueueKnowledgeArticle(ctx context.Context, profileID string
 	return srv.enqueueKnowledgeArticleScope(ctx, profileID, automatic, store.KnowledgeScope{})
 }
 func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID string, automatic bool, scope store.KnowledgeScope) (*store.KnowledgeArticleRecord, bool, error) {
+	if scope.QuestionID != "" && !scope.ExploreHistory && scope.PodcastID == "" && scope.SourceID == "" && scope.Theme == "" && scope.From == "" && scope.Until == "" && len(scope.MaterialIDs) == 0 {
+		q, err := srv.store.GetLearningQuestion(ctx, scope.QuestionID)
+		if err != nil {
+			return nil, false, err
+		}
+		if scope.ExpectedQuestionRevision > 0 && q.Revision != scope.ExpectedQuestionRevision {
+			return nil, false, store.ErrConflict
+		}
+		a, err := srv.store.KnowledgeArticleForQuestion(ctx, profileID, scope.QuestionID)
+		if err != nil {
+			return nil, false, err
+		}
+		if a != nil {
+			if a.Status != "discover" && a.Status != "select" && a.Status != "write" && a.Status != "review" && a.Status != "revise" && a.Status != "review_final" {
+				if _, _, err = srv.store.ReserveKnowledgeUpdateProposal(ctx, a.ID, a.WorkingRevision, srv.cfg.KnowledgeStageModels()); err != nil {
+					return nil, false, err
+				}
+			}
+			return a, false, nil
+		}
+	}
 	if automatic {
 		id, err := srv.store.NextAutomaticKnowledgeCandidateForQuestion(ctx, profileID, scope.QuestionID)
 		if err != nil {
@@ -488,6 +515,12 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 	diffs := knowledgeDiffs(revisions)
 	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
 	data["Coverage"], data["Candidates"] = req.Coverage, req.Candidates
+	updates, e := srv.store.ListKnowledgeUpdateProposals(r.Context(), article.ID, "")
+	if e != nil {
+		http.Error(w, "读取更新提案失败", 500)
+		return
+	}
+	data["Updates"] = updates
 	data["Question"] = req.Question
 	if req.Question != nil {
 		current, e := srv.store.GetLearningQuestion(r.Context(), req.Question.ID)

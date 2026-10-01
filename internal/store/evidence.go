@@ -100,6 +100,10 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
+		// Pending proposals may contain a newly recalled source that is not in
+		// any article revision yet. Purge their frozen text and tasks as well.
+		`DELETE FROM processing_jobs WHERE json_extract(CASE WHEN json_valid(input_snapshot_json) THEN input_snapshot_json ELSE '{}' END,'$.update_proposal_id') IN (SELECT p.id FROM knowledge_update_proposals p,json_each(CASE WHEN json_valid(p.input_json) THEN p.input_json ELSE '{}' END,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,
+		`DELETE FROM knowledge_update_proposals WHERE id IN (SELECT p.id FROM knowledge_update_proposals p,json_each(CASE WHEN json_valid(p.input_json) THEN p.input_json ELSE '{}' END,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,
 		`DELETE FROM processing_jobs WHERE source_type='knowledge_article' AND source_id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=? UNION SELECT article_id FROM knowledge_article_material_refs WHERE source_type=?1 AND source_id=?2)`,
 		`DELETE FROM knowledge_articles WHERE id IN (SELECT ka.id FROM knowledge_articles ka,json_each(ka.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=? UNION SELECT article_id FROM knowledge_article_material_refs WHERE source_type=?1 AND source_id=?2)`,
 		`DELETE FROM processing_jobs WHERE source_type='learning_review' AND source_id IN (SELECT b.id FROM learning_review_batches b,json_each(b.input_json,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,

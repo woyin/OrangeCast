@@ -35,6 +35,7 @@ type KnowledgeArticleRecord struct {
 
 // KnowledgeStageInput freezes the request and article identity for one queued stage.
 type KnowledgeStageInput struct {
+	UpdateProposalID string                           `json:"update_proposal_id,omitempty"`
 	ExpectedRevision *int                             `json:"expected_revision,omitempty"`
 	ArticleID        string                           `json:"article_id"`
 	Stage            string                           `json:"stage"`
@@ -324,7 +325,9 @@ func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name str
 			if snap.SourceID != m.SourceID || string(snap.SourceType) != m.SourceType {
 				return ErrConflict
 			}
-			if snap.Kind == models.SnapshotKindAudio {
+			// Personal reflections retain their genuine historical reference;
+			// only source assertions require the current transcript version.
+			if snap.Kind == models.SnapshotKindAudio && m.Kind != "owner_reflection" {
 				current, err := s.GetCurrentVersion(ctx, snap.SourceType, snap.SourceID, KindTranscript)
 				if err != nil {
 					return err
@@ -425,7 +428,7 @@ func enqueueKnowledgeStage(ctx context.Context, tx *sql.Tx, id, stage, name, mod
 	if err != nil {
 		return err
 	}
-	input, _ := json.Marshal(KnowledgeStageInput{ArticleID: id, Stage: stage, Request: req, ExpectedRevision: &revision})
+	input, _ := json.Marshal(KnowledgeStageInput{ArticleID: id, Stage: stage, Request: req, ExpectedRevision: &revision, UpdateProposalID: knowledgeUpdateID(req)})
 	version := req.PromptVersion
 	if version == "" {
 		version = "knowledge-article-v1"
@@ -475,6 +478,23 @@ func (s *Store) ListKnowledgeArticles(ctx context.Context) ([]*KnowledgeArticleR
 
 // CommitKnowledgeStage atomically saves a step result and its successor job.
 func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.ProcessingJob, input KnowledgeStageInput, result *provider.KnowledgeArticleResult) error {
+	if input.Request.Update != nil {
+		execution, e := s.GetJobExecution(ctx, job.ID)
+		if e != nil {
+			return e
+		}
+		if execution.ResultState == models.JobResultComplete {
+			return nil
+		}
+		p, e := s.GetKnowledgeUpdateProposal(ctx, input.Request.Update.ProposalID)
+		if e != nil {
+			return e
+		}
+		if e = s.CheckKnowledgeUpdateExecution(ctx, p, input.Request, job.Automated); e != nil {
+			return e
+		}
+	}
+
 	v, err := s.GetKnowledgeArticle(ctx, input.ArticleID)
 	if err != nil {
 		return err
@@ -649,6 +669,11 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
+		if req.Update != nil {
+			if err := updateKnowledgeProposalStage(ctx, tx, req.Update.ProposalID, "parent_changed", newRevision); err != nil {
+				return err
+			}
+		}
 		// A late result remains auditable, without selecting its body as working/passed.
 		if _, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET result_json=?,result_state='complete' WHERE id=?`, string(resultJSON), job.ID); err != nil {
 			return err
@@ -656,6 +681,18 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 		return tx.Commit()
 	}
 
+	if req.Update != nil {
+		proposalState := "generating"
+		if input.Stage == "write" || input.Stage == "revise" || status == "needs_review" {
+			proposalState = "needs_review"
+		}
+		if status == "ready" {
+			proposalState = "completed"
+		}
+		if err := updateKnowledgeProposalStage(ctx, tx, req.Update.ProposalID, proposalState, newRevision); err != nil {
+			return err
+		}
+	}
 	if candidateID != "" {
 		candidateStatus := "selected"
 		if next == "" {
@@ -715,6 +752,19 @@ func (s *Store) RetryKnowledgeArticle(ctx context.Context, id string) error {
 	}
 	if checkpoint != "" && (json.Unmarshal([]byte(snapshot), &prior) != nil || json.Unmarshal([]byte(checkpoint), &cached) != nil || provider.ValidateKnowledgeResult(prior.Request, cached.Result) != nil) {
 		checkpoint = ""
+	}
+	if json.Unmarshal([]byte(snapshot), &prior) == nil && prior.UpdateProposalID != "" {
+		res, e := tx.ExecContext(ctx, `UPDATE knowledge_update_proposals SET state='generating',automated=0,updated_at=datetime('now') WHERE id=? AND article_id=? AND state='failed'`, prior.UpdateProposalID, id)
+		if e != nil {
+			return e
+		}
+		n, e := res.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return ErrConflict
+		}
 	}
 	// Each explicit retry is a new attempt: preserve old usage/reservation audit.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,intent_id,input_snapshot_json,checkpoint_json,config_version,configured_provider,configured_model) VALUES(?,'knowledge_article',?,'knowledge_article','queued',?,?,?,?,?,?)`, uuid.NewString(), id, "knowledge-article:"+id+":"+stage, snapshot, checkpoint, version, configuredProvider, configuredModel); err != nil {

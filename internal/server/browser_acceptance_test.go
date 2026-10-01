@@ -38,7 +38,7 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 	}
 	session := claimOwnerAndLogin(t, srv, browserAcceptanceEmail, browserAcceptancePassword)
 	fixture := seedBrowserAcceptanceFixture(t, srv, session)
-	_, _ = seedKnowledgeLearning(t, srv)
+	_, knowledgeNoteID := seedKnowledgeLearning(t, srv)
 	srv.cfg.PodBaseURL, srv.cfg.PodAPIKey, srv.cfg.PodModel = "https://example.test/v1", "test", "browser-text"
 	srv.worker.WithBundleResolver(func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
 		bundle := journeyLearningBundle()
@@ -49,6 +49,32 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 		}
 		return bundle, nil
 	})
+	if os.Getenv("CWP_BROWSER_STAGE") == "p5" {
+		profile, err := srv.store.EnsureDefaultEditorialProfile(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		article, _, err := srv.enqueueKnowledgeArticle(t.Context(), profile.ID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 4; i++ {
+			if err = srv.worker.ProcessOne(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a, err := srv.store.GetKnowledgeArticle(t.Context(), article.ID)
+		if err != nil || a.PassedRevision != 1 {
+			t.Fatal(a, err)
+		}
+		note, err := srv.store.GetOwnerNote(t.Context(), knowledgeNoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = srv.store.UpdateOwnerNote(t.Context(), note.ID, note.Content+" 自建评测补充：需要区分适用场景和反例。", note.CitationsJSON, note.ReferencesJSON, note.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
 	workerCtx, workerCancel := context.WithCancel(t.Context())
 	defer workerCancel()
 	go srv.worker.Run(workerCtx)

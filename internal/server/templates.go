@@ -37,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "questionAction": questionAction, "questionKind": questionKind, "questionStatus": questionStatus, "knowledgeStatus": knowledgeStatus, "noteHref": noteHref}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "questionAction": questionAction, "questionKind": questionKind, "questionStatus": questionStatus, "knowledgeStatus": knowledgeStatus, "updateStatus": knowledgeUpdateStatus, "updateAction": knowledgeUpdateAction, "noteHref": noteHref}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 

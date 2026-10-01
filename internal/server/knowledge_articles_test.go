@@ -40,6 +40,8 @@ func seedKnowledgeLearning(t *testing.T, srv *Server) (string, string) {
 
 func knowledgeStepResult(req provider.KnowledgeArticleRequest, reviewFail, finalFail, insufficient bool) *provider.KnowledgeArticleResult {
 	switch req.Stage {
+	case "update_propose":
+		return &provider.KnowledgeArticleResult{Update: &provider.KnowledgeUpdateAnalysis{Decision: "update", Reason: "新笔记补充理解的边界", Changes: []provider.KnowledgeUpdateChange{{Action: "add", BlockID: req.Blocks[1].ID, Reason: "补充适用条件", MaterialIDs: []string{req.Materials[0].ID}}}}}
 	case "discover":
 		if insufficient {
 			return &provider.KnowledgeArticleResult{Reason: "当前材料缺少具体案例"}

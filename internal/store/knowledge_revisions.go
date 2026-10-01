@@ -163,6 +163,15 @@ func (s *Store) QueueKnowledgeRevision(ctx context.Context, id string, expected 
 		return ErrInvalidEditorialState
 	}
 	req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	if req.Update != nil {
+		p, e := s.GetKnowledgeUpdateProposal(ctx, req.Update.ProposalID)
+		if e != nil {
+			return e
+		}
+		if p.State == "completed" || p.State == "ignored" || p.State == "parent_changed" {
+			req.Update = nil
+		}
+	}
 	req.Instructions = strings.TrimSpace(instructions)
 	req.ReviewModel = reviewModel
 	ensureKnowledgeStageConfigs(&req, article.Model)
@@ -343,6 +352,9 @@ func (s *Store) KnowledgeEvidenceState(ctx context.Context, article *KnowledgeAr
 
 // FailKnowledgeArticleRun cannot attach a superseded attempt's failure to a new draft.
 func (s *Store) FailKnowledgeArticleRun(ctx context.Context, jobID, reason string) error {
+	if err := s.failKnowledgeUpdateJob(ctx, jobID, reason); err != nil {
+		return err
+	}
 	var articleID, stage string
 	var expected int
 	err := s.DB.QueryRowContext(ctx, `SELECT article_id,stage,parent_revision FROM knowledge_article_runs WHERE job_id=?`, jobID).Scan(&articleID, &stage, &expected)
