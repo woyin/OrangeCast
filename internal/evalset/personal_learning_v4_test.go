@@ -4,6 +4,7 @@ import "testing"
 
 func TestPersonalLearningV4Fixtures(t *testing.T) {
 	c := LearningV4Corpus()
+	t.Logf("self-authored corpus fingerprint=%s; human=missing; device=missing", c.Fingerprint())
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}

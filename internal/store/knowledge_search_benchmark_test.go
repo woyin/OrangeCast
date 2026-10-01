@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -45,11 +46,18 @@ func BenchmarkKnowledgeWideRecall(b *testing.B) {
 			}
 			q := KnowledgeSearchQuery{Text: "记忆练习", Kind: "materials", Recall: true, MetadataOnly: true, PerPage: 200, SendProvider: "pod"}
 			var times []time.Duration
+			var peakHeap uint64
+			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
 				result, err := s.SearchKnowledge(b.Context(), q)
 				times = append(times, time.Since(start))
+				var memory runtime.MemStats
+				runtime.ReadMemStats(&memory)
+				if memory.HeapInuse > peakHeap {
+					peakHeap = memory.HeapInuse
+				}
 				if err != nil || result.Total != size || len(result.Hits) != 200 {
 					b.Fatal(result.Total, len(result.Hits), err)
 				}
@@ -58,6 +66,7 @@ func BenchmarkKnowledgeWideRecall(b *testing.B) {
 			sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
 			idx := (len(times)*95+99)/100 - 1
 			b.ReportMetric(float64(times[idx].Microseconds())/1000, "p95-ms")
+			b.ReportMetric(float64(peakHeap)/(1024*1024), "sampled-heap-MiB")
 		})
 	}
 }
