@@ -229,8 +229,13 @@ func (h CreationHistory) ExternalURL() string {
 
 // NoteAnchor preserves a position and optional evidence identity at note creation.
 type NoteAnchor struct {
-	SnapshotID string   `json:"snapshot_id,omitempty"`
-	Version    int      `json:"version,omitempty"`
-	Position   float64  `json:"position"`
-	SegmentIDs []string `json:"segment_ids,omitempty"`
+	NoPosition  bool     `json:"no_position,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	PlanID      string   `json:"plan_id,omitempty"`
+	PlanVersion int      `json:"plan_version,omitempty"`
+	AudioSHA256 string   `json:"audio_sha256,omitempty"`
+	SnapshotID  string   `json:"snapshot_id,omitempty"`
+	Version     int      `json:"version,omitempty"`
+	Position    float64  `json:"position"`
+	SegmentIDs  []string `json:"segment_ids,omitempty"`
 }

@@ -71,6 +71,7 @@ func (s *Store) knowledgeMaterial(ctx context.Context, profile, name, id string)
 		if json.Unmarshal([]byte(note.AnchorJSON), &a) == nil {
 			m.SnapshotID = a.SnapshotID
 			m.Position = a.Position
+			m.NoPosition = a.NoPosition
 		}
 	} else {
 		return nil, err

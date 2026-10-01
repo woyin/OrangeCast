@@ -138,6 +138,7 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 		if json.Unmarshal([]byte(n.AnchorJSON), &anchor) == nil {
 			m.SnapshotID = anchor.SnapshotID
 			m.Position = anchor.Position
+			m.NoPosition = anchor.NoPosition
 		}
 		refs := n.CitationsJSON
 		if n.Kind == "owner_reflection" {

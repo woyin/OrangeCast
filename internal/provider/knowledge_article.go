@@ -19,6 +19,7 @@ func KnowledgeArticlePromptSupported(version string) bool {
 
 // KnowledgeMaterial is a frozen learning item with its original identity and evidence.
 type KnowledgeMaterial struct {
+	NoPosition         bool                       `json:"no_position,omitempty"`
 	EvidenceWindow     []KnowledgeEvidenceSegment `json:"evidence_window,omitempty"`
 	OmittedCitationIDs []string                   `json:"omitted_citation_ids,omitempty"`
 	PreviousContent    string                     `json:"previous_content,omitempty"`

@@ -61,7 +61,7 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 			return nil, fmt.Errorf("%w: owner reflection must not claim citations", ErrInvalidEditorialState)
 		}
 		if len(references) > 0 {
-			valid, err := s.ValidateSourceCitations(ctx, models.SourceType(note.SourceType), note.SourceID, references)
+			valid, err := s.validateNoteReferences(ctx, &note, references)
 			if err != nil {
 				return nil, err
 			}

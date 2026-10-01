@@ -40,20 +40,35 @@ func (s *Store) SaveListeningProgress(ctx context.Context, p *models.ListeningPr
 	if p.Mode != "original" && p.Mode != "dj" {
 		return ErrInvalidEditorialState
 	}
+	if err := s.checkProgressAudio(ctx, p); err != nil {
+		return err
+	}
 	if p.Seq <= 0 {
 		p.Seq = 1
 	}
 	if p.ID == "" {
 		p.ID = uuid.NewString()
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO listening_progress
- (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq)
- VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_type,source_id,mode) DO UPDATE SET
+	res, err := s.DB.ExecContext(ctx, `INSERT INTO listening_progress
+ (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,audio_sha256)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_type,source_id,mode) DO UPDATE SET
  plan_id=excluded.plan_id,plan_version=excluded.plan_version,item_position=excluded.item_position,
  highlight_id=excluded.highlight_id,item_offset_seconds=excluded.item_offset_seconds,speed=excluded.speed,
- seq=excluded.seq,revision=listening_progress.revision+1,updated_at=datetime('now')
- WHERE excluded.seq>listening_progress.seq`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq)
-	return err
+ seq=excluded.seq,audio_sha256=excluded.audio_sha256,revision=listening_progress.revision+1,updated_at=datetime('now')
+ WHERE excluded.seq>listening_progress.seq AND (listening_progress.audio_sha256='' OR excluded.audio_sha256!='')`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, p.AudioSHA256)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 && p.AudioSHA256 == "" {
+		old, e := s.GetListeningProgressMode(ctx, p.SourceType, p.SourceID, p.Mode)
+		if e != nil {
+			return e
+		}
+		if old.AudioSHA256 != "" {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 // SaveListeningProgressCAS saves only the expected server revision (zero creates).
@@ -70,6 +85,9 @@ func (s *Store) SaveListeningProgressCAS(ctx context.Context, p *models.Listenin
 	}
 	if !exists {
 		return nil, ErrNotFound
+	}
+	if err := s.checkProgressAudio(ctx, p); err != nil {
+		return nil, err
 	}
 	if p.Mode == "dj" {
 		plan, err := s.GetDJPlan(ctx, p.PlanID)
@@ -96,13 +114,13 @@ func (s *Store) SaveListeningProgressCAS(ctx context.Context, p *models.Listenin
 		p.ID = uuid.NewString()
 	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO listening_progress
- (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision)
- SELECT ?,?,?,?,?,?,?,?,?,?,?,1 WHERE ?=0
+ (id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision,audio_sha256)
+ SELECT ?,?,?,?,?,?,?,?,?,?,?,1,? WHERE ?=0
  ON CONFLICT(source_type,source_id,mode) DO UPDATE SET
  plan_id=excluded.plan_id,plan_version=excluded.plan_version,item_position=excluded.item_position,
  highlight_id=excluded.highlight_id,item_offset_seconds=excluded.item_offset_seconds,speed=excluded.speed,
- seq=excluded.seq,revision=listening_progress.revision+1,updated_at=datetime('now')
- WHERE listening_progress.revision=?`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, expected, expected)
+ seq=excluded.seq,audio_sha256=excluded.audio_sha256,revision=listening_progress.revision+1,updated_at=datetime('now')
+ WHERE listening_progress.revision=? AND (listening_progress.audio_sha256='' OR excluded.audio_sha256!='')`, p.ID, p.SourceType, p.SourceID, p.Mode, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, p.AudioSHA256, expected, expected)
 	// INSERT SELECT cannot update an existing row for expected>0. Use a guarded UPDATE.
 	if err != nil {
 		return nil, err
@@ -112,7 +130,7 @@ func (s *Store) SaveListeningProgressCAS(ctx context.Context, p *models.Listenin
 		return nil, err
 	}
 	if expected > 0 {
-		res, err = s.DB.ExecContext(ctx, `UPDATE listening_progress SET plan_id=?,plan_version=?,item_position=?,highlight_id=?,item_offset_seconds=?,speed=?,seq=?,revision=revision+1,updated_at=datetime('now') WHERE source_type=? AND source_id=? AND mode=? AND revision=?`, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, p.SourceType, p.SourceID, p.Mode, expected)
+		res, err = s.DB.ExecContext(ctx, `UPDATE listening_progress SET plan_id=?,plan_version=?,item_position=?,highlight_id=?,item_offset_seconds=?,speed=?,seq=?,audio_sha256=?,revision=revision+1,updated_at=datetime('now') WHERE source_type=? AND source_id=? AND mode=? AND revision=? AND (audio_sha256='' OR ?!='')`, p.PlanID, p.PlanVersion, p.ItemPosition, p.HighlightID, p.ItemOffsetSeconds, p.Speed, p.Seq, p.AudioSHA256, p.SourceType, p.SourceID, p.Mode, expected, p.AudioSHA256)
 		if err != nil {
 			return nil, err
 		}
@@ -141,7 +159,7 @@ func (s *Store) GetListeningProgressMode(ctx context.Context, sourceType models.
 }
 func (s *Store) getProgress(ctx context.Context, sourceType models.SourceType, sourceID, mode string) (*models.ListeningProgress, error) {
 	p := &models.ListeningProgress{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision,updated_at FROM listening_progress WHERE source_type=? AND source_id=? AND (?='' OR mode=?) ORDER BY updated_at DESC,seq DESC LIMIT 1`, sourceType, sourceID, mode, mode).Scan(&p.ID, &p.SourceType, &p.SourceID, &p.Mode, &p.PlanID, &p.PlanVersion, &p.ItemPosition, &p.HighlightID, &p.ItemOffsetSeconds, &p.Speed, &p.Seq, &p.Revision, &p.UpdatedAt)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,source_type,source_id,mode,plan_id,plan_version,item_position,highlight_id,item_offset_seconds,speed,seq,revision,updated_at,audio_sha256 FROM listening_progress WHERE source_type=? AND source_id=? AND (?='' OR mode=?) ORDER BY updated_at DESC,seq DESC LIMIT 1`, sourceType, sourceID, mode, mode).Scan(&p.ID, &p.SourceType, &p.SourceID, &p.Mode, &p.PlanID, &p.PlanVersion, &p.ItemPosition, &p.HighlightID, &p.ItemOffsetSeconds, &p.Speed, &p.Seq, &p.Revision, &p.UpdatedAt, &p.AudioSHA256)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -155,4 +173,21 @@ func (s *Store) getProgress(ctx context.Context, sourceType models.SourceType, s
 func (s *Store) DeleteListeningProgress(ctx context.Context, sourceType models.SourceType, sourceID string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM listening_progress WHERE source_type=? AND source_id=?`, sourceType, sourceID)
 	return err
+}
+
+func (s *Store) checkProgressAudio(ctx context.Context, p *models.ListeningProgress) error {
+	if p.AudioSHA256 == "" {
+		return nil
+	} // Old rows/clients explicitly remain unfrozen.
+	ea, err := s.GetEvidenceAudio(ctx, p.SourceType, p.SourceID)
+	if errors.Is(err, ErrNotFound) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	if ea.Status != "ready" || ea.SHA256 != p.AudioSHA256 {
+		return fmt.Errorf("%w: 播放音频已变化或不可用", ErrConflict)
+	}
+	return nil
 }

@@ -27,14 +27,16 @@
 </div>
 {{end}}
 
+{{with .PlaybackUnavailable}}<p class="error" data-listening-unavailable="1" data-source-type="{{$.SourceType}}" data-source-id="{{$.SourceID}}">无法收听：{{.}}</p>{{end}}
 <div class="source-head">
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>
 {{if .AudioURL}}
 <!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
 <div class="player-bar">
-  <audio id="audio-player" src="{{.AudioURL}}" preload="metadata" controls></audio>
+  <audio id="source-audio" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-audio-sha="{{.AudioSHA256}}" data-csrf="{{.CSRF}}" data-snapshot="{{.NoteSnapshotID}}" data-version="{{.NoteSnapshotVersion}}" src="{{.AudioURL}}" preload="metadata" controls></audio>
   <div class="player-controls">
+    <button type="button" data-queue-add="original">加入稍后听</button>
     <button id="play-btn" type="button" aria-label="播放或暂停">▶</button>
     <span id="current-time" class="time">0:00</span>
     <input aria-label="播放位置" id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
@@ -84,7 +86,7 @@
     <input type="hidden" name="source_id" value="{{.SourceID}}">
     <button class="btn" type="submit">生成精读文</button>
   </form>
-  <form action="/api/purge" method="POST" style="display:inline" onsubmit="return confirm('确认彻底删除该条内容及其全部证据与处理历史？此操作不可撤销。');">
+  <form action="/api/purge" method="POST" style="display:inline" data-confirm="确认彻底删除该条内容及其全部证据与处理历史？此操作不可撤销。">
     <input type="hidden" name="_csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_type" value="{{.SourceType}}">
     <input type="hidden" name="source_id" value="{{.SourceID}}">
@@ -128,7 +130,7 @@
       <ul class="chapter-list">
       {{range .chapters}}
         <li class="chapter" data-start="{{.startTime}}" data-end="{{.endTime}}">
-          <a href="#" onclick="return false;"><span class="ts">{{formatTime .startTime}}</span> {{.title}}</a>
+          <a href="#"><span class="ts">{{formatTime .startTime}}</span> {{.title}}</a>
           <p class="gist">{{.gist}}</p>
         </li>
       {{end}}

@@ -145,7 +145,7 @@ func TestDJFrozenAudioAndNoteSegmentsAreUsable(t *testing.T) {
 	session := claimOwnerAndLogin(t, srv, "dj-frozen@example.com", "password123")
 	fixture := seedBrowserAcceptanceFixture(t, srv, session)
 	rec := doWithCookie(srv, session, "GET", "/sources/episode/"+fixture.LearningSourceID+"/dj")
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "noteSegments=JSON.parse(") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `data-note-segments="[`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	plans, err := srv.store.GetLatestDJPlanForSource(t.Context(), models.SourceEpisode, fixture.LearningSourceID)

@@ -83,6 +83,7 @@ func TestListeningProgress_PageWiring(t *testing.T) {
 		t.Fatal(controller.Code)
 	}
 	body += controller.Body.String()
+	body += doWithCookie(srv, session, http.MethodGet, "/static/listening-session.js").Body.String()
 	for _, want := range []string{
 		"/api/listening-progress", // 保存与恢复端点
 		"继续听",                     // 恢复提示

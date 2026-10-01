@@ -1,5 +1,6 @@
 {{define "title"}}处理进度 · CloudWisePod{{end}}
 {{define "content"}}
+<div data-view="progress" hidden></div>
 <h1>处理进度</h1>
 
 <div id="progress-content">
@@ -49,46 +50,5 @@
 
 </div>
 
-<script>
-(function() {
-  function jobTypeLabel(t) {
-    if (t === 'episode_digest') return '单集精读生成';
-    if (t === 'transcribe') return '音频转录';
-    if (t === 'analyze') return '知识卡片生成';
-    return t;
-  }
-  async function refresh() {
-    try {
-      const resp = await fetch('/api/progress');
-      const data = await resp.json();
-      let html = '';
-      if (data.active) {
-        const a = data.active;
-        html += '<div class="status-bar processing"><span class="spinner"></span><div style="flex:1"><strong>正在处理：</strong><a href="/sources/' + a.source_type + '/' + a.source_id + '">' + a.title + '</a> <span class="meta">（' + a.stage + ' · ' + jobTypeLabel(a.job_type) + '）</span></div></div>';
-      } else {
-        html += '<div class="status-bar pending">当前没有正在处理的任务。</div>';
-      }
-      if (data.queued && data.queued.length > 0) {
-        html += '<h2>排队中（' + data.queued.length + '）</h2><div id="queued-list">';
-        data.queued.forEach(function(j) {
-          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + j.stage + ' · ' + jobTypeLabel(j.job_type) + '</p></div></div>';
-        });
-        html += '</div>';
-      } else {
-        html += '<p class="empty">没有排队中的任务。</p>';
-      }
-      if (data.recent && data.recent.length > 0) {
-        html += '<h2 style="margin-top:1.5rem">最近完成</h2><div id="recent-list">';
-        data.recent.forEach(function(j) {
-          const icon = j.status === 'succeeded' ? '✅' : '❌';
-          html += '<div class="list-item"><div class="ep-info" style="flex:1"><h3><a href="/sources/' + j.source_type + '/' + j.source_id + '">' + j.title + '</a></h3><p class="meta">' + icon + (j.status === 'succeeded' ? ' 成功' : ' 失败') + ' · ' + jobTypeLabel(j.job_type) + ' · ' + (window.cwpLocalTime ? window.cwpLocalTime(j.updated_at) : j.updated_at) + '</p></div></div>';
-        });
-        html += '</div>';
-      }
-      document.getElementById('progress-content').innerHTML = html;
-    } catch(e) {}
-  }
-  setInterval(refresh, 5000);
-})();
-</script>
+
 {{end}}

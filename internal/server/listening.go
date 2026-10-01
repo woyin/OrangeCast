@@ -40,6 +40,7 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 	case http.MethodPost:
 		var body struct {
 			Mode             string  `json:"mode"`
+			AudioSHA256      string  `json:"audio_sha256"`
 			ExpectedRevision *int64  `json:"expected_revision"`
 			SourceType       string  `json:"source_type"`
 			SourceID         string  `json:"source_id"`
@@ -57,7 +58,8 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		p := &models.ListeningProgress{
-			Mode: body.Mode, SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
+			AudioSHA256: body.AudioSHA256,
+			Mode:        body.Mode, SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
 			PlanID: body.PlanID, PlanVersion: body.PlanVersion,
 			ItemPosition: body.ItemPosition, HighlightID: body.HighlightID,
 			ItemOffsetSeconds: body.Offset, Speed: body.Speed, Seq: body.Seq,

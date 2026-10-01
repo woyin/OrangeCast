@@ -252,7 +252,9 @@ func knowledgeArticleViews(req provider.KnowledgeArticleRequest, blocks []provid
 			}
 			href := ""
 			if m.SnapshotID != "" {
-				if m.SourceType == "document" {
+				if m.NoPosition {
+					href = "/evidence/" + m.SnapshotID
+				} else if m.SourceType == "document" {
 					href = fmt.Sprintf("/evidence/%s?position=%.0f", m.SnapshotID, m.Position)
 				} else {
 					href = fmt.Sprintf("/evidence/%s?t=%.1f", m.SnapshotID, m.Position)

@@ -1,0 +1,12 @@
+{{define "title"}}稍后听 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>稍后听</h1><a class="btn" href="/podcasts">选择节目</a></div>
+<section id="listening-queue" class="panel" data-revision="{{.Queue.Revision}}" data-csrf="{{.CSRF}}">
+<p>按保存的顺序收听。原音与DJ清单分别记录，移除条目保留来源。</p>
+<label><input id="queue-autoplay" type="checkbox" {{if .Queue.Autoplay}}checked{{end}}>播放结束后自动听下一项（默认关闭）</label>
+<button type="button" data-queue-action="clear">清空队列</button><p id="queue-feedback" aria-live="polite"></p>
+<ol id="queue-items">{{range .Queue.Items}}<li data-queue-id="{{.ID}}"><a href="/sources/{{.SourceType}}/{{.SourceID}}{{if eq .Mode "dj"}}/dj?plan_id={{.PlanID}}&amp;plan_version={{.PlanVersion}}{{end}}">{{.Title}}</a> · {{if eq .Mode "dj"}}DJ精听{{else}}原音{{end}}{{with .Reason}}<p class="meta">{{.}}</p>{{end}}
+<button type="button" data-queue-action="play" {{if not .Available}}disabled{{end}}>立即播放</button><button type="button" data-queue-action="up">上移</button><button type="button" data-queue-action="down">下移</button><button type="button" data-queue-action="move_last">移到末尾</button><button type="button" data-queue-action="remove">移除</button></li>{{else}}<li>队列为空，在节目或DJ页面添加“稍后听”。</li>{{end}}</ol>
+<noscript><p>可用上面的链接进入节目收听；队列编辑需要启用JavaScript。</p></noscript>
+</section>
+{{end}}

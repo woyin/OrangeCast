@@ -82,6 +82,9 @@ func TestPlaybackUpgradeKeepsOnlyLegacyMode(t *testing.T) {
 	if _, err := s.DB.Exec(string(sql)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.DB.Exec(`ALTER TABLE listening_progress ADD COLUMN audio_sha256 TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatal(err)
+	}
 	old, err := s.GetListeningProgressMode(t.Context(), models.SourceEpisode, "ep", "dj")
 	if err != nil || old.ItemPosition != 3 || old.Revision != 1 {
 		t.Fatalf("backfill: %+v %v", old, err)

@@ -128,6 +128,13 @@ var scenarios = [
     var idle = h.player.state() === 'idle' && h.player.position().index === 0;
     assert('停止后无幽灵续播', idle);
   },
+  async function playbackPermissionKeepsCurrentItem() {
+    var h=makePlayer(),blocked=true;
+    h.ev.play=function(){if(blocked){var error=new Error('gesture required');error.name='NotAllowedError';return Promise.reject(error);}return FakeAudio.prototype.play.call(this);};
+    h.player.load([{type:'evidence',start:3,end:8,position:3,idx:'3'},{type:'evidence',start:10,end:15,position:4,idx:'4'}]);h.player.play();await wait(5);
+    assert('浏览器拒绝自动播放时保持暂停而不跳段',h.player.state()==='paused'&&h.player.position().index===0&&h.player.position().item.position===3);
+    blocked=false;h.player.play();await wait(5);assert('明确播放后继续同一段',h.player.state()==='playing'&&h.ev.currentTime===3&&h.player.position().item.position===3);h.player.stop();
+  },
   async function fastSwitchNoDoubleAudio() {
     var h = makePlayer();
     h.player.playItems([{ type: 'evidence', start: 0, end: 5, idx: '0' }]);

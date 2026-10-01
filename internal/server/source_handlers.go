@@ -66,6 +66,20 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		"SourceID":   sourceID,
 		"CSRF":       auth.CSRFValue(r),
 	}
+	if audio, err := srv.store.GetEvidenceAudio(r.Context(), sourceType, sourceID); err == nil {
+		data["AudioSHA256"] = audio.SHA256
+	}
+	identity, checkErr := srv.store.CheckListeningIdentity(r.Context(), models.ListeningQueueItem{SourceType: sourceType, SourceID: sourceID, Mode: "original", AudioSHA256: srv.sourceAudioSHA(r.Context(), sourceType, sourceID)})
+	if checkErr != nil {
+		http.Error(w, "检查播放来源失败", 500)
+		return
+	}
+	availability := &models.ListeningQueue{Items: []models.ListeningQueueItem{identity}}
+	srv.listeningQueueAvailability(r.Context(), availability)
+	if !availability.Items[0].Available {
+		data["AudioURL"] = ""
+		data["PlaybackUnavailable"] = availability.Items[0].Reason
+	}
 	if policy, err := srv.store.GetSourcePolicy(r.Context(), sourceType, sourceID); err == nil {
 		data["SourcePolicy"] = policy
 	}
@@ -125,6 +139,13 @@ func (srv *Server) sourceAudioURL(ctx context.Context, sourceType models.SourceT
 func (srv *Server) sourceDetailContent(ctx context.Context, sourceType models.SourceType, sourceID string, status models.EpisodeProcessingStatus) (string, string, []provider.Segment, map[string]any) {
 	segments := []provider.Segment(nil)
 	title, summary := titleForStatus(status), ""
+	if sourceType == models.SourceEpisode {
+		if episode, err := srv.store.GetEpisodeByID(ctx, sourceID); err == nil {
+			title = episode.Title
+		}
+	} else if upload, err := srv.store.GetUploadByID(ctx, sourceID); err == nil {
+		title = upload.OriginalFilename
+	}
 	var card map[string]any
 	if transcript, err := srv.store.GetCurrentVersion(ctx, sourceType, sourceID, store.KindTranscript); err == nil {
 		var payload provider.TranscriptPayload
@@ -305,7 +326,22 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	plan, err := srv.store.GetLatestDJPlanForSource(r.Context(), sourceType, sourceID)
+	var plan *models.DJPlan
+	var err error
+	if planID := r.URL.Query().Get("plan_id"); planID != "" {
+		plan, err = srv.store.GetDJPlan(r.Context(), planID)
+		version, e := strconv.Atoi(r.URL.Query().Get("plan_version"))
+		if err != nil || e != nil || plan.SourceType != sourceType || plan.SourceID != sourceID || plan.Version != version {
+			http.NotFound(w, r)
+			return
+		}
+	} else {
+		if r.URL.Query().Get("plan_version") != "" {
+			http.Error(w, "缺少清单身份", 400)
+			return
+		}
+		plan, err = srv.store.GetLatestDJPlanForSource(r.Context(), sourceType, sourceID)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		// 兼容状态：旧来源无清单（不冒充）。展示生成动作（不触发任何模型调用）。
 		hv := 0
@@ -334,6 +370,12 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		HighlightID  string
 	}
 	narrations, _ := srv.store.ListCurrentNarrationsForSource(r.Context(), sourceType, sourceID)
+	evidenceRefs := map[string][]string{}
+	for _, it := range plan.Items {
+		if it.Kind == models.DJItemEvidence && it.HighlightID != "" {
+			evidenceRefs[it.HighlightID] = append(evidenceRefs[it.HighlightID], it.SegmentIDs...)
+		}
+	}
 	items := make([]djItemView, 0, len(plan.Items))
 	for _, it := range plan.Items {
 		v := djItemView{
@@ -342,6 +384,9 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		}
 		switch it.Kind {
 		case models.DJItemNarration:
+			if len(v.Segments) == 0 && it.HighlightID != "" {
+				v.Segments = evidenceRefs[it.HighlightID]
+			}
 			v.Text = it.ScriptText
 			// 解说音频解析：优先计划脚本身份（plan:<id>:p<pos>），其次高光真实解说。
 			pseudo := fmt.Sprintf("plan:%s:p%d", plan.ID, it.Position)
@@ -397,7 +442,8 @@ func (srv *Server) handleDJ(w http.ResponseWriter, r *http.Request) {
 		"Items":      items,
 		"KeyPoints":  card.KeyPoints,
 		"AudioURL":   audioURL, "AudioWarning": audioWarning,
-		"PlanExists": true, "NoteSnapshotID": noteSnapshotID, "NoteSnapshotVersion": noteVersion, "NoteSegments": noteSegments,
+		"AudioSHA256": srv.sourceAudioSHA(r.Context(), sourceType, sourceID),
+		"PlanExists":  true, "NoteSnapshotID": noteSnapshotID, "NoteSnapshotVersion": noteVersion, "NoteSegments": noteSegments,
 		"PlanID":      plan.ID,
 		"PlanVersion": plan.Version,
 		"PlanTotal":   plan.TotalSeconds,
@@ -505,4 +551,12 @@ func (srv *Server) handleSourceSnapshot(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		http.Error(w, "编码失败", http.StatusInternalServerError)
 	}
+}
+
+func (srv *Server) sourceAudioSHA(ctx context.Context, sourceType models.SourceType, sourceID string) string {
+	audio, err := srv.store.GetEvidenceAudio(ctx, sourceType, sourceID)
+	if err != nil {
+		return ""
+	}
+	return audio.SHA256
 }

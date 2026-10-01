@@ -21,7 +21,11 @@ func (srv *Server) Router() http.Handler {
 	mux := http.NewServeMux()
 	srv.registerStaticRoutes(mux)
 	srv.registerPublicRoutes(mux)
-	mux.Handle("/", auth.RequireAuth(srv.store)(auth.CSRFProtect(srv.protectedRoutes())))
+	privateRoutes := auth.RequireAuth(srv.store)(auth.CSRFProtect(srv.protectedRoutes()))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		privateRoutes.ServeHTTP(w, r)
+	}))
 	return mux
 }
 
@@ -130,8 +134,11 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/purge", srv.handlePurge) // Purge（ADR-0012）：完整删除 Source
 	mux.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	mux.HandleFunc("/api/audio/", srv.handleAudio)
-	mux.HandleFunc("/api/narration/", srv.handleNarration)                              // Narration 解说音轨（ADR-0019）
-	mux.HandleFunc("/api/listening-progress", srv.handleListeningProgress)              // 听播进度（D07）
+	mux.HandleFunc("/api/narration/", srv.handleNarration)                 // Narration 解说音轨（ADR-0019）
+	mux.HandleFunc("/api/listening-progress", srv.handleListeningProgress) // 听播进度（D07）
+	mux.HandleFunc("/api/listening-session", srv.handleListeningSession)
+	mux.HandleFunc("/api/listening-queue", srv.handleListeningQueue)
+	mux.HandleFunc("/listening-queue", srv.handleListeningQueuePage)
 	mux.HandleFunc("/creation/selections", srv.handleCreationSelections)                // 创作素材选择（C01）
 	mux.HandleFunc("/workbench/ideation/round", srv.handleIdeationRoundCreate)          // C02：追加构思轮次
 	mux.HandleFunc("/workbench/ideation/rounds", srv.handleIdeationRoundsDetail)        // C02：轮次详情

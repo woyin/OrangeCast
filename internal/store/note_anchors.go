@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/woyin/orangecast/internal/provider"
 	"math"
+	"strings"
 
 	"github.com/woyin/orangecast/internal/models"
 )
@@ -22,21 +24,56 @@ func (s *Store) prepareNoteAnchor(ctx context.Context, note *models.OwnerNote, c
 	if note.Kind == "owner_reflection" {
 		ids = references
 	}
-	snap, err := s.FreezeSourceSnapshot(ctx, models.SourceType(note.SourceType), note.SourceID)
+	if a.NoPosition && (len(ids) > 0 || a.Position != 0 || a.Mode != "" || a.PlanID != "" || a.PlanVersion != 0 || a.AudioSHA256 != "") {
+		return "", ErrInvalidEditorialState
+	}
+	if (a.Mode != "" && a.Mode != "original" && a.Mode != "dj") || len(a.AudioSHA256) > 128 || len(a.PlanID) > 200 || a.PlanVersion < 0 || (a.Mode != "dj" && (a.PlanID != "" || a.PlanVersion != 0)) || (a.Mode == "dj" && (a.PlanID == "" || a.PlanVersion < 1)) {
+		return "", ErrInvalidEditorialState
+	}
+	if len(ids) == 0 && (note.AnchorJSON == "" || strings.TrimSpace(note.AnchorJSON) == "{}") {
+		a.NoPosition = true
+	}
+	var snap *models.SourceSnapshot
+	var audio []provider.Segment
+	var docs []models.DocumentSegment
+	var err error
+	if a.SnapshotID != "" && note.Kind == "owner_reflection" {
+		snap, audio, docs, err = s.SnapshotContent(ctx, a.SnapshotID)
+		if err != nil {
+			return "", err
+		}
+		if string(snap.SourceType) != note.SourceType || snap.SourceID != note.SourceID || snap.ContentVersion != a.Version {
+			return "", ErrInvalidEditorialState
+		}
+	} else {
+		snap, err = s.FreezeSourceSnapshot(ctx, models.SourceType(note.SourceType), note.SourceID)
+		if err == nil {
+			if a.SnapshotID != "" && (a.SnapshotID != snap.ID || a.Version != snap.ContentVersion) {
+				return "", fmt.Errorf("%w: 来源版本已改变，保留草稿并重新选择依据", ErrConflict)
+			}
+			_, audio, docs, err = s.SnapshotContent(ctx, snap.ID)
+		}
+	}
 	if err != nil {
 		if len(ids) > 0 || a.SnapshotID != "" || (!errors.Is(err, ErrInvalidEditorialState) && !errors.Is(err, ErrNotFound)) {
 			return "", err
 		}
 	} else {
-		if a.SnapshotID != "" && (a.SnapshotID != snap.ID || a.Version != snap.ContentVersion) {
-			return "", fmt.Errorf("%w: 来源版本已改变，保留草稿并重新选择依据", ErrConflict)
+		a.SnapshotID, a.Version, a.SegmentIDs = snap.ID, snap.ContentVersion, ids
+		if a.AudioSHA256 != "" && (snap.AudioSHA256 == "" || a.AudioSHA256 != snap.AudioSHA256) {
+			return "", fmt.Errorf("%w: 笔记原音身份与冻结快照不符", ErrInvalidEditorialState)
 		}
-		a.SnapshotID = snap.ID
-		a.Version = snap.ContentVersion
-		a.SegmentIDs = ids
-		_, audio, docs, err := s.SnapshotContent(ctx, snap.ID)
-		if err != nil {
-			return "", err
+		if a.Mode == "dj" {
+			plan, e := s.GetDJPlan(ctx, a.PlanID)
+			if e != nil {
+				return "", e
+			}
+			var frozen struct {
+				ID string `json:"source_snapshot_id"`
+			}
+			if json.Unmarshal([]byte(plan.InputSnapshotJSON), &frozen) != nil || plan.SourceType != snap.SourceType || plan.SourceID != snap.SourceID || plan.Version != a.PlanVersion || frozen.ID != snap.ID {
+				return "", ErrInvalidEditorialState
+			}
 		}
 		if len(ids) > 0 && note.AnchorJSON == "" {
 			for _, seg := range audio {
@@ -53,6 +90,7 @@ func (s *Store) prepareNoteAnchor(ctx context.Context, note *models.OwnerNote, c
 			}
 		}
 	}
+
 	raw, err := json.Marshal(a)
 	return string(raw), err
 }

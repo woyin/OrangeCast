@@ -132,7 +132,8 @@
           if (p && typeof p.then === 'function') {
             p.then(function () {
               if (!finished && !stale(t)) setState(STATES.PLAYING, item);
-            }).catch(function () {
+            }).catch(function (error) {
+              if(error && error.name === 'NotAllowedError'){pauseRequested=false;if(!isNarr)resumeAt=media.currentTime;setState(STATES.PAUSED,error);finish('paused');return;}
               // 播放被拒绝（自动播放策略等）：跳过该条目，不阻塞后续。
               if (!finished) { setState(STATES.ERROR, item); finish('failed'); }
             });

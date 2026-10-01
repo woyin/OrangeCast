@@ -133,6 +133,9 @@ func knowledgeStatus(status string) string {
 func noteHref(n *models.OwnerNote) string {
 	var a models.NoteAnchor
 	if json.Unmarshal([]byte(n.AnchorJSON), &a) == nil && a.SnapshotID != "" {
+		if a.NoPosition {
+			return "/evidence/" + url.PathEscape(a.SnapshotID)
+		}
 		if n.SourceType == "document" {
 			return fmt.Sprintf("/evidence/%s?position=%.0f", url.PathEscape(a.SnapshotID), a.Position)
 		}

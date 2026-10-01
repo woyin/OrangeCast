@@ -245,3 +245,5 @@ fieldset {min-width:0;margin:1rem 0;}fieldset textarea {width:100%;box-sizing:bo
 /* Preserve native hidden behavior even for flex/grid forms and panels. */
 [hidden]{display:none!important}
 #audio-player{width:100%}
+
+.listening-shell{margin:.5rem auto;max-width:1160px;padding:.75rem;display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}.listening-shell p,.listening-shell form{flex-basis:100%;margin:.2rem 0}.listening-shell label{display:inline-flex;align-items:center;gap:.3rem}.listening-shell input[type=number]{width:6rem}#source-audio{width:100%}#page-view:focus{outline:none}

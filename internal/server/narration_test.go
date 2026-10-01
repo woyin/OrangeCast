@@ -104,8 +104,8 @@ func TestDJRenders_WithNarrationURLs(t *testing.T) {
 	for _, want := range []string{
 		`data-position="2"`,
 		`data-segments="[&#34;seg-0001&#34;,&#34;seg-0002&#34;]"`,
-		"JSON.parse(btn.dataset.segments",
-		"pinBtn.disabled = !currentItemSegments()",
+		`data-note-segments=`,
+		`/static/dj-view.js`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("DJ 播放项缺少可交互元数据 %q", want)

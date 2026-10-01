@@ -276,7 +276,7 @@ func TestDJBriefCaptureButtons(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DJ 页应 200: %d", rec.Code)
 	}
-	body := rec.Body.String()
+	body := rec.Body.String() + doWithCookie(srv, session, http.MethodGet, "/static/dj-view.js").Body.String() + doWithCookie(srv, session, http.MethodGet, "/static/listening-session.js").Body.String()
 	for _, want := range []string{"dj-pin", "dj-note", "/api/pin", "/api/owner-notes", "owner_reflection", "data-segments"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("DJ 页缺少 %q", want)
