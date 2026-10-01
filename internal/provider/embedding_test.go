@@ -158,3 +158,19 @@ func TestEmbeddingInvalidVectorPreservesUsage(t *testing.T) {
 		t.Fatal("unsafe error")
 	}
 }
+
+func TestEmbeddingWrongModelPreservesUnpricedUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"model":"untrusted-vendor-name","data":[{"index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":31,"total_tokens":31}}`)
+	}))
+	defer srv.Close()
+	p, err := NewEmbeddingClient("secret", srv.URL, "vector", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := p.Embed(context.Background(), []string{"材料"})
+	var responseErr *EmbeddingResponseError
+	if result != nil || !errors.As(err, &responseErr) || responseErr.Receipt.Model != "unknown" || !responseErr.Receipt.UsageKnown || responseErr.Receipt.InputTokens != 31 {
+		t.Fatal(result, err)
+	}
+}

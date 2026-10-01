@@ -164,8 +164,12 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *Embe
 	if json.Unmarshal(raw, &wire) != nil {
 		return nil, errors.New("invalid embedding response JSON")
 	}
-	if wire.Model == p.model && wire.Usage != nil && wire.Usage.Prompt != nil && wire.Usage.Total != nil && *wire.Usage.Prompt >= 0 && *wire.Usage.Total == *wire.Usage.Prompt {
-		receipt = &EmbeddingResult{Model: p.model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
+	if wire.Usage != nil && wire.Usage.Prompt != nil && wire.Usage.Total != nil && *wire.Usage.Prompt >= 0 && *wire.Usage.Total == *wire.Usage.Prompt {
+		model := p.model
+		if wire.Model != p.model {
+			model = "unknown"
+		}
+		receipt = &EmbeddingResult{Model: model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
 	}
 	if len(wire.Data) != len(inputs) || wire.Model != p.model {
 		return nil, errors.New("invalid embedding response identity or batch")
