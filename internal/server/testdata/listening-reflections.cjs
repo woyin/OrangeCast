@@ -16,6 +16,10 @@ async function scenario(restore=false){
  vm.runInNewContext(fs.readFileSync('static/listening-reflections.js','utf8'),context);
  for(let i=0;i<5;i++)await settle();
  if(restore){assert.equal(node('reflection-remember').value,'刷新前的理解');assert(requests.every(r=>!r.opts.method));root.CWPReflections.clearPrivate();assert.equal(node('reflection-remember').value,'');assert(!storage.has('cwp-reflection-draft-v1'));return}
+ const postCount=()=>requests.filter(r=>r.opts.method).length;
+ const ended={detail:{playbackId:1,capture:active}};listeners['cwp-listening-ended'](ended);assert.equal(node('reflection-prompt').hidden,true,'default disabled');
+ root.CWPReflections.setPrompt(true);listeners['cwp-listening-ended'](ended);assert.equal(node('reflection-prompt').hidden,false);assert.equal(postCount(),0,'a prompt must not create drafts');assert(!node('reflection-remember').focused,'prompt cannot steal focus');
+ node('reflection-prompt-dismiss').onclick();listeners['cwp-listening-ended'](ended);assert.equal(node('reflection-prompt').hidden,true,'same end only once');
  await root.CWPReflections.start();assert(node('reflection-anchor').textContent.includes('正在播放A'));assert.equal(node('reflection-remember').focused,true);
  active={...active,sourceId:'B',title:'浏览B'};
  node('reflection-question').value='q';node('reflection-question').events.change();

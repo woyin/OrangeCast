@@ -52,7 +52,12 @@
   remember();emit();return true;
  }
  function act(spec,fn){if(!install(spec))return;fn(state());emit();}
- function ended(){loop=null;remember();emit();stepQueue(1,true);}
+ let lastNaturalEnd=-1;
+ function ended(){
+  if(loop&&active?.mode==='original'){seek(loop.start);transport?.play();return;}
+  if(root.CWPPlayback.canOfferReflection(state())&&lastNaturalEnd!==token){lastNaturalEnd=token;const captured=anchor();if(captured)root.dispatchEvent(new CustomEvent('cwp-listening-ended',{detail:{capture:captured,playbackId:token}}));}
+  loop=null;remember();emit();stepQueue(1,true);
+ }
  async function readQueue(){const response=await fetch('/api/listening-queue',{cache:'no-store'});if(!response.ok){if(response.status===401||response.redirected)root.CWPNavigation?.expire();throw Error('无法读取队列');}return response.json();}
  async function changeQueue(change,revision){const response=await fetch('/api/listening-queue',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':active?.csrf||document.querySelector('[name=_csrf]')?.value||document.querySelector('#listening-queue')?.dataset.csrf||''},body:JSON.stringify({...change,expected_revision:revision})});if(!response.ok){if(response.status===409)throw Error('队列已被其他窗口修改，请重载后操作。');throw Error(await response.text());}return response.json();}
  async function loadSpec(identity,signal){const response=await fetch(urlFor({sourceType:identity.sourceType||identity.source_type,sourceId:identity.sourceId||identity.source_id,mode:identity.mode,planId:identity.planId||identity.plan_id,planVersion:identity.planVersion||identity.plan_version}),{signal,cache:'no-store'});if(response.redirected||response.status===401){root.CWPNavigation?.expire();throw Error('登录已失效');}if(!response.ok)throw Error('来源或清单不可用');const view=new DOMParser().parseFromString(await response.text(),'text/html').querySelector('#page-view');const spec=view&&specFrom(view);if(!spec)throw Error('没有可播放的音频');return spec;}

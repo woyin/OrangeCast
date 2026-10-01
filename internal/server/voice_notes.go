@@ -56,7 +56,12 @@ func (srv *Server) handleVoiceSession(w http.ResponseWriter, r *http.Request) {
 	if len(questions) > 100 {
 		questions = questions[:100]
 	}
-	voiceJSON(w, map[string]any{"session_id": auth.PrivateSessionID(r), "csrf": auth.CSRFValue(r), "questions": questions})
+	prefs, err := srv.store.GetLearningPreferences(r.Context())
+	if err != nil {
+		voiceError(w, err)
+		return
+	}
+	voiceJSON(w, map[string]any{"session_id": auth.PrivateSessionID(r), "csrf": auth.CSRFValue(r), "questions": questions, "reflection_prompt": prefs.ReflectionPrompt, "current_question_id": prefs.CurrentQuestionID})
 }
 func (srv *Server) handleVoiceNotes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

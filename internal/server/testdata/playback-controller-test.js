@@ -65,5 +65,8 @@ const fetcher=async(url,opts)=>{
  const inherited=CWPPlayback.create({sourceType:'episode',sourceId:'sleep-next',mode:'original',sleepDeadline:deadline,now:()=>clock,
   fetch:async()=>({ok:true,json:async()=>({})}),adapter:{play:()=>{inheritedPaused=false;},pause:()=>{inheritedPaused=true;},paused:()=>inheritedPaused,time:()=>0,seek:()=>{},setRate:()=>{},getRate:()=>1,snapshot:()=>null,restore:()=>{}}});
  await flush();assert.equal(inherited.status().deadline,deadline);clock=deadline;await inherited.play();assert.equal(inheritedPaused,true);assert.equal(inherited.status().sleepExpired,true);assert.equal(inherited.status().deadline,0);inherited.destroy();
+ const endState={spec:{mode:'original'},audio:{ended:true,error:null,currentTime:100,duration:100},transport:{status:()=>({})},player:null,loop:null};
+ assert.equal(CWPPlayback.canOfferReflection(endState,1000),true);
+ for(const value of [{...endState,spec:{mode:'dj'}},{...endState,spec:{mode:'original',excerptId:'excerpt'}},{...endState,player:{}},{...endState,loop:{start:1,end:2}},{...endState,audio:{...endState.audio,error:{code:4}}},{...endState,audio:{...endState.audio,ended:false}},{...endState,audio:{...endState.audio,currentTime:10}},{...endState,audio:{...endState.audio,duration:NaN}},{...endState,transport:{status:()=>({sleepExpired:true})}},{...endState,transport:{status:()=>({deadline:999})}}])assert.equal(CWPPlayback.canOfferReflection(value,1000),false,'partial/error/sleep end cannot prompt');
  process.stdout.write('playback behavior passed');
 })().catch(err=>{process.stderr.write(String(err.stack));process.exitCode=1;});

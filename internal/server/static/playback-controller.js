@@ -92,5 +92,14 @@
       destroy:function () { stopped=true;if(abort)abort.abort();root.clearInterval(timer);mediaActions.forEach(function(name){try{root.navigator.mediaSession.setActionHandler(name,null);}catch(_){}});try{root.navigator.mediaSession.metadata=null;root.navigator.mediaSession.playbackState='none';}catch(_){}root.removeEventListener('pagehide',save);root.removeEventListener('online',online); if(root.document){root.document.removeEventListener('keydown',key);root.document.removeEventListener('visibilitychange',hidden);} },
       status:function () { return {revision:revision,loaded:loaded,dirty:dirty,conflict:conflict,deadline:deadline,sleepExpired:sleepExpired}; }};
   }
-  root.CWPPlayback = Object.freeze({create:create,rates:rates});
+  // Only a whole original recording's natural end can offer reflection.
+  // Queue/DJ transitions, loops, excerpts, failures and expired sleep are excluded.
+  function canOfferReflection(state,now=Date.now()) {
+    var spec=state?.spec,a=state?.audio,sleep=state?.transport?.status()||{};
+    return !!spec&&spec.mode==='original'&&!state.player&&!state.loop&&!spec.excerptId&&
+      a?.ended===true&&!a.error&&Number.isFinite(a.duration)&&a.duration>0&&
+      Number.isFinite(a.currentTime)&&a.currentTime>=a.duration-0.05&&
+      !sleep.sleepExpired&&(!sleep.deadline||sleep.deadline>now);
+  }
+  root.CWPPlayback = Object.freeze({create:create,rates:rates,canOfferReflection});
 })(typeof window !== 'undefined' ? window : globalThis);

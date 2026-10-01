@@ -97,6 +97,14 @@ func (s *Store) LearningNextActions(ctx context.Context, now time.Time) ([]Learn
 	if err != nil {
 		return nil, err
 	}
+	var reflectionID string
+	err = s.DB.QueryRowContext(ctx, `SELECT id FROM listening_reflections WHERE state='draft' AND expires_at>datetime('now') ORDER BY updated_at DESC,id LIMIT 1`).Scan(&reflectionID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		out = append(out, LearningAction{"reflection", "继续听后整理", "有尚未保存的私人整理草稿", "/listening-reflections/" + url.PathEscape(reflectionID)})
+	}
 	if p.CurrentQuestionID != "" {
 		q, e := s.GetLearningQuestion(ctx, p.CurrentQuestionID)
 		if e != nil && !errors.Is(e, ErrNotFound) {

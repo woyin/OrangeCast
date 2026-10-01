@@ -232,6 +232,21 @@ func TestListeningReflectionDraftUpgrade(t *testing.T) {
 	}
 }
 
+func TestListeningReflectionDraftHomeActionIsReadonly(t *testing.T) {
+	s, c := reflectionFixture(t)
+	r, err := s.StartListeningReflection(t.Context(), uuid.NewString(), c, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after int
+	s.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
+	actions, err := s.LearningNextActions(t.Context(), time.Now())
+	s.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
+	if err != nil || before != after || len(actions) != 1 || actions[0].Kind != "reflection" || actions[0].Href != "/listening-reflections/"+r.ID {
+		t.Fatal(actions, err, before, after)
+	}
+}
+
 func TestListeningReflectionSaveAtomicReplayAndConflict(t *testing.T) {
 	s, c := reflectionFixture(t)
 	ctx := t.Context()
