@@ -73,7 +73,7 @@ func TestListeningReflectionDraftReplayCASAndPrivacy(t *testing.T) {
 		t.Fatal(cancelled, err)
 	}
 	replay, err = s.ChangeListeningReflection(ctx, id, key, "edit", 1, a)
-	if err != nil || replay.State != "cancelled" || replay.Answers.Remember != "" {
+	if !errors.Is(err, ErrConflict) {
 		t.Fatal(replay, err)
 	}
 	if _, err = s.ChangeListeningReflection(ctx, id, uuid.NewString(), "edit", 3, a); !errors.Is(err, ErrConflict) {
@@ -229,5 +229,141 @@ func TestListeningReflectionDraftUpgrade(t *testing.T) {
 	list, err := s.ListListeningReflections(t.Context())
 	if err != nil || len(list) != 0 {
 		t.Fatal(list, err)
+	}
+}
+
+func TestListeningReflectionSaveAtomicReplayAndConflict(t *testing.T) {
+	s, c := reflectionFixture(t)
+	ctx := t.Context()
+	q, err := s.CreateLearningQuestion(ctx, LearningQuestion{Body: "有哪些适用条件？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.StartListeningReflection(ctx, uuid.NewString(), c, q.ID, q.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := ReflectionAnswers{Remember: "我的新理解", Apply: "明天用一个具体例子验证"}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, uuid.NewString(), 1, ReflectionAnswers{}); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, "invalid", 1, a); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, uuid.NewString(), 0, a); !errors.Is(err, ErrInvalidEditorialState) {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, uuid.NewString(), 2, a); !errors.Is(err, ErrConflict) {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`CREATE TEMP TRIGGER fail_reflection_save BEFORE UPDATE OF state ON listening_reflections WHEN NEW.state='saved' BEGIN SELECT RAISE(ABORT,'injected failure');END`); err != nil {
+		t.Fatal(err)
+	}
+	key := uuid.NewString()
+	if _, err = s.SaveListeningReflection(ctx, r.ID, key, 1, a); err == nil {
+		t.Fatal("fault unexpectedly committed")
+	}
+	var notes, links, receipts int
+	s.DB.QueryRow(`SELECT count(*) FROM owner_notes`).Scan(&notes)
+	s.DB.QueryRow(`SELECT count(*) FROM learning_question_links WHERE question_id=?`, q.ID).Scan(&links)
+	s.DB.QueryRow(`SELECT count(*) FROM listening_reflection_actions`).Scan(&receipts)
+	if notes != 0 || links != 0 || receipts != 0 {
+		t.Fatal(notes, links, receipts)
+	}
+	unchanged, _ := s.GetLearningQuestion(ctx, q.ID)
+	draft, _ := s.GetListeningReflection(ctx, r.ID)
+	if unchanged.Revision != q.Revision || draft.State != "draft" || draft.Revision != 1 {
+		t.Fatal(unchanged, draft)
+	}
+	if _, err = s.DB.Exec(`DROP TRIGGER fail_reflection_save`); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveListeningReflection(ctx, r.ID, key, 1, a)
+	if err != nil || saved.State != "saved" || saved.SavedNoteID == "" {
+		t.Fatal(saved, err)
+	}
+	replay, err := s.SaveListeningReflection(ctx, r.ID, key, 1, a)
+	if err != nil || replay.SavedNoteID != saved.SavedNoteID {
+		t.Fatal(replay, err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, key, 1, ReflectionAnswers{Remember: "异hash"}); !errors.Is(err, ErrConflict) {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, uuid.NewString(), 1, a); !errors.Is(err, ErrConflict) {
+		t.Fatal(err)
+	}
+	note, err := s.GetOwnerNote(ctx, saved.SavedNoteID)
+	if err != nil || note.Content != a.Content() || note.Kind != "owner_reflection" || note.CitationsJSON != "[]" || note.ReferencesJSON != `["seg-1"]` {
+		t.Fatal(note, err)
+	}
+	updated, _ := s.GetLearningQuestion(ctx, q.ID)
+	if updated.Revision != q.Revision+1 {
+		t.Fatal(updated)
+	}
+	s.DB.QueryRow(`SELECT count(*) FROM learning_question_links WHERE question_id=? AND object_id=? AND state='confirmed'`, q.ID, note.ID).Scan(&links)
+	if links != 1 {
+		t.Fatal(links)
+	}
+	if err = s.DeleteOwnerNote(ctx, note.ID, note.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveListeningReflection(ctx, r.ID, key, 1, a); !errors.Is(err, ErrNotFound) {
+		t.Fatal("deleted note replay recreated", err)
+	}
+}
+
+func TestListeningReflectionSaveQuestionAndSourceInvalidation(t *testing.T) {
+	for _, kind := range []string{"question_changed", "question_deleted", "source_archived", "source_purged", "expired", "unlinked"} {
+		t.Run(kind, func(t *testing.T) {
+			s, c := reflectionFixture(t)
+			ctx := t.Context()
+			q, err := s.CreateLearningQuestion(ctx, LearningQuestion{Body: "问题"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			qid, qrev := q.ID, q.Revision
+			if kind == "unlinked" {
+				qid = ""
+				qrev = 0
+			}
+			r, err := s.StartListeningReflection(ctx, uuid.NewString(), c, qid, qrev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "question_changed":
+				_, err = s.ChangeLearningQuestion(ctx, q.ID, q.Revision, LearningQuestionChange{Action: "status", Status: "paused"})
+			case "question_deleted":
+				_, err = s.DB.Exec(`DELETE FROM learning_questions WHERE id=?`, q.ID)
+			case "source_archived":
+				_, err = s.DB.Exec(`UPDATE episodes SET archived_at=datetime('now') WHERE id=?`, c.SourceID)
+			case "source_purged":
+				err = s.DeleteSourceRows(ctx, models.SourceEpisode, c.SourceID)
+			case "expired":
+				err = s.ExpireListeningReflections(ctx, time.Now().Add(8*24*time.Hour))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved, err := s.SaveListeningReflection(ctx, r.ID, uuid.NewString(), 1, ReflectionAnswers{Uncertain: "还不知道"})
+			if kind == "unlinked" {
+				if err != nil || saved.State != "saved" {
+					t.Fatal(saved, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("invalid scope adopted")
+			}
+			var n int
+			s.DB.QueryRow(`SELECT count(*) FROM owner_notes`).Scan(&n)
+			if n != 0 {
+				t.Fatal(n)
+			}
+			draft, _ := s.GetListeningReflection(ctx, r.ID)
+			if kind != "source_purged" && kind != "expired" && draft.State != "draft" {
+				t.Fatal(draft)
+			}
+		})
 	}
 }

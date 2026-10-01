@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 // ListeningCapture belongs to the playing source, regardless of the viewed page.
@@ -279,6 +280,15 @@ func (s *Store) ChangeListeningReflection(ctx context.Context, id, key, action s
 	if err != nil {
 		return nil, err
 	}
+	if action == "cancel" {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM listening_reflection_actions WHERE reflection_id=?`, id); err != nil {
+			return nil, err
+		}
+	}
+	r, err = scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
 	if err = recordReflectionAction(ctx, tx, key, id, hash, r); err != nil {
 		return nil, err
 	}
@@ -335,4 +345,112 @@ func (s *Store) ExpireListeningReflections(ctx context.Context, now time.Time) e
 		return err
 	}
 	return tx.Commit()
+}
+
+// SaveListeningReflection creates one formal Owner note and its optional question
+// relation in the same transaction as the draft transition and replay receipt.
+func (s *Store) SaveListeningReflection(ctx context.Context, id, key string, expected int, answers ReflectionAnswers) (*ListeningReflection, error) {
+	if _, err := uuid.Parse(key); err != nil || expected < 1 {
+		return nil, ErrInvalidEditorialState
+	}
+	a, err := answers.normalized()
+	if err != nil {
+		return nil, err
+	}
+	if a.Content() == "" {
+		return nil, ErrInvalidEditorialState
+	}
+	hash := reflectionHash(struct {
+		ID, Action string
+		Revision   int
+		Answers    ReflectionAnswers
+	}{id, "save", expected, a})
+	r, err := s.GetListeningReflection(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var prepared *models.OwnerNote
+	if r.State == "draft" {
+		anchor, _ := json.Marshal(r.Capture.Anchor)
+		refs, _ := json.Marshal(r.Capture.Anchor.SegmentIDs)
+		prepared, err = s.prepareOwnerNote(ctx, models.OwnerNote{SourceType: r.Capture.SourceType, SourceID: r.Capture.SourceID, Kind: "owner_reflection", Content: a.Content(), AnchorJSON: string(anchor), ReferencesJSON: string(refs)})
+		if err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if old, e := reflectionReplay(ctx, tx, key, id, hash); old != nil || e != nil {
+		if e != nil {
+			return nil, e
+		}
+		if old.State != "saved" {
+			return nil, ErrConflict
+		}
+		var exists int
+		if e = tx.QueryRowContext(ctx, `SELECT 1 FROM owner_notes WHERE id=?`, old.SavedNoteID).Scan(&exists); errors.Is(e, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return old, e
+	}
+	r, err = scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if r.State != "draft" || r.Revision != expected || prepared == nil {
+		return nil, ErrConflict
+	}
+	if err = checkReflectionCapture(ctx, tx, r.Capture); err != nil {
+		return nil, err
+	}
+	if err = checkReflectionQuestion(ctx, tx, r.QuestionID, r.QuestionRevision); err != nil {
+		return nil, err
+	}
+	if r.QuestionID != "" {
+		var count int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM learning_question_links WHERE question_id=?`, r.QuestionID).Scan(&count); err != nil {
+			return nil, err
+		}
+		if count >= 200 {
+			return nil, ErrInvalidEditorialState
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO owner_notes(id,source_type,source_id,kind,content,citations_json,references_json,anchor_json)VALUES(?,?,?,?,?,?,?,?)`, prepared.ID, prepared.SourceType, prepared.SourceID, prepared.Kind, prepared.Content, prepared.CitationsJSON, prepared.ReferencesJSON, prepared.AnchorJSON)
+	if err != nil {
+		return nil, err
+	}
+	if r.QuestionID != "" {
+		if err = insertQuestionRelation(ctx, tx, r.QuestionID, provider.LearningQuestionLink{Kind: "note", ObjectID: prepared.ID, SourceType: prepared.SourceType, SourceID: prepared.SourceID, Version: 1}, "confirmed", "owner"); err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE learning_questions SET revision=revision+1,updated_at=datetime('now') WHERE id=?`, r.QuestionID); err != nil {
+			return nil, err
+		}
+		if err = questionOperation(ctx, tx, r.QuestionID, r.QuestionRevision+1, "note", prepared.ID); err != nil {
+			return nil, err
+		}
+	}
+	r.Answers = a
+	r.State = "saved"
+	r.SavedNoteID = prepared.ID
+	r.Revision++
+	raw, _ := json.Marshal(a)
+	_, err = tx.ExecContext(ctx, `UPDATE listening_reflections SET answers_json=?,state='saved',saved_note_id=?,revision=?,updated_at=datetime('now') WHERE id=?`, string(raw), prepared.ID, r.Revision, id)
+	if err != nil {
+		return nil, err
+	}
+	r, err = scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err = recordReflectionAction(ctx, tx, key, id, hash, r); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r, nil
 }

@@ -27,7 +27,7 @@ func (srv *Server) Router() http.Handler {
 		if r.URL.Path == "/api/voice-notes/upload" {
 			r.Body = http.MaxBytesReader(w, r.Body, (20<<20)+(64<<10))
 		}
-		if r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" || r.URL.Path == "/api/learning-actions" {
+		if r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" || r.URL.Path == "/api/learning-actions" || r.URL.Path == "/api/listening-reflections" {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		}
 		privateRoutes.ServeHTTP(w, r)
@@ -53,6 +53,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
 	mux.HandleFunc("/api/learning-actions", srv.handleLearningActions)
+	mux.HandleFunc("/api/listening-reflections", srv.handleListeningReflections)
 	mux.HandleFunc("/voice-notes", srv.handleVoiceNotes)
 	mux.HandleFunc("/voice-notes/price", srv.handleVoicePrice)
 	mux.HandleFunc("/api/voice-notes/upload", srv.handleVoiceUpload)
