@@ -322,6 +322,24 @@ func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) e
 	}
 	// 预算针对将要实际调用的生效模型（配置为空时用 Provider 官方默认）。
 	model := provider.EffectiveModel(tc.Provider, tc.Model, string(job.JobType))
+	if job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview {
+		exec, err := w.store.GetJobExecution(ctx, job.ID)
+		if err != nil {
+			return err
+		}
+		var snapshot struct {
+			Request provider.KnowledgeArticleRequest `json:"request"`
+		}
+		if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &snapshot); err != nil {
+			return err
+		}
+		if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion {
+			if _, err := w.store.HoldKnowledgeBudget(ctx, job.ID, string(job.JobType), job.Automated, tc.Provider, model, snapshot.Request.Estimate); err != nil {
+				return fmt.Errorf("预算检查拒绝任务: %w", err)
+			}
+			return nil
+		}
+	}
 	in, out := budgetEstimateUnits(string(job.JobType))
 	if _, err := w.store.HoldBudget(ctx, job.ID, string(job.JobType), job.Automated, tc.Provider, model, in, out); err != nil {
 		return fmt.Errorf("预算检查拒绝任务: %w", err)

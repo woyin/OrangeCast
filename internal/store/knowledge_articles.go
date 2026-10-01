@@ -324,6 +324,7 @@ func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name str
 
 // ReserveKnowledgeArticle atomically admits one input snapshot and its first stage.
 func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, model string, req provider.KnowledgeArticleRequest, automatic bool) (*KnowledgeArticleRecord, bool, error) {
+	ensureKnowledgeStageConfigs(&req, model)
 	if len(req.Materials) < 2 {
 		return nil, false, fmt.Errorf("至少需要两项可用重点或笔记；先完成学习处理或记录笔记")
 	}
@@ -397,8 +398,10 @@ func enqueueKnowledgeStage(ctx context.Context, tx *sql.Tx, id, stage, name, mod
 	if err := tx.QueryRowContext(ctx, `SELECT working_revision FROM knowledge_articles WHERE id=?`, id).Scan(&revision); err != nil {
 		return err
 	}
-	if (stage == "review" || stage == "review_final") && req.ReviewModel != "" {
-		model = req.ReviewModel
+	var err error
+	model, err = freezeKnowledgeEstimate(ctx, tx, name, model, &req)
+	if err != nil {
+		return err
 	}
 	input, _ := json.Marshal(KnowledgeStageInput{ArticleID: id, Stage: stage, Request: req, ExpectedRevision: &revision})
 	version := req.PromptVersion
@@ -406,7 +409,7 @@ func enqueueKnowledgeStage(ctx context.Context, tx *sql.Tx, id, stage, name, mod
 		version = "knowledge-article-v1"
 	}
 	jobID := uuid.NewString()
-	_, err := tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,is_automated,intent_id,input_snapshot_json,config_version,configured_provider,configured_model) VALUES(?,?,?,?,'queued',?,?,?,?,?,?)`, jobID, "knowledge_article", id, string(models.JobKnowledgeArticle), automatic, "knowledge-article:"+id+":"+stage, string(input), version, name, model)
+	_, err = tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,is_automated,intent_id,input_snapshot_json,config_version,configured_provider,configured_model) VALUES(?,?,?,?,'queued',?,?,?,?,?,?)`, jobID, "knowledge_article", id, string(models.JobKnowledgeArticle), automatic, "knowledge-article:"+id+":"+stage, string(input), version, name, model)
 	if err != nil {
 		return err
 	}

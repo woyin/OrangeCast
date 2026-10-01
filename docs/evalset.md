@@ -76,10 +76,20 @@ CWP_LEARNING_EVAL_SAVE=1 go test ./internal/server -run '^TestPersonalLearningV3
 CWP_LEARNING_V3_LIVE=1 CWP_LEARNING_EVAL_SAVE=1 go test ./internal/server -run '^TestPersonalLearningV3Evaluation$' -count=1 -v
 ```
 
-入口读取本地`.env`，调用走既有队列、来源策略与预算。可设置`CWP_LEARNING_V3_MANIFEST`指定私有JSON语料清单；设置`CWP_LEARNING_V3_COMPARE_MODELS`为不同模型名称的逗号列表，可比较同一份冻结语料。未设置`POD_REVIEW_MODEL`时审校回退到对应写作模型，不能称作独立审校模型。
+入口读取本地`.env`，调用走既有队列、来源策略与预算。可设置`CWP_LEARNING_V3_MANIFEST`指定私有JSON语料清单；设置`CWP_LEARNING_V3_COMPARE_MODELS`为不同模型名称的逗号列表，可比较同一份冻结语料。可选阶段模型和输出上限冻结在每个任务；比较时应检查这些实际阶段配置，不能将被覆盖的`POD_MODEL`当成写作模型。未设置`POD_REVIEW_MODEL`时审校回退到`POD_MODEL`，不能称作独立审校模型。
 
 清单格式由`internal/evalset/personal_learning_report.go`定义：`version:1`、`kind:real|self-authored`，`episodes`含稳定ID/标题/来源标识/真实Segments/`model_data_policy`，`notes`含ID/episode_id/kind/content/segments，`cases`含ID/question/note_ids/expected/forbidden。来源策略默认`local_only`；只有明确允许外发的材料能通过付费准入。来源笔记的片段必须存在于所属节目；个人反思只能保存参考关系。
 
 输出位于忽略目录`data/eval/personal-learning-v3/run-*`：私有`report.json`与包含精确任务输入、断点结果及用量的`frozen-run.db`。失败也保存已知记录；报告中的`human`默认缺省。人工评分必须有评测人和五个1–5分维度，均分≥4且无严重事实/归因错误才达到人工质量标准。真人评分、模型审校、真实接口和手机体验分别记录。
 
 当前Owner确认尚无真实个人笔记，因此真实笔记质量与人工评分保持待验证。自建笔记不代填真实使用记录；后续积累笔记后可直接更换清单进行评测。
+
+P2的阶段输入估算以实际消息序列为准，仍属于近似；校准只针对确切已测路由，其它模型保留保守办法。报告同时保存前置估算和实际receipt；不把价格未知写成零。新v4任务记录候选覆盖/证据窗口，旧v1–v3沿原契约恢复。阶段返回计费输出超限时保留响应和实际用量，并阻止自动推进，不能假设兼容端点一定遵守请求上限。
+
+高命中投影性能可独立复测（无模型调用）：
+
+```bash
+go test ./internal/store -run '^$' -bench '^BenchmarkKnowledgeWideRecall$' -benchtime=20x -count=1
+```
+
+该基准为1万/5万合成投影、100%词项命中、最多200项元数据，包含来源外发策略过滤；不评估文章语义质量。实际运行见第三轮验收记录。

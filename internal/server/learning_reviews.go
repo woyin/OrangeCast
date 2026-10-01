@@ -49,7 +49,7 @@ func (srv *Server) RunLearningReviews(ctx context.Context, now time.Time) error 
 	if err != nil {
 		return err
 	}
-	_, _, err = srv.store.ReserveLearningReview(ctx, profile.ID, "pod", srv.cfg.PodModel, now, true)
+	_, _, err = srv.store.ReserveLearningReview(ctx, profile.ID, "pod", srv.cfg.KnowledgeStageModels()["weekly_review"], now, true)
 	return err
 }
 
@@ -184,7 +184,7 @@ func (srv *Server) handleLearningReviewAction(w http.ResponseWriter, r *http.Req
 			srv.reviewActionError(w, r, e)
 			return
 		}
-		batch, _, e := srv.store.ReserveLearningReview(ctx, profile.ID, "pod", srv.cfg.PodModel, time.Now(), false)
+		batch, _, e := srv.store.ReserveLearningReview(ctx, profile.ID, "pod", srv.cfg.KnowledgeStageModels()["weekly_review"], time.Now(), false)
 		if e != nil {
 			srv.reviewActionError(w, r, e)
 			return

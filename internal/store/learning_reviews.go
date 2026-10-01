@@ -213,6 +213,11 @@ func (s *Store) ReserveLearningReview(ctx context.Context, profile, name, model 
 		}
 	}
 	id, jobID := uuid.NewString(), uuid.NewString()
+	ensureKnowledgeStageConfigs(&req, model)
+	model, err = freezeKnowledgeEstimate(ctx, tx, name, model, &req)
+	if err != nil {
+		return nil, false, err
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO learning_review_batches(id,profile_id,week_key,timezone,start_utc,end_utc,input_json,provider,model,prompt_version,job_id,automated)VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, profile, key, prefs.Timezone, start.Format(time.RFC3339), end.Format(time.RFC3339), jsonString(req), name, model, req.PromptVersion, jobID, automatic); err != nil {
 		return nil, false, err
 	}

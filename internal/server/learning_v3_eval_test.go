@@ -175,6 +175,7 @@ func TestPersonalLearningV3Evaluation(t *testing.T) {
 				srv.cfg.PodBaseURL, srv.cfg.PodAPIKey, srv.cfg.PodModel = "https://example.test/v1", "evaluation-test-key", model
 				if live {
 					srv.cfg.PodBaseURL, srv.cfg.PodAPIKey, srv.cfg.PodReviewModel = os.Getenv("POD_BASE_URL"), os.Getenv("POD_API_KEY"), os.Getenv("POD_REVIEW_MODEL")
+					srv.cfg.PodDiscoveryModel, srv.cfg.PodSelectionModel, srv.cfg.PodWriteModel, srv.cfg.PodLearningReviewModel = os.Getenv("POD_DISCOVERY_MODEL"), os.Getenv("POD_SELECTION_MODEL"), os.Getenv("POD_WRITE_MODEL"), os.Getenv("POD_LEARNING_REVIEW_MODEL")
 				}
 				if !srv.cfg.PodAvailable() {
 					t.Fatal("POD configuration incomplete")
@@ -186,7 +187,10 @@ func TestPersonalLearningV3Evaluation(t *testing.T) {
 						return &provider.ProviderBundle{KnowledgeArticle: &learningV3EvaluationProvider{}}, nil
 					})
 				}
-				configuration, _ := json.Marshal([]string{srv.cfg.PodBaseURL, model, srv.cfg.KnowledgeReviewModel(), provider.KnowledgeArticlePromptVersion})
+				configuration, _ := json.Marshal(struct {
+					Endpoint, Prompt string
+					Stages           map[string]provider.KnowledgeStageConfig
+				}{srv.cfg.PodBaseURL, provider.KnowledgeArticlePromptVersion, provider.FreezeKnowledgeStageConfigs(srv.cfg.KnowledgeStageModels())})
 				report := evalset.LearningEvaluationRun{SourceFingerprint: sourceFingerprint, ConfigurationFingerprint: fmt.Sprintf("%x", sha256.Sum256(configuration)), CaseID: sample.ID, CorpusHash: corpus.Fingerprint(), Baseline: "9757702", Model: model, ReviewModel: srv.cfg.KnowledgeReviewModel(), PromptVersion: provider.KnowledgeArticlePromptVersion, Status: "pending"}
 				var executions []store.KnowledgeExecution
 				if os.Getenv("CWP_LEARNING_EVAL_SAVE") == "1" {
@@ -228,6 +232,7 @@ func TestPersonalLearningV3Evaluation(t *testing.T) {
 				}
 				req.Instructions = "围绕以下问题发现文章方向：" + sample.Question
 				req.ReviewModel = srv.cfg.KnowledgeReviewModel()
+				req.StageConfigs = provider.FreezeKnowledgeStageConfigs(srv.cfg.KnowledgeStageModels())
 				batch, e := isolated.EnsureKnowledgeDiscoveryBatch(t.Context(), profile.ID, "pod", model, req, last, false)
 				if e != nil {
 					t.Fatal(e)

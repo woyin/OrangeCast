@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 // ErrBudgetExhausted 全局月度预算不足（含在途预估）。
@@ -22,6 +23,9 @@ var ErrBudgetExhausted = errors.New("monthly budget exhausted")
 
 // ErrBudgetUnpriced 已配置预算但模型未登记价格：付费自动任务被阻止的配置缺口。
 var ErrBudgetUnpriced = errors.New("model price missing while budget is configured")
+
+// ErrBudgetIncomplete means the request has no usable frozen token estimate.
+var ErrBudgetIncomplete = errors.New("frozen request estimate incomplete")
 
 // ErrAutoDailyLimitReached 自动处理任务达到当日数量上限。
 var ErrAutoDailyLimitReached = errors.New("automated daily job limit reached")
@@ -178,6 +182,19 @@ func reuseOrRejectReservation(res *models.BudgetReservation) (*models.BudgetRese
 //
 // 预算未配置时不预占（记录 nil 语义），行为与旧路径一致。
 func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automated bool, providerName, model string, estimateUnitsIn, estimateUnitsOut int) (*models.BudgetReservation, error) {
+	return s.holdBudget(ctx, jobID, operation, automated, providerName, model, estimateUnitsIn, estimateUnitsOut, nil)
+}
+
+// HoldKnowledgeBudget uses the admitted request's price and approximate units.
+// A missing frozen price still blocks configured monetary budgets.
+func (s *Store) HoldKnowledgeBudget(ctx context.Context, jobID, operation string, automated bool, providerName, model string, estimate *provider.KnowledgeEstimate) (*models.BudgetReservation, error) {
+	if estimate == nil || estimate.InputTokens <= 0 || estimate.OutputTokens <= 0 || estimate.Method == "" {
+		return nil, fmt.Errorf("%w: %w", ErrBudgetIncomplete, ErrInvalidEditorialState)
+	}
+	return s.holdBudget(ctx, jobID, operation, automated, providerName, model, estimate.InputTokens, estimate.OutputTokens, estimate)
+}
+
+func (s *Store) holdBudget(ctx context.Context, jobID, operation string, automated bool, providerName, model string, estimateUnitsIn, estimateUnitsOut int, frozen *provider.KnowledgeEstimate) (*models.BudgetReservation, error) {
 	// 日限额按执行资格计数（R03）：仅约束订阅自动产生的任务。
 	if automated {
 		if err := s.AdmitAutomatedDailyIntent(ctx, jobID); err != nil {
@@ -194,16 +211,26 @@ func (s *Store) HoldBudget(ctx context.Context, jobID, operation string, automat
 	}
 
 	// 已配置预算：付费模型必须登记价格（自动任务的配置缺口必须显式暴露）。
-	if _, err := s.GetModelPrice(ctx, providerName, model); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, fmt.Errorf("%w: %s/%s 未登记价格，无法核算自动任务预算", ErrBudgetUnpriced, providerName, model)
+	if frozen == nil {
+		if _, err := s.GetModelPrice(ctx, providerName, model); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil, fmt.Errorf("%w: %s/%s 未登记价格，无法核算自动任务预算", ErrBudgetUnpriced, providerName, model)
+			}
+			return nil, err
 		}
-		return nil, err
+	} else if !frozen.PriceKnown {
+		return nil, fmt.Errorf("%w: %s/%s 入队时未登记价格", ErrBudgetUnpriced, providerName, model)
 	}
 	if estimateUnitsIn < 0 || estimateUnitsOut < 0 {
 		return nil, fmt.Errorf("%w: 预估单位不能为负 (%d, %d)", ErrInvalidEditorialState, estimateUnitsIn, estimateUnitsOut)
 	}
-	estimate, known, err := s.ResolveUsageCost(ctx, providerName, model, estimateUnitsIn, estimateUnitsOut)
+	var estimate int64
+	var known bool
+	if frozen != nil {
+		estimate, known = frozen.CostForUnits(estimateUnitsIn, estimateUnitsOut)
+	} else {
+		estimate, known, err = s.ResolveUsageCost(ctx, providerName, model, estimateUnitsIn, estimateUnitsOut)
+	}
 	if err != nil {
 		return nil, err
 	}

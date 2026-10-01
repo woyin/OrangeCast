@@ -13,6 +13,8 @@ import (
 // KnowledgeSearchQuery bounds local-only retrieval and preserves explicit filters.
 type KnowledgeSearchQuery struct {
 	Recall                                                          bool
+	SendProvider, RecallProfileID                                   string // internal eligible recall; ordinary local search remains unrestricted
+	MetadataOnly                                                    bool   // bounded snippet, no full body transfer; internal recall may request 200 hits
 	Text, Kind, SourceType, SourceID, PodcastID, Theme, From, Until string
 	Page, PerPage                                                   int
 	IncludeDrafts, IncludeHistory                                   bool
@@ -101,7 +103,11 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if q.Page > 10000 {
 		return result, ErrInvalidEditorialState
 	}
-	if q.PerPage < 1 || q.PerPage > 100 {
+	maxPage := 100
+	if q.Recall && q.MetadataOnly {
+		maxPage = 200
+	}
+	if q.PerPage < 1 || q.PerPage > maxPage {
 		q.PerPage = 20
 	}
 	result.Page = q.Page
@@ -119,7 +125,7 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	var args []any
 	if match != "" {
 		join = " JOIN knowledge_search_fts f ON f.rowid=d.rowid"
-		rank = "bm25(knowledge_search_fts)"
+		rank = "bm25(knowledge_search_fts,3.0,5.0,1.0)"
 		where = append(where, "knowledge_search_fts MATCH ?")
 		args = append(args, match)
 		clause, extra := knowledgePhraseFilter(q.Text)
@@ -153,7 +159,7 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 		}
 		if match == "" {
 			join = " JOIN knowledge_search_fts f ON f.rowid=d.rowid"
-			rank = "bm25(knowledge_search_fts)"
+			rank = "bm25(knowledge_search_fts,3.0,5.0,1.0)"
 		}
 		where = append(where, "knowledge_search_fts MATCH ?")
 		args = append(args, themeMatch)
@@ -176,6 +182,19 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	where = append(where, "d.visibility IN ("+strings.Join(visibility, ",")+")")
 	// Archive filtering is local; external-send policy is checked only at the paid seam.
 	where = append(where, `(d.source_id='' OR (d.source_type='episode' AND EXISTS(SELECT 1 FROM episodes e WHERE e.id=d.source_id AND e.archived_at IS NULL)) OR (d.source_type='upload' AND EXISTS(SELECT 1 FROM uploads u WHERE u.id=d.source_id AND u.archived_at IS NULL)) OR (d.source_type='document' AND EXISTS(SELECT 1 FROM documents x WHERE x.id=d.source_id AND x.archived_at IS NULL)))`)
+	if q.Recall && q.SendProvider != "" {
+		var policies []string
+		for _, source := range []struct{ kind, table string }{{"episode", "episodes"}, {"upload", "uploads"}, {"document", "documents"}} {
+			policies = append(policies, "(d.source_type='"+source.kind+"' AND EXISTS(SELECT 1 FROM "+source.table+" p WHERE p.id=d.source_id AND (p.model_data_policy='external_allowed' OR (p.model_data_policy='approved_providers_only' AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(p.approved_providers_json) THEN p.approved_providers_json ELSE '[]' END) a WHERE lower(trim(a.value))=lower(trim(?)))))))")
+			args = append(args, q.SendProvider)
+		}
+		where = append(where, "("+strings.Join(policies, " OR ")+")")
+		where = append(where, "(d.kind!='keypoint' OR EXISTS(SELECT 1 FROM keypoint_index k WHERE k.id=d.object_id AND k.stale_at IS NULL AND k.evidence_status!='stale' AND k.production_status!='dismissed' AND k.quality_status IN ('ready','owner_confirmed')))")
+		if q.RecallProfileID != "" {
+			where = append(where, "(d.kind!='keypoint' OR NOT EXISTS(SELECT 1 FROM editorial_relevance er WHERE er.keypoint_id=d.object_id AND er.editorial_profile_id=? AND (er.owner_override='excluded' OR er.assessment='irrelevant')))")
+			args = append(args, q.RecallProfileID)
+		}
+	}
 	if q.Kind == "keypoint" {
 		join += " JOIN keypoint_index live_k ON live_k.id=d.object_id"
 	}
@@ -192,7 +211,11 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&result.Total); err != nil {
 		return result, fmt.Errorf("知识索引检索失败: %w", err)
 	}
-	query := "SELECT d.key,d.kind,d.object_id,d.revision,d.source_type,d.source_id,d.title,d.body,d.position,d.segment_id,d.snapshot_id,d.visibility,d.created_at," + rank + from + " ORDER BY " + rank + ",d.updated_at DESC,d.key LIMIT ? OFFSET ?"
+	bodyColumn := "d.body"
+	if q.MetadataOnly {
+		bodyColumn = "substr(d.body,1,280)"
+	}
+	query := "SELECT d.key,d.kind,d.object_id,d.revision,d.source_type,d.source_id,d.title," + bodyColumn + ",d.position,d.segment_id,d.snapshot_id,d.visibility,d.created_at," + rank + from + " ORDER BY " + rank + ",d.updated_at DESC,d.key LIMIT ? OFFSET ?"
 	paged := append(append([]any(nil), args...), q.PerPage, (q.Page-1)*q.PerPage)
 	rows, err := s.DB.QueryContext(ctx, query, paged...)
 	if err != nil {
@@ -282,7 +305,7 @@ func knowledgePhraseFilter(text string) (string, []any) {
 		words := strings.FieldsFunc(variant, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
 		var terms []string
 		for _, word := range words {
-			terms = append(terms, "instr(lower(d.title||' '||d.body),?)>0")
+			terms = append(terms, "instr(lower(d.title||' '||d.question||' '||d.body),?)>0")
 			args = append(args, word)
 		}
 		if len(terms) > 0 {

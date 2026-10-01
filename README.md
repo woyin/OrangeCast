@@ -127,6 +127,11 @@ docker compose up -d
 | `POD_BASE_URL` | 否 | 自动知识文章的 OpenAI 兼容基础地址（含 `/v1` 等路径） | — |
 | `POD_API_KEY` | 否 | 自动知识文章的独立密钥 | — |
 | `POD_MODEL` | 否 | 自动知识文章使用的文本模型 | — |
+| `POD_REVIEW_MODEL` | 否 | 独立审校模型，使用同一POD连接 | `POD_MODEL` |
+| `POD_DISCOVERY_MODEL` | 否 | 发现选题模型 | `POD_MODEL` |
+| `POD_SELECTION_MODEL` | 否 | 检索后选材模型 | `POD_MODEL` |
+| `POD_WRITE_MODEL` | 否 | 写作及定向修订模型 | `POD_MODEL` |
+| `POD_LEARNING_REVIEW_MODEL` | 否 | 学习回顾模型 | `POD_MODEL` |
 | `OPENAI_API_KEY` | 否 | OpenAI key；仅按单次任务显式授权使用 | — |
 | `PORT` | 否 | 监听端口 | 8080 |
 | `DATA_DIR` | 否 | 统一数据目录（DB/evidence/tmp/backups） | ./data |

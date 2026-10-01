@@ -72,6 +72,8 @@ func (o *OpenAIProvider) chatComplete(ctx context.Context, payload map[string]an
 // 调用 /chat/completions，并把 choices[0].message.content 合成为 {"output_text":...} 响应体，
 // 使 Analyze/Scout 等调用方无需感知端点差异；usage 映射 prompt/completion tokens。
 // 兼容端点不支持 response_format，schema 以文本追加到用户消息；非 JSON 响应体原样返回由调用方报错。
+const jsonObjectOutputInstruction = "\n\n输出必须是 JSON 对象（不要输出任何其他文字）。"
+
 func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[string]any, label string) ([]byte, int, error) {
 	bURL := o.baseURL
 	if bURL == "" {
@@ -88,7 +90,7 @@ func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[s
 			} else if format["type"] == "json_object" {
 				// 兼容端点不支持 response_format：用提示词强制 JSON，否则
 				// 推理型模型会输出 YAML/文本而非 JSON（08-17 Curator 实证）。
-				user += "\n\n输出必须是 JSON 对象（不要输出任何其他文字）。"
+				user += jsonObjectOutputInstruction
 			}
 		}
 	}

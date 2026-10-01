@@ -163,6 +163,7 @@ func TestKnowledgeV3WriteRechecksDirections(t *testing.T) {
 	input.Request.Stage = "write"
 	input.Request.DiscoveryBatchID = "batch"
 	input.Request.Topic = &provider.KnowledgeTopic{Title: "独立解释", Question: "怎样留下理解？", Thesis: "先表达再检查", MaterialIDs: []string{input.Request.Materials[0].ID, input.Request.Materials[1].ID}}
+	input.Request.Estimate, _ = provider.EstimateKnowledgeRequest(input.Request, "model")
 	raw, _ := json.Marshal(input)
 	_, _ = s.DB.ExecContext(ctx, `UPDATE processing_jobs SET input_snapshot_json=? WHERE id=?`, string(raw), job.ID)
 	_, _ = s.DB.ExecContext(ctx, `UPDATE knowledge_articles SET stage='write',status='write',topic_json=? WHERE id=?`, string(mustJSON(t, input.Request.Topic)), a.ID)
@@ -194,6 +195,7 @@ func TestKnowledgeV3DuplicateStopsBeforePaidWrite(t *testing.T) {
 	input.Request.Stage = "write"
 	input.Request.DiscoveryBatchID = "batch"
 	input.Request.Topic = &provider.KnowledgeTopic{Title: "独立解释", Question: "怎样留下理解？", Thesis: "先表达再检查", MaterialIDs: []string{input.Request.Materials[0].ID, input.Request.Materials[1].ID}}
+	input.Request.Estimate, _ = provider.EstimateKnowledgeRequest(input.Request, "model")
 	raw, _ := json.Marshal(input)
 	topic := string(mustJSON(t, input.Request.Topic))
 	_, _ = s.DB.ExecContext(ctx, `UPDATE knowledge_article_runs SET stage='write' WHERE job_id=?`, job.ID)

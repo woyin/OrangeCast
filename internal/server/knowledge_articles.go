@@ -78,6 +78,7 @@ func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID s
 		return nil, false, err
 	}
 	req.ReviewModel = srv.cfg.KnowledgeReviewModel()
+	req.StageConfigs = provider.FreezeKnowledgeStageConfigs(srv.cfg.KnowledgeStageModels())
 	if automatic {
 		settings, err := srv.store.GetKnowledgeArticleSettings(ctx)
 		if err != nil {
@@ -447,6 +448,7 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 	}
 	diffs := knowledgeDiffs(revisions)
 	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
+	data["Coverage"], data["Candidates"] = req.Coverage, req.Candidates
 	if err := srv.tmpl.Render(w, "knowledge_article.html", data); err != nil {
 		http.Error(w, "渲染文章失败", 500)
 	}

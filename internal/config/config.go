@@ -17,41 +17,49 @@ import (
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
-	Port                 string
-	DBPath               string
-	SessionSecret        string
-	TempDir              string // 临时文件目录（下载/转码中间产物）
-	GroqAPIKey           string
-	OpenAIAPIKey         string
-	PodBaseURL           string // 自动知识文章的独立 OpenAI 兼容文本连接。
-	PodAPIKey            string
-	PodReviewModel       string
-	PodModel             string
-	PublicURL            string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
-	TrustedProxies       []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
-	DataDir              string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
-	EvidenceDir          string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
-	BackupDir            string   // 备份输出目录（DATA_DIR/backups）
-	NarrationDir         string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
-	KokoroBinary         string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
-	KokoroVoice          string   // Kokoro 默认音色（默认 af_heart）
-	KokoroModel          string   // Kokoro 模型文件路径（可选，某些发行版需要）
-	KokoroLanguage       string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
-	KokoroTimeoutSeconds int      // 单次合成超时秒数（D03，默认 120）
+	Port                   string
+	DBPath                 string
+	SessionSecret          string
+	TempDir                string // 临时文件目录（下载/转码中间产物）
+	GroqAPIKey             string
+	OpenAIAPIKey           string
+	PodBaseURL             string // 自动知识文章的独立 OpenAI 兼容文本连接。
+	PodAPIKey              string
+	PodReviewModel         string
+	PodModel               string
+	PodDiscoveryModel      string
+	PodSelectionModel      string
+	PodWriteModel          string
+	PodLearningReviewModel string
+	PublicURL              string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
+	TrustedProxies         []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
+	DataDir                string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
+	EvidenceDir            string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
+	BackupDir              string   // 备份输出目录（DATA_DIR/backups）
+	NarrationDir           string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	KokoroBinary           string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	KokoroVoice            string   // Kokoro 默认音色（默认 af_heart）
+	KokoroModel            string   // Kokoro 模型文件路径（可选，某些发行版需要）
+	KokoroLanguage         string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
+	KokoroTimeoutSeconds   int      // 单次合成超时秒数（D03，默认 120）
 }
 
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
-		Port:           envOrDefault("PORT", "8080"),
-		SessionSecret:  os.Getenv("SESSION_SECRET"),
-		GroqAPIKey:     os.Getenv("GROQ_API_KEY"),
-		OpenAIAPIKey:   os.Getenv("OPENAI_API_KEY"),
-		PodBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
-		PodAPIKey:      strings.TrimSpace(os.Getenv("POD_API_KEY")),
-		PodModel:       strings.TrimSpace(os.Getenv("POD_MODEL")),
-		PodReviewModel: strings.TrimSpace(os.Getenv("POD_REVIEW_MODEL")),
-		PublicURL:      envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
+		Port:                   envOrDefault("PORT", "8080"),
+		SessionSecret:          os.Getenv("SESSION_SECRET"),
+		GroqAPIKey:             os.Getenv("GROQ_API_KEY"),
+		OpenAIAPIKey:           os.Getenv("OPENAI_API_KEY"),
+		PodBaseURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
+		PodAPIKey:              strings.TrimSpace(os.Getenv("POD_API_KEY")),
+		PodModel:               strings.TrimSpace(os.Getenv("POD_MODEL")),
+		PodReviewModel:         strings.TrimSpace(os.Getenv("POD_REVIEW_MODEL")),
+		PodDiscoveryModel:      strings.TrimSpace(os.Getenv("POD_DISCOVERY_MODEL")),
+		PodSelectionModel:      strings.TrimSpace(os.Getenv("POD_SELECTION_MODEL")),
+		PodWriteModel:          strings.TrimSpace(os.Getenv("POD_WRITE_MODEL")),
+		PodLearningReviewModel: strings.TrimSpace(os.Getenv("POD_LEARNING_REVIEW_MODEL")),
+		PublicURL:              envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
 	}
 	// 统一数据目录（ADR-0010）：DB/evidence/tmp/backups 全部落在 DATA_DIR 之下。
 	c.DataDir = envOrDefault("DATA_DIR", envOrDefault("DB_PATH_DIR", "./data"))
@@ -121,4 +129,21 @@ func (c *Config) KnowledgeReviewModel() string {
 		return c.PodReviewModel
 	}
 	return c.PodModel
+}
+
+// KnowledgeStageModels resolves optional stage overrides on the POD connection.
+// Callers freeze the returned values when admitting a new workflow.
+func (c *Config) KnowledgeStageModels() map[string]string {
+	fallback := func(v string) string {
+		if v != "" {
+			return v
+		}
+		return c.PodModel
+	}
+	return map[string]string{
+		"discover": fallback(c.PodDiscoveryModel), "select": fallback(c.PodSelectionModel),
+		"write": fallback(c.PodWriteModel), "revise": fallback(c.PodWriteModel),
+		"review": c.KnowledgeReviewModel(), "review_final": c.KnowledgeReviewModel(),
+		"weekly_review": fallback(c.PodLearningReviewModel),
+	}
 }

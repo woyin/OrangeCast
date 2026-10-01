@@ -270,8 +270,15 @@ func knowledgeExclusions(candidates, admitted []provider.KnowledgeMaterial) []pr
 	return out
 }
 
-// RecallKnowledgeMaterials retrieves up to20 real historical candidates for a question.
+// RecallKnowledgeMaterials recalls metadata locally and sends bounded complete evidence.
 func (s *Store) RecallKnowledgeMaterials(ctx context.Context, profile, name string, req provider.KnowledgeArticleRequest, topic provider.KnowledgeTopic) (provider.KnowledgeArticleRequest, error) {
+	if req.PromptVersion == provider.KnowledgeArticlePromptVersion {
+		return s.recallKnowledgePool(ctx, profile, name, req, topic)
+	}
+	return s.recallLegacyKnowledgeMaterials(ctx, profile, name, req, topic)
+}
+
+func (s *Store) recallLegacyKnowledgeMaterials(ctx context.Context, profile, name string, req provider.KnowledgeArticleRequest, topic provider.KnowledgeTopic) (provider.KnowledgeArticleRequest, error) {
 	var scope KnowledgeScope
 	if req.ScopeJSON != "" && json.Unmarshal([]byte(req.ScopeJSON), &scope) != nil {
 		return req, ErrInvalidEditorialState

@@ -19,6 +19,7 @@ type knowledgeCheckpoint struct {
 	Version     string                           `json:"version"`
 	Result      *provider.KnowledgeArticleResult `json:"result"`
 	Usage       provider.TaskUsage               `json:"usage"`
+	Estimate    *provider.KnowledgeEstimate      `json:"estimate,omitempty"`
 }
 
 func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle) error {
@@ -61,6 +62,16 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 }
 
 func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, req provider.KnowledgeArticleRequest, exec *models.ProcessingJobExecution, validate func() error) (*provider.KnowledgeArticleResult, error) {
+	if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion {
+		cfg, err := provider.KnowledgeConfigForStage(req, exec.ConfiguredModel)
+		if err != nil || req.PromptVersion != exec.ConfigVersion || cfg.Model != exec.ConfiguredModel {
+			return nil, fmt.Errorf("阶段配置与冻结模型不匹配")
+		}
+		estimate, err := provider.EstimateKnowledgeRequest(req, cfg.Model)
+		if err != nil || req.Estimate == nil || estimate.InputFingerprint != req.Estimate.InputFingerprint || estimate.OutputTokens != req.Estimate.OutputTokens || estimate.InputTokens != req.Estimate.InputTokens || estimate.Method != req.Estimate.Method {
+			return nil, fmt.Errorf("输入与冻结估算不匹配")
+		}
+	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(exec.InputSnapshotJSON)))
 	cp := knowledgeCheckpoint{}
 	if exec.CheckpointJSON != "" {
@@ -94,7 +105,7 @@ func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob
 			// A malformed response can still contain billable token usage.
 			// Record that known usage even though no draft can be persisted.
 			if usage.InputUnits > 0 || usage.OutputUnits > 0 {
-				if receiptErr := w.recordKnowledgeUsage(ctx, job, req.Stage, knowledgeCheckpoint{Provider: exec.ConfiguredProvider, Model: exec.ConfiguredModel, Usage: usage}); receiptErr != nil {
+				if receiptErr := w.recordKnowledgeUsage(ctx, job, req.Stage, knowledgeCheckpoint{Provider: exec.ConfiguredProvider, Model: exec.ConfiguredModel, Usage: usage, Estimate: req.Estimate}); receiptErr != nil {
 					return nil, fmt.Errorf("模型响应失败且用量记录失败: %w", receiptErr)
 				}
 			}
@@ -103,7 +114,7 @@ func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob
 			}
 			return nil, fmt.Errorf("模型返回空结果")
 		}
-		cp = knowledgeCheckpoint{OriginJobID: job.ID, InputHash: hash, Provider: exec.ConfiguredProvider, Model: exec.ConfiguredModel, Version: exec.ConfigVersion, Result: result, Usage: usage}
+		cp = knowledgeCheckpoint{OriginJobID: job.ID, InputHash: hash, Provider: exec.ConfiguredProvider, Model: exec.ConfiguredModel, Version: exec.ConfigVersion, Result: result, Usage: usage, Estimate: req.Estimate}
 		checkpoint, err := json.Marshal(cp)
 		if err != nil {
 			return nil, err
@@ -114,6 +125,9 @@ func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob
 	}
 	if err := w.recordKnowledgeUsage(ctx, job, req.Stage, cp); err != nil {
 		return nil, err
+	}
+	if req.PromptVersion == provider.KnowledgeArticlePromptVersion && req.Estimate != nil && cp.Usage.OutputUnits > req.Estimate.OutputTokens {
+		return nil, fmt.Errorf("模型返回的计费输出超出冻结上限（%d > %d，可能包含推理用量）；已保留响应与用量，停止后续阶段，请校准配置后创建新任务", cp.Usage.OutputUnits, req.Estimate.OutputTokens)
 	}
 	if err := provider.ValidateKnowledgeResult(req, cp.Result); err != nil {
 		return nil, err
@@ -134,7 +148,11 @@ func (w *Worker) recordKnowledgeUsage(ctx context.Context, job *models.Processin
 	cost, known := int64(0), false
 	if cp.Usage.InputUnits > 0 || cp.Usage.OutputUnits > 0 {
 		var err error
-		cost, known, err = w.store.ResolveUsageCost(ctx, cp.Provider, cp.Model, cp.Usage.InputUnits, cp.Usage.OutputUnits)
+		if cp.Estimate != nil {
+			cost, known = cp.Estimate.CostForUnits(cp.Usage.InputUnits, cp.Usage.OutputUnits)
+		} else {
+			cost, known, err = w.store.ResolveUsageCost(ctx, cp.Provider, cp.Model, cp.Usage.InputUnits, cp.Usage.OutputUnits)
+		}
 		if err != nil {
 			return err
 		}

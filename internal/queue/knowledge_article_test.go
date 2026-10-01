@@ -12,16 +12,20 @@ import (
 )
 
 type knowledgeQueueFake struct {
-	calls   int
-	bad     bool
-	failure error
-	empty   bool
+	calls       int
+	bad         bool
+	failure     error
+	empty       bool
+	outputUnits int
 }
 
 func (f *knowledgeQueueFake) Name() string { return "pod" }
 func (f *knowledgeQueueFake) KnowledgeArticleStep(_ context.Context, req provider.KnowledgeArticleRequest) (*provider.KnowledgeArticleResult, provider.TaskUsage, error) {
 	f.calls++
 	usage := provider.TaskUsage{InputUnits: 100, OutputUnits: 50}
+	if f.outputUnits > 0 {
+		usage.OutputUnits = f.outputUnits
+	}
 	if f.failure != nil || f.empty {
 		return nil, usage, f.failure
 	}
@@ -45,13 +49,17 @@ func (f *knowledgeQueueFake) KnowledgeArticleStep(_ context.Context, req provide
 func TestKnowledgeArticleFailedResponseStillAccountsForUsage(t *testing.T) {
 	for _, empty := range []bool{false, true} {
 		t.Run(fmt.Sprint(empty), func(t *testing.T) {
-			s, w, article, fake, _ := seedKnowledgeQueue(t)
+			s, w, article, fake, _ := seedKnowledgeQueue(t, func(s *store.Store) {
+				if err := s.SetModelPrice(t.Context(), models.ModelPrice{Provider: "pod", Model: "model", InputCentsPerMillion: 1_000_000, OutputCentsPerMillion: 1_000_000}); err != nil {
+					t.Fatal(err)
+				}
+			})
 			ctx := t.Context()
 			fake.empty = empty
 			if !empty {
 				fake.failure = fmt.Errorf("malformed remote JSON")
 			}
-			if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "pod", Model: "model", InputCentsPerMillion: 1_000_000, OutputCentsPerMillion: 1_000_000}); err != nil {
+			if err := s.SetModelPrice(ctx, models.ModelPrice{Provider: "pod", Model: "model", InputCentsPerMillion: 2_000_000, OutputCentsPerMillion: 2_000_000}); err != nil {
 				t.Fatal(err)
 			}
 			if err := w.ProcessOne(ctx); err != nil {
@@ -184,11 +192,14 @@ func TestKnowledgeArticleUsagePersistenceRecovery(t *testing.T) {
 	}
 }
 
-func seedKnowledgeQueue(t *testing.T) (*store.Store, *Worker, *store.KnowledgeArticleRecord, *knowledgeQueueFake, string) {
+func seedKnowledgeQueue(t *testing.T, configure ...func(*store.Store)) (*store.Store, *Worker, *store.KnowledgeArticleRecord, *knowledgeQueueFake, string) {
 	t.Helper()
 	s, w := newTestWorker(t)
 	ep := seedEpisode(t, s)
 	ctx := t.Context()
+	for _, setup := range configure {
+		setup(s)
+	}
 	for _, text := range []string{"每次听完先写一条自己的理解。", "几天后回看笔记，检查还能不能解释。"} {
 		if _, err := s.CreateOwnerNote(ctx, models.OwnerNote{SourceType: "episode", SourceID: ep, Kind: "owner_reflection", Content: text}); err != nil {
 			t.Fatal(err)

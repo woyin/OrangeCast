@@ -165,6 +165,14 @@ func (s *Store) QueueKnowledgeRevision(ctx context.Context, id string, expected 
 	req.PromptVersion = provider.KnowledgeArticlePromptVersion
 	req.Instructions = strings.TrimSpace(instructions)
 	req.ReviewModel = reviewModel
+	ensureKnowledgeStageConfigs(&req, article.Model)
+	for _, stage := range []string{"review", "review_final"} {
+		cfg := req.StageConfigs[stage]
+		if reviewModel != "" {
+			cfg.Model = reviewModel
+			req.StageConfigs[stage] = cfg
+		}
+	}
 	if err := s.CheckKnowledgeMaterials(ctx, article.ProfileID, article.Provider, req.Materials); err != nil {
 		return err
 	}
@@ -245,11 +253,12 @@ func (s *Store) ListKnowledgeReviews(ctx context.Context, id string) ([]Knowledg
 type KnowledgeExecution struct {
 	JobID, Stage, Status, Provider, Model, PromptVersion, CreatedAt, Cost string
 	ParentRevision, InputUnits, OutputUnits                               int
+	Estimate                                                              *provider.KnowledgeEstimate
 }
 
 // ListKnowledgeExecutions includes failures and retries, retaining their own receipts.
 func (s *Store) ListKnowledgeExecutions(ctx context.Context, id string) ([]KnowledgeExecution, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT j.id,COALESCE(r.stage,json_extract(j.input_snapshot_json,'$.stage'),''),j.status,j.configured_provider,j.configured_model,j.config_version,j.created_at,COALESCE(r.parent_revision,0),COALESCE(SUM(u.input_units),0),COALESCE(SUM(u.output_units),0),SUM(u.estimated_cost),COUNT(u.id),SUM(CASE WHEN u.estimated_cost IS NULL THEN 1 ELSE 0 END) FROM processing_jobs j LEFT JOIN knowledge_article_runs r ON r.job_id=j.id LEFT JOIN usage_records u ON u.attempt_id=j.id WHERE j.source_type='knowledge_article' AND j.source_id=? GROUP BY j.id ORDER BY j.created_at,j.rowid`, id)
+	rows, err := s.DB.QueryContext(ctx, `SELECT j.id,COALESCE(r.stage,json_extract(j.input_snapshot_json,'$.stage'),''),j.status,j.configured_provider,j.configured_model,j.config_version,j.created_at,COALESCE(r.parent_revision,0),COALESCE(SUM(u.input_units),0),COALESCE(SUM(u.output_units),0),SUM(u.estimated_cost),COUNT(u.id),SUM(CASE WHEN u.estimated_cost IS NULL THEN 1 ELSE 0 END),json_extract(j.input_snapshot_json,'$.request.estimate') FROM processing_jobs j LEFT JOIN knowledge_article_runs r ON r.job_id=j.id LEFT JOIN usage_records u ON u.attempt_id=j.id WHERE j.source_type='knowledge_article' AND j.source_id=? GROUP BY j.id ORDER BY j.created_at,j.rowid`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +268,12 @@ func (s *Store) ListKnowledgeExecutions(ctx context.Context, id string) ([]Knowl
 		var v KnowledgeExecution
 		var cost sql.NullFloat64
 		var count, unknown int
-		if err := rows.Scan(&v.JobID, &v.Stage, &v.Status, &v.Provider, &v.Model, &v.PromptVersion, &v.CreatedAt, &v.ParentRevision, &v.InputUnits, &v.OutputUnits, &cost, &count, &unknown); err != nil {
+		var estimate sql.NullString
+		if err := rows.Scan(&v.JobID, &v.Stage, &v.Status, &v.Provider, &v.Model, &v.PromptVersion, &v.CreatedAt, &v.ParentRevision, &v.InputUnits, &v.OutputUnits, &cost, &count, &unknown, &estimate); err != nil {
 			return nil, err
+		}
+		if estimate.Valid && json.Unmarshal([]byte(estimate.String), &v.Estimate) != nil {
+			return nil, ErrInvalidEditorialState
 		}
 		v.Cost = "未知"
 		if count > 0 && unknown == 0 && cost.Valid {
