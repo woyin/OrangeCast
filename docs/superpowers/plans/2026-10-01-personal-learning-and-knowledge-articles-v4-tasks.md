@@ -1,6 +1,6 @@
 # 第四轮开发原子任务清单
 
-日期：2026-10-01。基线：`3024642`，迁移截止0069。状态：**实施中；技术完成2/73，剩余71张；产品待验单列**。
+日期：2026-10-01。基线：`3024642`，迁移截止0069。状态：**实施中；技术完成3/73，剩余70张；产品待验单列**。
 
 关联：[设计文档](../specs/2026-10-01-personal-learning-and-knowledge-articles-v4-design.md)、[开发计划](2026-10-01-personal-learning-and-knowledge-articles-v4.md)、[第三轮验收](../../acceptance/2026-10-personal-learning-v3.md)。
 
@@ -29,7 +29,7 @@
 | E 学习成果包 | M8 | 5 | E01–E05 |
 | O 离线设备路径 | M9 | 11 | O01–O11 |
 | V 综合交付 | M10 | 5 | V01–V05 |
-| 合计 | M0–M10 | 73 | 技术完成2/73 |
+| 合计 | M0–M10 | 73 | 技术完成3/73 |
 
 精确依赖已进行静态检查：身份唯一、依赖存在、无自依赖、无循环。此检查仅验证任务图，不验证生产实现。
 
@@ -37,7 +37,7 @@
 
 - [x] [A01 固化第四轮行为与评测基线](#a01)
 - [x] [A02 实现共用表单提交Interface](#a02)
-- [ ] [A03 将知识文章表单迁入共用Interface](#a03)
+- [x] [A03 将知识文章表单迁入共用Interface](#a03)
 - [ ] [A04 统一问题与回顾的冲突输入行为](#a04)
 - [ ] [A05 交付首页下一步投影](#a05)
 - [ ] [A06 扩展运行类别与无模型任务契约](#a06)
@@ -143,12 +143,12 @@
 
 **建议提交**：`feat(learning): a02 实现共用表单提交Interface`。实际标题应描述最终行为。
 
-**完成记录**：commit `HEAD`；TestCommonFormActions通过：禁用状态恢复、单请求、401/409、未知结果及卸载隔离；真实接口/人工/设备待验条件见实施记录。
+**完成记录**：commit `bcb68d3`；TestCommonFormActions通过：禁用状态恢复、单请求、401/409、未知结果及卸载隔离；真实接口/人工/设备待验条件见实施记录。
 
 <a id="a03"></a>
 ### A03 — 将知识文章表单迁入共用Interface
 
-**状态**：待实施。**依赖**：A02。**粒度**：0.5–1.5日。
+**状态**：已提交/技术验证完成。**依赖**：A02。**粒度**：0.5–1.5日。
 
 **文件/所有权**：static/knowledge-articles.js；static/knowledge-updates.js；templates/knowledge_articles.html；templates/knowledge_article.html；相关Node夹具。
 
@@ -160,7 +160,7 @@
 
 **建议提交**：`feat(learning): a03 将知识文章表单迁入共用Interface`。实际标题应描述最终行为。
 
-**完成记录**：commit待填；当前验证/证据待填；真实接口/人工/设备待验条件单列。
+**完成记录**：commit `d9f1efd`；KnowledgeForm、KnowledgeGeneration、KnowledgeUpdate当前测试通过；实际Node脚本保留父稿草稿、命名action与局部导航；真实接口/人工/设备待验条件见实施记录。
 
 <a id="a04"></a>
 ### A04 — 统一问题与回顾的冲突输入行为

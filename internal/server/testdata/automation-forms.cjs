@@ -21,6 +21,6 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
  const feedback={setAttribute(){}};
  const scope={on:(node,event,fn)=>listeners[event]=fn,fetch:async url=>{endpoint=url;return{ok:true,json:async()=>({href:'/review/daily'})}}};
  const context={document:{createElement:()=>feedback},FormData:class{},window:{CWPViews:{define:fn=>fn({querySelectorAll:s=>s==='.daily-review-form'?[]:[form]},scope)},CWPNavigation:{visit(){}}}};
- vm.runInNewContext(fs.readFileSync('static/daily-review.js','utf8'),context);
+ vm.runInNewContext(fs.readFileSync('static/form-actions.js','utf8'),context);vm.runInNewContext(fs.readFileSync('static/daily-review.js','utf8'),context);
  await listeners.submit({preventDefault(){},submitter:{}});assert.equal(endpoint,'/review/daily/action');
 })().catch(e=>{console.error(e);process.exit(1)});

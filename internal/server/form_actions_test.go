@@ -16,6 +16,16 @@ func TestCommonFormActions(t *testing.T) {
 	}
 }
 
+func TestLearningReviewCommonForms(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, err := exec.Command(node, filepath.Join("testdata", "review-forms.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+}
+
 func TestKnowledgeFormNamedActionDoesNotReplaceEndpoint(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

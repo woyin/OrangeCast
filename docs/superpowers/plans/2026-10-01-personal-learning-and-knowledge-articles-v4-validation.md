@@ -18,7 +18,9 @@
 | --- | --- | --- | --- |
 | A01 | 固定自建语料完整性与既有PersonalLearning评测通过（evalset/server当前运行） | 技术验证完成；独立待验见下 | `1c7c7ca` |
 
-| A02 | TestCommonFormActions通过：禁用状态恢复、单请求、401/409、未知结果及卸载隔离 | 技术验证完成；独立待验见下 | `HEAD` |
+| A02 | TestCommonFormActions通过：禁用状态恢复、单请求、401/409、未知结果及卸载隔离 | 技术验证完成；独立待验见下 | `bcb68d3` |
+
+| A03 | KnowledgeForm、KnowledgeGeneration、KnowledgeUpdate当前测试通过；实际Node脚本保留父稿草稿、命名action与局部导航 | 技术验证完成；独立待验见下 | `d9f1efd` |
 
 ## 独立待验
 
