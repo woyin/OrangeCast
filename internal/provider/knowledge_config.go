@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"unicode"
 )
 
@@ -129,12 +130,22 @@ func EstimateKnowledgeRequest(req KnowledgeArticleRequest, model string) (*Knowl
 
 // CostForUnits uses the frozen price; zero actual usage is known zero.
 func (e *KnowledgeEstimate) CostForUnits(input, output int) (int64, bool) {
+	if input < 0 || output < 0 {
+		return 0, false
+	}
 	if input == 0 && output == 0 {
 		return 0, true
 	}
 	if e == nil || !e.PriceKnown {
 		return 0, false
 	}
-	n := int64(input)*e.InputCentsPerMillion + int64(output)*e.OutputCentsPerMillion
+	if e.InputCentsPerMillion < 0 || e.OutputCentsPerMillion < 0 || (input > 0 && e.InputCentsPerMillion > (math.MaxInt64-999999)/int64(input)) || (output > 0 && e.OutputCentsPerMillion > (math.MaxInt64-999999)/int64(output)) {
+		return 0, false
+	}
+	a, b := int64(input)*e.InputCentsPerMillion, int64(output)*e.OutputCentsPerMillion
+	if a > math.MaxInt64-999999-b {
+		return 0, false
+	}
+	n := a + b
 	return (n + 999999) / 1000000, true
 }

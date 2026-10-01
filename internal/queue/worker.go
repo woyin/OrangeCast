@@ -215,6 +215,9 @@ func (w *Worker) Run(ctx context.Context) {
 				log.Printf("清理语音草稿失败: %v", err)
 			}
 		case <-ticker.C:
+			if err := w.ScheduleKnowledgeEmbeddings(ctx); err != nil {
+				log.Printf("语义索引增量准入失败: %v", err)
+			}
 			if err := w.ProcessOne(ctx); err != nil {
 				log.Printf("worker 周期处理错误: %v", err)
 			}
@@ -469,7 +472,7 @@ func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64)
 // settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
 func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
 	known, actual := w.jobReceiptUsage(ctx, job.ID)
-	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview || job.JobType == models.JobTranscribe) && known == 0 {
+	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview || job.JobType == models.JobTranscribe || job.JobType == models.JobKnowledgeEmbedding) && known == 0 {
 		if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.RemoteCallStarted {
 			_ = w.store.MarkBudgetPendingRemote(ctx, job.ID)
 			return
@@ -535,6 +538,9 @@ func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
 
 // processJob 执行一个已领取任务（不处理终态写回）。
 func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) error {
+	if job.JobType == models.JobKnowledgeEmbedding {
+		return w.doKnowledgeEmbedding(ctx, job)
+	}
 	if job.JobType == models.JobLearningExport {
 		if err := w.store.CheckRunControl(ctx, job.ID); err != nil {
 			return err

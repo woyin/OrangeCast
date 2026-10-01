@@ -144,9 +144,25 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 		http.Error(w, "读取控制失败", 500)
 		return
 	}
+	var embeddingIn store.KnowledgeEmbeddingJobInput
+	if job.JobType == "knowledge_embedding" && json.Unmarshal([]byte(ex.InputSnapshotJSON), &embeddingIn) == nil && embeddingIn.Version == store.KnowledgeEmbeddingJobVersion {
+		in.Stage = embeddingIn.Kind
+		in.Request.Estimate = embeddingIn.Estimate
+	}
 	var materials []automationMaterial
 	for _, m := range in.Request.Materials {
 		materials = append(materials, automationMaterial{ID: m.ID, Kind: m.Kind, Title: m.SourceTitle, Body: m.Content, SourceType: m.SourceType, SourceID: m.SourceID, Snapshot: m.SnapshotID, Version: m.Version})
+	}
+	for _, window := range embeddingIn.Windows {
+		material := automationMaterial{ID: window.DocKey + ":" + strconv.Itoa(window.WindowNo), Kind: "embedding完整窗口", Title: window.DocKey, Body: window.Input, Snapshot: window.ContentHash, Version: window.Revision}
+		var types, ids []string
+		for _, ref := range window.Sources {
+			types = append(types, ref.SourceType)
+			ids = append(ids, ref.SourceID)
+		}
+		material.SourceType = strings.Join(types, ", ")
+		material.SourceID = strings.Join(ids, ", ")
+		materials = append(materials, material)
 	}
 	v := store.RunRecord{ID: id, Lane: lane, SourceID: job.SourceID, Status: string(job.Status), Stopped: stop}
 	blockReason := ""
@@ -210,7 +226,12 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 	var paid struct {
 		OriginJobID string `json:"origin_job_id"`
 	}
-	if json.Unmarshal([]byte(ex.CheckpointJSON), &paid) == nil && paid.OriginJobID != "" && paid.OriginJobID != id {
+	if embeddingIn.OriginJobID != "" {
+		paid.OriginJobID = embeddingIn.OriginJobID
+	} else {
+		_ = json.Unmarshal([]byte(ex.CheckpointJSON), &paid)
+	}
+	if paid.OriginJobID != "" && paid.OriginJobID != id {
 		if _, e := uuid.Parse(paid.OriginJobID); e == nil {
 			paidOrigin = paid.OriginJobID
 			originalUsage, e := srv.store.ListRunUsage(r.Context(), paidOrigin)

@@ -70,6 +70,16 @@ func (p *EmbeddingClient) Config() EmbeddingConfig {
 
 // WithDimensions constructs a client for a measured, fixed dimension. When the
 // original route omitted dimensions, do not add an unsupported wire parameter.
+// WithDimensions freezes a measured result in safe provenance without any I/O.
+func (c EmbeddingConfig) WithDimensions(n int) (EmbeddingConfig, error) {
+	if n < 1 || n > EmbeddingMaxDimensions {
+		return c, errors.New("embedding dimension outside capacity")
+	}
+	c.Dimensions = n
+	c.ID = fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", c.ConnectionID, c.Model, n))))
+	return c, nil
+}
+
 func (p *EmbeddingClient) WithDimensions(n int) (*EmbeddingClient, error) {
 	if n < 1 || n > EmbeddingMaxDimensions {
 		return nil, errors.New("embedding dimension outside capacity")
@@ -186,4 +196,28 @@ func EstimateEmbeddingInputs(inputs []string) (*KnowledgeEstimate, error) {
 		tokens += len(v) + 8
 	} // conservative byte bound, plus per-input framing
 	return &KnowledgeEstimate{Method: "embedding-utf8-byte-bound-v1", InputFingerprint: fmt.Sprintf("%x", sha256.Sum256(payload)), InputTokens: tokens, Approximate: true}, nil
+}
+
+// ValidateEmbeddingResult is also used when restoring a durable response. A
+// checkpoint is not an exemption from vector shape, identity, or unit checks.
+func ValidateEmbeddingResult(r *EmbeddingResult, model string, count, dimensions int) error {
+	if r == nil || r.Model != model || len(r.Vectors) != count || r.Dimensions < 1 || r.Dimensions > EmbeddingMaxDimensions || (dimensions != 0 && r.Dimensions != dimensions) || r.InputTokens < 0 {
+		return errors.New("invalid embedding result identity")
+	}
+	for _, vec := range r.Vectors {
+		if len(vec) != r.Dimensions {
+			return errors.New("invalid embedding vector shape")
+		}
+		var norm float64
+		for _, v := range vec {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return errors.New("nonfinite embedding vector")
+			}
+			norm += float64(v) * float64(v)
+		}
+		if math.Abs(norm-1) > .0001 {
+			return errors.New("invalid embedding vector norm")
+		}
+	}
+	return nil
 }

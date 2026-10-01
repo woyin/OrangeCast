@@ -190,6 +190,7 @@ func (s *Store) ChangeRunControl(ctx context.Context, kind, target, action, reas
 
 // RunRecord contains only recorded metadata; authenticated URLs and raw checkpoints stay private.
 type RunRecord struct {
+	UnmeasuredReceipts                                                                                           int
 	ID, SourceType, SourceID, Lane, Status, Stage, Provider, Model, Version, CreatedAt, UpdatedAt, Error, Intent string
 	Revision, Priority, InputUnits, OutputUnits, Receipts, UnknownReceipts                                       int
 	Stopped, Paused, RemoteStarted, HasCheckpoint                                                                bool
@@ -251,7 +252,7 @@ func (s *Store) ListRuns(ctx context.Context, status, lane string, offset int) (
 	}
 	for i := range out {
 		v := &out[i]
-		if err = s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(input_units),0),COALESCE(SUM(output_units),0),COALESCE(SUM(estimated_cost),0),COUNT(*),COALESCE(SUM(estimated_cost IS NULL),0) FROM usage_records WHERE attempt_id=? OR attempt_id=?`, v.ID, v.ID+":response").Scan(&v.InputUnits, &v.OutputUnits, &v.KnownCost, &v.Receipts, &v.UnknownReceipts); err != nil {
+		if err = s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(input_units),0),COALESCE(SUM(output_units),0),COALESCE(SUM(estimated_cost),0),COUNT(*),COALESCE(SUM(estimated_cost IS NULL),0),COALESCE(SUM(units_known=0),0) FROM usage_records WHERE attempt_id=? OR attempt_id=?`, v.ID, v.ID+":response").Scan(&v.InputUnits, &v.OutputUnits, &v.KnownCost, &v.Receipts, &v.UnknownReceipts, &v.UnmeasuredReceipts); err != nil {
 			return nil, false, err
 		}
 		v.NextAction = "等待现有队列领取与资格检查"
@@ -340,11 +341,12 @@ type RunUsage struct {
 	InputUnits, OutputUnits              int
 	AudioSeconds, CostCents              float64
 	CostKnown                            bool
+	UnitsKnown                           bool
 }
 
 // ListRunUsage returns recorded receipts for the exact paid identity of a task.
 func (s *Store) ListRunUsage(ctx context.Context, id string) ([]RunUsage, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT operation,provider,model,input_units,output_units,COALESCE(unit_kind,'text_tokens'),COALESCE(audio_seconds,0),estimated_cost FROM usage_records WHERE attempt_id=? OR attempt_id=? ORDER BY created_at,id LIMIT 100`, id, id+":response")
+	rows, err := s.DB.QueryContext(ctx, `SELECT operation,provider,model,input_units,output_units,COALESCE(unit_kind,'text_tokens'),COALESCE(audio_seconds,0),estimated_cost,units_known FROM usage_records WHERE attempt_id=? OR attempt_id=? ORDER BY created_at,id LIMIT 100`, id, id+":response")
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +355,7 @@ func (s *Store) ListRunUsage(ctx context.Context, id string) ([]RunUsage, error)
 	for rows.Next() {
 		var v RunUsage
 		var cost sql.NullFloat64
-		if err = rows.Scan(&v.Operation, &v.Provider, &v.Model, &v.InputUnits, &v.OutputUnits, &v.UnitKind, &v.AudioSeconds, &cost); err != nil {
+		if err = rows.Scan(&v.Operation, &v.Provider, &v.Model, &v.InputUnits, &v.OutputUnits, &v.UnitKind, &v.AudioSeconds, &cost, &v.UnitsKnown); err != nil {
 			return nil, err
 		}
 		v.CostCents, v.CostKnown = cost.Float64, cost.Valid

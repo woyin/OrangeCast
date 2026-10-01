@@ -283,6 +283,10 @@ func (s *Store) PrepareKnowledgeEmbeddingBatch(ctx context.Context, id string) (
 // AdoptKnowledgeEmbeddings atomically admits only still-current complete windows.
 // A changed config/scope returns a conflict. Source withdrawal discards that result.
 func (s *Store) AdoptKnowledgeEmbeddings(ctx context.Context, id string, windows []EmbeddingWindow, result *provider.EmbeddingResult) (int, error) {
+	return s.adoptKnowledgeEmbeddings(ctx, id, windows, result, "")
+}
+
+func (s *Store) adoptKnowledgeEmbeddings(ctx context.Context, id string, windows []EmbeddingWindow, result *provider.EmbeddingResult, jobID string) (int, error) {
 	cfg, err := s.GetKnowledgeEmbeddingConfig(ctx, id)
 	if err != nil {
 		return 0, err
@@ -316,6 +320,11 @@ func (s *Store) AdoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 		return 0, err
 	}
 	defer tx.Rollback()
+	if jobID != "" {
+		if err = checkRunControl(ctx, tx, jobID); err != nil {
+			return 0, err
+		}
+	}
 	var enabled bool
 	var revision int
 	if err = tx.QueryRowContext(ctx, `SELECT enabled,revision FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&enabled, &revision); err != nil {
@@ -349,12 +358,19 @@ func (s *Store) AdoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 		args := embeddingSQLArgs(cfg)
 		args = append(args, sql.Named("key", window.DocKey))
 		var doc embeddingDocument
-		err = tx.QueryRowContext(ctx, `SELECT d.key,d.revision,d.title,d.body FROM knowledge_search_docs d WHERE d.key=:key AND `+embeddingDocumentQualified(), args...).Scan(&doc.key, &doc.revision, &doc.title, &doc.body)
+		err = tx.QueryRowContext(ctx, `SELECT d.key,d.revision,d.title,d.body,d.kind,d.object_id,d.source_type,d.source_id FROM knowledge_search_docs d WHERE d.key=:key AND `+embeddingDocumentQualified(), args...).Scan(&doc.key, &doc.revision, &doc.title, &doc.body, &doc.kind, &doc.objectID, &doc.sourceType, &doc.sourceID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return 0, err
+		}
+		matches, e := embeddingSourcesMatch(ctx, tx, doc, window.Sources)
+		if e != nil {
+			return 0, e
+		}
+		if !matches {
+			continue
 		}
 		current, err := embeddingWindows(doc.key, doc.revision, doc.title, doc.body, revision)
 		if err != nil || window.WindowNo < 0 || window.WindowNo >= len(current) || current[window.WindowNo].ContentHash != window.ContentHash || current[window.WindowNo].Input != window.Input || window.Revision != doc.revision {
@@ -373,6 +389,17 @@ func (s *Store) AdoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 			if _, err = tx.ExecContext(ctx, `DELETE FROM knowledge_embedding_events WHERE config_id=? AND doc_key=?`, id, window.DocKey); err != nil {
 				return 0, err
 			}
+		}
+	}
+	if jobID != "" {
+		raw := fmt.Sprintf(`{"adopted":%d,"discarded":%d}`, adopted, len(windows)-adopted)
+		updated, e := tx.ExecContext(ctx, `UPDATE processing_jobs SET result_json=?,result_state='complete',updated_at=datetime('now') WHERE id=? AND status IN('running','queued') AND result_state!='complete'`, raw, jobID)
+		if e != nil {
+			return 0, e
+		}
+		n, _ := updated.RowsAffected()
+		if n != 1 {
+			return 0, ErrConflict
 		}
 	}
 	if adopted > 0 {
@@ -420,4 +447,38 @@ func (s *Store) KnowledgeEmbeddingStatus(ctx context.Context, id string) (*Embed
 	}
 	status.CapacityBlocked = status.IndexedWindows >= KnowledgeEmbeddingCapacity
 	return status, nil
+}
+
+// Frozen article provenance is compared as a complete set at dispatch and adopt.
+func embeddingSourcesMatch(ctx context.Context, tx *sql.Tx, d embeddingDocument, frozen []EmbeddingSource) (bool, error) {
+	if d.kind != "article" {
+		return len(frozen) == 1 && frozen[0].SourceType == d.sourceType && frozen[0].SourceID == d.sourceID, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT source_type,source_id FROM knowledge_article_material_refs WHERE article_id=? AND revision=? ORDER BY source_type,source_id`, d.objectID, d.revision)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	seen := map[EmbeddingSource]bool{}
+	for _, ref := range frozen {
+		if seen[ref] {
+			return false, nil
+		}
+		seen[ref] = true
+	}
+	n := 0
+	for rows.Next() {
+		var ref EmbeddingSource
+		if err = rows.Scan(&ref.SourceType, &ref.SourceID); err != nil {
+			return false, err
+		}
+		if !seen[ref] {
+			return false, nil
+		}
+		n++
+	}
+	if err = rows.Err(); err != nil {
+		return false, err
+	}
+	return n > 0 && n == len(frozen), nil
 }
