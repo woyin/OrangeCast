@@ -16,7 +16,7 @@
 
 | 任务 | 验证 | 结果 | 提交/证据 |
 | --- | --- | --- | --- |
-| A01 | go test ./internal/evalset ./internal/server -run "PersonalLearning|LearningFixtures|CommonFormActions" -count=1（记录命令，测试通过；CommonFormActions属A02） | 固定语料及既有评测通过 | 提交后登记 |
+| A01 | 固定自建语料完整性与既有PersonalLearning评测通过（evalset/server当前运行） | 技术验证完成；独立待验见下 | `1c7c7ca` |
 
 ## 独立待验
 

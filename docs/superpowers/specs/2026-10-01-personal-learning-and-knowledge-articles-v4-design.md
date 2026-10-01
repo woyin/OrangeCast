@@ -1,6 +1,6 @@
 # 第四轮个人听学与知识文章设计
 
-日期：2026-10-01。源码基线：`3024642`。状态：**设计完成，尚未实施；文中表、接口、默认值均为拟议契约**。
+日期：2026-10-01。源码基线：`3024642`。状态：**设计完成，已授权实施；文中表、接口、默认值为目标契约，实际交付见[实施记录](../plans/2026-10-01-personal-learning-and-knowledge-articles-v4-validation.md)**。
 
 关联：[开发计划](../plans/2026-10-01-personal-learning-and-knowledge-articles-v4.md)、[原子任务列表](../plans/2026-10-01-personal-learning-and-knowledge-articles-v4-tasks.md)、[第三轮验收](../../acceptance/2026-10-personal-learning-v3.md)、[领域词汇](../../../CONTEXT.md)。本文覆盖本轮讨论的七项功能和五项实现优化；执行范围以这三份第四轮文档共同定义。
 
