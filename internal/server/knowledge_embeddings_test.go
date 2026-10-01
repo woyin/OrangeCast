@@ -202,3 +202,42 @@ func TestKnowledgeSearchSettingsReadonlyAndExplicitPreflight(t *testing.T) {
 		t.Fatal(count, calls, err)
 	}
 }
+
+func TestQuestionStudyGenerationAutomationProjectionIsReadonly(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "study-automation@example.com", "password123")
+	client, err := provider.NewSelector("", "").WithPod("secret-sentinel", "https://private-endpoint.example/v1", "generate").QuestionStudy("generate", "review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := srv.store.CreatePastedDocument(t.Context(), "条件来源", "检查条件后再解释。")
+	if err != nil {
+		t.Fatal(err)
+	}
+	question, err := srv.store.CreateLearningQuestion(t.Context(), store.LearningQuestion{Body: "检查哪些条件？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	question, err = srv.store.ChangeLearningQuestion(t.Context(), question.ID, question.Revision, store.LearningQuestionChange{Action: "link", Link: provider.LearningQuestionLink{Kind: "source", SourceType: "document", SourceID: doc.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := srv.store.StartQuestionStudySession(t.Context(), question.ID, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, job, _, err := srv.store.SubmitQuestionStudyTurn(t.Context(), session.ID, 1, "解释条件", uuid.NewString(), nil, client.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after int
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
+	page := doWithCookie(srv, cookie, "GET", "/automation/"+job.ID)
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "question-study-serialized-byte-bound-v1") || strings.Contains(page.Body.String(), "secret-sentinel") || strings.Contains(page.Body.String(), "private-endpoint") {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
+	if before != after {
+		t.Fatal("GET admitted work", before, after)
+	}
+}

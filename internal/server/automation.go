@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
+	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
@@ -149,9 +150,17 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 		in.Stage = embeddingIn.Kind
 		in.Request.Estimate = embeddingIn.Estimate
 	}
+	var studyIn store.QuestionStudyJobInput
+	if job.JobType == models.JobQuestionStudy && json.Unmarshal([]byte(ex.InputSnapshotJSON), &studyIn) == nil && studyIn.Version == store.QuestionStudyTaskVersion {
+		in.Stage = studyIn.Stage
+		in.Request.Estimate = studyIn.Estimate
+	}
 	var materials []automationMaterial
 	for _, m := range in.Request.Materials {
 		materials = append(materials, automationMaterial{ID: m.ID, Kind: m.Kind, Title: m.SourceTitle, Body: m.Content, SourceType: m.SourceType, SourceID: m.SourceID, Snapshot: m.SnapshotID, Version: m.Version})
+	}
+	for _, material := range studyIn.Scope.Materials {
+		materials = append(materials, automationMaterial{ID: material.Key, Kind: material.Kind, Title: material.Key, Body: material.Content, SourceType: material.SourceType, SourceID: material.SourceID, Snapshot: material.SnapshotID, Version: material.Revision})
 	}
 	for _, window := range embeddingIn.Windows {
 		material := automationMaterial{ID: window.DocKey + ":" + strconv.Itoa(window.WindowNo), Kind: "embedding完整窗口", Title: window.DocKey, Body: window.Input, Snapshot: window.ContentHash, Version: window.Revision}

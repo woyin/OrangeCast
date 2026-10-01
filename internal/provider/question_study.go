@@ -23,9 +23,14 @@ type QuestionStudyMaterial struct {
 	Content     string                     `json:"content"`
 	Segments    []KnowledgeEvidenceSegment `json:"segments"`
 }
+type QuestionStudySourceDependency struct {
+	SourceType string `json:"source_type"`
+	SourceID   string `json:"source_id"`
+}
 type QuestionStudyHistoryItem struct {
 	Ordinal                  int
 	OwnerInput, AcceptedJSON string
+	SourceDependencies       []QuestionStudySourceDependency `json:"-"`
 }
 type QuestionStudyScope struct {
 	Version    string                     `json:"version"`

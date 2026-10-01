@@ -88,7 +88,7 @@ func (s *Store) GetQuestionStudyTurn(ctx context.Context, id string) (*QuestionS
 // reserveQuestionStudyTurn runs inside the eventual admission transaction. The
 // caller supplies already-validated frozen scope; this is not an HTTP command.
 func reserveQuestionStudyTurn(ctx context.Context, tx *sql.Tx, sessionID string, expected int, input, key, frozen string, sources []QuestionStudySource) (*QuestionStudyTurn, bool, error) {
-	if _, err := uuid.Parse(key); err != nil || expected < 1 || !utf8.ValidString(input) || strings.TrimSpace(input) == "" || len(input) > 8192 || !json.Valid([]byte(frozen)) || len(frozen) > 128*1024 || len(sources) > 8 {
+	if _, err := uuid.Parse(key); err != nil || expected < 1 || !utf8.ValidString(input) || strings.TrimSpace(input) == "" || len(input) > 8192 || !json.Valid([]byte(frozen)) || len(frozen) > 512*1024 || len(sources) > 96 {
 		return nil, false, ErrInvalidEditorialState
 	}
 	payload, _ := json.Marshal([]any{sessionID, expected, input, frozen, sources})

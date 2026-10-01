@@ -132,7 +132,11 @@ func (s *Store) FreezeQuestionStudyScope(ctx context.Context, sessionID, input, 
 			scope.Omissions = appendOnce(scope.Omissions, "历史回答的来源现已限制外发，该轮未外发")
 			continue
 		}
-		scope.History = append(scope.History, provider.QuestionStudyHistoryItem{Ordinal: turn.Ordinal, OwnerInput: turn.OwnerInput, AcceptedJSON: turn.AcceptedJSON})
+		item := provider.QuestionStudyHistoryItem{Ordinal: turn.Ordinal, OwnerInput: turn.OwnerInput, AcceptedJSON: turn.AcceptedJSON}
+		for _, ref := range refs {
+			item.SourceDependencies = append(item.SourceDependencies, provider.QuestionStudySourceDependency{SourceType: ref.SourceType, SourceID: ref.SourceID})
+		}
+		scope.History = append(scope.History, item)
 	}
 	if len(scope.Materials) == 0 {
 		return scope, fmt.Errorf("%w: 没有可用的已确认且可外发材料。%s", ErrInvalidEditorialState, strings.Join(scope.Omissions, "；"))

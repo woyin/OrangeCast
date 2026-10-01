@@ -256,6 +256,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 			if job.JobType == models.JobKnowledgeArticle {
 				_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, "远端结果未知，请显式重试")
 			}
+			if job.JobType == models.JobQuestionStudy {
+				_ = w.store.FailQuestionStudyGeneration(ctx, job.ID)
+			}
 			if job.JobType == models.JobWeeklyReview {
 				_ = w.store.FailLearningReview(ctx, job.SourceID, "远端结果未知，请显式重试")
 			}
@@ -472,7 +475,7 @@ func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64)
 // settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
 func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
 	known, actual := w.jobReceiptUsage(ctx, job.ID)
-	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview || job.JobType == models.JobTranscribe || job.JobType == models.JobKnowledgeEmbedding) && known == 0 {
+	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview || job.JobType == models.JobTranscribe || job.JobType == models.JobKnowledgeEmbedding || job.JobType == models.JobQuestionStudy) && known == 0 {
 		if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.RemoteCallStarted {
 			_ = w.store.MarkBudgetPendingRemote(ctx, job.ID)
 			return
@@ -540,6 +543,9 @@ func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
 func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) error {
 	if job.JobType == models.JobKnowledgeEmbedding {
 		return w.doKnowledgeEmbedding(ctx, job)
+	}
+	if job.JobType == models.JobQuestionStudy {
+		return w.doQuestionStudy(ctx, job)
 	}
 	if job.JobType == models.JobLearningExport {
 		if err := w.store.CheckRunControl(ctx, job.ID); err != nil {
