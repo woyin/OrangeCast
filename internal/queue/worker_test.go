@@ -16,13 +16,14 @@ import (
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
+	"github.com/woyin/orangecast/internal/testdb"
 )
 
 // newTestWorker 构造临时 store + worker（evidence/tmp 独立目录）。
 func newTestWorker(t *testing.T) (*store.Store, *Worker) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(filepath.Join(dir, "test.db"))
+	s, err := testdb.Open(filepath.Join(dir, "test.db"), "../store/migrations", store.Open)
 	if err != nil {
 		t.Fatal(err)
 	}

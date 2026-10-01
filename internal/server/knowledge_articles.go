@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -111,7 +112,11 @@ func (srv *Server) handleKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 }
 
 func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Request, status int, message, action string) {
-	records, err := srv.store.ListKnowledgeArticles(r.Context())
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "读取筛选条件失败", 400)
+		return
+	}
+	records, err := srv.store.ListKnowledgeArticlesPage(r.Context(), knowledgeListQuery(r, "article"))
 	if err != nil {
 		http.Error(w, "读取文章失败", 500)
 		return
@@ -131,12 +136,12 @@ func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "读取探索进度失败", 500)
 		return
 	}
-	candidates, err := srv.store.ListKnowledgeTopicCandidates(r.Context())
+	candidates, err := srv.store.ListKnowledgeTopicCandidatesPage(r.Context(), knowledgeListQuery(r, "candidate"))
 	if err != nil {
 		http.Error(w, "读取候选方向失败", 500)
 		return
 	}
-	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	sources, err := srv.store.SearchKnowledgeSources(r.Context(), knowledgeListQuery(r, "source"), r.Form.Get("source"))
 	if err != nil {
 		http.Error(w, "读取来源范围失败", 500)
 		return
@@ -153,7 +158,7 @@ func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 	if status != 0 {
 		w.WriteHeader(status)
 	}
-	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates, "Sources": sources, "Podcasts": podcasts, "Articles": records, "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
+	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates.Items, "CandidatePage": knowledgeListView(r, "candidate", candidates.Page, candidates.PerPage, candidates.Total), "Sources": sources.Items, "SourcePage": knowledgeListView(r, "source", sources.Page, sources.PerPage, sources.Total), "SourceMissing": sources.SelectedUnavailable, "Podcasts": podcasts, "Articles": records.Items, "ArticlePage": knowledgeListView(r, "article", records.Page, records.PerPage, records.Total), "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
 		http.Error(w, "渲染文章列表失败", 500)
 	}
 }
@@ -396,6 +401,10 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 	workReq := req
 	workBlocks := blocks
 	workTitle := article.Title
+	workHash := ""
+	if selected != nil && selectedRevision == article.WorkingRevision {
+		workHash = selected.ContentHash
+	}
 	if article.WorkingRevision > 0 && article.WorkingRevision != selectedRevision {
 		working, e := srv.store.GetKnowledgeRevision(r.Context(), article.ID, article.WorkingRevision)
 		if e != nil {
@@ -407,6 +416,7 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 			return
 		}
 		workTitle = working.Title
+		workHash = working.ContentHash
 	}
 	library, _, err := srv.store.BuildKnowledgeArticleRequest(r.Context(), article.ProfileID, article.Provider)
 	if err != nil {
@@ -424,7 +434,7 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 		}
 	}
 	editBlocks := make([]knowledgeEditBlock, 0, len(workBlocks))
-	for _, block := range workBlocks {
+	for i, block := range workBlocks {
 		used := map[string]bool{}
 		for _, id := range block.MaterialIDs {
 			used[id] = true
@@ -433,10 +443,10 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 		for _, m := range materials {
 			choices = append(choices, knowledgeMaterialChoice{Material: m, Selected: used[m.ID]})
 		}
-		editBlocks = append(editBlocks, knowledgeEditBlock{Block: block, Materials: choices})
+		editBlocks = append(editBlocks, knowledgeEditBlock{Block: block, Materials: choices, Key: knowledgeBlockKey(block, article.WorkingRevision, i)})
 	}
 	diffs := knowledgeDiffs(revisions)
-	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
+	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
 	if err := srv.tmpl.Render(w, "knowledge_article.html", data); err != nil {
 		http.Error(w, "渲染文章失败", 500)
 	}
@@ -447,6 +457,7 @@ type knowledgeMaterialChoice struct {
 	Selected bool
 }
 type knowledgeEditBlock struct {
+	Key       string
 	Block     provider.KnowledgeBlock
 	Materials []knowledgeMaterialChoice
 }
@@ -559,7 +570,7 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 					break
 				}
 			}
-			blocks = append(blocks, provider.KnowledgeBlock{Text: text, Kind: r.FormValue(fmt.Sprintf("block_kind_%d", i)), MaterialIDs: ids, Quotes: quotes})
+			blocks = append(blocks, provider.KnowledgeBlock{ID: r.FormValue(fmt.Sprintf("block_id_%d", i)), Text: text, Kind: r.FormValue(fmt.Sprintf("block_kind_%d", i)), MaterialIDs: ids, Quotes: quotes})
 		}
 		for _, mid := range r.Form["extra_material"] {
 			used[mid] = true
@@ -616,4 +627,41 @@ func (srv *Server) handleKnowledgeCandidate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	http.Redirect(w, r, "/knowledge-articles/"+v.ID, 303)
+}
+
+func knowledgeListQuery(r *http.Request, kind string) store.KnowledgeListQuery {
+	page, _ := strconv.Atoi(r.Form.Get(kind + "_page"))
+	text := r.Form.Get("list_query")
+	if kind == "source" {
+		text = r.Form.Get("source_query")
+	}
+	return store.KnowledgeListQuery{Text: text, Status: r.Form.Get(kind + "_status"), Theme: r.Form.Get("list_theme"), Page: page, PerPage: 20}
+}
+
+type knowledgeListNavigation struct {
+	Total, Page          int
+	Previous, Next       string
+	HasPrevious, HasNext bool
+}
+
+func knowledgeListView(r *http.Request, kind string, page, size, total int) knowledgeListNavigation {
+	link := func(n int) string {
+		values := url.Values{}
+		// Preserve only list/scope fields; never put CSRF tokens or editor prose in URLs.
+		for _, key := range []string{"article_page", "candidate_page", "source_page", "source_query", "list_query", "list_theme", "article_status", "candidate_status", "source", "podcast", "theme", "from", "until", "explore_history", "history_cursor", "material"} {
+			if v := r.Form[key]; len(v) > 0 {
+				values[key] = v
+			}
+		}
+		values.Set(kind+"_page", strconv.Itoa(n))
+		return "/knowledge-articles?" + values.Encode()
+	}
+	return knowledgeListNavigation{Total: total, Page: page, Previous: link(page - 1), Next: link(page + 1), HasPrevious: page > 1, HasNext: page*size < total}
+}
+
+func knowledgeBlockKey(block provider.KnowledgeBlock, revision, index int) string {
+	if block.ID != "" {
+		return block.ID
+	}
+	return fmt.Sprintf("legacy-revision-%d-block-%d", revision, index)
 }

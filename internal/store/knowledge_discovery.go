@@ -457,6 +457,15 @@ func (s *Store) StartKnowledgeCandidate(ctx context.Context, candidateID string,
 	if json.Unmarshal([]byte(batch.InputJSON), &req) != nil || json.Unmarshal([]byte(topicJSON), &topic) != nil {
 		return nil, false, ErrInvalidEditorialState
 	}
+	if err := s.checkKnowledgeDirection(ctx, batch.ProfileID, "", candidateID, topic); err != nil {
+		if errors.Is(err, ErrConflict) {
+			_, updateErr := s.DB.ExecContext(ctx, `UPDATE knowledge_topic_candidates SET status='duplicate',reason='成稿前发现全库重复方向' WHERE id=? AND article_id=''`, candidateID)
+			if updateErr != nil {
+				return nil, false, updateErr
+			}
+		}
+		return nil, false, err
+	}
 	history, err := s.knowledgeDirectionHistory(ctx, batch.ProfileID, topic)
 	if err != nil {
 		return nil, false, err
@@ -572,37 +581,62 @@ func (s *Store) knowledgeDirectionHistory(ctx context.Context, profile string, t
 			seen[a.ID] = true
 		}
 	}
-	// Metadata fallback is bounded; no body or private evidence is duplicated.
-	rows, err := s.DB.QueryContext(ctx, `SELECT a.id,a.topic_json FROM knowledge_articles a WHERE a.profile_id=? AND a.topic_json!='{}' UNION ALL SELECT '',c.topic_json FROM knowledge_topic_candidates c JOIN knowledge_discovery_batches b ON b.id=c.batch_id WHERE b.profile_id=? AND c.status='waiting' ORDER BY 1 DESC LIMIT 100`, profile, profile)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
+
+	// Article and pending-candidate pools have separate chronological limits.
+	// UUID order is not time order, and candidates must not lose their pool to articles.
+	type directionMetadata struct{ key, articleID, raw, at string }
+	var recent []directionMetadata
+	for i, query := range []string{
+		`SELECT id,topic_json,updated_at FROM knowledge_articles WHERE profile_id=? AND topic_json!='{}' ORDER BY updated_at DESC,id DESC LIMIT 100`,
+		`SELECT c.id,c.topic_json,c.created_at FROM knowledge_topic_candidates c JOIN knowledge_discovery_batches b ON b.id=c.batch_id WHERE b.profile_id=? AND c.status='waiting' ORDER BY c.created_at DESC,c.id DESC LIMIT 100`,
+	} {
+		rows, err := s.DB.QueryContext(ctx, query, profile)
+		if err != nil {
 			return nil, err
 		}
+		for rows.Next() {
+			var v directionMetadata
+			if err := rows.Scan(&v.key, &v.raw, &v.at); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if i == 0 {
+				v.articleID = v.key
+			} else {
+				v.key = "candidate:" + v.key
+			}
+			recent = append(recent, v)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.SliceStable(recent, func(i, j int) bool {
+		if recent[i].at != recent[j].at {
+			return recent[i].at > recent[j].at
+		}
+		return recent[i].key > recent[j].key
+	})
+	for _, v := range recent {
 		var previous provider.KnowledgeTopic
-		if json.Unmarshal([]byte(raw), &previous) != nil {
+		if json.Unmarshal([]byte(v.raw), &previous) != nil || seen[v.key] {
 			continue
 		}
-		if previous.Question == topic.Question && previous.Thesis == topic.Thesis && id == "" {
+		if v.articleID == "" && previous.Question == topic.Question && previous.Thesis == topic.Thesis {
 			continue
 		}
-		if id != "" && seen[id] {
-			continue
-		}
-		seen[id] = true
-		previous.ArticleID = id
+		previous.ArticleID = v.articleID
 		encoded := jsonString(previous)
 		if size+len(encoded) > 8000 {
-			break
+			continue
 		}
+		seen[v.key] = true
 		size += len(encoded)
 		out = append(out, previous)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func selectedKnowledgeMaterials(materials []provider.KnowledgeMaterial, ids []string) []provider.KnowledgeMaterial {
@@ -631,14 +665,30 @@ func (s *Store) NextAutomaticKnowledgeCandidate(ctx context.Context, profile str
 
 // CheckKnowledgeDirection rechecks current history before a paid write, excluding itself.
 func (s *Store) CheckKnowledgeDirection(ctx context.Context, profile, articleID string, topic provider.KnowledgeTopic) error {
-	history, err := s.knowledgeDirectionHistory(ctx, profile, topic)
+	return s.checkKnowledgeDirection(ctx, profile, articleID, "", topic)
+}
+
+func (s *Store) checkKnowledgeDirection(ctx context.Context, profile, articleID, candidateID string, topic provider.KnowledgeTopic) error {
+	// Paid admission checks all current direction metadata locally. A bounded
+	// model history and paginated UI must never make an old duplicate invisible.
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,topic_json FROM knowledge_articles WHERE profile_id=? AND id!=? AND topic_json!='{}' UNION ALL SELECT '',c.topic_json FROM knowledge_topic_candidates c JOIN knowledge_discovery_batches b ON b.id=c.batch_id WHERE b.profile_id=? AND c.status='waiting' AND c.id!=?`, profile, articleID, profile, candidateID)
 	if err != nil {
 		return err
 	}
-	for _, h := range history {
-		if h.ArticleID != articleID && provider.KnowledgeTopicDuplicate(topic, h) {
+	defer rows.Close()
+	for rows.Next() {
+		var id, raw string
+		if err = rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		var previous provider.KnowledgeTopic
+		if json.Unmarshal([]byte(raw), &previous) != nil {
+			continue
+		}
+		previous.ArticleID = id
+		if provider.KnowledgeTopicDuplicate(topic, previous) {
 			return fmt.Errorf("成稿前发现重复问题，请选择有真实增量的方向: %w", ErrConflict)
 		}
 	}
-	return nil
+	return rows.Err()
 }

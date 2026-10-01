@@ -10,7 +10,7 @@ import (
 // TestMigration0014_NarrationsTable (ADR-0019 R4)
 // 全新库应应用到 0014，narrations 表存在。
 func TestMigration0014_NarrationsTable(t *testing.T) {
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	ctx := context.Background()
 	v, err := AppliedVersion(ctx, s.DB)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestMigration0014_NarrationsTable(t *testing.T) {
 // 之前 SetCurrentVersion(KindHighlight) 会落到 current_card_version 覆盖 KnowledgeCard 指针。
 // 修正后应映射到 current_highlight_version，不影响 card 指针。
 func TestSetCurrentVersion_Highlight_NoLongerClobbersCard(t *testing.T) {
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	ctx := context.Background()
 	seedUser(t, s, "a@b.com")
 	p, _ := s.CreatePodcast(ctx, "https://f.xml", "Pod", "", "")

@@ -236,7 +236,7 @@ func TestHasPendingDestructiveMigration(t *testing.T) {
 	}
 
 	// 已应用 ≥2 → 无 pending
-	s2 := newTestStore(t)
+	s2 := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s2.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestHasPendingDestructiveMigration(t *testing.T) {
 	}
 
 	// 插入 version=1 记录 → pending（<2）
-	s3 := newTestStore(t)
+	s3 := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s3.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestCountUsers(t *testing.T) {
 	}
 
 	// 有表但 0 行
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	n, err = CountUsers(ctx, s.DB)
 	if err != nil {
 		t.Fatalf("CountUsers: %v", err)
@@ -296,7 +296,7 @@ func TestCountUsers(t *testing.T) {
 // TestRequireSafeForSingleOwner 验证单 Owner 守卫：1 用户通过、多用户拒绝。
 func TestRequireSafeForSingleOwner(t *testing.T) {
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	// 0 用户通过
 	if err := RequireSafeForSingleOwner(ctx, s.DB); err != nil {
 		t.Fatalf("0 用户应通过: %v", err)
@@ -389,7 +389,7 @@ func TestAppliedVersion_NoMigrationTable(t *testing.T) {
 // 覆盖 AppliedVersion 中存在 schema_migrations 表时读 MAX(version) 路径。
 func TestAppliedVersion_WithMigrations(t *testing.T) {
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestMigrationTableExists(t *testing.T) {
 		t.Error("全新库应无 schema_migrations 表")
 	}
 	// 迁移后 → true
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestUsersTableExists(t *testing.T) {
 		t.Error("全新库应无 users 表")
 	}
 	// 迁移后 → true（迁移会创建 users 表）
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestUsersTableExists(t *testing.T) {
 // 覆盖 applyOne 中 tx.ExecContext 错误分支与 defer tx.Rollback。
 func TestApplyOne_ExecError(t *testing.T) {
 	ctx := context.Background()
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	if _, err := Migrate(ctx, s.DB); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

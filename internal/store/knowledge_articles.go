@@ -173,7 +173,7 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 	}
 	req.Materials = bounded
 	sort.Slice(req.Materials, func(i, j int) bool { return req.Materials[i].ID < req.Materials[j].ID })
-	rows, err = s.DB.QueryContext(ctx, `SELECT title,core_claim FROM creation_history WHERE editorial_profile_id=? UNION ALL SELECT title,thesis FROM knowledge_articles WHERE profile_id=? AND title!='' ORDER BY title LIMIT 100`, profileID, profileID)
+	rows, err = s.DB.QueryContext(ctx, `SELECT title,core_claim FROM (SELECT title,core_claim,updated_at AS at,id FROM creation_history WHERE editorial_profile_id=? UNION ALL SELECT title,thesis,updated_at AS at,id FROM knowledge_articles WHERE profile_id=? AND title!='') ORDER BY at DESC,id DESC LIMIT 100`, profileID, profileID)
 	if err != nil {
 		return req, "", err
 	}
@@ -579,7 +579,13 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 	}
 	newRevision := v.WorkingRevision
 	if input.Stage == "write" || input.Stage == "revise" {
-		newRevision, err = appendKnowledgeRevision(ctx, tx, v.ID, expected, title, req, result.Blocks, "ai:"+job.ID, actualProvider, actualModel, promptVersion)
+		assigned, assignErr := assignKnowledgeBlockIDs(ctx, tx, v.ID, expected, result.Blocks, false)
+		if assignErr != nil {
+			return assignErr
+		}
+		req.Blocks = assigned
+		blocks = jsonString(assigned)
+		newRevision, err = appendKnowledgeRevision(ctx, tx, v.ID, expected, title, req, assigned, "ai:"+job.ID, actualProvider, actualModel, promptVersion)
 		if err != nil {
 			return err
 		}

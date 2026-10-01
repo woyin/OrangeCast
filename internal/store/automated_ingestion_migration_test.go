@@ -6,7 +6,7 @@ import (
 )
 
 func TestMigration0020_AutomatedIngestionJobs(t *testing.T) {
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	ctx := context.Background()
 	version, err := AppliedVersion(ctx, s.DB)
 	if err != nil || version < 20 {

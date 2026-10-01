@@ -445,7 +445,7 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "搜索失败："+err.Error(), code)
 		return
 	}
-	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	sources, sourceNavigation, err := srv.knowledgeSourcePicker(r, q)
 	if err != nil {
 		http.Error(w, "读取来源范围失败", 500)
 		return
@@ -456,7 +456,7 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	views := knowledgeSearchViews(result.Hits)
-	data := map[string]any{"Sources": sources, "Podcasts": podcasts, "Query": q.Text, "Filter": q, "Results": views, "Total": result.Total, "Page": result.Page, "PerPage": result.PerPage, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
+	data := map[string]any{"Sources": sources.Items, "SourcePage": sourceNavigation, "SourceQuery": r.URL.Query().Get("source_query"), "SourceMissing": sources.SelectedUnavailable, "SelectedSource": q.SourceType + ":" + q.SourceID, "Podcasts": podcasts, "Query": q.Text, "Filter": q, "Results": views, "Total": result.Total, "Page": result.Page, "PerPage": result.PerPage, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
 	if err := srv.tmpl.Render(w, "search.html", data); err != nil {
 		http.Error(w, "渲染搜索失败", 500)
 	}

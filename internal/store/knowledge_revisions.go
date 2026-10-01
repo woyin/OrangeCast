@@ -112,6 +112,11 @@ func (s *Store) SaveKnowledgeDraft(ctx context.Context, id string, expected int,
 		return nil, err
 	}
 	defer tx.Rollback()
+	blocks, err = assignKnowledgeBlockIDs(ctx, tx, id, expected, blocks, true)
+	if err != nil {
+		return nil, err
+	}
+	req.Blocks = blocks
 	// Reserve CAS before creating the body. A new draft preserves passed_revision.
 	res, err := tx.ExecContext(ctx, `UPDATE knowledge_articles SET status='needs_review',stage='manual',reason='手动修改尚未审校',title=?,blocks_json=?,input_json=?,updated_at=datetime('now') WHERE id=? AND working_revision=?`, title, jsonString(blocks), jsonString(req), id, expected)
 	if err != nil {
@@ -353,4 +358,34 @@ func (s *Store) FailKnowledgeArticleRun(ctx context.Context, jobID, reason strin
 	}
 	_, err = s.DB.ExecContext(ctx, `UPDATE knowledge_articles SET status='failed',reason=?,updated_at=datetime('now') WHERE id=? AND stage=? AND working_revision=? AND status NOT IN ('ready','needs_review','insufficient')`, reason, articleID, stage, expected)
 	return err
+}
+
+// assignKnowledgeBlockIDs preserves only confirmed parent identities for Owner edits.
+// AI-produced IDs and duplicate/new Owner IDs always receive application-owned identities.
+func assignKnowledgeBlockIDs(ctx context.Context, tx *sql.Tx, id string, parent int, blocks []provider.KnowledgeBlock, owner bool) ([]provider.KnowledgeBlock, error) {
+	allowed := map[string]bool{}
+	if owner && parent > 0 {
+		var raw string
+		if err := tx.QueryRowContext(ctx, `SELECT blocks_json FROM knowledge_article_revisions WHERE article_id=? AND revision=?`, id, parent).Scan(&raw); err != nil {
+			return nil, err
+		}
+		var old []provider.KnowledgeBlock
+		if err := json.Unmarshal([]byte(raw), &old); err != nil {
+			return nil, err
+		}
+		for _, b := range old {
+			if b.ID != "" {
+				allowed[b.ID] = true
+			}
+		}
+	}
+	out := append([]provider.KnowledgeBlock(nil), blocks...)
+	used := map[string]bool{}
+	for i := range out {
+		if !allowed[out[i].ID] || used[out[i].ID] {
+			out[i].ID = uuid.NewString()
+		}
+		used[out[i].ID] = true
+	}
+	return out, nil
 }

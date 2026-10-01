@@ -8,11 +8,12 @@ import (
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/store"
+	"github.com/woyin/orangecast/internal/testdb"
 )
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	s, err := testdb.Open(filepath.Join(t.TempDir(), "test.db"), "../store/migrations", store.Open)
 	if err != nil {
 		t.Fatalf("打开测试库: %v", err)
 	}

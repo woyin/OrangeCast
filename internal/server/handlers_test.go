@@ -18,13 +18,14 @@ import (
 	"github.com/woyin/orangecast/internal/queue"
 	"github.com/woyin/orangecast/internal/rss"
 	"github.com/woyin/orangecast/internal/store"
+	"github.com/woyin/orangecast/internal/testdb"
 )
 
 // newTestServer 构造一个完整装配的 server，用临时 SQLite + 假 API key。
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.Open(dir + "/test.db")
+	s, err := testdb.Open(dir+"/test.db", "../store/migrations", store.Open)
 	if err != nil {
 		t.Fatal(err)
 	}

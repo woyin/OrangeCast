@@ -81,7 +81,8 @@ func (t *KnowledgeTopic) UnmarshalJSON(data []byte) error {
 
 // KnowledgeBlock is a grounded paragraph; kind keeps attribution visible.
 type KnowledgeBlock struct {
-	Kind        string           `json:"kind"` // source | reflection | synthesis
+	ID          string           `json:"id,omitempty"` // assigned by the application, never trusted from model output
+	Kind        string           `json:"kind"`         // source | reflection | synthesis
 	Text        string           `json:"text"`
 	MaterialIDs []string         `json:"material_ids"`
 	Quotes      []KnowledgeQuote `json:"quotes,omitempty"`

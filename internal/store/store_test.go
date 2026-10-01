@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/testdb"
 )
 
 // newTestStore 每个测试用独立的临时 SQLite 库。
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := Open(filepath.Join(dir, "test.db"))
+	s, err := testdb.Open(filepath.Join(dir, "test.db"), "migrations", Open)
 	if err != nil {
 		t.Fatalf("打开测试库: %v", err)
 	}
@@ -32,7 +33,7 @@ func seedUser(t *testing.T, s *Store, email string) *models.User {
 }
 
 func TestOpen_InitializesSchema(t *testing.T) {
-	s := newTestStore(t)
+	s := newFreshTestStore(t)
 	// 验证关键表存在
 	tables := []string{"users", "sessions", "podcasts", "episodes", "uploads",
 		"transcripts", "analyses", "processing_jobs", "usage_records", "settings", "search_index", "schema_migrations"}
@@ -321,4 +322,15 @@ func TestPreMigrationSafety_BackupFailureWarns(t *testing.T) {
 	if err := preMigrationSafety(ctx, db, dbPath); err != nil {
 		t.Fatalf("备份失败应只告警不阻断，实际报错 %v", err)
 	}
+}
+
+// newFreshTestStore keeps schema/startup/upgrade tests on the full initialization path.
+func newFreshTestStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
 }

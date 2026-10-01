@@ -70,13 +70,31 @@ func (srv *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "读取笔记失败："+err.Error(), 500)
 		return
 	}
-	sources, err := srv.store.ListKnowledgeSearchSources(r.Context())
+	sources, sourceNavigation, err := srv.knowledgeSourcePicker(r, q)
 	if err != nil {
 		http.Error(w, "读取来源失败", 500)
 		return
 	}
-	data := map[string]any{"Filter": q, "Sources": sources, "Results": knowledgeSearchViews(result.Hits), "Total": result.Total, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
+	data := map[string]any{"Filter": q, "Sources": sources.Items, "SourcePage": sourceNavigation, "SourceQuery": r.URL.Query().Get("source_query"), "SourceMissing": sources.SelectedUnavailable, "SelectedSource": q.SourceType + ":" + q.SourceID, "Results": knowledgeSearchViews(result.Hits), "Total": result.Total, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
 	if err := srv.tmpl.Render(w, "notes.html", data); err != nil {
 		http.Error(w, "渲染失败", 500)
 	}
+}
+
+func (srv *Server) knowledgeSourcePicker(r *http.Request, q store.KnowledgeSearchQuery) (store.KnowledgeSourcePage, knowledgeListNavigation, error) {
+	values := r.URL.Query()
+	page, _ := strconv.Atoi(values.Get("source_page"))
+	selected := ""
+	if q.SourceID != "" {
+		selected = q.SourceType + ":" + q.SourceID
+	}
+	result, err := srv.store.SearchKnowledgeSources(r.Context(), store.KnowledgeListQuery{Text: values.Get("source_query"), Page: page, PerPage: 20}, selected)
+	link := func(n int) string {
+		query := r.URL.Query()
+		query.Del("_csrf")
+		query.Set("source_page", strconv.Itoa(n))
+		return r.URL.Path + "?" + query.Encode()
+	}
+	nav := knowledgeListNavigation{Total: result.Total, Page: result.Page, Previous: link(result.Page - 1), Next: link(result.Page + 1), HasPrevious: result.Page > 1, HasNext: result.Page*result.PerPage < result.Total}
+	return result, nav, err
 }
