@@ -18,65 +18,69 @@ import (
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
-	EmbeddingBaseURL       string
-	EmbeddingAPIKey        string
-	EmbeddingModel         string
-	EmbeddingDimensions    int
-	VoiceDir               string
-	VoiceASRProvider       string
-	VoiceASRModel          string
-	VoiceASRBaseURL        string
-	VoiceASRAPIKey         string
-	Port                   string
-	DBPath                 string
-	SessionSecret          string
-	TempDir                string // 临时文件目录（下载/转码中间产物）
-	GroqAPIKey             string
-	OpenAIAPIKey           string
-	PodBaseURL             string // 自动知识文章的独立 OpenAI 兼容文本连接。
-	PodAPIKey              string
-	PodReviewModel         string
-	PodModel               string
-	PodDiscoveryModel      string
-	PodSelectionModel      string
-	PodWriteModel          string
-	PodLearningReviewModel string
-	PublicURL              string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
-	TrustedProxies         []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
-	DataDir                string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
-	EvidenceDir            string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
-	BackupDir              string   // 备份输出目录（DATA_DIR/backups）
-	NarrationDir           string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
-	KokoroBinary           string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
-	KokoroVoice            string   // Kokoro 默认音色（默认 af_heart）
-	KokoroModel            string   // Kokoro 模型文件路径（可选，某些发行版需要）
-	KokoroLanguage         string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
-	KokoroTimeoutSeconds   int      // 单次合成超时秒数（D03，默认 120）
+	EmbeddingBaseURL            string
+	EmbeddingAPIKey             string
+	EmbeddingModel              string
+	EmbeddingDimensions         int
+	VoiceDir                    string
+	VoiceASRProvider            string
+	VoiceASRModel               string
+	VoiceASRBaseURL             string
+	VoiceASRAPIKey              string
+	Port                        string
+	DBPath                      string
+	SessionSecret               string
+	TempDir                     string // 临时文件目录（下载/转码中间产物）
+	GroqAPIKey                  string
+	OpenAIAPIKey                string
+	PodBaseURL                  string // 自动知识文章的独立 OpenAI 兼容文本连接。
+	PodAPIKey                   string
+	PodReviewModel              string
+	PodModel                    string
+	PodDiscoveryModel           string
+	PodSelectionModel           string
+	PodWriteModel               string
+	PodQuestionStudyModel       string
+	PodQuestionStudyReviewModel string
+	PodLearningReviewModel      string
+	PublicURL                   string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
+	TrustedProxies              []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
+	DataDir                     string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
+	EvidenceDir                 string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
+	BackupDir                   string   // 备份输出目录（DATA_DIR/backups）
+	NarrationDir                string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	KokoroBinary                string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	KokoroVoice                 string   // Kokoro 默认音色（默认 af_heart）
+	KokoroModel                 string   // Kokoro 模型文件路径（可选，某些发行版需要）
+	KokoroLanguage              string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
+	KokoroTimeoutSeconds        int      // 单次合成超时秒数（D03，默认 120）
 }
 
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
-		EmbeddingBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_BASE_URL")), "/"),
-		EmbeddingAPIKey:        strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_API_KEY")),
-		EmbeddingModel:         strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_MODEL")),
-		VoiceASRProvider:       strings.TrimSpace(os.Getenv("VOICE_ASR_PROVIDER")),
-		VoiceASRModel:          strings.TrimSpace(os.Getenv("VOICE_ASR_MODEL")),
-		VoiceASRBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("VOICE_ASR_BASE_URL")), "/"),
-		VoiceASRAPIKey:         strings.TrimSpace(os.Getenv("VOICE_ASR_API_KEY")),
-		Port:                   envOrDefault("PORT", "8080"),
-		SessionSecret:          os.Getenv("SESSION_SECRET"),
-		GroqAPIKey:             os.Getenv("GROQ_API_KEY"),
-		OpenAIAPIKey:           os.Getenv("OPENAI_API_KEY"),
-		PodBaseURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
-		PodAPIKey:              strings.TrimSpace(os.Getenv("POD_API_KEY")),
-		PodModel:               strings.TrimSpace(os.Getenv("POD_MODEL")),
-		PodReviewModel:         strings.TrimSpace(os.Getenv("POD_REVIEW_MODEL")),
-		PodDiscoveryModel:      strings.TrimSpace(os.Getenv("POD_DISCOVERY_MODEL")),
-		PodSelectionModel:      strings.TrimSpace(os.Getenv("POD_SELECTION_MODEL")),
-		PodWriteModel:          strings.TrimSpace(os.Getenv("POD_WRITE_MODEL")),
-		PodLearningReviewModel: strings.TrimSpace(os.Getenv("POD_LEARNING_REVIEW_MODEL")),
-		PublicURL:              envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
+		EmbeddingBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_BASE_URL")), "/"),
+		EmbeddingAPIKey:             strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_API_KEY")),
+		EmbeddingModel:              strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_MODEL")),
+		VoiceASRProvider:            strings.TrimSpace(os.Getenv("VOICE_ASR_PROVIDER")),
+		VoiceASRModel:               strings.TrimSpace(os.Getenv("VOICE_ASR_MODEL")),
+		VoiceASRBaseURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("VOICE_ASR_BASE_URL")), "/"),
+		VoiceASRAPIKey:              strings.TrimSpace(os.Getenv("VOICE_ASR_API_KEY")),
+		Port:                        envOrDefault("PORT", "8080"),
+		SessionSecret:               os.Getenv("SESSION_SECRET"),
+		GroqAPIKey:                  os.Getenv("GROQ_API_KEY"),
+		OpenAIAPIKey:                os.Getenv("OPENAI_API_KEY"),
+		PodBaseURL:                  strings.TrimRight(strings.TrimSpace(os.Getenv("POD_BASE_URL")), "/"),
+		PodAPIKey:                   strings.TrimSpace(os.Getenv("POD_API_KEY")),
+		PodModel:                    strings.TrimSpace(os.Getenv("POD_MODEL")),
+		PodReviewModel:              strings.TrimSpace(os.Getenv("POD_REVIEW_MODEL")),
+		PodDiscoveryModel:           strings.TrimSpace(os.Getenv("POD_DISCOVERY_MODEL")),
+		PodSelectionModel:           strings.TrimSpace(os.Getenv("POD_SELECTION_MODEL")),
+		PodWriteModel:               strings.TrimSpace(os.Getenv("POD_WRITE_MODEL")),
+		PodLearningReviewModel:      strings.TrimSpace(os.Getenv("POD_LEARNING_REVIEW_MODEL")),
+		PodQuestionStudyModel:       strings.TrimSpace(os.Getenv("POD_QUESTION_STUDY_MODEL")),
+		PodQuestionStudyReviewModel: strings.TrimSpace(os.Getenv("POD_QUESTION_STUDY_REVIEW_MODEL")),
+		PublicURL:                   envOrDefault("PUBLIC_URL", envOrDefault("BASE_URL", "http://localhost:8080")),
 	}
 	// 统一数据目录（ADR-0010）：DB/evidence/tmp/backups 全部落在 DATA_DIR 之下。
 	c.DataDir = envOrDefault("DATA_DIR", envOrDefault("DB_PATH_DIR", "./data"))
@@ -220,4 +224,20 @@ func (c *Config) ValidateEmbedding() error {
 		return fmt.Errorf("LEARNING_EMBEDDING 配置无效")
 	}
 	return nil
+}
+
+// QuestionStudyModels resolves the new task's explicit fallback chain only.
+func (c *Config) QuestionStudyModels() (generation, review string) {
+	generation = c.PodQuestionStudyModel
+	if generation == "" {
+		generation = c.PodModel
+	}
+	review = c.PodQuestionStudyReviewModel
+	if review == "" {
+		review = c.PodReviewModel
+	}
+	if review == "" {
+		review = c.PodModel
+	}
+	return
 }

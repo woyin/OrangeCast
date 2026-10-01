@@ -98,7 +98,7 @@ func QuestionStudyMessages(scope QuestionStudyScope) ([]QuestionStudyMessage, er
 	if err != nil {
 		return nil, err
 	}
-	return []QuestionStudyMessage{{Role: "system", Content: QuestionStudySystem}, {Role: "user", Content: string(raw)}}, nil
+	return []QuestionStudyMessage{{Role: "system", Content: QuestionStudySystem + "\n" + questionStudyOutputContract}, {Role: "user", Content: string(raw)}}, nil
 }
 func EstimateQuestionStudy(scope QuestionStudyScope) (*KnowledgeEstimate, error) {
 	messages, err := QuestionStudyMessages(scope)

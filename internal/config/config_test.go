@@ -179,3 +179,23 @@ func TestLoad_KokoroNarrationConfig(t *testing.T) {
 		t.Fatalf("非法超时应回退 120: %d", c3.KokoroTimeoutSeconds)
 	}
 }
+
+func TestQuestionStudyProviderModelFallback(t *testing.T) {
+	for _, item := range []struct{ generation, review, baseReview, wantGeneration, wantReview string }{{"", "", "", "base", "base"}, {"", "", "base-review", "base", "base-review"}, {"generation", "review", "base-review", "generation", "review"}} {
+		t.Setenv("SESSION_SECRET", "test-secret")
+		t.Setenv("POD_MODEL", "base")
+		t.Setenv("POD_BASE_URL", "https://pod.example/v1")
+		t.Setenv("POD_API_KEY", "test-only")
+		t.Setenv("POD_REVIEW_MODEL", item.baseReview)
+		t.Setenv("POD_QUESTION_STUDY_MODEL", item.generation)
+		t.Setenv("POD_QUESTION_STUDY_REVIEW_MODEL", item.review)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, review := cfg.QuestionStudyModels()
+		if generation != item.wantGeneration || review != item.wantReview {
+			t.Fatal(generation, review)
+		}
+	}
+}
