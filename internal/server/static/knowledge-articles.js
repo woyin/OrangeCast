@@ -31,15 +31,10 @@ window.CWPViews.define(function(view,scope){
    // Keep an incompatible old draft intact until an explicit merge/discard.
    save();if(recoveryPending)feedback.textContent='旧草稿与当前输入分别保留，请比对后处理。';
   });
-  scope.on(form,'submit',async event=>{
-   event.preventDefault();save();
-   const data=new FormData(form);if(event.submitter?.name)data.set(event.submitter.name,event.submitter.value);
-   feedback.textContent='处理中…';const button=event.submitter;if(button)button.disabled=true;
-   try{const response=await scope.fetch(form.getAttribute('action'),{method:'POST',body:data,headers:{Accept:'application/json'}});if(!response.ok){feedback.textContent=await response.text();return;}
-    const value=await response.json();localStorage.removeItem(currentKey);if(!recoveryPending){localStorage.removeItem(draftKey);sessionStorage.removeItem(legacyKey);}draft=null;
-    if(data.get('action')==='feedback'){feedback.textContent='反馈已记录，偏好未自动改变。';}else{window.CWPNavigation.visit(value.redirect);}
-   }catch(_){feedback.textContent='请求未完成，输入仍保留。';}finally{if(button)button.disabled=false;}
-  });
+  window.CWPForms.bind(form,scope,{feedback,before:save,navigate:false,success:async(value,data)=>{
+   localStorage.removeItem(currentKey);if(!recoveryPending){localStorage.removeItem(draftKey);sessionStorage.removeItem(legacyKey);}draft=null;
+   if(data.get('action')==='feedback'){feedback.textContent='反馈已记录，偏好未自动改变。';}else{await window.CWPNavigation.visit(value.redirect);}
+  }});
  });
  const active=['discover','select','write','review','revise','review_final'];
  const timer=scope.interval(async()=>{if(document.hidden)return;try{const response=await scope.fetch('/knowledge-articles/'+encodeURIComponent(state.dataset.id)+'?state=1');if(!response.ok)return;const value=await response.json();
@@ -51,7 +46,5 @@ window.CWPViews.define(function(view,scope){
 // Admission uses JSON so an explicit generation does not replace the listening shell.
 window.CWPViews.define(function(view,scope){view.querySelectorAll('.knowledge-generation-form').forEach(form=>{
  const feedback=form.querySelector('.knowledge-generation-feedback');
- scope.on(form,'submit',async event=>{event.preventDefault();const data=new FormData(form),controls=form.querySelectorAll('button,input,select,textarea');controls.forEach(c=>c.disabled=true);feedback.textContent='正在接纳生成任务…';
- try{const response=await scope.fetch(form.getAttribute('action'),{method:'POST',body:data,headers:{Accept:'application/json'}});if(!response.ok){feedback.textContent=await response.text();return;}const result=await response.json();window.CWPNavigation.visit(result.redirect);}catch(_){feedback.textContent='生成请求尚未确认，范围输入保留；核对任务后再明确重试。';}finally{controls.forEach(c=>c.disabled=false);}
- });
+ window.CWPForms.bind(form,scope,{feedback,pendingText:'正在接纳生成任务…',unknownText:'生成请求尚未确认，范围输入保留；核对任务后再明确重试。'});
 });});

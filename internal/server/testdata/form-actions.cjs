@@ -7,6 +7,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
   const context={document:{querySelector:selector=>selector==='#article-state'?state:null,querySelectorAll:selector=>selector==='.knowledge-form'?[form]:[]},sessionStorage:{getItem:k=>drafts.get(k),setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)},location:{assign:v=>redirect=v},fetch:async url=>{endpoint=url;return{ok,json:async()=>({redirect:'/knowledge-articles/article?revision=2'}),text:async()=> 'conflict'}},setInterval:()=>1,clearInterval:()=>{},FormData:class{constructor(){this.fields=new Map(fields.map(f=>[f.name,f.value]))}get(n){return this.fields.get(n)}set(n,v){this.fields.set(n,v)}}};
   context.window=context;context.addEventListener=()=>{};context.localStorage=context.sessionStorage;context.AbortController=AbortController;context.CWPNavigation={visit:v=>redirect=v};
   vm.runInNewContext(fs.readFileSync('static/view-lifecycle.js','utf8'),context);
+  vm.runInNewContext(fs.readFileSync('static/form-actions.js','utf8'),context);
   vm.runInNewContext(fs.readFileSync('static/article-drafts.js','utf8'),context);
   vm.runInNewContext(fs.readFileSync('static/knowledge-articles.js','utf8'),context);context.CWPViews.mount(context.document);
   const button={disabled:false,name:'',value:''};await listeners.submit({preventDefault(){},submitter:button});assert.equal(endpoint,'/knowledge-articles/action');assert.equal(button.disabled,false);
