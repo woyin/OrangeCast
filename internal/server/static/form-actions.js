@@ -20,8 +20,9 @@
   pending.set(form,true);
   if(feedback)feedback.textContent=options.pendingText||'处理中…';
   try{
-   const body=options.encoding==='urlencoded'?new URLSearchParams(data):data;
-   const response=await scope.fetch(form.getAttribute('action'),{method:'POST',headers:{Accept:'application/json'},body});
+   const body=options.json?JSON.stringify(options.json(data)):options.encoding==='urlencoded'?new URLSearchParams(data):data;
+   const headers={Accept:'application/json',...options.headers};if(options.json)headers['Content-Type']='application/json';
+   const response=await scope.fetch(form.getAttribute('action'),{method:'POST',headers,body});
    if(!active(scope))return {state:'unmounted'};
    if(!response.ok){
     const raw=await response.text();let value;try{value=JSON.parse(raw);}catch(_){value=raw;}

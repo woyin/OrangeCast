@@ -54,6 +54,8 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
 	mux.HandleFunc("/api/learning-actions", srv.handleLearningActions)
 	mux.HandleFunc("/api/listening-reflections", srv.handleListeningReflections)
+	mux.HandleFunc("/listening-reflections", srv.handleListeningReflectionPage)
+	mux.HandleFunc("/listening-reflections/", srv.handleListeningReflectionPage)
 	mux.HandleFunc("/voice-notes", srv.handleVoiceNotes)
 	mux.HandleFunc("/voice-notes/price", srv.handleVoicePrice)
 	mux.HandleFunc("/api/voice-notes/upload", srv.handleVoiceUpload)

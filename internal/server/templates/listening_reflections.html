@@ -1,0 +1,12 @@
+{{define "title"}}听后整理 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>听后整理</h1><p>把听到的内容变成自己的理解。三栏整理保存为一条笔记；私人草稿7天后清理。</p>
+<button type="button" data-reflection-start>整理当前播放</button><a href="/listening-queue">选择节目</a>
+{{range .Reflections}}<article class="panel"><h2>{{.Capture.Title}}</h2><p>{{if eq .State "draft"}}草稿{{else if eq .State "saved"}}已保存{{else if eq .State "expired"}}草稿已过期{{else if eq .State "cancelled"}}已丢弃{{else}}来源已清理{{end}} · 修订{{.Revision}} · <time data-utc="{{.CreatedAt}}">{{.CreatedAt}}</time></p>
+{{if .Answers.Remember}}<h3>我记住了什么</h3><p class="pre-wrap">{{.Answers.Remember}}</p>{{end}}
+{{if .Answers.Uncertain}}<h3>我还不确定什么</h3><p class="pre-wrap">{{.Answers.Uncertain}}</p>{{end}}
+{{if .Answers.Apply}}<h3>我准备如何使用</h3><p class="pre-wrap">{{.Answers.Apply}}</p>{{end}}
+{{if eq .State "draft"}}<button type="button" data-reflection-open="{{.ID}}">继续整理</button>{{end}}
+{{if .SavedNoteID}}<a href="/notes/{{.SavedNoteID}}/history">核对已保存笔记</a>{{end}}
+<a href="/listening-reflections/{{.ID}}">查看记录</a></article>{{else}}<p>还没有整理记录。播放时可从播放器开始。</p>{{end}}
+{{end}}

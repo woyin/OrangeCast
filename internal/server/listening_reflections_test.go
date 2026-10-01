@@ -52,6 +52,12 @@ func TestListeningReflectionSaveHTTPReplayReadonlyAndLimits(t *testing.T) {
 			t.Fatal(rec.Code, rec.Body.String())
 		}
 	}
+	for _, path := range []string{"/listening-reflections", "/listening-reflections/" + cmd.ID} {
+		rec := doWithCookie(srv, cookie, "GET", path)
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "data-reflection-open") {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+	}
 	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
 	if before != after {
 		t.Fatal("GET writes", before, after)

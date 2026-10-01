@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/store"
 )
 
@@ -18,6 +19,31 @@ type reflectionCommand struct {
 	QuestionID       string                  `json:"question_id"`
 	QuestionRevision int                     `json:"question_revision"`
 	Answers          store.ReflectionAnswers `json:"answers"`
+}
+
+func (srv *Server) handleListeningReflectionPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(405)
+		return
+	}
+	var records []*store.ListeningReflection
+	var err error
+	if r.URL.Path == "/listening-reflections" {
+		records, err = srv.store.ListListeningReflections(r.Context())
+	} else {
+		var result *store.ListeningReflection
+		result, err = srv.store.GetListeningReflection(r.Context(), strings.TrimPrefix(r.URL.Path, "/listening-reflections/"))
+		if err == nil {
+			records = []*store.ListeningReflection{result}
+		}
+	}
+	if err != nil {
+		questionHTTPError(w, err)
+		return
+	}
+	if err = srv.tmpl.Render(w, "listening_reflections.html", map[string]any{"Reflections": records, "CSRF": auth.CSRFValue(r)}); err != nil {
+		http.Error(w, "无法显示整理记录", 500)
+	}
 }
 
 func (srv *Server) handleListeningReflections(w http.ResponseWriter, r *http.Request) {

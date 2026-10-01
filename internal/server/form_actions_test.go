@@ -77,3 +77,13 @@ func TestVoiceRecoveredDraftOpensEditorWithoutPaidRequest(t *testing.T) {
 		t.Fatal(e, string(out))
 	}
 }
+
+func TestListeningReflectionRootEditor(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, err := exec.Command(node, filepath.Join("testdata", "listening-reflections.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+}
