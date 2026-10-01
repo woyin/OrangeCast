@@ -44,6 +44,8 @@
 
 | S01 | 当前KnowledgeSearch/KnowledgeRecall/UnifiedKnowledgeSearch store测试通过（1.967s）；检索目的显式区分local/external、旧查询分页/范围/版本DeepEqual对照、本地private可见与外发不可见、模糊目的拒绝；普通读取total_changes不变，不扫描旧字符向量。语义请求尚未就绪明确返回FTS降级；S06将接入向量适配。 | 技术验证完成；独立待验见下 | `a5028dd` |
 
+| S02 | 配置/协议stub测试通过；输入价格冻结及预算阻断race通过；真实接口与预检UI按S07待验 | 技术验证完成；独立待验见下 | `724b319` |
+
 ## 独立待验
 
 - 真实个人资料和Owner五维评分：待验证。
@@ -90,3 +92,10 @@ FTS测量：Apple M4 / darwin arm64，固定10,000/50,000条合成索引，20次
 - 输入单位为供应商报告的input tokens；缺usage保持未知。输入估算采用明确标记的UTF-8字节上界启发式，冻结精确连接/model价格，embedding输出价必须为0；未定价有预算阻断，不借用POD价。店内预算事务测试通过（race）。
 - 官方协议核对： [Create embeddings](https://developers.openai.com/api/reference/ruby/resources/embeddings/methods/create)、[Vector embeddings](https://developers.openai.com/api/docs/guides/embeddings)。兼容端点需实际预检；不假定所有模型支持dimensions，不硬编码供应商价格。
 - 真实接口质量/计量尚待S07明确预检与评测；本项协议stub不能证明语义质量。可见预检/开关入口按S07交付，持久调用及receipt按S04交付。
+
+### S03 版本化向量缓存与增量事件（当前验证）
+
+- 真正从0069前缀数据库升级至新迁移；未创建embedding配置或付费任务。无缓存备份恢复仍返回FTS结果，且没有自动外发重建。
+- 当前race测试验证：默认关闭、明确来源范围、准确连接权限、不沿用POD权限、版本/hash及scope CAS、维度分离、过时响应丢弃、立即删除权限撤回/purge对应向量、通过版文章的完整来源准入、超长Owner段落明确跳过、完整段落分窗。向量仅用合成单位向量验证缓存事务，不能证明召回质量。
+- 0074迁移把索引事件和付费队列分开；向量身份为配置/稳定对象/窗口/正文hash/修订/维度。已确认材料更改生成事件，私有整理草稿没有索引投影。来源策略、归档、删除、purge快照和文章依据改变使缓存立即失效。全库容量最多50,000个窗口（比50,000对象更保守），下一阶段在持久任务中继续复查每一窗口。
+- 当前回归：统一全文检索、外发召回、整理升级和输入计价定向测试通过。界面、实际任务及语义排序由S04–S07交付。
