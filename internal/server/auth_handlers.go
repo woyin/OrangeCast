@@ -148,6 +148,17 @@ func (srv *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data["Listening"] = progress
+	due, err := srv.store.DueReviewCount(r.Context(), srv.reviewNow())
+	if err != nil {
+		http.Error(w, "读取到期回顾失败", 500)
+		return
+	}
+	active, err := srv.store.ActiveReviewSession(r.Context())
+	if err != nil {
+		http.Error(w, "读取短回顾会话失败", 500)
+		return
+	}
+	data["DueReviews"], data["ActiveReview"] = due, active
 	notes, err := srv.store.SearchKnowledge(r.Context(), store.KnowledgeSearchQuery{Kind: "notes", PerPage: 5})
 	if err != nil {
 		http.Error(w, "读取笔记失败", 500)

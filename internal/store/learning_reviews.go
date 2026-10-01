@@ -36,8 +36,8 @@ type LearningReviewItem struct {
 
 // LearningReviewAnswer is an immutable Owner answer version.
 type LearningReviewAnswer struct {
-	Revision                             int
-	Answer, Assessment, State, CreatedAt string
+	Revision                                     int
+	Answer, Assessment, State, CreatedAt, NoteID string
 }
 
 // GetLearningReviewSettings reads the independent opt-in and time zone.
@@ -326,6 +326,11 @@ func (s *Store) FailLearningReview(ctx context.Context, id, reason string) error
 
 // AnswerLearningReview saves an immutable Owner explanation version with CAS.
 func (s *Store) AnswerLearningReview(ctx context.Context, id, answer, assessment, action string, expected int) error {
+	return s.AnswerLearningReviewAt(ctx, id, answer, assessment, action, expected, time.Now())
+}
+
+// AnswerLearningReviewAt shares a fixed clock with daily review scheduling.
+func (s *Store) AnswerLearningReviewAt(ctx context.Context, id, answer, assessment, action string, expected int, now time.Time) error {
 	if len([]rune(answer)) > 10000 || expected < 0 {
 		return ErrInvalidEditorialState
 	}
@@ -359,12 +364,22 @@ func (s *Store) AnswerLearningReview(ctx context.Context, id, answer, assessment
 	if _, err = tx.ExecContext(ctx, `INSERT INTO learning_review_answers(id,item_id,revision,answer,assessment,state) SELECT ?,id,revision,answer,assessment,state FROM learning_review_items WHERE id=?`, uuid.NewString(), id); err != nil {
 		return err
 	}
+	if action == "answer" {
+		if err = scheduleReviewAnswerTx(ctx, tx, id, assessment, now); err != nil {
+			return err
+		}
+	}
+	if action == "later" {
+		if err = postponeReviewTx(ctx, tx, id, now); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
 // LearningReviewAnswerHistory exposes only recorded answer versions.
 func (s *Store) LearningReviewAnswerHistory(ctx context.Context, id string) ([]LearningReviewAnswer, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT revision,answer,assessment,state,created_at FROM learning_review_answers WHERE item_id=? ORDER BY revision DESC`, id)
+	rows, err := s.DB.QueryContext(ctx, `SELECT revision,answer,assessment,state,created_at,note_id FROM learning_review_answers WHERE item_id=? ORDER BY revision DESC`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +387,7 @@ func (s *Store) LearningReviewAnswerHistory(ctx context.Context, id string) ([]L
 	var out []LearningReviewAnswer
 	for rows.Next() {
 		var v LearningReviewAnswer
-		if e := rows.Scan(&v.Revision, &v.Answer, &v.Assessment, &v.State, &v.CreatedAt); e != nil {
+		if e := rows.Scan(&v.Revision, &v.Answer, &v.Assessment, &v.State, &v.CreatedAt, &v.NoteID); e != nil {
 			return nil, e
 		}
 		out = append(out, v)
@@ -415,27 +430,40 @@ func (s *Store) RetryLearningReview(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-// SaveLearningReviewNote explicitly creates one personal reflection for this answer version.
+// SaveLearningReviewNote retains the weekly current-answer CAS interface.
 func (s *Store) SaveLearningReviewNote(ctx context.Context, itemID string, expected int) (*models.OwnerNote, error) {
-	var batchID, answer, ids, state, noteID string
 	var revision int
-	err := s.DB.QueryRowContext(ctx, `SELECT batch_id,answer,material_ids_json,state,revision,note_id FROM learning_review_items WHERE id=?`, itemID).Scan(&batchID, &answer, &ids, &state, &revision, &noteID)
+	var state string
+	if err := s.DB.QueryRowContext(ctx, `SELECT revision,state FROM learning_review_items WHERE id=?`, itemID).Scan(&revision, &state); err != nil {
+		return nil, err
+	}
+	if revision != expected || state != "answered" {
+		return nil, ErrConflict
+	}
+	return s.saveLearningReviewAnswerNote(ctx, itemID, expected, true)
+}
+
+// SaveLearningReviewAnswerNote addresses an immutable answer version, so an old
+// session's explicit note can be saved even after another answer is submitted.
+func (s *Store) SaveLearningReviewAnswerNote(ctx context.Context, itemID string, revision int) (*models.OwnerNote, error) {
+	return s.saveLearningReviewAnswerNote(ctx, itemID, revision, false)
+}
+
+func (s *Store) saveLearningReviewAnswerNote(ctx context.Context, itemID string, revision int, requireCurrent bool) (*models.OwnerNote, error) {
+	var batchID, answer, ids, input, state, noteID string
+	err := s.DB.QueryRowContext(ctx, `SELECT i.batch_id,a.answer,i.material_ids_json,b.input_json,a.state,a.note_id FROM learning_review_answers a JOIN learning_review_items i ON i.id=a.item_id JOIN learning_review_batches b ON b.id=i.batch_id WHERE a.item_id=? AND a.revision=?`, itemID, revision).Scan(&batchID, &answer, &ids, &input, &state, &noteID)
 	if err != nil {
 		return nil, err
 	}
-	if revision != expected || state != "answered" || strings.TrimSpace(answer) == "" {
+	if state != "answered" || strings.TrimSpace(answer) == "" {
 		return nil, ErrConflict
 	}
 	if noteID != "" {
 		return s.GetOwnerNote(ctx, noteID)
 	}
-	batch, err := s.GetLearningReviewBatch(ctx, batchID)
-	if err != nil {
-		return nil, err
-	}
 	var req provider.KnowledgeArticleRequest
 	var wanted []string
-	if json.Unmarshal([]byte(batch.InputJSON), &req) != nil || json.Unmarshal([]byte(ids), &wanted) != nil {
+	if json.Unmarshal([]byte(input), &req) != nil || json.Unmarshal([]byte(ids), &wanted) != nil {
 		return nil, ErrInvalidEditorialState
 	}
 	selected := selectedKnowledgeMaterials(req.Materials, wanted)
@@ -443,7 +471,7 @@ func (s *Store) SaveLearningReviewNote(ctx context.Context, itemID string, expec
 		return nil, ErrInvalidEditorialState
 	}
 	m := selected[0]
-	anchor := models.NoteAnchor{SnapshotID: m.SnapshotID, Position: m.Position, SegmentIDs: []string{}}
+	anchor := models.NoteAnchor{SnapshotID: m.SnapshotID, Position: m.Position, NoPosition: m.NoPosition, SegmentIDs: []string{}}
 	if m.SnapshotID != "" {
 		snap, _, _, e := s.SnapshotContent(ctx, m.SnapshotID)
 		if e != nil {
@@ -454,44 +482,51 @@ func (s *Store) SaveLearningReviewNote(ctx context.Context, itemID string, expec
 		}
 		anchor.Version = snap.ContentVersion
 	}
+	n, err := s.prepareOwnerNote(ctx, models.OwnerNote{SourceType: m.SourceType, SourceID: m.SourceID, Kind: "owner_reflection", Content: answer, CitationsJSON: "[]", ReferencesJSON: "[]", AnchorJSON: jsonString(anchor)})
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if err = tx.QueryRowContext(ctx, `SELECT note_id,revision FROM learning_review_items WHERE id=?`, itemID).Scan(&noteID, &revision); err != nil {
+	if requireCurrent {
+		var current int
+		var currentState string
+		if err = tx.QueryRowContext(ctx, `SELECT revision,state FROM learning_review_items WHERE id=?`, itemID).Scan(&current, &currentState); err != nil {
+			return nil, err
+		}
+		if current != revision || currentState != "answered" {
+			return nil, ErrConflict
+		}
+	}
+
+	if err = tx.QueryRowContext(ctx, `SELECT note_id FROM learning_review_answers WHERE item_id=? AND revision=? AND state='answered'`, itemID, revision).Scan(&noteID); err != nil {
 		return nil, err
 	}
 	if noteID != "" {
 		tx.Rollback()
 		return s.GetOwnerNote(ctx, noteID)
 	}
-	if revision != expected {
-		return nil, ErrConflict
-	}
-	table := ""
-	switch m.SourceType {
-	case "episode":
-		table = "episodes"
-	case "upload":
-		table = "uploads"
-	case "document":
-		table = "documents"
-	default:
+	if !validSourceType(models.SourceType(m.SourceType)) {
 		return nil, ErrInvalidEditorialState
 	}
 	var exists int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE id=?`, m.SourceID).Scan(&exists); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM `+sourceTable(models.SourceType(m.SourceType))+` WHERE id=?`, m.SourceID).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if exists != 1 {
 		return nil, ErrNotFound
 	}
 	noteID = uuid.NewString()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO owner_notes(id,source_type,source_id,kind,content,citations_json,references_json,anchor_json)VALUES(?,?,?,'owner_reflection',?,'[]','[]',?)`, noteID, m.SourceType, m.SourceID, answer, jsonString(anchor)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO owner_notes(id,source_type,source_id,kind,content,citations_json,references_json,anchor_json)VALUES(?,?,?,'owner_reflection',?,'[]','[]',?)`, noteID, n.SourceType, n.SourceID, n.Content, n.AnchorJSON); err != nil {
 		return nil, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE learning_review_items SET note_id=? WHERE id=? AND revision=?`, noteID, itemID, expected); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE learning_review_answers SET note_id=? WHERE item_id=? AND revision=?`, noteID, itemID, revision); err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE learning_review_items SET note_id=? WHERE id=? AND revision=?`, noteID, itemID, revision); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(); err != nil {

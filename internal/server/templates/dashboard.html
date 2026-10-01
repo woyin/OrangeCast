@@ -7,6 +7,7 @@
 <section class="panel"><h2>最近笔记</h2>{{range .Notes}}<p><a href="{{.Href}}">{{.Hit.Snippet}}</a> <span class="meta">{{.Label}}</span></p>{{else}}<p>收听时记录当前位置或选中的原文。<a href="/podcasts">打开播客</a></p>{{end}}<a href="/notes">全部笔记与重点</a></section>
 <section class="panel"><h2>新生成文章</h2>{{range .ReadyArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{.Title}}</a></p>{{else}}<p>已有重点和笔记后，<a href="/knowledge-articles">发现值得写的问题</a>。</p>{{end}}</section>
 <section class="panel"><h2>待审与失败事项</h2>{{range .PendingArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}文章发现{{end}}</a> · {{knowledgeStatus .Status}} · {{.Reason}}</p>{{else}}<p>暂无待处理文章。</p>{{end}}</section>
+<section class="panel"><h2>每日短回顾</h2><p>今日到期 {{.DueReviews}} 题。{{if .ActiveReview}}有未完成的会话。{{end}}</p><a class="btn" href="/review/daily">{{if .ActiveReview}}继续短会话{{else}}打开到期题目{{end}}</a></section>
 <section class="panel"><h2>本周回顾</h2><p>先尝试用自己的话解释，再查看冻结依据。</p><a class="btn" href="/review">打开学习回顾</a></section>
 <details class="panel"><summary>高级学习与创作入口</summary><div class="cards">
   <a class="card" href="/knowledge-articles"><h3>生成知识文章</h3><p>从已有重点和笔记自动选题、写作与审校</p></a>

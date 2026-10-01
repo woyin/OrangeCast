@@ -80,6 +80,26 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if os.Getenv("CWP_BROWSER_STAGE") == "p7" {
+		profile, err := srv.store.EnsureDefaultEditorialProfile(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		batch, _, err := srv.store.ReserveLearningReview(t.Context(), profile.ID, "pod", "browser-text", time.Now(), false)
+		if err != nil || batch == nil {
+			t.Fatal(batch, err)
+		}
+		result := &provider.KnowledgeArticleResult{Questions: []provider.LearningReviewQuestion{
+			{Question: "如何区分原话与自己的解释？", AnswerBasis: "自建每日回顾依据：先确认原话，再用自己的例子说明理解。", MaterialIDs: []string{knowledgeNoteID}},
+			{Question: "什么时候需要回听原音？", AnswerBasis: "自建每日回顾依据：关键条件不明确时回听冻结位置。", MaterialIDs: []string{knowledgeNoteID}},
+			{Question: "新材料出现后怎样更新旧理解？", AnswerBasis: "自建每日回顾依据：保留旧版本，再核对新材料支持的改变。", MaterialIDs: []string{knowledgeNoteID}},
+		}}
+		if err = srv.store.CommitLearningReview(t.Context(), batch.JobID, batch.ID, result); err != nil {
+			t.Fatal(err)
+		}
+		srv.store.MarkJobRunning(t.Context(), batch.JobID)
+		srv.store.MarkJobSucceeded(t.Context(), batch.JobID)
+	}
 	workerCtx, workerCancel := context.WithCancel(t.Context())
 	defer workerCancel()
 	go srv.worker.Run(workerCtx)

@@ -27,6 +27,7 @@ type Server struct {
 	tmpl          *Templates
 	loginLimiter  *auth.RateLimiter
 	discoveryMu   sync.Mutex
+	reviewClock   func() time.Time
 }
 
 // New 装配 Server 全部依赖：模板、登录限流、默认 bundleFor/fetchFeed。

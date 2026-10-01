@@ -1,7 +1,7 @@
 // Conservative GET navigation. SSR remains authoritative; fetched scripts are never executed.
 (function(root){
  'use strict';
- const allowed=/^\/(?:dashboard|voice-notes|podcasts(?:\/[^/]+)?|sources\/(?:episode|upload)\/[^/]+(?:\/dj)?|search|notes(?:\/[^/]+\/history)?|questions(?:\/[^/]+)?|knowledge-updates(?:\/[^/]+)?|knowledge-articles(?:\/[^/]+(?:\/revisions\/[^/]+)?)?|review|listening-queue|documents(?:\/[^/]+)?|uploads)$/;
+ const allowed=/^\/(?:dashboard|voice-notes|podcasts(?:\/[^/]+)?|sources\/(?:episode|upload)\/[^/]+(?:\/dj)?|search|notes(?:\/[^/]+\/history)?|questions(?:\/[^/]+)?|knowledge-updates(?:\/[^/]+)?|knowledge-articles(?:\/[^/]+(?:\/revisions\/[^/]+)?)?|review(?:\/daily)?|listening-queue|documents(?:\/[^/]+)?|uploads)$/;
  let seq=0,pending=null,expired=false;
  const feedback=document.getElementById('navigation-feedback');
  const privateClear=()=>root.CWPPrivate.clear();

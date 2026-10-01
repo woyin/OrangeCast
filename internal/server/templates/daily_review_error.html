@@ -1,0 +1,2 @@
+{{define "title"}}回顾尚未保存 · CloudWisePod{{end}}
+{{define "content"}}<h1>回顾尚未保存</h1><p class="error">{{.Error}}</p><p>原解释保留在下面。版本冲突时请核对最新记录，不能直接覆盖另一窗口的解释。</p><form action="/review/daily/action" method="post"><input type="hidden" name="_csrf" value="{{.CSRF}}">{{range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<label>保留的解释<textarea name="answer" rows="5" maxlength="10000">{{.Answer}}</textarea></label><button>重试原请求</button></form><a href="/review/daily{{if .Session}}?session={{.Session}}{{end}}">核对最新回顾</a>{{end}}
