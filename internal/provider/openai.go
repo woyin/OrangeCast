@@ -20,10 +20,11 @@ import (
 // 说明：自定义 baseURL 的 OpenAI 兼容端点普遍未实现 /responses 与 response_format 参数，
 // 故统一走 /chat/completions（官方 OpenAI 同样支持），结构约束以 schema 文本随提示词下发。
 type OpenAIProvider struct {
-	apiKey        string
-	baseURL       string // 空则用默认
-	analysisModel string // 空则用默认
-	providerName  string
+	apiKey             string
+	baseURL            string // 空则用默认
+	analysisModel      string // 空则用默认
+	transcriptionModel string
+	providerName       string
 }
 
 const (
@@ -57,6 +58,13 @@ func (o *OpenAIProvider) WithBaseURL(url string) *OpenAIProvider {
 func (o *OpenAIProvider) WithModel(model string) *OpenAIProvider {
 	clone := *o
 	clone.analysisModel = model
+	return &clone
+}
+
+// WithTranscriptionModel freezes the audio route without changing chat models.
+func (o *OpenAIProvider) WithTranscriptionModel(model string) *OpenAIProvider {
+	clone := *o
+	clone.transcriptionModel = model
 	return &clone
 }
 
@@ -192,6 +200,11 @@ func chatUsage(data []byte, retryCounts ...int) TaskUsage {
 
 // Transcribe 用 OpenAI 语音识别，将音频转为带时间戳的转录片段。
 func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) {
+	return o.TranscribeContext(context.Background(), filePath)
+}
+
+// TranscribeContext supports cancellation and model-specific response formats.
+func (o *OpenAIProvider) TranscribeContext(ctx context.Context, filePath string) (*TranscriptResult, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -199,8 +212,17 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 	defer f.Close()
 	body := &bytes.Buffer{}
 	w := multipart.NewWriter(body)
-	_ = w.WriteField("model", openaiTranscribeModel)
-	_ = w.WriteField("response_format", "verbose_json")
+	model := o.transcriptionModel
+	if model == "" {
+		model = openaiTranscribeModel
+	}
+	_ = w.WriteField("model", model)
+	format := "json"
+	if model == "whisper-1" {
+		format = "verbose_json"
+		_ = w.WriteField("timestamp_granularities[]", "segment")
+	}
+	_ = w.WriteField("response_format", format)
 	part, err := w.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
 		return nil, err
@@ -214,7 +236,10 @@ func (o *OpenAIProvider) Transcribe(filePath string) (*TranscriptResult, error) 
 	if bURL == "" {
 		bURL = openaiBaseURL
 	}
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, bURL+"/audio/transcriptions", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bURL+"/audio/transcriptions", body)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Authorization", "Bearer "+o.apiKey)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	client := &http.Client{Timeout: 5 * time.Minute}

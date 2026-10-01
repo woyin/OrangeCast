@@ -358,21 +358,21 @@ func TestUploadFileAsMultipart_MissingFile(t *testing.T) {
 	}
 }
 
-// TestUploadFileAsMultipart_RetryError 验证服务端持续 5xx 时上传返回重试失败错误。
-func TestUploadFileAsMultipart_RetryError(t *testing.T) {
+// A paid upload is attempted once, even when the server advertises a retry.
+func TestUploadFileAsMultipart_NoImplicitRetry(t *testing.T) {
+	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.mp3")
-	if err := os.WriteFile(path, []byte("fake-audio"), 0o644); err != nil {
+	path := filepath.Join(t.TempDir(), "test.mp3")
+	if err := os.WriteFile(path, []byte("fake-audio"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, code, err := uploadFileAsMultipart(context.Background(), srv.URL, "k", "file", path, nil); err == nil || code != 0 {
-		t.Fatalf("应返回错误且 code=0，实际 code=%d err=%v", code, err)
+	if _, code, err := uploadFileAsMultipart(context.Background(), srv.URL, "k", "file", path, nil); err != nil || code != http.StatusInternalServerError || calls != 1 {
+		t.Fatalf("status=%d calls=%d err=%v", code, calls, err)
 	}
 }
 

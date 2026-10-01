@@ -18,6 +18,7 @@
     <a href="/podcasts">播客</a>
     <a href="/knowledge-articles">知识文章</a>
     <a href="/knowledge-updates">文章更新</a>
+ <a href="/voice-notes">语音笔记</a>
     <a href="/notes">笔记/重点</a><a href="/search">搜索</a><a href="/questions">学习问题</a><a href="/review">回顾</a><a href="/listening-queue">稍后听</a>
     <details class="nav-advanced"><summary>更多</summary><div>    <a href="/attention">注意力队列</a>
     <a href="/workbench">创作工作空间（迁移）</a>
@@ -35,9 +36,18 @@
 <aside id="listening-shell" class="panel listening-shell" hidden aria-label="当前收听">
 <a id="listening-title" href="/listening-queue"></a><span id="listening-position"></span>
 <button id="listening-toggle" type="button">播放</button><button id="listening-back" type="button">−15秒</button><button id="listening-forward" type="button">+15秒</button><button id="listening-prev" type="button">上一项</button><button id="listening-next" type="button">下一项</button>
-<label>睡眠<select id="listening-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label><label>循环起点（秒）<input id="listening-loop-start" type="number" min="0" step="0.1"></label><label>循环终点（秒）<input id="listening-loop-end" type="number" min="0" step="0.1"></label><button id="listening-loop-set" type="button">循环原音区间</button><button id="listening-loop-clear" type="button">关闭循环</button><button id="listening-note" type="button">记录当前播放</button><button id="listening-stop" type="button">停止并清空播放会话</button>
+<label>睡眠<select id="listening-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label><label>循环起点（秒）<input id="listening-loop-start" type="number" min="0" step="0.1"></label><label>循环终点（秒）<input id="listening-loop-end" type="number" min="0" step="0.1"></label><button id="listening-loop-set" type="button">循环原音区间</button><button id="listening-loop-clear" type="button">关闭循环</button><button id="listening-note" type="button">记录当前播放</button><button id="voice-start" type="button">录音笔记</button><button id="listening-stop" type="button">停止并清空播放会话</button>
 <p id="listening-feedback" aria-live="polite"></p>
 <form id="listening-note-form" hidden><p id="listening-note-anchor"></p><label>我的理解<textarea id="listening-note-content" rows="3" required></textarea></label><button type="submit">保存当前播放的笔记</button><button id="listening-note-cancel" type="button">收起</button><span id="listening-note-feedback" aria-live="polite"></span></form>
+</aside>
+<aside id="voice-recorder" class="container voice-recorder" hidden aria-label="语音笔记草稿">
+<p id="voice-anchor"></p><p id="voice-status" aria-live="polite"></p>
+<button id="voice-stop-draft" type="button" disabled>停止并留草稿</button><button id="voice-stop-asr" type="button" disabled>停止并转写</button><button id="voice-transcribe" type="button">上传并转写</button><button id="voice-refresh" type="button">刷新转写进度（只读）</button>
+<button id="voice-resume-play" type="button">继续节目播放</button><button id="voice-hide" type="button">收起草稿</button>
+<label>我的理解（转写不会覆盖）<textarea id="voice-text" rows="4" maxlength="40000"></textarea></label>
+<div id="voice-asr-result" hidden><p>转写建议，请核对后明确采用：</p><pre id="voice-asr-text"></pre><button id="voice-adopt" type="button">采用转写（替换我的草稿文字）</button></div>
+<label>关联学习问题<select id="voice-question"><option value="">不关联</option></select></label>
+<label><input id="voice-keep-audio" type="checkbox">保存笔记后保留录音（默认删除录音）</label><button id="voice-save" type="button">保存为个人理解笔记</button><button id="voice-delete" type="button">删除语音草稿和录音</button>
 </aside>
 <p id="navigation-feedback" class="container" aria-live="polite" hidden></p>
 <main class="container" id="page-view" tabindex="-1">
@@ -63,6 +73,7 @@
 <script src="/static/safe-render.js"></script>
 <script src="/static/dj-player.js"></script>
 <script src="/static/listening-session.js"></script>
+<script src="/static/voice-notes.js"></script>
 <script src="/static/player.js"></script>
 <script src="/static/owner-notes.js"></script>
 <script src="/static/learning-questions.js"></script>

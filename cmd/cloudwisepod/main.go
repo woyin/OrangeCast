@@ -94,7 +94,7 @@ func backupCore(cfg *config.Config, dest string) (*backup.Manifest, error) {
 	defer s.Close()
 
 	dest = ensureArchiveExt(dest)
-	m, err := backup.Create(context.Background(), s, cfg.EvidenceDir, dest)
+	m, err := backup.Create(context.Background(), s, cfg.EvidenceDir, dest, cfg.VoiceDir)
 	if err != nil {
 		return nil, fmt.Errorf("备份失败: %w", err)
 	}

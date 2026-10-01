@@ -100,6 +100,9 @@ func (s *Store) DeleteSourceRows(ctx context.Context, sourceType models.SourceTy
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
+		`INSERT OR IGNORE INTO voice_audio_cleanup(file) SELECT audio_file FROM voice_note_drafts WHERE source_type=? AND source_id=? AND audio_file!=''`,
+		`UPDATE processing_jobs SET status=CASE WHEN status='queued' THEN 'failed' ELSE status END,last_error='关联来源已清理',input_snapshot_json='{}',checkpoint_json='',result_json='',result_state=CASE WHEN remote_call_started=1 THEN 'unknown' ELSE result_state END WHERE source_type='voice_note' AND source_id IN(SELECT id FROM voice_note_drafts WHERE source_type=? AND source_id=?)`,
+		`UPDATE voice_note_drafts SET state='deleted',revision=revision+1,text='',asr_text='',anchor_json='{}',audio_file='',error='来源已清理' WHERE source_type=? AND source_id=?`,
 		// Pending proposals may contain a newly recalled source that is not in
 		// any article revision yet. Purge their frozen text and tasks as well.
 		`DELETE FROM processing_jobs WHERE json_extract(CASE WHEN json_valid(input_snapshot_json) THEN input_snapshot_json ELSE '{}' END,'$.update_proposal_id') IN (SELECT p.id FROM knowledge_update_proposals p,json_each(CASE WHEN json_valid(p.input_json) THEN p.input_json ELSE '{}' END,'$.materials') m WHERE json_extract(m.value,'$.source_type')=? AND json_extract(m.value,'$.source_id')=?)`,

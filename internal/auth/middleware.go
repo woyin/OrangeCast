@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net"
@@ -119,9 +120,9 @@ func CSRFProtect(next http.Handler) http.Handler {
 		}
 
 		// 状态变更请求：表单字段或头必须与 cookie 一致
-		got := r.FormValue("_csrf")
+		got := r.Header.Get("X-CSRF-Token")
 		if got == "" {
-			got = r.Header.Get("X-CSRF-Token")
+			got = r.FormValue("_csrf")
 		}
 		if got == "" || c.Value == "" || got != c.Value {
 			http.Error(w, "CSRF 校验失败", http.StatusForbidden)
@@ -223,4 +224,15 @@ func ClientIP(r *http.Request, trustedProxies []string) string {
 		}
 	}
 	return host
+}
+
+// PrivateSessionID scopes browser-private drafts to an authenticated session.
+// It is a one-way identifier, never the login credential itself.
+func PrivateSessionID(r *http.Request) string {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256([]byte("voice-draft-session:" + c.Value))
+	return hex.EncodeToString(hash[:])
 }

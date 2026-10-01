@@ -9,6 +9,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +18,11 @@ import (
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
+	VoiceDir               string
+	VoiceASRProvider       string
+	VoiceASRModel          string
+	VoiceASRBaseURL        string
+	VoiceASRAPIKey         string
 	Port                   string
 	DBPath                 string
 	SessionSecret          string
@@ -47,6 +53,10 @@ type Config struct {
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
+		VoiceASRProvider:       strings.TrimSpace(os.Getenv("VOICE_ASR_PROVIDER")),
+		VoiceASRModel:          strings.TrimSpace(os.Getenv("VOICE_ASR_MODEL")),
+		VoiceASRBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("VOICE_ASR_BASE_URL")), "/"),
+		VoiceASRAPIKey:         strings.TrimSpace(os.Getenv("VOICE_ASR_API_KEY")),
 		Port:                   envOrDefault("PORT", "8080"),
 		SessionSecret:          os.Getenv("SESSION_SECRET"),
 		GroqAPIKey:             os.Getenv("GROQ_API_KEY"),
@@ -67,6 +77,7 @@ func Load() (*Config, error) {
 	c.DBPath = envOrDefault("DB_PATH", filepath.Join(c.DataDir, "cloudwisepod.db"))
 	c.TempDir = envOrDefault("TEMP_DIR", filepath.Join(c.DataDir, "tmp"))
 	c.EvidenceDir = filepath.Join(c.DataDir, "evidence")
+	c.VoiceDir = filepath.Join(c.DataDir, "voice-notes")
 	c.BackupDir = filepath.Join(c.DataDir, "backups")
 	c.NarrationDir = envOrDefault("NARRATION_DIR", filepath.Join(c.DataDir, "narrations"))
 	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
@@ -98,6 +109,21 @@ func Load() (*Config, error) {
 			c.TrustedProxies = append(c.TrustedProxies, part)
 		}
 	}
+	if c.VoiceASRProvider != "" && c.VoiceASRProvider != "groq" && c.VoiceASRProvider != "openai" {
+		return nil, fmt.Errorf("VOICE_ASR_PROVIDER 必须是 groq 或 openai")
+	}
+	if (c.VoiceASRBaseURL == "") != (c.VoiceASRAPIKey == "") {
+		return nil, fmt.Errorf("VOICE_ASR_BASE_URL 与 VOICE_ASR_API_KEY 必须成组配置")
+	}
+	if c.VoiceASRBaseURL != "" {
+		u, e := url.Parse(c.VoiceASRBaseURL)
+		if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("VOICE_ASR_BASE_URL 须为不含认证信息、查询参数或片段的HTTP(S)地址")
+		}
+	}
+	if c.VoiceASRBaseURL != "" && (c.VoiceASRProvider == "" || c.VoiceASRModel == "") {
+		return nil, fmt.Errorf("自定义语音连接须明确设置 provider 和 model")
+	}
 	return c, nil
 }
 
@@ -108,8 +134,15 @@ func (c *Config) PublicSchemeIsHTTPS() bool {
 
 // EnsureDirs 创建 DataDir/EvidenceDir/TempDir/BackupDir。
 func (c *Config) EnsureDirs() error {
-	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir, c.VoiceDir} {
+		if d == "" {
+			continue
+		}
+		mode := os.FileMode(0o755)
+		if d == c.VoiceDir {
+			mode = 0o700
+		}
+		if err := os.MkdirAll(d, mode); err != nil {
 			return fmt.Errorf("创建目录 %s: %w", d, err)
 		}
 	}

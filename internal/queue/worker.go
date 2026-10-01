@@ -40,13 +40,15 @@ const (
 // SQLite 驱动（ADR-0006）：启动时回收 running 任务，周期领取 queued 任务，
 // 领取时设置租约，处理中心跳续约；失败/中断后任务可被重新领取（至少一次执行）。
 type Worker struct {
-	store        *store.Store
-	selector     *provider.Selector
-	tempDir      string
-	evidenceDir  string
-	narrationDir string
-	client       *http.Client
-	poll         time.Duration
+	store         *store.Store
+	selector      *provider.Selector
+	tempDir       string
+	evidenceDir   string
+	narrationDir  string
+	voiceDir      string
+	voiceSelector *provider.Selector
+	client        *http.Client
+	poll          time.Duration
 	// bundleFor 选择本次任务的 provider bundle（ADR-0009 默认 Groq；测试可注入 fake）。
 	bundleFor func(*models.ProcessingJob) (*provider.ProviderBundle, error)
 	// rawAudioFor optionally substitutes the external media fetch boundary. The
@@ -75,7 +77,7 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		// 读 settings 选每任务的 Provider + Model（ADR-0009 扩展；旧任务兼容路径）
 		st, err := w.store.GetSettings(context.Background())
 		if err != nil {
-			return provider.TaskConfig{Provider: "groq"}, nil // 降级默认
+			return provider.TaskConfig{}, err
 		}
 		var tc provider.TaskConfig
 		switch job.JobType {
@@ -121,8 +123,32 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 	w.bundleFor = func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
 		tc, err := w.taskConfigFor(job)
 		if err != nil {
-			return w.selector.Bundle("groq")
+			return nil, err
 		}
+		if job.SourceType == "voice_note" {
+			ex, e := w.store.GetJobExecution(context.Background(), job.ID)
+			if e != nil {
+				return nil, e
+			}
+			var in store.VoiceASRInput
+			if e = json.Unmarshal([]byte(ex.InputSnapshotJSON), &in); e != nil {
+				return nil, e
+			}
+			if in.Connection == "voice" {
+				if w.voiceSelector == nil {
+					return nil, fmt.Errorf("冻结的独立语音连接已移除，不能切换端点")
+				}
+				if in.ConnectionID != "" && in.ConnectionID != w.voiceSelector.TranscriptionConnectionID(tc.Provider) {
+					return nil, fmt.Errorf("冻结的语音端点已改变，请显式确认新转写任务")
+				}
+				tc.Transcription = true
+				return w.voiceSelector.BundleForTask(tc)
+			}
+			if in.ConnectionID != "" && in.ConnectionID != w.selector.TranscriptionConnectionID(tc.Provider) {
+				return nil, fmt.Errorf("冻结的转录端点已改变，请显式确认新转写任务")
+			}
+		}
+		tc.Transcription = job.JobType == models.JobTranscribe
 		return w.selector.BundleForTask(tc)
 	}
 	return w
@@ -155,16 +181,25 @@ func (w *Worker) Run(ctx context.Context) {
 	if err := w.store.ResetRunningOnStartup(ctx); err != nil {
 		log.Printf("启动恢复 running 任务失败: %v", err)
 	}
+	if err := w.CleanupVoiceFiles(ctx); err != nil {
+		log.Printf("清理语音草稿失败: %v", err)
+	}
 	// 恢复中断的 Purge（文件删除 + DB 删除，ADR-0012）
 	if err := w.ResumePurges(ctx); err != nil {
 		log.Printf("启动恢复 Purge 失败: %v", err)
 	}
+	cleanupTicker := time.NewTicker(time.Hour)
+	defer cleanupTicker.Stop()
 	ticker := time.NewTicker(w.poll)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-cleanupTicker.C:
+			if err := w.CleanupVoiceFiles(ctx); err != nil {
+				log.Printf("清理语音草稿失败: %v", err)
+			}
 		case <-ticker.C:
 			if err := w.ProcessOne(ctx); err != nil {
 				log.Printf("worker 周期处理错误: %v", err)
@@ -207,6 +242,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 			if job.JobType == models.JobWeeklyReview {
 				_ = w.store.FailLearningReview(ctx, job.SourceID, "远端结果未知，请显式重试")
 			}
+			if job.SourceType == "voice_note" {
+				_ = w.store.FailVoiceASR(ctx, job.SourceID, job.ID, "远端结果未知，请显式重试")
+			}
 			return w.store.MarkJobFailed(ctx, job.ID, "远端结果未知（result_state=unknown），已阻止自动重执行；请人工确认后重新入队")
 		}
 	}
@@ -237,6 +275,9 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 		if job.JobType == models.JobWeeklyReview {
 			_ = w.store.FailLearningReview(ctx, job.SourceID, err.Error())
 		}
+		if job.SourceType == "voice_note" {
+			_ = w.store.FailVoiceASR(ctx, job.SourceID, job.ID, err.Error())
+		}
 		w.markSourceFailed(ctx, job)
 		w.finalizeJobBudgetOnFailure(ctx, job) // B02/B04：按结果已知性收尾预占
 		return nil                             // 已标记失败，不算周期错误
@@ -259,7 +300,7 @@ var sendPolicyJobTypes = map[models.JobType]bool{
 // enforceSourceSendPolicy 执行时动态应用来源模型数据策略（R04）：
 // LocalOnly 或未批准 Provider 阻止外发；无策略记录的来源类型放行。
 func (w *Worker) enforceSourceSendPolicy(ctx context.Context, job *models.ProcessingJob) error {
-	if !sendPolicyJobTypes[job.JobType] {
+	if job.SourceType == "voice_note" || !sendPolicyJobTypes[job.JobType] {
 		return nil
 	}
 	tc, err := w.taskConfigFor(job)
@@ -320,6 +361,58 @@ func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) e
 	if err != nil {
 		return err
 	}
+	if job.SourceType == "voice_note" {
+		ex, e := w.store.GetJobExecution(ctx, job.ID)
+		if e != nil {
+			return e
+		}
+		var in store.VoiceASRInput
+		if e = json.Unmarshal([]byte(ex.InputSnapshotJSON), &in); e != nil {
+			return e
+		}
+		_, e = w.store.HoldVoiceASRBudget(ctx, job.ID, in)
+		return e
+	}
+	if job.JobType == models.JobTranscribe {
+		if job.Automated {
+			if e := w.store.AdmitAutomatedDailyIntent(ctx, job.ID); e != nil {
+				return e
+			}
+		}
+		// Check a configured budget's audio-price gap before downloading any media.
+		budget, e := w.store.GetOwnerMonthlyBudget(ctx)
+		if e != nil {
+			return e
+		}
+		if budget != nil {
+			var prices int
+			e = w.store.DB.QueryRowContext(ctx, `SELECT count(*) FROM asr_audio_prices WHERE provider=? AND model=?`, tc.Provider, provider.EffectiveModel(tc.Provider, tc.Model, "transcribe")).Scan(&prices)
+			if e != nil {
+				return e
+			}
+			if prices == 0 {
+				return fmt.Errorf("预算检查拒绝任务: %w: 音频每分钟价格未登记", store.ErrBudgetUnpriced)
+			}
+		}
+		path, e := w.ensureEvidence(ctx, job)
+		if e != nil {
+			return e
+		}
+		duration, e := audioDuration(path)
+		if e != nil {
+			return e
+		}
+		hash, e := filehash.SHA256(path)
+		if e != nil {
+			return e
+		}
+		in, e := w.store.FreezeSourceASREstimate(ctx, job.ID, tc.Provider, provider.EffectiveModel(tc.Provider, tc.Model, "transcribe"), hash, duration)
+		if e != nil {
+			return e
+		}
+		_, e = w.store.HoldSourceASRBudget(ctx, job.ID, in)
+		return e
+	}
 	// 预算针对将要实际调用的生效模型（配置为空时用 Provider 官方默认）。
 	model := provider.EffectiveModel(tc.Provider, tc.Model, string(job.JobType))
 	if job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview {
@@ -362,7 +455,7 @@ func (w *Worker) jobReceiptUsage(ctx context.Context, jobID string) (int, int64)
 // settleJobBudget 成功结算：实际费用 = 已落账 receipt 的已知费用合计。
 func (w *Worker) settleJobBudget(ctx context.Context, job *models.ProcessingJob) {
 	known, actual := w.jobReceiptUsage(ctx, job.ID)
-	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview) && known == 0 {
+	if (job.JobType == models.JobKnowledgeArticle || job.JobType == models.JobWeeklyReview || job.JobType == models.JobTranscribe) && known == 0 {
 		if exec, err := w.store.GetJobExecution(ctx, job.ID); err == nil && exec.RemoteCallStarted {
 			_ = w.store.MarkBudgetPendingRemote(ctx, job.ID)
 			return
@@ -428,6 +521,27 @@ func (w *Worker) heartbeatLoop(ctx context.Context, jobID string) {
 
 // processJob 执行一个已领取任务（不处理终态写回）。
 func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) error {
+	// A paid response can be applied without an API key, a new budget hold or a
+	// reachable endpoint. Validate its identity in the transcription module.
+	if job.JobType == models.JobTranscribe {
+		ex, e := w.store.GetJobExecution(ctx, job.ID)
+		if e != nil {
+			return e
+		}
+		if ex.CheckpointJSON == "" && ex.RemoteCallStarted {
+			if e = w.store.SaveJobResult(ctx, job.ID, "", models.JobResultUnknown); e != nil {
+				return e
+			}
+			return fmt.Errorf("转录远端结果未知，请显式重试；没有自动重发")
+		}
+		if ex.CheckpointJSON != "" {
+			if job.SourceType == "voice_note" {
+				return w.doVoiceASR(ctx, job, &provider.ProviderBundle{})
+			}
+			return w.doTranscribe(ctx, job, &provider.ProviderBundle{})
+		}
+	}
+
 	// B04：付费任务在构建 Provider 之前做全局预算检查并预占在途预估；
 	// 预算不足/未配价格/日限额超限以显式错误失败（可见原因，不无限重试）。
 	if err := w.holdJobBudget(ctx, job); err != nil {
@@ -448,6 +562,9 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 	case models.JobWeeklyReview:
 		return w.doWeeklyReview(ctx, job, bundle)
 	case models.JobTranscribe:
+		if job.SourceType == "voice_note" {
+			return w.doVoiceASR(ctx, job, bundle)
+		}
 		return w.doTranscribe(ctx, job, bundle)
 	case models.JobAnalyze:
 		return w.doAnalyze(ctx, job, bundle)
@@ -490,47 +607,14 @@ func (w *Worker) doTranscribe(ctx context.Context, job *models.ProcessingJob, bu
 		return fmt.Errorf("持久化证据音频: %w", err)
 	}
 
-	// 2) 从 EvidenceAudio 转录（播放/引用只依赖它，ADR-0005）
-	w.markRemoteCallStarted(ctx, job)
-	result, err := bundle.Transcription.Transcribe(evidencePath)
-	if err != nil {
-		return fmt.Errorf("转录: %w", err)
-	}
-
-	// 3) 创建不可变 Transcript ArtifactVersion（ADR-0011），并指向当前版本
-	payload, _ := json.Marshal(provider.TranscriptPayload{
-		Language: result.Language,
-		Text:     result.Text,
-		Segments: result.Segments,
-	})
-	// B03：产物血缘记录响应报告的实际模型；未报告时不冒充配置值，记 unknown。
-	transcribeModel := result.Model
-	if transcribeModel == "" {
-		transcribeModel = "unknown"
-	}
-	version, err := w.store.CreateArtifactVersion(ctx, job.SourceType, job.SourceID,
-		store.KindTranscript, bundle.Transcription.Name(), transcribeModel, "1", job.ID, string(payload))
-	if err != nil {
-		return fmt.Errorf("创建转录版本: %w", err)
-	}
-	if err := w.store.SetCurrentVersion(ctx, job.SourceType, job.SourceID, store.KindTranscript, version); err != nil {
-		return fmt.Errorf("设置当前转录版本: %w", err)
-	}
-	w.setSourceStatus(ctx, job, models.StatusTranscribed)
-
-	w.recordCallUsage(ctx, job, "transcription", bundle.Transcription.Name(), transcribeModel, result.Usage)
-
-	// 4) 入队分析任务（已有进行中 analyze 则不重复创建），并继承处理深度快照（B08）。
-	analyzeJob, err := w.store.EnqueueAnalyzeForIngestion(ctx, job.SourceType, job.SourceID, job.Automated)
+	cp, err := w.transcribeDurably(ctx, job, bundle.Transcription, evidencePath)
 	if err != nil {
 		return err
 	}
-	if analyzeJob != nil {
-		if err := w.store.InheritJobInputSnapshot(ctx, job.ID, analyzeJob.ID); err != nil {
-			return fmt.Errorf("继承处理深度快照: %w", err)
-		}
+	if err := w.enforceSourceSendPolicy(ctx, job); err != nil {
+		return fmt.Errorf("检查来源访问策略: %w", err)
 	}
-	return nil
+	return w.store.CommitSourceTranscription(ctx, job, cp.Provider, cp.Model, cp.Result)
 }
 
 // doAnalyze：读当前 Transcript 版本 → 调 provider 分析（模型返回 Segment ID）→
@@ -845,6 +929,9 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 			return fmt.Errorf("purge 删除 DB 行（%s/%s）: %w", p.SourceType, p.SourceID, err)
 		}
 		// 3) 标记完成
+		if err := w.CleanupVoiceFiles(ctx); err != nil {
+			return err
+		}
 		if err := w.store.MarkPurgeDone(ctx, p.ID); err != nil {
 			return err
 		}
@@ -861,6 +948,9 @@ func (w *Worker) PurgeSource(ctx context.Context, sourceType models.SourceType, 
 }
 
 func (w *Worker) setSourceStatus(ctx context.Context, job *models.ProcessingJob, status models.EpisodeProcessingStatus) {
+	if job.SourceType == "voice_note" {
+		return
+	}
 	if job.SourceType == models.SourceEpisode {
 		_ = w.store.UpdateEpisodeStatus(ctx, job.SourceID, status)
 	} else {

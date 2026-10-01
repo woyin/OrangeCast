@@ -129,7 +129,8 @@ func uploadFileAsMultipart(ctx context.Context, url, apiKey, fieldName, filePath
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := doWithRetry(ctx, req)
+	// A lost ASR response may already be billed. Recovery/retry is an explicit queue action.
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

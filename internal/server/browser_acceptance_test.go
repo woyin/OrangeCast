@@ -30,6 +30,8 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 	}
 
 	srv := newTestServer(t)
+	srv.cfg.VoiceDir = filepath.Join(srv.cfg.DataDir, "voice-notes")
+	srv.worker.WithVoice(srv.cfg.VoiceDir, "", "", "", "")
 	srv.cfg.NarrationDir = filepath.Join(srv.cfg.DataDir, "narrations")
 	for _, dir := range []string{srv.cfg.EvidenceDir, srv.cfg.NarrationDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -42,6 +44,9 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 	srv.cfg.PodBaseURL, srv.cfg.PodAPIKey, srv.cfg.PodModel = "https://example.test/v1", "test", "browser-text"
 	srv.worker.WithBundleResolver(func(job *models.ProcessingJob) (*provider.ProviderBundle, error) {
 		bundle := journeyLearningBundle()
+		if job.SourceType == "voice_note" {
+			bundle.Transcription = voiceBrowserTranscriber{}
+		}
 		if job.JobType == models.JobWeeklyReview {
 			bundle.KnowledgeArticle = &weeklyFake{}
 		} else {
@@ -224,4 +229,12 @@ func writeBrowserAcceptanceWAV(path string, seconds int) error {
 		return err
 	}
 	return os.WriteFile(path, buf, 0o644)
+}
+
+type voiceBrowserTranscriber struct{}
+
+func (voiceBrowserTranscriber) Name() string { return "browser-voice-fixture" }
+func (voiceBrowserTranscriber) Transcribe(string) (*provider.TranscriptResult, error) {
+	time.Sleep(2 * time.Second)
+	return &provider.TranscriptResult{Text: "这是自建录音流程的转写替身。请核对个人理解后保存。", Model: "fixture-asr"}, nil
 }

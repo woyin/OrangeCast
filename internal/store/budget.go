@@ -238,6 +238,12 @@ func (s *Store) holdBudget(ctx context.Context, jobID, operation string, automat
 		return nil, fmt.Errorf("%w: %s/%s 按预估单位无法核算费用", ErrBudgetUnpriced, providerName, model)
 	}
 
+	return s.holdBudgetAmount(ctx, jobID, operation, *budget, estimate)
+}
+
+// holdBudgetAmount shares the same atomic monetary admission for token and audio units.
+func (s *Store) holdBudgetAmount(ctx context.Context, jobID, operation string, budget, estimate int64) (*models.BudgetReservation, error) {
+
 	// 事务内串行化并发预占：读占用 → 校验 → 插入 held。
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -271,8 +277,8 @@ func (s *Store) holdBudget(ctx context.Context, jobID, operation string, automat
 		return nil, err
 	}
 	total := editorial.Int64 + usage.Int64 + held.Int64
-	if total+estimate > *budget {
-		return nil, fmt.Errorf("%w: 当月已计 %d 分 + 在途预估 + 本次预估 %d 分，超过预算 %d 分", ErrBudgetExhausted, total, estimate, *budget)
+	if total+estimate > budget {
+		return nil, fmt.Errorf("%w: 当月已计 %d 分 + 在途预估 + 本次预估 %d 分，超过预算 %d 分", ErrBudgetExhausted, total, estimate, budget)
 	}
 	res := &models.BudgetReservation{
 		ID: uuid.NewString(), JobID: jobID, Operation: operation,

@@ -104,10 +104,16 @@ func (s *Store) GetJobExecution(ctx context.Context, jobID string) (*models.Proc
 
 // SaveJobCheckpoint 保存步骤断点（running 任务），崩溃恢复后从断点继续。
 func (s *Store) SaveJobCheckpoint(ctx context.Context, jobID, checkpointJSON string) error {
-	_, err := s.DB.ExecContext(ctx,
+	res, err := s.DB.ExecContext(ctx,
 		`UPDATE processing_jobs SET checkpoint_json = ?, updated_at = datetime('now') WHERE id = ? AND status IN ('queued','running')`,
 		checkpointJSON, jobID)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrConflict
+	}
+	return nil
 }
 
 // SaveJobResult 在任务终态之前持久化结果（崩溃安全）：complete 结果恢复时复用；

@@ -871,8 +871,8 @@ func TestWorkerBudgetAndUsageFailureBoundaries(t *testing.T) {
 		return provider.TaskConfig{}, errors.New("config unavailable")
 	}
 	job := &models.ProcessingJob{ID: "job-boundary", SourceType: models.SourceEpisode, SourceID: "missing", JobType: models.JobDigest}
-	if _, err := w.bundleFor(job); err != nil {
-		t.Fatalf("bundle 解析应在配置读取失败时回退 Groq: %v", err)
+	if _, err := w.bundleFor(job); err == nil {
+		t.Fatal("配置读取失败必须阻断供应商选择")
 	}
 	if err := w.enforceSourceSendPolicy(ctx, job); err == nil || !strings.Contains(err.Error(), "config unavailable") {
 		t.Fatalf("动态策略必须上浮任务配置错误: %v", err)

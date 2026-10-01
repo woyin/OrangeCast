@@ -16,6 +16,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/filehash"
 	"github.com/woyin/orangecast/internal/store"
+	"github.com/woyin/orangecast/internal/voice"
 )
 
 // archiveTWriter 描述 Create 写入归档所需的最小 tar 写入能力，便于测试注入伪造失败。
@@ -56,10 +58,11 @@ var (
 // ManifestFormat 备份包格式标识与版本。
 const (
 	ManifestFormat    = "cloudwisepod-backup"
-	ManifestVersion   = 1
+	ManifestVersion   = 2
 	manifestFileName  = "manifest.json"
 	dbFileName        = "cloudwisepod.db"
 	evidenceDirPrefix = "evidence/"
+	voiceDirPrefix    = "voice-notes/"
 )
 
 // EvidenceEntry 证据文件清单项。
@@ -78,6 +81,7 @@ type Manifest struct {
 	DBFile     string          `json:"db_file"`
 	DBSHA256   string          `json:"db_sha256"`
 	Evidence   []EvidenceEntry `json:"evidence"`
+	Voice      []EvidenceEntry `json:"voice,omitempty"`
 }
 
 // Create 生成一致性备份包到 destFile（.tar.gz）。
@@ -108,7 +112,7 @@ func collectEvidenceEntries(evidenceDir string) ([]EvidenceEntry, error) {
 	return entries, nil
 }
 
-func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manifest) error {
+func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manifest, voiceDirs ...string) error {
 	f, err := os.Create(destFile)
 	if err != nil {
 		return err
@@ -118,7 +122,11 @@ func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manif
 	tw := newTarWriter(gz)
 
 	writeFile := func(name, path string, size int64) error {
-		hdr := &tar.Header{Name: name, Mode: 0o644, Size: size, ModTime: time.Unix(0, 0)}
+		mode := int64(0o644)
+		if strings.HasPrefix(name, voiceDirPrefix) {
+			mode = 0o600
+		}
+		hdr := &tar.Header{Name: name, Mode: mode, Size: size, ModTime: time.Unix(0, 0)}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
@@ -156,6 +164,19 @@ func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manif
 			return err
 		}
 	}
+	for _, entry := range manifest.Voice {
+		if len(voiceDirs) != 1 {
+			return fmt.Errorf("语音录音目录未传入备份")
+		}
+		path, err := voice.Path(voiceDirs[0], entry.RelPath)
+		if err != nil {
+			return err
+		}
+		if err = writeFile(voiceDirPrefix+entry.RelPath, path, entry.SizeBytes); err != nil {
+			return err
+		}
+	}
+
 	if err := tw.Close(); err != nil {
 		return err
 	}
@@ -166,7 +187,7 @@ func writeBackupArchive(destFile, dbSnapshot, evidenceDir string, manifest Manif
 }
 
 // Create writes a consistent backup package of the store and evidence directory to destFile and returns its Manifest.
-func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (Manifest, error) {
+func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string, voiceDirs ...string) (Manifest, error) {
 	var manifest Manifest
 	if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
 		return manifest, err
@@ -189,7 +210,12 @@ func Create(ctx context.Context, s *store.Store, evidenceDir, destFile string) (
 		return manifest, err
 	}
 	manifest = Manifest{Format: ManifestFormat, Version: ManifestVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339), DBFile: dbFileName, DBSHA256: dbSHA, Evidence: entries}
-	if err := writeBackupArchive(destFile, dbSnapshot, evidenceDir, manifest); err != nil {
+	recordings, err := collectVoiceEntries(ctx, dbSnapshot, voiceDirs)
+	if err != nil {
+		return manifest, err
+	}
+	manifest.Voice = recordings
+	if err := writeBackupArchive(destFile, dbSnapshot, evidenceDir, manifest, voiceDirs...); err != nil {
 		return manifest, err
 	}
 	return manifest, nil
@@ -202,10 +228,11 @@ type extractedArchive struct {
 	manifestData      []byte
 	dbPath            string
 	extractedEvidence map[string]string
+	extractedVoice    map[string]string
 }
 
 func extractArchive(tr *tar.Reader, tmp string) (extractedArchive, error) {
-	archive := extractedArchive{extractedEvidence: map[string]string{}}
+	archive := extractedArchive{extractedEvidence: map[string]string{}, extractedVoice: map[string]string{}}
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -213,6 +240,12 @@ func extractArchive(tr *tar.Reader, tmp string) (extractedArchive, error) {
 		}
 		if err != nil {
 			return archive, err
+		}
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+			return archive, fmt.Errorf("备份只接受普通文件")
+		}
+		if filepath.IsAbs(header.Name) || strings.Contains(header.Name, "\\") || filepath.ToSlash(filepath.Clean(header.Name)) != header.Name || strings.HasPrefix(header.Name, "../") {
+			return archive, fmt.Errorf("备份包含非法路径")
 		}
 		switch {
 		case header.Name == manifestFileName:
@@ -222,6 +255,23 @@ func extractArchive(tr *tar.Reader, tmp string) (extractedArchive, error) {
 			if err == nil {
 				err = copyFromTar(tr, archive.dbPath)
 			}
+		case strings.HasPrefix(header.Name, voiceDirPrefix):
+			rel := strings.TrimPrefix(header.Name, voiceDirPrefix)
+			dest, e := voice.Path(filepath.Join(tmp, "voice-notes"), rel)
+			if e != nil {
+				return archive, e
+			}
+			if _, ok := archive.extractedVoice[rel]; ok {
+				return archive, fmt.Errorf("重复录音文件")
+			}
+			if err = os.MkdirAll(filepath.Dir(dest), 0700); err == nil {
+				err = copyFromTar(tr, dest)
+			}
+			if err == nil {
+				err = os.Chmod(dest, 0600)
+			}
+			archive.extractedVoice[rel] = dest
+
 		case strings.HasPrefix(header.Name, evidenceDirPrefix):
 			rel := strings.TrimPrefix(header.Name, evidenceDirPrefix)
 			dest := filepath.Join(tmp, "evidence", filepath.FromSlash(rel))
@@ -247,7 +297,7 @@ func validateExtractedArchive(archive extractedArchive) (Manifest, error) {
 	if err := json.Unmarshal(archive.manifestData, &manifest); err != nil {
 		return manifest, fmt.Errorf("解析 manifest: %w", err)
 	}
-	if manifest.Format != ManifestFormat || manifest.Version != ManifestVersion {
+	if manifest.Format != ManifestFormat || (manifest.Version != 1 && manifest.Version != ManifestVersion) {
 		return manifest, fmt.Errorf("不支持的备份格式: %s v%d", manifest.Format, manifest.Version)
 	}
 	gotSHA, err := filehash.SHA256(archive.dbPath)
@@ -270,13 +320,45 @@ func validateExtractedArchive(archive extractedArchive) (Manifest, error) {
 			return manifest, fmt.Errorf("证据文件 %s 哈希校验失败", entry.RelPath)
 		}
 	}
+	if manifest.Version == 1 && len(manifest.Voice) > 0 {
+		return manifest, fmt.Errorf("旧格式不能包含录音清单")
+	}
+	seen := map[string]bool{}
+	for _, entry := range manifest.Voice {
+		if _, err := voice.Path("voice-notes", entry.RelPath); err != nil {
+			return manifest, err
+		}
+		if seen[entry.RelPath] {
+			return manifest, fmt.Errorf("重复录音清单")
+		}
+		seen[entry.RelPath] = true
+		path, ok := archive.extractedVoice[entry.RelPath]
+		if !ok {
+			return manifest, fmt.Errorf("备份包缺少私有录音")
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			return manifest, err
+		}
+		if fi.Size() != entry.SizeBytes {
+			return manifest, fmt.Errorf("录音长度校验失败")
+		}
+		hash, err := filehash.SHA256(path)
+		if err != nil {
+			return manifest, err
+		}
+		if hash != entry.SHA256 {
+			return manifest, fmt.Errorf("录音哈希校验失败")
+		}
+	}
+	if len(archive.extractedVoice) != len(manifest.Voice) {
+		return manifest, fmt.Errorf("存在清单外的私有录音")
+	}
+
 	return manifest, nil
 }
 
 func installArchive(archive extractedArchive, manifest Manifest, targetDataDir string) error {
-	if err := os.Rename(archive.dbPath, filepath.Join(targetDataDir, dbFileName)); err != nil {
-		return err
-	}
 	evidenceDir := filepath.Join(targetDataDir, "evidence")
 	for _, entry := range manifest.Evidence {
 		src := archive.extractedEvidence[entry.RelPath]
@@ -288,6 +370,27 @@ func installArchive(archive extractedArchive, manifest Manifest, targetDataDir s
 			return err
 		}
 	}
+	for _, entry := range manifest.Voice {
+		dst, err := voice.Path(filepath.Join(targetDataDir, "voice-notes"), entry.RelPath)
+		if err != nil {
+			return err
+		}
+		if err = os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+			return err
+		}
+		if err = os.Rename(archive.extractedVoice[entry.RelPath], dst); err != nil {
+			return err
+		}
+		if err = os.Chmod(dst, 0600); err != nil {
+			return err
+		}
+	}
+
+	// Select the database only after every referenced private file is installed.
+	if err := os.Rename(archive.dbPath, filepath.Join(targetDataDir, dbFileName)); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -339,4 +442,56 @@ func copyFromTar(tr *tar.Reader, dest string) error {
 	defer f.Close()
 	_, err = io.Copy(f, tr)
 	return err
+}
+
+// collectVoiceEntries reads references from the same database snapshot that goes
+// into the archive. Only explicitly retained, saved recordings enter it.
+func collectVoiceEntries(ctx context.Context, snapshot string, dirs []string) ([]EvidenceEntry, error) {
+	db, err := sql.Open("sqlite", snapshot)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	var exists int
+	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='voice_note_drafts'`).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists == 0 {
+		return nil, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT audio_file,audio_sha256,size_bytes FROM voice_note_drafts WHERE audio_file!='' AND state='saved' AND keep_audio=1 ORDER BY audio_file`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	entries := []EvidenceEntry{}
+	for rows.Next() {
+		var entry EvidenceEntry
+		if err = rows.Scan(&entry.RelPath, &entry.SHA256, &entry.SizeBytes); err != nil {
+			return nil, err
+		}
+		if len(dirs) != 1 || dirs[0] == "" {
+			return nil, fmt.Errorf("备份存在私有录音，请明确提供语音目录")
+		}
+		path, e := voice.Path(dirs[0], entry.RelPath)
+		if e != nil {
+			return nil, e
+		}
+		fi, e := os.Lstat(path)
+		if e != nil {
+			return nil, e
+		}
+		if !fi.Mode().IsRegular() || fi.Size() != entry.SizeBytes {
+			return nil, fmt.Errorf("私有录音文件身份或长度不符")
+		}
+		hash, e := filehash.SHA256(path)
+		if e != nil {
+			return nil, e
+		}
+		if hash != entry.SHA256 {
+			return nil, fmt.Errorf("私有录音哈希不符")
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }

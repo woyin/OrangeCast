@@ -24,6 +24,9 @@ func (srv *Server) Router() http.Handler {
 	privateRoutes := auth.RequireAuth(srv.store)(auth.CSRFProtect(srv.protectedRoutes()))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		if r.URL.Path == "/api/voice-notes/upload" {
+			r.Body = http.MaxBytesReader(w, r.Body, (20<<20)+(64<<10))
+		}
 		privateRoutes.ServeHTTP(w, r)
 	}))
 	return mux
@@ -46,6 +49,11 @@ func (srv *Server) registerPublicRoutes(mux *http.ServeMux) {
 func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
+	mux.HandleFunc("/voice-notes", srv.handleVoiceNotes)
+	mux.HandleFunc("/voice-notes/price", srv.handleVoicePrice)
+	mux.HandleFunc("/api/voice-notes/upload", srv.handleVoiceUpload)
+	mux.HandleFunc("/api/voice-notes/session", srv.handleVoiceSession)
+	mux.HandleFunc("/api/voice-notes/", srv.handleVoiceDraft)
 	mux.HandleFunc("/questions", srv.handleLearningQuestions)
 	mux.HandleFunc("/questions/action", srv.handleLearningQuestionAction)
 	mux.HandleFunc("/questions/", srv.handleLearningQuestionDetail)

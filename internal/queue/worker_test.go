@@ -1000,22 +1000,14 @@ func TestNewWorker_DefaultBundleFor_EmptyProviderFallsBack(t *testing.T) {
 	}
 }
 
-// TestNewWorker_DefaultBundleFor_GetSettingsError 验证 GetSettings 出错时降级到 groq 默认 bundle。
-// 覆盖 bundleFor 中 err != nil → return w.selector.Bundle("groq") 分支。
+// Missing configuration cannot silently switch the supplier of a frozen task.
 func TestNewWorker_DefaultBundleFor_GetSettingsError(t *testing.T) {
 	s, w := newTestWorker(t)
-	ctx := context.Background()
-	// 先正常迁移，然后删除 settings 表制造 GetSettings 错误
-	if _, err := s.DB.ExecContext(ctx, `DROP TABLE settings`); err != nil {
-		t.Fatalf("drop settings: %v", err)
+	if _, err := s.DB.ExecContext(t.Context(), `DROP TABLE settings`); err != nil {
+		t.Fatal(err)
 	}
-	// GetSettings 报错 → 应降级到 groq bundle（不报错）
-	bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe})
-	if err != nil {
-		t.Fatalf("GetSettings 出错时应降级、不报错，实际 %v", err)
-	}
-	if bundle == nil {
-		t.Fatal("应返回降级 groq bundle")
+	if bundle, err := w.bundleFor(&models.ProcessingJob{JobType: models.JobTranscribe}); err == nil || bundle != nil {
+		t.Fatal("configuration failure silently changed provider", bundle, err)
 	}
 }
 
@@ -1371,8 +1363,8 @@ func TestDoTranscribe_SetCurrentVersionFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("SetCurrentVersion 失败应报错")
 	}
-	if !strings.Contains(err.Error(), "设置当前转录版本") {
-		t.Errorf("错误应含 '设置当前转录版本'，实际 %v", err)
+	if !strings.Contains(err.Error(), "检查来源访问策略") {
+		t.Errorf("错误应含 '检查来源访问策略'，实际 %v", err)
 	}
 }
 

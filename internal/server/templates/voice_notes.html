@@ -1,0 +1,16 @@
+{{define "title"}}语音笔记 · CloudWisePod{{end}}
+{{define "content"}}
+<div id="voice-notes-view" data-csrf="{{.CSRF}}">
+<h1>语音笔记</h1>
+<p>播放节目时点击“录音笔记”。录音前冻结节目和原音位置；录完保持暂停，由你明确继续播放。</p>
+<p>每条最多5分钟／20MB。本地草稿仅在当前登录会话恢复，退出登录会清除。只有“上传并转写”会发送录音，打开页面或恢复草稿不会调用AI。保存后的笔记是个人理解。</p>
+<button type="button" data-voice-action="start">录制当前播放的笔记</button><button type="button" data-voice-action="local">查看本地草稿</button><a href="/listening-queue">选择节目</a>
+<section><h2>本地草稿</h2><div id="voice-local-list"><p>点击“查看本地草稿”读取，读取不会上传。</p></div></section>
+<section><h2>服务器草稿与已保存笔记</h2><p>未保存草稿7天后清理；保存时默认删除录音。后台转写完成后可只读刷新，不会覆盖文字。</p>
+{{range .Drafts}}<article class="panel"><p>{{.CreatedAt}} · {{.State}} · {{formatTime .DurationSeconds}}</p><p>{{.Text}}</p>{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .NoteID}}<a href="/notes/{{.NoteID}}/history">查看已保存笔记</a>{{else}}<button type="button" data-voice-open="{{.ID}}">打开此草稿</button>{{end}}{{if and .KeepAudio .AudioAvailable}}<a href="/api/voice-notes/{{.ID}}/audio" data-full-navigation="1">私有录音</a>{{end}}</article>{{else}}<p>还没有服务器录音草稿。</p>{{end}}
+{{if .Offset}}<a href="/voice-notes">返回第一页</a>{{end}}{{if and .Drafts (ge .NextOffset 0)}}<a href="/voice-notes?offset={{.NextOffset}}">下一页</a>{{end}}
+</section>
+<details><summary>语音转录预算价格</summary><p>为确切provider/model登记每分钟预估价格（美元分）。音频分钟与文本token分开；此价格用于入队预算预占。未登记对应实际计量价格时，实际费用保持未知，不能把预估当作供应商账单。已配置月预算但缺少此价格会阻止转写。</p>
+<form action="/voice-notes/price" method="post"><input type="hidden" name="_csrf" value="{{.CSRF}}"><label>供应商<select name="provider"><option value="groq">Groq</option><option value="openai">OpenAI</option></select></label><label>确切转录模型<input name="model" required></label><label>每分钟预估（分）<input name="cents_per_minute" type="number" min="0" step="0.001" required></label><button>登记价格</button></form></details>
+</div>
+{{end}}

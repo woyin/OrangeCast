@@ -29,13 +29,14 @@ const (
 // GroqProvider Groq 全套实现（方案 B 主力）。
 // 转录走 /audio/transcriptions（multipart file），分析/QA 走 /chat/completions。
 type GroqProvider struct {
-	disableReduce  bool
-	reduceFn       AnalysisReduceFunc
-	apiKey         string
-	baseURL        string // 空则用默认 groqBaseURL
-	model          string // 空则用默认 groqAnalysisModel
-	chatCompleteFn func(messages []map[string]string, jsonMode string) (string, int, error)
-	sleepFn        func(time.Duration)
+	disableReduce      bool
+	reduceFn           AnalysisReduceFunc
+	apiKey             string
+	baseURL            string // 空则用默认 groqBaseURL
+	model              string // 空则用默认 groqAnalysisModel
+	transcriptionModel string
+	chatCompleteFn     func(messages []map[string]string, jsonMode string) (string, int, error)
+	sleepFn            func(time.Duration)
 }
 
 // NewGroqProvider 构造 Groq Provider（默认零成本主力）。
@@ -58,21 +59,41 @@ func (g *GroqProvider) base() string {
 
 // WithBaseURL 返回指向自定义 base URL 的新实例（测试/兼容 API 用）。
 func (g *GroqProvider) WithBaseURL(url string) *GroqProvider {
-	return &GroqProvider{apiKey: g.apiKey, baseURL: url, model: g.model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn}
+	clone := *g
+	clone.baseURL = url
+	return &clone
 }
 
 // WithModel 返回使用指定分析模型的新实例（转录模型不变）。
 func (g *GroqProvider) WithModel(model string) *GroqProvider {
-	return &GroqProvider{apiKey: g.apiKey, baseURL: g.baseURL, model: model, chatCompleteFn: g.chatCompleteFn, sleepFn: g.sleepFn, disableReduce: g.disableReduce, reduceFn: g.reduceFn}
+	clone := *g
+	clone.model = model
+	return &clone
+}
+
+// WithTranscriptionModel freezes the audio route without changing chat models.
+func (g *GroqProvider) WithTranscriptionModel(model string) *GroqProvider {
+	clone := *g
+	clone.transcriptionModel = model
+	return &clone
 }
 
 // Transcribe 转录：Groq 要求上传文件本体（不支持服务端 fetch URL）。
 // filePath 是已临时落盘的音频文件。
 func (g *GroqProvider) Transcribe(filePath string) (*TranscriptResult, error) {
+	return g.TranscribeContext(context.Background(), filePath)
+}
+
+// TranscribeContext allows a worker shutdown to cancel the HTTP request.
+func (g *GroqProvider) TranscribeContext(ctx context.Context, filePath string) (*TranscriptResult, error) {
+	model := g.transcriptionModel
+	if model == "" {
+		model = groqTranscribeModel
+	}
 	data, code, err := uploadFileAsMultipart(
-		context.Background(), g.base()+"/audio/transcriptions", g.apiKey, "file", filePath,
+		ctx, g.base()+"/audio/transcriptions", g.apiKey, "file", filePath,
 		map[string]string{
-			"model":                     groqTranscribeModel,
+			"model":                     model,
 			"response_format":           "verbose_json",
 			"timestamp_granularities[]": "segment",
 		},

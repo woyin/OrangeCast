@@ -4,7 +4,10 @@
 package provider
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/woyin/orangecast/internal/models"
 )
@@ -117,8 +120,9 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 
 // TaskConfig 每个任务的 Provider + Model 配置（来自 settings）。
 type TaskConfig struct {
-	Provider string
-	Model    string // 空则用该 provider 的默认模型
+	Provider      string
+	Model         string // 空则用该 provider 的默认模型
+	Transcription bool   // Audio model overrides never alter the chat route.
 }
 
 // EffectiveTaskModel returns the exact model selected by a task configuration,
@@ -143,6 +147,17 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 	bundle, err := sel.Bundle(tc.Provider)
 	if err != nil {
 		return nil, err
+	}
+	if tc.Transcription {
+		switch p := bundle.Transcription.(type) {
+		case *GroqProvider:
+			bundle.Transcription = p.WithTranscriptionModel(tc.Model)
+		case *OpenAIProvider:
+			bundle.Transcription = p.WithTranscriptionModel(tc.Model)
+		default:
+			return nil, fmt.Errorf("provider %s 不支持音频转录", tc.Provider)
+		}
+		return bundle, nil
 	}
 	if tc.Provider == "pod" && tc.Model != "" {
 		if p, ok := bundle.KnowledgeArticle.(*OpenAIProvider); ok {
@@ -186,4 +201,27 @@ func (sel *Selector) BundleForTask(tc TaskConfig) (*ProviderBundle, error) {
 		}
 	}
 	return bundle, nil
+}
+
+// TranscriptionConnectionFingerprint identifies an endpoint without storing its
+// credentials or URL in an admitted voice task.
+func TranscriptionConnectionFingerprint(providerName, baseURL string) string {
+	if baseURL == "" {
+		if providerName == "openai" {
+			baseURL = openaiBaseURL
+		} else {
+			baseURL = groqBaseURL
+		}
+	}
+	sum := sha256.Sum256([]byte(providerName + ":" + strings.TrimRight(baseURL, "/")))
+	return hex.EncodeToString(sum[:])
+}
+
+// TranscriptionConnectionID returns this selector's currently resolved route.
+func (sel *Selector) TranscriptionConnectionID(providerName string) string {
+	base := sel.groqBaseURL
+	if providerName == "openai" {
+		base = sel.openaiBaseURL
+	}
+	return TranscriptionConnectionFingerprint(providerName, base)
 }
