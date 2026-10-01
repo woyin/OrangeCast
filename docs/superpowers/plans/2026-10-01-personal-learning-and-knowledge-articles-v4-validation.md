@@ -22,9 +22,19 @@
 
 | A03 | KnowledgeForm、KnowledgeGeneration、KnowledgeUpdate当前测试通过；实际Node脚本保留父稿草稿、命名action与局部导航 | 技术验证完成；独立待验见下 | `d9f1efd` |
 
+| A04 | 当前QuestionForm、DailyReview、LearningReview、AutomationForms及共用接口测试通过；实际Node验证查看依据不清解释和CAS草稿身份 | 技术验证完成；独立待验见下 | `3a58e4a` |
+
 ## 独立待验
 
 - 真实个人资料和Owner五维评分：待验证。
 - 新embedding连接及真实召回收益：待验证。
 - 新问题对话和用途模式真实接口：待验证。
 - iOS Safari/Android Chrome实体手机、自然录音、HTTPS、后台15分钟与离线：待验证。
+
+## M0 当前浏览器证据
+
+独立p9测试实例，真实Router/模板/SQLite/Worker，确定性Provider；当前相关race结果store19.051s、queue8.464s、server8.023s。浏览器创建自建问题、保存首页当前选择，360/375px页面宽度与scrollWidth相等；保存后焦点回到page-view。播放中10次局部导航每次为同一audio且paused=false。截图已实际查看，保存在忽略目录`data/eval/personal-learning-v4/m0/`。测试实例已停止，真实模型和手机未参与。
+
+FTS测量：Apple M4 / darwin arm64，固定10,000/50,000条合成索引，20次；第一轮p95为37.92/181.9ms。后续内存采样测量单列，采样Go Heap不能表示进程RSS峰值。浏览器此轮首页资源2ms、队列1ms是本地单次观察，不是p95，也不含外部供应商耗时。
+
+内存采样轮：同机同语料20次，FTS p95 38.92/184.6ms，采样Go HeapInuse最大5.867/5.891MiB，约266KB/4,341分配每次。语料指纹`6c35837f84aa1659d969fce4056e5f2471bb8b631e11196d87a10a014a72e4de`；当前evalset固定输入检查通过，人工及设备为空。M0迁移落点0070学习偏好、0071新运行类别，历史前缀0067/0068/0069升级及偏好一致性备份恢复已检查。

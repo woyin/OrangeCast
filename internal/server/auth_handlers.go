@@ -107,6 +107,10 @@ func (srv *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	u, _ := srv.store.GetUserByID(r.Context(), userID)
 	data := map[string]any{"Email": u.Email, "CSRF": auth.CSRFValue(r)}
+	if err := srv.learningHomeData(r, data); err != nil {
+		http.Error(w, "读取下一步失败", 500)
+		return
+	}
 
 	// 注意力队列（学习 + 创作双泳道）。
 	profiles, err := srv.store.ListEditorialProfiles(r.Context())

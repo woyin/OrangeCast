@@ -484,24 +484,25 @@ func TestReviewEvidenceRejectsWithdrawalsAndMarksHistoricalVersions(t *testing.T
 }
 
 func TestDailyReviewUpgradePreservesOldQuestionAndAnswer(t *testing.T) {
-	s, items, _, now := dailyReviewFixture(t, 1)
+	s, path := historicalTestStore(t, 67)
 	ctx := t.Context()
-	id := items[0].ID
-	if err := s.AnswerLearningReviewAt(ctx, id, "迁移前的解释", "partial", "answer", 0, now); err != nil {
-		t.Fatal(err)
-	}
-	note, err := s.SaveLearningReviewNote(ctx, id, 1)
+	doc, err := s.CreatePastedDocument(ctx, "历史资料", "历史正文")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{`DROP TRIGGER run_control_admission`, `DROP TRIGGER run_control_lane`, `DROP TABLE run_control_actions`, `DROP TABLE run_controls`, `DROP INDEX run_control_claim`, `ALTER TABLE processing_jobs DROP COLUMN run_lane`, `ALTER TABLE processing_jobs DROP COLUMN priority`, `ALTER TABLE processing_jobs DROP COLUMN stop_requested`, `ALTER TABLE processing_jobs DROP COLUMN control_revision`, `DELETE FROM schema_migrations WHERE version=69`, `DROP TRIGGER review_item_schedule`, `DROP TABLE review_session_items`, `DROP TABLE review_sessions`, `DROP TABLE review_owner_actions`, `DROP TABLE review_schedules`, `DROP TABLE review_schedule_settings`, `ALTER TABLE learning_review_answers DROP COLUMN note_id`, `DELETE FROM schema_migrations WHERE version=68`} {
+	note, err := s.CreateOwnerNote(ctx, models.OwnerNote{SourceType: "document", SourceID: doc.ID, Kind: "owner_reflection", Content: "迁移前的解释"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "historical-review-item"
+	for _, statement := range []string{`INSERT INTO editorial_profiles(id,name)VALUES('historical-profile','旧资料')`, `INSERT INTO learning_review_batches(id,profile_id,week_key,timezone,start_utc,end_utc,input_json,provider,model,prompt_version)VALUES('historical-batch','historical-profile','2026-W40','UTC','2026-09-28','2026-10-05','{}','pod','old','old')`, `INSERT INTO learning_review_items(id,batch_id,position,question,answer_basis,material_ids_json,state,answer,assessment,revision)VALUES('historical-review-item','historical-batch',1,'旧问题','旧依据','[]','answered','迁移前的解释','partial',1)`, `INSERT INTO learning_review_answers(id,item_id,revision,answer,assessment,state)VALUES('historical-answer','historical-review-item',1,'迁移前的解释','partial','answered')`} {
 		if _, err = s.DB.Exec(statement); err != nil {
 			t.Fatal(statement, err)
 		}
 	}
-	var seq int
-	var name, path string
-	s.DB.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path)
+	if _, err = s.DB.Exec(`UPDATE learning_review_items SET note_id=? WHERE id=?`, note.ID, id); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 	upgraded, err := Open(path)
 	if err != nil {
