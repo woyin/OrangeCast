@@ -74,7 +74,17 @@
  };
  function clearPrivate(){epoch++;lifetime.abort();lifetime=new AbortController();clearTimeout(timer);requests.forEach(c=>c.abort());current=null;session=null;busy=false;panel.hidden=true;feedback.textContent='';byId('reflection-anchor').textContent='';for(const f of fields)byId('reflection-'+f).value='';select.replaceChildren(new Option('不关联',''));try{localStorage.removeItem(key);}catch(_){} }
  byId('reflection-start').onclick=()=>start();
- root.CWPReflections={start,open,clearPrivate};
+ async function adoptVoice(voice,field,target){
+  if(!current||busy||current.pending?.action==='save'||(target&&target!==current.id)||(voice.reflection_id&&voice.reflection_id!==current.id))throw Error('请先打开录音所属的原整理草稿');
+  if(!fields.includes(field))throw Error('整理栏无效');clearTimeout(timer);await serial;if(!current||busy)throw Error('已有操作进行中');busy=true;render();const token=epoch;
+  try{await synchronize();if(token!==epoch||!current)return;const cmd={action:'voice_adopt',id:current.id,request_key:crypto.randomUUID(),expected_revision:current.revision,voice_id:voice.id,voice_revision:voice.revision,field};
+   current.pending=cmd;storeLocal();const result=await command(cmd);if(token!==epoch)return;current={...current,...result,pending:null};voice.reflection_id=current.id;render(true);storeLocal();say('已采用语音草稿到所选栏；其他栏保持原文字。');
+  }finally{if(token===epoch){busy=false;render();}}
+ }
+ byId('reflection-voice-start').onclick=async()=>{if(!current||busy)return;clearTimeout(timer);await serial;if(!current||busy)return;busy=true;render();const token=epoch;
+  try{await synchronize();if(token!==epoch||!current)return;await root.CWPVoice.start({capture:structuredClone(current.capture),reflectionId:current.id});}catch(error){say(error.message);}finally{if(token===epoch){busy=false;render();}}
+ };
+ root.CWPReflections={start,open,adoptVoice,clearPrivate};
  root.addEventListener('storage',event=>{if(event.key==='cwp-private-reset')clearPrivate();});
  root.CWPViews.define((view,viewScope)=>{viewScope.on(view,'click',event=>{const startButton=event.target.closest('[data-reflection-start]'),openButton=event.target.closest('[data-reflection-open]');if(startButton)start();if(openButton)open(openButton.dataset.reflectionOpen);});});
  // Restore only after verifying the current session. Reading cannot start a paid job.

@@ -40,13 +40,14 @@ type VoiceNoteDraft struct {
 	ExpiresAt       string            `json:"expires_at"`
 	CreatedAt       string            `json:"created_at"`
 	UpdatedAt       string            `json:"updated_at"`
+	ReflectionID    string            `json:"reflection_id,omitempty"`
 }
 
-const voiceColumns = `id,source_type,source_id,anchor_json,upload_sha256,audio_sha256,audio_file,duration_seconds,size_bytes,text,revision,state,asr_text,asr_base_revision,job_id,note_id,keep_audio,error,expires_at,created_at,updated_at`
+const voiceColumns = `id,source_type,source_id,anchor_json,upload_sha256,audio_sha256,audio_file,duration_seconds,size_bytes,text,revision,state,asr_text,asr_base_revision,job_id,note_id,keep_audio,error,expires_at,created_at,updated_at,COALESCE((SELECT reflection_id FROM voice_reflection_adoptions WHERE voice_id=voice_note_drafts.id),'')`
 
 func scanVoice(row interface{ Scan(...any) error }) (*VoiceNoteDraft, error) {
 	d := &VoiceNoteDraft{}
-	err := row.Scan(&d.ID, &d.SourceType, &d.SourceID, &d.AnchorJSON, &d.UploadSHA256, &d.AudioSHA256, &d.AudioFile, &d.DurationSeconds, &d.SizeBytes, &d.Text, &d.Revision, &d.State, &d.ASRText, &d.ASRBaseRevision, &d.JobID, &d.NoteID, &d.KeepAudio, &d.Error, &d.ExpiresAt, &d.CreatedAt, &d.UpdatedAt)
+	err := row.Scan(&d.ID, &d.SourceType, &d.SourceID, &d.AnchorJSON, &d.UploadSHA256, &d.AudioSHA256, &d.AudioFile, &d.DurationSeconds, &d.SizeBytes, &d.Text, &d.Revision, &d.State, &d.ASRText, &d.ASRBaseRevision, &d.JobID, &d.NoteID, &d.KeepAudio, &d.Error, &d.ExpiresAt, &d.CreatedAt, &d.UpdatedAt, &d.ReflectionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -335,6 +336,14 @@ func (s *Store) DeleteVoiceNoteDraft(ctx context.Context, id string, expected in
 // SaveVoiceNoteDraft creates exactly one personal reflection and question link
 // together with the draft state. References keep the original historical anchor.
 func (s *Store) SaveVoiceNoteDraft(ctx context.Context, id string, expected int, questionID string, questionRevision int, keepAudio bool) (*models.OwnerNote, error) {
+	var reflectionID string
+	linkErr := s.DB.QueryRowContext(ctx, `SELECT reflection_id FROM voice_reflection_adoptions WHERE voice_id=?`, id).Scan(&reflectionID)
+	if linkErr == nil {
+		return nil, ErrConflict
+	}
+	if !errors.Is(linkErr, sql.ErrNoRows) {
+		return nil, linkErr
+	}
 	d, err := s.GetVoiceNoteDraft(ctx, id)
 	if err != nil {
 		return nil, err

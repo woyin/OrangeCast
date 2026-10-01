@@ -19,6 +19,9 @@ type reflectionCommand struct {
 	QuestionID       string                  `json:"question_id"`
 	QuestionRevision int                     `json:"question_revision"`
 	Answers          store.ReflectionAnswers `json:"answers"`
+	VoiceID          string                  `json:"voice_id"`
+	VoiceRevision    int                     `json:"voice_revision"`
+	Field            string                  `json:"field"`
 }
 
 func (srv *Server) handleListeningReflectionPage(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +91,8 @@ func (srv *Server) handleListeningReflections(w http.ResponseWriter, r *http.Req
 		result, err = srv.store.ChangeListeningReflection(r.Context(), cmd.ID, cmd.RequestKey, cmd.Action, cmd.ExpectedRevision, cmd.Answers)
 	case "save":
 		result, err = srv.store.SaveListeningReflection(r.Context(), cmd.ID, cmd.RequestKey, cmd.ExpectedRevision, cmd.Answers)
+	case "voice_adopt":
+		result, err = srv.store.AdoptVoiceIntoReflection(r.Context(), cmd.ID, cmd.RequestKey, cmd.VoiceID, cmd.Field, cmd.ExpectedRevision, cmd.VoiceRevision)
 	default:
 		http.Error(w, "未知整理操作", 400)
 		return

@@ -29,12 +29,13 @@
   byId('voice-stop-draft').disabled=!(waiting||recorder?.state==='recording');byId('voice-stop-asr').disabled=recorder?.state!=='recording';
   byId('voice-transcribe').textContent=current?.server?.state==='failed'?'显式重试转写（可能再次计费）':'上传并转写';
   byId('voice-transcribe').disabled=!current||busy||waiting||!!recorder||!current.blob&&!current.server?.audio_available;
-  byId('voice-save').disabled=!current||busy||waiting||!!recorder||current.server?.state==='queued'||current.server?.state==='transcribing';
+  byId('voice-save').disabled=!current||!!(current.reflectionId||current.server?.reflection_id)||busy||waiting||!!recorder||current.server?.state==='queued'||current.server?.state==='transcribing';
+  byId('voice-reflection-adopt').disabled=!current||busy||waiting||!!recorder;
   byId('voice-refresh').disabled=!current?.server||busy||waiting;byId('voice-adopt').disabled=!current?.server?.asr_text||busy||waiting||!!recorder;byId('voice-delete').disabled=!current||busy||waiting||!!recorder;
  }
- async function start(){
+ async function start(options={}){
   // Freeze before any session fetch or microphone permission wait.
-  const frozen=root.CWPListening?.anchor();if(!frozen?.anchor.snapshot_id){root.CWPListening?.captureNote();say('当前播放没有可确认的位置，请使用文字笔记。');return;}
+  const frozen=options.capture||root.CWPListening?.anchor();if(!frozen?.anchor.snapshot_id){root.CWPListening?.captureNote();say('当前播放没有可确认的位置，请使用文字笔记。');return;}
   if(waiting||recorder||busy){say('已有录音或权限请求，请先停止或取消。');return;}
   const capture=structuredClone(frozen);delete capture.csrf;
   if(!root.isSecureContext||!navigator.mediaDevices?.getUserMedia||!root.MediaRecorder){root.CWPListening?.captureNote(capture);root.CWPListening?.notify('此环境不支持安全录音，可记录文字笔记。');return;}
@@ -42,7 +43,7 @@
   const token=epoch,permission=++permissionSeq;waiting=true;pendingCapture=capture;panel.hidden=false;render();say('播放位置已冻结，等待麦克风权限。节目暂不暂停。');
   try{await ensureSession();if(token!==epoch||permission!==permissionSeq)return;if(current){try{await persist();}catch(error){say(error.message);return;}}
    if(permission!==permissionSeq)return;const acquired=await navigator.mediaDevices.getUserMedia({audio:true});if(token!==epoch||permission!==permissionSeq||!waiting){acquired.getTracks().forEach(track=>track.stop());return;}stream=acquired;
-   current={id:crypto.randomUUID(),capture,text:'',createdAt:new Date().toISOString(),sessionId:session.session_id,blob:null};chunks=[];recordBytes=0;afterStop=false;text.value='';
+   current={id:crypto.randomUUID(),capture,reflectionId:options.reflectionId||'',text:'',createdAt:new Date().toISOString(),sessionId:session.session_id,blob:null};chunks=[];recordBytes=0;afterStop=false;text.value='';
    recorder=new MediaRecorder(acquired,{mimeType:mime});
    recorder.onstart=()=>{if(token!==epoch||permission!==permissionSeq)return;root.CWPListening?.state().transport?.pause();startedAt=performance.now();say('录音中：0:00／5:00，0MB／20MB；节目已暂停。');render();timer=setInterval(()=>{const elapsed=(performance.now()-startedAt)/1000;say('录音中：'+fmt(elapsed)+'/5:00，'+(recordBytes/1048576).toFixed(1)+'MB/20MB');if(elapsed>=299)stop(false);},500);};
    recorder.ondataavailable=event=>{if(token!==epoch||!event.data.size)return;chunks.push(event.data);recordBytes+=event.data.size;current.blob=new Blob(chunks,{type:recorder.mimeType});current.interrupted=true;persist().catch(error=>say('录音仍在内存，本地保存失败：'+error.message));if(recordBytes>=maxBytes)stop(false);};
@@ -66,6 +67,7 @@
  byId('voice-hide').onclick=()=>{if(recorder||waiting){stop(false);return;}if(current)persist().catch(error=>say(error.message));panel.hidden=true;};
  byId('voice-adopt').onclick=()=>perform(async()=>{await syncText();current.server=await post('adopt',{job_id:current.server.job_id});current.text=current.server.text;text.value=current.text;await persist();say('已明确采用转写，仍需编辑核对并保存为笔记。');},true);
  byId('voice-save').onclick=()=>perform(async()=>{await upload();await syncText();const option=byId('voice-question').selectedOptions[0],result=await post('save',{question_id:option.value,question_revision:Number(option.dataset.revision)||0,keep_audio:byId('voice-keep-audio').checked});if(!result.saved)throw Error('未保存');await removeLocal(current.id);say('已保存为个人理解笔记。'+(byId('voice-keep-audio').checked?'录音已私有保留。':'录音已安排删除。'));current=null;text.value='';byId('voice-asr-result').hidden=true;},true);
+ byId('voice-reflection-adopt').onclick=()=>perform(async()=>{await upload();await syncText();await root.CWPReflections.adoptVoice(current.server,byId('voice-reflection-field').value,current.reflectionId);current.reflectionId=current.server.reflection_id||current.reflectionId;await persist();say('已明确采用到整理栏；请在整理中核对并保存为一条笔记。');},true);
  byId('voice-delete').onclick=()=>perform(async()=>{if(current.server)await post('delete');await removeLocal(current.id);current=null;text.value='';panel.hidden=true;say('已删除草稿，录音已安排清理；已发生的远端调用与用量记录仍保留。');},true);
  function clearPrivate(){epoch++;permissionSeq++;pendingCapture=null;waiting=false;afterStop=false;clearInterval(timer);timer=null;stream?.getTracks().forEach(track=>track.stop());if(recorder?.state==='recording')recorder.stop();recorder=null;stream=null;chunks=[];recordBytes=0;current=null;session=null;busy=false;requests.forEach(c=>c.abort());db?.close();db=null;dbPromise=null;panel.hidden=true;text.value='';status.textContent='';byId('voice-asr-text').textContent='';byId('voice-anchor').textContent='';byId('voice-asr-result').hidden=true;byId('voice-question').replaceChildren(new Option('不关联',''));try{const req=indexedDB.deleteDatabase(dbName);req.onblocked=()=>{};}catch(_){} }
  render();

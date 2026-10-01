@@ -44,6 +44,7 @@
 </aside>
 <aside id="reflection-editor" class="container panel" hidden aria-label="听后整理草稿">
 <h2>听后整理</h2><p id="reflection-anchor"></p>
+<button id="reflection-voice-start" type="button">录音补充这次整理</button>
 <form id="reflection-form" action="/api/listening-reflections">
 <label>关联问题<select id="reflection-question"><option value="">不关联</option></select></label>
 <p>第一次同步后问题和播放位置固定。至少写一栏；这是你自己的理解。</p>
@@ -59,6 +60,7 @@
 <button id="voice-stop-draft" type="button" disabled>停止并留草稿</button><button id="voice-stop-asr" type="button" disabled>停止并转写</button><button id="voice-transcribe" type="button">上传并转写</button><button id="voice-refresh" type="button">刷新转写进度（只读）</button>
 <button id="voice-resume-play" type="button">继续节目播放</button><button id="voice-hide" type="button">收起草稿</button>
 <label>我的理解（转写不会覆盖）<textarea id="voice-text" rows="4" maxlength="40000"></textarea></label>
+<label>采用到整理中的哪一栏<select id="voice-reflection-field"><option value="remember">我记住了什么</option><option value="uncertain">我还不确定什么</option><option value="apply">我准备如何使用</option></select></label><button id="voice-reflection-adopt" type="button">采用我的语音草稿到当前整理（替换所选栏）</button>
 <div id="voice-asr-result" hidden><p>转写建议，请核对后明确采用：</p><pre id="voice-asr-text"></pre><button id="voice-adopt" type="button">采用转写（替换我的草稿文字）</button></div>
 <label>关联学习问题<select id="voice-question"><option value="">不关联</option></select></label>
 <label><input id="voice-keep-audio" type="checkbox">保存笔记后保留录音（默认删除录音）</label><button id="voice-save" type="button">保存为个人理解笔记</button><button id="voice-delete" type="button">删除语音草稿和录音</button>

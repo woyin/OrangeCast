@@ -108,3 +108,34 @@ func TestListeningReflectionSaveHTTPReplayReadonlyAndLimits(t *testing.T) {
 		t.Fatal(n)
 	}
 }
+
+func TestVoiceReflectionHTTPUsesExplicitTextAndRejectsSecondSave(t *testing.T) {
+	srv, cookie, audio, capture := voiceHTTPFixture(t)
+	var c store.ListeningCapture
+	json.Unmarshal([]byte(capture), &c)
+	r, err := srv.store.StartListeningReflection(t.Context(), uuid.NewString(), c, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voiceID := uuid.NewString()
+	rec := voiceUploadRequest(t, srv, cookie, voiceID, capture, audio, true)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	cmd := reflectionCommand{ID: r.ID, Action: "voice_adopt", RequestKey: uuid.NewString(), ExpectedRevision: 1, VoiceID: voiceID, VoiceRevision: 1, Field: "apply"}
+	raw, _ := json.Marshal(cmd)
+	for range 2 {
+		rec = reflectionPost(srv, cookie, string(raw), true)
+		if rec.Code != 200 {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+	}
+	rec = voicePostJSON(srv, cookie, voiceID, map[string]any{"action": "save", "expected_revision": 1})
+	if rec.Code != 409 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	got, err := srv.store.GetListeningReflection(t.Context(), r.ID)
+	if err != nil || got.Answers.Apply != "我的录音草稿文字" || got.Answers.Remember != "" {
+		t.Fatal(got, err)
+	}
+}

@@ -298,6 +298,88 @@ func (s *Store) ChangeListeningReflection(ctx context.Context, id, key, action s
 	return r, nil
 }
 
+// AdoptVoiceIntoReflection is an explicit Owner action. ASR completion has no
+// route to this method and cannot overwrite any of the three answers.
+func (s *Store) AdoptVoiceIntoReflection(ctx context.Context, id, key, voiceID, field string, expected, voiceRevision int) (*ListeningReflection, error) {
+	if _, err := uuid.Parse(key); err != nil || expected < 1 || voiceRevision < 1 || (field != "remember" && field != "uncertain" && field != "apply") {
+		return nil, ErrInvalidEditorialState
+	}
+	hash := reflectionHash(struct {
+		ID, Action, VoiceID, Field string
+		Revision, VoiceRevision    int
+	}{id, "voice_adopt", voiceID, field, expected, voiceRevision})
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if old, e := reflectionReplay(ctx, tx, key, id, hash); old != nil || e != nil {
+		return old, e
+	}
+	r, err := scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if r.State != "draft" || r.Revision != expected {
+		return nil, ErrConflict
+	}
+	v, err := scanVoice(tx.QueryRowContext(ctx, `SELECT `+voiceColumns+` FROM voice_note_drafts WHERE id=?`, voiceID))
+	if err != nil {
+		return nil, err
+	}
+	if v.Revision != voiceRevision || v.State == "deleted" || v.State == "saved" || strings.TrimSpace(v.Text) == "" || v.ExpiresAt <= time.Now().UTC().Format("2006-01-02 15:04:05") {
+		return nil, ErrConflict
+	}
+	var anchor models.NoteAnchor
+	if err = json.Unmarshal([]byte(v.AnchorJSON), &anchor); err != nil {
+		return nil, err
+	}
+	if string(v.SourceType) != r.Capture.SourceType || v.SourceID != r.Capture.SourceID || reflectionHash(anchor) != reflectionHash(r.Capture.Anchor) {
+		return nil, ErrConflict
+	}
+	if err = checkReflectionCapture(ctx, tx, r.Capture); err != nil {
+		return nil, err
+	}
+	var target string
+	err = tx.QueryRowContext(ctx, `SELECT reflection_id FROM voice_reflection_adoptions WHERE voice_id=?`, voiceID).Scan(&target)
+	if err == nil && target != id {
+		return nil, ErrConflict
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	switch field {
+	case "remember":
+		r.Answers.Remember = v.Text
+	case "uncertain":
+		r.Answers.Uncertain = v.Text
+	case "apply":
+		r.Answers.Apply = v.Text
+	}
+	r.Answers, err = r.Answers.normalized()
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := json.Marshal(r.Answers)
+	if _, err = tx.ExecContext(ctx, `UPDATE listening_reflections SET answers_json=?,revision=revision+1,updated_at=datetime('now') WHERE id=?`, string(raw), id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO voice_reflection_adoptions(voice_id,reflection_id,field,voice_revision)VALUES(?,?,?,?) ON CONFLICT(voice_id) DO UPDATE SET field=excluded.field,voice_revision=excluded.voice_revision`, voiceID, id, field, voiceRevision); err != nil {
+		return nil, err
+	}
+	r, err = scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err = recordReflectionAction(ctx, tx, key, id, hash, r); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 func reflectionReplay(ctx context.Context, tx *sql.Tx, key, id, hash string) (*ListeningReflection, error) {
 	var priorID, priorHash, raw string
 	err := tx.QueryRowContext(ctx, `SELECT reflection_id,payload_hash,result_json FROM listening_reflection_actions WHERE request_key=?`, key).Scan(&priorID, &priorHash, &raw)
@@ -418,6 +500,13 @@ func (s *Store) SaveListeningReflection(ctx context.Context, id, key string, exp
 			return nil, ErrInvalidEditorialState
 		}
 	}
+	var voicePending int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM voice_note_drafts v JOIN voice_reflection_adoptions a ON a.voice_id=v.id WHERE a.reflection_id=? AND v.state IN('queued','transcribing')`, id).Scan(&voicePending); err != nil {
+		return nil, err
+	}
+	if voicePending > 0 {
+		return nil, fmt.Errorf("%w: 关联录音仍在转写，请等结果返回后保存", ErrConflict)
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO owner_notes(id,source_type,source_id,kind,content,citations_json,references_json,anchor_json)VALUES(?,?,?,?,?,?,?,?)`, prepared.ID, prepared.SourceType, prepared.SourceID, prepared.Kind, prepared.Content, prepared.CitationsJSON, prepared.ReferencesJSON, prepared.AnchorJSON)
 	if err != nil {
 		return nil, err
@@ -440,6 +529,12 @@ func (s *Store) SaveListeningReflection(ctx context.Context, id, key string, exp
 	raw, _ := json.Marshal(a)
 	_, err = tx.ExecContext(ctx, `UPDATE listening_reflections SET answers_json=?,state='saved',saved_note_id=?,revision=?,updated_at=datetime('now') WHERE id=?`, string(raw), prepared.ID, r.Revision, id)
 	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO voice_audio_cleanup(file) SELECT v.audio_file FROM voice_note_drafts v JOIN voice_reflection_adoptions a ON a.voice_id=v.id WHERE a.reflection_id=? AND v.audio_file!=''`, id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE voice_note_drafts SET state='saved',note_id=?,revision=revision+1,keep_audio=0,audio_file='',asr_text='',updated_at=datetime('now') WHERE state!='deleted' AND id IN(SELECT voice_id FROM voice_reflection_adoptions WHERE reflection_id=?)`, prepared.ID, id); err != nil {
 		return nil, err
 	}
 	r, err = scanReflection(tx.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
