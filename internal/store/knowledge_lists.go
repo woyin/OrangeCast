@@ -11,8 +11,8 @@ import (
 
 // KnowledgeListQuery bounds metadata pages without bounding background history checks.
 type KnowledgeListQuery struct {
-	Text, Status, Theme string
-	Page, PerPage       int
+	Text, Status, Theme, QuestionID string
+	Page, PerPage                   int
 }
 
 // KnowledgeArticlePage contains article metadata only; exact bodies remain on the detail seam.
@@ -41,7 +41,7 @@ func normalizeKnowledgeList(q KnowledgeListQuery) (KnowledgeListQuery, error) {
 	if q.PerPage < 1 || q.PerPage > 100 {
 		q.PerPage = 20
 	}
-	if q.Page > 10000 || len([]rune(q.Text)) > 200 || len([]rune(q.Theme)) > 200 || len(q.Status) > 40 {
+	if q.Page > 10000 || len([]rune(q.Text)) > 200 || len([]rune(q.Theme)) > 200 || len(q.Status) > 40 || len(q.QuestionID) > 200 {
 		return q, ErrInvalidEditorialState
 	}
 	return q, nil
@@ -71,6 +71,10 @@ func (s *Store) ListKnowledgeArticlesPage(ctx context.Context, q KnowledgeListQu
 		return page, err
 	}
 	where, args := knowledgeListFilter(q, "title||' '||thesis||' '||topic_json")
+	if q.QuestionID != "" {
+		where += ` AND id IN(SELECT object_id FROM learning_question_links WHERE question_id=? AND kind='article' AND state='confirmed')`
+		args = append(args, q.QuestionID)
+	}
 	if err = s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM knowledge_articles WHERE "+where, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
@@ -97,6 +101,10 @@ func (s *Store) ListKnowledgeTopicCandidatesPage(ctx context.Context, q Knowledg
 		return page, err
 	}
 	where, args := knowledgeListFilter(q, "topic_json")
+	if q.QuestionID != "" {
+		where += ` AND batch_id IN(SELECT id FROM knowledge_discovery_batches WHERE json_extract(CASE WHEN json_valid(scope_json) THEN scope_json ELSE '{}' END,'$.question_id')=?)`
+		args = append(args, q.QuestionID)
+	}
 	if err = s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM knowledge_topic_candidates WHERE "+where, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}

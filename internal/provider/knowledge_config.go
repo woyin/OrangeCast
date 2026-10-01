@@ -71,6 +71,11 @@ func KnowledgeArticleMessages(req KnowledgeArticleRequest) (string, string, erro
 	if req.PromptVersion == KnowledgeArticlePromptVersion {
 		req.Estimate = nil
 		req.StageConfigs = nil
+		if req.Question != nil {
+			q := *req.Question
+			q.Links = nil
+			req.Question = &q
+		}
 		req.Candidates = nil // local-only metadata includes candidates denied send permission
 	}
 	input, err := json.Marshal(req)

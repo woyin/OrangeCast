@@ -18,6 +18,7 @@ import (
 
 // KnowledgeArticleSettings controls explicit automation and article preferences.
 type KnowledgeArticleSettings struct {
+	QuestionID                  string
 	Enabled                     bool
 	DailyLimit, DebounceMinutes int
 	Audience, Style             string
@@ -43,7 +44,7 @@ type KnowledgeStageInput struct {
 // GetKnowledgeArticleSettings reads the singleton automatic-article policy.
 func (s *Store) GetKnowledgeArticleSettings(ctx context.Context) (KnowledgeArticleSettings, error) {
 	var v KnowledgeArticleSettings
-	err := s.DB.QueryRowContext(ctx, `SELECT enabled,daily_limit,debounce_minutes,audience,style FROM knowledge_article_settings WHERE id=1`).Scan(&v.Enabled, &v.DailyLimit, &v.DebounceMinutes, &v.Audience, &v.Style)
+	err := s.DB.QueryRowContext(ctx, `SELECT enabled,daily_limit,debounce_minutes,audience,style,question_id FROM knowledge_article_settings WHERE id=1`).Scan(&v.Enabled, &v.DailyLimit, &v.DebounceMinutes, &v.Audience, &v.Style, &v.QuestionID)
 	return v, err
 }
 
@@ -52,7 +53,21 @@ func (s *Store) SetKnowledgeArticleSettings(ctx context.Context, v KnowledgeArti
 	if v.DailyLimit < 1 || v.DailyLimit > 10 || v.DebounceMinutes < 0 || v.DebounceMinutes > 1440 || strings.TrimSpace(v.Audience) == "" || strings.TrimSpace(v.Style) == "" || len([]rune(v.Style)) > 2000 || len([]rune(v.Audience)) > 500 {
 		return fmt.Errorf("每日篇数需为1–10，防抖为0–1440分钟，读者和风格不能为空或过长")
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE knowledge_article_settings SET enabled=?,daily_limit=?,debounce_minutes=?,audience=?,style=?,updated_at=datetime('now') WHERE id=1`, v.Enabled, v.DailyLimit, v.DebounceMinutes, v.Audience, v.Style)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if v.QuestionID != "" {
+		var found int
+		if err = tx.QueryRowContext(ctx, `SELECT 1 FROM learning_questions WHERE id=?`, v.QuestionID).Scan(&found); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE knowledge_article_settings SET enabled=?,daily_limit=?,debounce_minutes=?,audience=?,style=?,question_id=?,updated_at=datetime('now') WHERE id=1`, v.Enabled, v.DailyLimit, v.DebounceMinutes, v.Audience, v.Style, v.QuestionID)
+	if err == nil {
+		err = tx.Commit()
+	}
 	return err
 }
 
@@ -339,6 +354,9 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 		return nil, false, err
 	}
 	defer tx.Rollback()
+	if err := checkQuestionAdmission(ctx, tx, req.Question, automatic, true); err != nil {
+		return nil, false, err
+	}
 	var existing string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM knowledge_articles WHERE profile_id=? AND input_hash=?`, profileID, hash).Scan(&existing)
 	if err == nil {
@@ -373,11 +391,14 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,provider,model,automated,review_model,discovery_batch_id) VALUES(?,?,?,?,?,?,?,?,?)`, id, profileID, hash, string(input), name, model, automatic, req.ReviewModel, req.DiscoveryBatchID); err != nil {
 		return nil, false, err
 	}
+	if err := attachGeneratedQuestionArticle(ctx, tx, req.Question, id); err != nil {
+		return nil, false, err
+	}
 	if req.DiscoveryBatchID != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE knowledge_discovery_batches SET article_id=? WHERE id=? AND article_id=''`, id, req.DiscoveryBatchID); err != nil {
 			return nil, false, err
 		}
-		if automatic {
+		if automatic && req.Question == nil {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_discovery_cursors(profile_id,last_seq) SELECT profile_id,last_seq FROM knowledge_discovery_batches WHERE id=? ON CONFLICT(profile_id) DO UPDATE SET last_seq=MAX(last_seq,excluded.last_seq)`, req.DiscoveryBatchID); err != nil {
 				return nil, false, err
 			}

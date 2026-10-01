@@ -120,3 +120,11 @@ func TestKnowledgeCalibrationPreservesOldAdmittedEstimate(t *testing.T) {
 		t.Fatal("invalid JSON sent")
 	}
 }
+
+func TestQuestionPromptSeparatesGoalsFromEvidenceAndKeepsRelationsLocal(t *testing.T) {
+	req := KnowledgeArticleRequest{PromptVersion: KnowledgeArticlePromptVersion, Stage: "discover", Materials: knowledgeTestMaterials(), Question: &FrozenLearningQuestion{ID: "q", Revision: 2, Body: "要回答的学习问题", Goal: "个人目标", Links: []LearningQuestionLink{{Kind: "source", ObjectID: "blocked-source", SourceID: "private"}}}}
+	system, user, err := KnowledgeArticleMessages(req)
+	if err != nil || !strings.Contains(system, "不是事实或已经解决的结论") || !strings.Contains(user, "个人目标") || strings.Contains(user, "blocked-source") || len(req.Question.Links) != 1 {
+		t.Fatal(system, user, err)
+	}
+}

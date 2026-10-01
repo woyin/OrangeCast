@@ -18,6 +18,17 @@ func validOwnerNoteKind(kind string) bool {
 // CreateOwnerNote keeps source-faithful notes distinct from the Owner's own
 // reflections. A source note must resolve to cited segments in that source.
 func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*models.OwnerNote, error) {
+	prepared, err := s.prepareOwnerNote(ctx, note)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.DB.ExecContext(ctx, `INSERT INTO owner_notes(id,source_type,source_id,kind,content,citations_json,references_json,anchor_json)VALUES(?,?,?,?,?,?,?,?)`, prepared.ID, prepared.SourceType, prepared.SourceID, prepared.Kind, prepared.Content, prepared.CitationsJSON, prepared.ReferencesJSON, prepared.AnchorJSON); err != nil {
+		return nil, err
+	}
+	return s.GetOwnerNote(ctx, prepared.ID)
+}
+
+func (s *Store) prepareOwnerNote(ctx context.Context, note models.OwnerNote) (*models.OwnerNote, error) {
 	note.ID = uuid.NewString()
 	note.SourceType, note.SourceID = strings.TrimSpace(note.SourceType), strings.TrimSpace(note.SourceID)
 	note.Kind, note.Content = strings.TrimSpace(note.Kind), strings.TrimSpace(note.Content)
@@ -75,10 +86,7 @@ func (s *Store) CreateOwnerNote(ctx context.Context, note models.OwnerNote) (*mo
 		return nil, err
 	}
 	note.AnchorJSON = anchor
-	if _, err := s.DB.ExecContext(ctx, `INSERT INTO owner_notes (id,source_type,source_id,kind,content,citations_json,references_json,anchor_json) VALUES (?,?,?,?,?,?,?,?)`, note.ID, note.SourceType, note.SourceID, note.Kind, note.Content, note.CitationsJSON, note.ReferencesJSON, note.AnchorJSON); err != nil {
-		return nil, err
-	}
-	return s.GetOwnerNote(ctx, note.ID)
+	return &note, nil
 }
 
 // GetOwnerNote retrieves one Owner note by stable identifier.

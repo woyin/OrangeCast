@@ -17,3 +17,13 @@ func TestKnowledgeFormNamedActionDoesNotReplaceEndpoint(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 }
+
+func TestQuestionFormNamedActionDraftIsolationAndConflict(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, err := exec.Command(node, filepath.Join("testdata", "question-forms.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+}

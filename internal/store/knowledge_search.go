@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 	"strings"
 	"time"
 	"unicode"
@@ -12,6 +13,7 @@ import (
 
 // KnowledgeSearchQuery bounds local-only retrieval and preserves explicit filters.
 type KnowledgeSearchQuery struct {
+	Question                                                        *provider.FrozenLearningQuestion
 	Recall                                                          bool
 	SendProvider, RecallProfileID                                   string // internal eligible recall; ordinary local search remains unrestricted
 	MetadataOnly                                                    bool   // bounded snippet, no full body transfer; internal recall may request 200 hits
@@ -123,6 +125,10 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	rank := "0.0"
 	where := []string{"1=1"}
 	var args []any
+	if clause, extra := questionMaterialFilter(q.Question); clause != "" {
+		where = append(where, clause)
+		args = append(args, extra...)
+	}
 	if match != "" {
 		join = " JOIN knowledge_search_fts f ON f.rowid=d.rowid"
 		rank = "bm25(knowledge_search_fts,3.0,5.0,1.0)"

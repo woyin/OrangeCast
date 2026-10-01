@@ -37,7 +37,7 @@ func NewTemplates() (*Templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "knowledgeStatus": knowledgeStatus, "noteHref": noteHref}
+	funcs := template.FuncMap{"formatTime": formatSeconds, "sourceHref": sourceHref, "join": strings.Join, "jsonArray": jsonArray, "json": jsonValue, "questionAction": questionAction, "questionKind": questionKind, "questionStatus": questionStatus, "knowledgeStatus": knowledgeStatus, "noteHref": noteHref}
 
 	t := &Templates{pages: map[string]*template.Template{}}
 
@@ -142,4 +142,55 @@ func noteHref(n *models.OwnerNote) string {
 		return fmt.Sprintf("/evidence/%s?t=%.1f", url.PathEscape(a.SnapshotID), a.Position)
 	}
 	return sourceHref(models.SourceType(n.SourceType), n.SourceID, 0)
+}
+
+func questionStatus(status string) string {
+	switch status {
+	case "active":
+		return "进行中"
+	case "paused":
+		return "暂停"
+	case "resolved":
+		return "已解决"
+	case "archived":
+		return "归档"
+	}
+	return status
+}
+
+func questionAction(action string) string {
+	switch action {
+	case "create":
+		return "创建问题"
+	case "edit":
+		return "修改目标"
+	case "status":
+		return "确认状态"
+	case "link":
+		return "确认关联"
+	case "suggest":
+		return "添加待确认关系"
+	case "unlink":
+		return "移除关系"
+	case "note":
+		return "保存个人笔记"
+	case "source_purged":
+		return "来源清理，移除相关关系"
+	}
+	return action
+}
+func questionKind(kind string) string {
+	switch kind {
+	case "source":
+		return "来源"
+	case "keypoint":
+		return "重点"
+	case "note":
+		return "笔记"
+	case "evidence":
+		return "证据"
+	case "article":
+		return "文章"
+	}
+	return kind
 }

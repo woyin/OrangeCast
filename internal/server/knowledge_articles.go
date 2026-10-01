@@ -53,7 +53,16 @@ func (srv *Server) RunKnowledgeArticles(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = srv.enqueueKnowledgeArticle(ctx, profile.ID, true)
+	if settings.QuestionID != "" {
+		q, e := srv.store.GetLearningQuestion(ctx, settings.QuestionID)
+		if e != nil {
+			return e
+		}
+		if q.Status != "active" {
+			return nil
+		}
+	}
+	_, _, err = srv.enqueueKnowledgeArticleScope(ctx, profile.ID, true, store.KnowledgeScope{QuestionID: settings.QuestionID})
 	return err
 }
 
@@ -65,7 +74,7 @@ func (srv *Server) enqueueKnowledgeArticle(ctx context.Context, profileID string
 }
 func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID string, automatic bool, scope store.KnowledgeScope) (*store.KnowledgeArticleRecord, bool, error) {
 	if automatic {
-		id, err := srv.store.NextAutomaticKnowledgeCandidate(ctx, profileID)
+		id, err := srv.store.NextAutomaticKnowledgeCandidateForQuestion(ctx, profileID, scope.QuestionID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -89,6 +98,9 @@ func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID s
 		}
 	}
 	if len(req.Materials) < 2 && automatic {
+		if scope.QuestionID != "" {
+			return nil, false, nil
+		}
 		_, err := srv.store.DB.ExecContext(ctx, `INSERT INTO knowledge_discovery_cursors(profile_id,last_seq) VALUES(?,?) ON CONFLICT(profile_id) DO UPDATE SET last_seq=MAX(last_seq,excluded.last_seq)`, profileID, last)
 		return nil, false, err
 	}
@@ -159,7 +171,32 @@ func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 	if status != 0 {
 		w.WriteHeader(status)
 	}
-	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates.Items, "CandidatePage": knowledgeListView(r, "candidate", candidates.Page, candidates.PerPage, candidates.Total), "Sources": sources.Items, "SourcePage": knowledgeListView(r, "source", sources.Page, sources.PerPage, sources.Total), "SourceMissing": sources.SelectedUnavailable, "Podcasts": podcasts, "Articles": records.Items, "ArticlePage": knowledgeListView(r, "article", records.Page, records.PerPage, records.Total), "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
+	questions, err := srv.store.ListLearningQuestions(r.Context(), "", "")
+	if err != nil {
+		http.Error(w, "读取学习问题失败", 500)
+		return
+	}
+	selectedQuestionSetting := settings.QuestionID
+	if action == "settings" {
+		selectedQuestionSetting = r.Form.Get("question_id")
+	}
+	knownQuestions := map[string]bool{}
+	for _, q := range questions {
+		knownQuestions[q.ID] = true
+	}
+	for _, id := range []string{settings.QuestionID, r.Form.Get("question_id"), r.Form.Get("list_question")} {
+		if id != "" && !knownQuestions[id] {
+			q, e := srv.store.GetLearningQuestion(r.Context(), id)
+			if e == nil {
+				questions = append(questions, q)
+				knownQuestions[id] = true
+			} else if !errors.Is(e, store.ErrNotFound) {
+				http.Error(w, "读取选定问题失败", 500)
+				return
+			}
+		}
+	}
+	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"SelectedQuestionSetting": selectedQuestionSetting, "Questions": questions, "Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates.Items, "CandidatePage": knowledgeListView(r, "candidate", candidates.Page, candidates.PerPage, candidates.Total), "Sources": sources.Items, "SourcePage": knowledgeListView(r, "source", sources.Page, sources.PerPage, sources.Total), "SourceMissing": sources.SelectedUnavailable, "Podcasts": podcasts, "Articles": records.Items, "ArticlePage": knowledgeListView(r, "article", records.Page, records.PerPage, records.Total), "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
 		http.Error(w, "渲染文章列表失败", 500)
 	}
 }
@@ -174,7 +211,7 @@ func (srv *Server) handleKnowledgeArticleGenerate(w http.ResponseWriter, r *http
 		http.Error(w, "读取默认文章偏好失败", 500)
 		return
 	}
-	scope := store.KnowledgeScope{PodcastID: r.FormValue("podcast"), Theme: r.FormValue("theme"), From: r.FormValue("from"), Until: r.FormValue("until"), ExploreHistory: r.FormValue("explore_history") == "on"}
+	scope := store.KnowledgeScope{QuestionID: r.FormValue("question_id"), PodcastID: r.FormValue("podcast"), Theme: r.FormValue("theme"), From: r.FormValue("from"), Until: r.FormValue("until"), ExploreHistory: r.FormValue("explore_history") == "on"}
 	if source := strings.SplitN(r.FormValue("source"), ":", 2); len(source) == 2 {
 		scope.SourceType, scope.SourceID = source[0], source[1]
 	}
@@ -196,7 +233,7 @@ func (srv *Server) handleKnowledgeArticleSettings(w http.ResponseWriter, r *http
 	}
 	daily, e1 := strconv.Atoi(r.FormValue("daily_limit"))
 	debounce, e2 := strconv.Atoi(r.FormValue("debounce_minutes"))
-	settings := store.KnowledgeArticleSettings{Enabled: r.FormValue("enabled") == "on", DailyLimit: daily, DebounceMinutes: debounce, Audience: r.FormValue("audience"), Style: r.FormValue("style")}
+	settings := store.KnowledgeArticleSettings{Enabled: r.FormValue("enabled") == "on", DailyLimit: daily, DebounceMinutes: debounce, Audience: r.FormValue("audience"), Style: r.FormValue("style"), QuestionID: r.FormValue("question_id")}
 	if e1 != nil || e2 != nil {
 		srv.renderKnowledgeArticles(w, r, 400, "频率必须为整数", "settings")
 		return
@@ -451,6 +488,12 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 	diffs := knowledgeDiffs(revisions)
 	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
 	data["Coverage"], data["Candidates"] = req.Coverage, req.Candidates
+	data["Question"] = req.Question
+	if req.Question != nil {
+		current, e := srv.store.GetLearningQuestion(r.Context(), req.Question.ID)
+		data["QuestionMissing"] = e != nil
+		data["QuestionChanged"] = e == nil && current.Revision != req.Question.Revision
+	}
 	if err := srv.tmpl.Render(w, "knowledge_article.html", data); err != nil {
 		http.Error(w, "渲染文章失败", 500)
 	}
@@ -639,7 +682,7 @@ func knowledgeListQuery(r *http.Request, kind string) store.KnowledgeListQuery {
 	if kind == "source" {
 		text = r.Form.Get("source_query")
 	}
-	return store.KnowledgeListQuery{Text: text, Status: r.Form.Get(kind + "_status"), Theme: r.Form.Get("list_theme"), Page: page, PerPage: 20}
+	return store.KnowledgeListQuery{QuestionID: r.FormValue("list_question"), Text: text, Status: r.Form.Get(kind + "_status"), Theme: r.Form.Get("list_theme"), Page: page, PerPage: 20}
 }
 
 type knowledgeListNavigation struct {
@@ -652,7 +695,7 @@ func knowledgeListView(r *http.Request, kind string, page, size, total int) know
 	link := func(n int) string {
 		values := url.Values{}
 		// Preserve only list/scope fields; never put CSRF tokens or editor prose in URLs.
-		for _, key := range []string{"article_page", "candidate_page", "source_page", "source_query", "list_query", "list_theme", "article_status", "candidate_status", "source", "podcast", "theme", "from", "until", "explore_history", "history_cursor", "material"} {
+		for _, key := range []string{"article_page", "candidate_page", "source_page", "source_query", "list_query", "list_theme", "list_question", "question_id", "article_status", "candidate_status", "source", "podcast", "theme", "from", "until", "explore_history", "history_cursor", "material"} {
 			if v := r.Form[key]; len(v) > 0 {
 				values[key] = v
 			}

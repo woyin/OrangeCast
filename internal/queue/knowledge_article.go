@@ -45,6 +45,9 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 		return w.store.SaveJobResult(ctx, job.ID, `{"superseded":true}`, models.JobResultComplete)
 	}
 	result, err := w.groundedTextStep(ctx, job, bundle, input.Request, exec, func() error {
+		if err := w.store.CheckLearningQuestionExecution(ctx, input.Request.Question, job.Automated); err != nil {
+			return err
+		}
 		if err := w.store.CheckKnowledgeMaterials(ctx, article.ProfileID, exec.ConfiguredProvider, input.Request.Materials); err != nil {
 			return err
 		}

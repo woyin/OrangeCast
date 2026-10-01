@@ -16,6 +16,7 @@ func (s *Store) recallKnowledgePool(ctx context.Context, profile, name string, r
 	if req.ScopeJSON != "" && json.Unmarshal([]byte(req.ScopeJSON), &scope) != nil {
 		return req, ErrInvalidEditorialState
 	}
+	scope.Question = req.Question
 	q := scopeQuery(scope)
 	q.Recall, q.MetadataOnly, q.PerPage = true, true, 200
 	q.SendProvider, q.RecallProfileID = name, profile
@@ -80,6 +81,10 @@ func (s *Store) recallKnowledgePool(ctx context.Context, profile, name string, r
 			m = *item
 		} else {
 			coverage.ReadCount++
+		}
+		if !questionAllowsMaterial(req.Question, m) {
+			c.State, c.Reason = "skipped", "不属于冻结的问题材料范围"
+			continue
 		}
 		m.RetrievalReason = "本地词项召回/来源轮转；相关性不表示支持论点"
 		if c.LexicalClue != "" {

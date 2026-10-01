@@ -17,6 +17,9 @@ import (
 
 // KnowledgeScope expresses human-selected learning material scope and history cursor.
 type KnowledgeScope struct {
+	ExpectedQuestionRevision                            int                              `json:"expected_question_revision,omitempty"`
+	QuestionID                                          string                           `json:"question_id,omitempty"`
+	Question                                            *provider.FrozenLearningQuestion `json:"frozen_question,omitempty"`
 	PodcastID, SourceType, SourceID, Theme, From, Until string
 	MaterialIDs                                         []string
 	ExploreHistory                                      bool
@@ -92,9 +95,12 @@ func (s *Store) knowledgeMaterial(ctx context.Context, profile, name, id string)
 	return &m, nil
 }
 func scopeQuery(scope KnowledgeScope) KnowledgeSearchQuery {
-	return KnowledgeSearchQuery{Kind: "materials", PodcastID: scope.PodcastID, SourceType: scope.SourceType, SourceID: scope.SourceID, Theme: scope.Theme, From: scope.From, Until: scope.Until, PerPage: 20}
+	return KnowledgeSearchQuery{Question: scope.Question, Kind: "materials", PodcastID: scope.PodcastID, SourceType: scope.SourceType, SourceID: scope.SourceID, Theme: scope.Theme, From: scope.From, Until: scope.Until, PerPage: 20}
 }
 func (s *Store) scopeAllows(ctx context.Context, scope KnowledgeScope, m provider.KnowledgeMaterial) (bool, error) {
+	if !questionAllowsMaterial(scope.Question, m) {
+		return false, nil
+	}
 	if scope.SourceID != "" && m.SourceID != scope.SourceID {
 		return false, nil
 	}
@@ -138,13 +144,38 @@ func (s *Store) BuildKnowledgeDiscoveryRequest(ctx context.Context, profile, nam
 	if _, e := s.SearchKnowledge(ctx, scopeQuery(scope)); e != nil {
 		return base, 0, "", e
 	}
+	if scope.QuestionID != "" {
+		scope.Question, err = s.FreezeLearningQuestion(ctx, scope.QuestionID, automatic)
+		if err != nil {
+			return base, 0, "", err
+		}
+		if scope.ExpectedQuestionRevision > 0 && scope.Question.Revision != scope.ExpectedQuestionRevision {
+			return base, 0, "", ErrConflict
+		}
+		base.Question = scope.Question
+		latestQuestion, e := s.GetLearningQuestion(ctx, scope.QuestionID)
+		if e != nil {
+			return base, 0, "", e
+		}
+		latest = latestQuestion.UpdatedAt
+		clause, args := questionMaterialFilter(scope.Question)
+		var changed string
+		if e = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(d.updated_at),'') FROM knowledge_search_docs d WHERE d.kind IN ('keypoint','source_note','owner_reflection') AND `+clause, args...).Scan(&changed); e != nil {
+			return base, 0, "", e
+		}
+		if changed > latest {
+			latest = changed
+		}
+	}
 	base.Materials = nil
-	base.ScopeJSON = jsonString(scope)
+	localScope := scope
+	localScope.Question = nil
+	base.ScopeJSON = jsonString(localScope)
 	if len(scope.MaterialIDs) > 20 || scope.HistoryCursor < 0 {
 		return base, 0, "", ErrInvalidEditorialState
 	}
 	cursor := int64(0)
-	if automatic {
+	if automatic && scope.QuestionID == "" {
 		err = s.DB.QueryRowContext(ctx, `SELECT last_seq FROM knowledge_discovery_cursors WHERE profile_id=?`, profile).Scan(&cursor)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return base, 0, "", err
@@ -152,7 +183,7 @@ func (s *Store) BuildKnowledgeDiscoveryRequest(ctx context.Context, profile, nam
 	}
 	ids := append([]string(nil), scope.MaterialIDs...)
 	last := cursor
-	if scope.ExploreHistory || automatic {
+	if scope.QuestionID == "" && (scope.ExploreHistory || automatic) {
 		start := cursor
 		if scope.ExploreHistory {
 			start = scope.HistoryCursor
@@ -177,7 +208,13 @@ func (s *Store) BuildKnowledgeDiscoveryRequest(ctx context.Context, profile, nam
 			return base, 0, "", err
 		}
 	} else if len(ids) == 0 {
-		result, err := s.SearchKnowledge(ctx, scopeQuery(scope))
+		query := scopeQuery(scope)
+		if scope.Question != nil {
+			query.Recall, query.MetadataOnly = true, true
+			query.SendProvider, query.RecallProfileID = name, profile
+			query.PerPage = 200
+		}
+		result, err := s.SearchKnowledge(ctx, query)
 		if err != nil {
 			return base, 0, "", err
 		}
@@ -491,6 +528,9 @@ func (s *Store) StartKnowledgeCandidate(ctx context.Context, candidateID string,
 	req.Materials = selectedKnowledgeMaterials(req.Materials, topic.MaterialIDs)
 	req.Topic = &topic
 	req.DiscoveryBatchID = batch.ID
+	if err := s.CheckLearningQuestionExecution(ctx, req.Question, automatic); err != nil {
+		return nil, false, err
+	}
 	if err := s.CheckKnowledgeMaterials(ctx, batch.ProfileID, batch.Provider, req.Materials); err != nil {
 		return nil, false, err
 	}
@@ -503,6 +543,9 @@ func (s *Store) StartKnowledgeCandidate(ctx context.Context, candidateID string,
 		return nil, false, err
 	}
 	defer tx.Rollback()
+	if err := checkQuestionAdmission(ctx, tx, req.Question, automatic, false); err != nil {
+		return nil, false, err
+	}
 	// Repeat identity check inside the transaction: simultaneous clicks charge once.
 	if err := tx.QueryRowContext(ctx, `SELECT article_id FROM knowledge_topic_candidates WHERE id=?`, candidateID).Scan(&articleID); err != nil {
 		return nil, false, err
@@ -535,6 +578,9 @@ func (s *Store) StartKnowledgeCandidate(ctx context.Context, candidateID string,
 	articleID = uuid.NewString()
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("candidate:"+candidateID)))
 	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_articles(id,profile_id,input_hash,input_json,status,stage,title,thesis,topic_json,provider,model,automated,review_model,discovery_batch_id,candidate_id)VALUES(?,?,?,?,'select','select',?,?,?,?,?,?,?,?,?)`, articleID, batch.ProfileID, hash, jsonString(req), topic.Title, topic.Thesis, topicJSON, batch.Provider, batch.Model, automatic, req.ReviewModel, batch.ID, candidateID); err != nil {
+		return nil, false, err
+	}
+	if err := attachGeneratedQuestionArticle(ctx, tx, req.Question, articleID); err != nil {
 		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE knowledge_topic_candidates SET article_id=?,status='selected' WHERE id=? AND article_id=''`, articleID, candidateID); err != nil {
@@ -663,8 +709,13 @@ func selectedKnowledgeMaterials(materials []provider.KnowledgeMaterial, ids []st
 
 // NextAutomaticKnowledgeCandidate retrieves a previously discovered waiting direction.
 func (s *Store) NextAutomaticKnowledgeCandidate(ctx context.Context, profile string) (string, error) {
+	return s.NextAutomaticKnowledgeCandidateForQuestion(ctx, profile, "")
+}
+
+// NextAutomaticKnowledgeCandidateForQuestion prevents candidates leaking across question scopes.
+func (s *Store) NextAutomaticKnowledgeCandidateForQuestion(ctx context.Context, profile, questionID string) (string, error) {
 	var id string
-	err := s.DB.QueryRowContext(ctx, `SELECT c.id FROM knowledge_topic_candidates c JOIN knowledge_discovery_batches b ON b.id=c.batch_id WHERE b.profile_id=? AND b.automated=1 AND c.status='waiting' AND c.article_id='' ORDER BY c.created_at,c.id LIMIT 1`, profile).Scan(&id)
+	err := s.DB.QueryRowContext(ctx, `SELECT c.id FROM knowledge_topic_candidates c JOIN knowledge_discovery_batches b ON b.id=c.batch_id WHERE b.profile_id=? AND b.automated=1 AND c.status='waiting' AND c.article_id='' AND COALESCE(json_extract(b.input_json,'$.learning_question.id'),'')=? AND (?='' OR EXISTS(SELECT 1 FROM learning_questions q WHERE q.id=? AND q.status='active' AND q.revision=json_extract(b.input_json,'$.learning_question.revision'))) ORDER BY c.created_at,c.id LIMIT 1`, profile, questionID, questionID, questionID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

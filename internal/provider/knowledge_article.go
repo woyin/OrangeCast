@@ -97,8 +97,30 @@ type KnowledgeExclusion struct {
 	Reason     string `json:"reason"`
 }
 
+// LearningQuestionLink is an organization relation, never a model data permission.
+type LearningQuestionLink struct {
+	Kind        string   `json:"kind"`
+	ObjectID    string   `json:"object_id"`
+	SourceType  string   `json:"source_type,omitempty"`
+	SourceID    string   `json:"source_id,omitempty"`
+	Version     int      `json:"version,omitempty"`
+	MaterialIDs []string `json:"material_ids,omitempty"`
+}
+
+// FrozenLearningQuestion preserves the Owner's question and confirmed scope at admission.
+type FrozenLearningQuestion struct {
+	ID         string                 `json:"id"`
+	Revision   int                    `json:"revision"`
+	Body       string                 `json:"body"`
+	Goal       string                 `json:"goal"`
+	ThemeID    string                 `json:"theme_id,omitempty"`
+	TargetDate string                 `json:"target_date,omitempty"`
+	Links      []LearningQuestionLink `json:"confirmed_links"`
+}
+
 // KnowledgeArticleRequest freezes the inputs to one independent model step.
 type KnowledgeArticleRequest struct {
+	Question         *FrozenLearningQuestion         `json:"learning_question,omitempty"`
 	Candidates       []KnowledgeRecallCandidate      `json:"candidates,omitempty"`
 	Coverage         *KnowledgeRecallCoverage        `json:"coverage,omitempty"`
 	StageConfigs     map[string]KnowledgeStageConfig `json:"stage_configs,omitempty"`
@@ -154,6 +176,9 @@ const knowledgeArticlePrompt = `你是个人知识文章助手。只使用提供
 // KnowledgeArticleStep runs through the existing OpenAI-compatible transport.
 func knowledgeArticleInstructions(req KnowledgeArticleRequest) string {
 	instructions := knowledgeArticlePrompt
+	if req.Question != nil {
+		instructions += "\nlearning_question 是Owner的学习问题与目标，不是事实或已经解决的结论。只围绕该问题发现、选材和写作；资料不足说明缺口，不补外部事实，不决定问题是否解决。confirmed_links只表达组织范围，不是来源证据。"
+	}
 	if req.PromptVersion == "knowledge-article-v2" || req.PromptVersion == "knowledge-article-v3" || req.PromptVersion == KnowledgeArticlePromptVersion {
 		instructions += "\n直接引语须另加 quotes:[{material_id,text}]，text 必须逐字来自该来源材料的证据，并在段落中出现；个人笔记不可作来源直接引语。修订时按 instructions 的明确要求修改，审校问题注明段落序号。"
 	}
