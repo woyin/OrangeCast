@@ -65,7 +65,7 @@ func (srv *Server) handleNotes(w http.ResponseWriter, r *http.Request) {
 	if q.Kind != "keypoint" {
 		q.Kind = "notes"
 	}
-	result, err := srv.store.SearchKnowledge(r.Context(), q)
+	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal})
 	if err != nil {
 		http.Error(w, "读取笔记失败："+err.Error(), 500)
 		return

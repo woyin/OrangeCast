@@ -62,7 +62,7 @@ func (s *Store) SearchKeyPointsHybrid(ctx context.Context, query string, limit i
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	result, err := s.SearchKnowledge(ctx, KnowledgeSearchQuery{Text: query, Kind: "keypoint", PerPage: limit, Recall: true})
+	result, err := s.Retrieve(ctx, KnowledgeRetrieveQuery{Search: KnowledgeSearchQuery{Text: query, Kind: "keypoint", PerPage: limit, Recall: true}, Purpose: RetrieveLocal})
 	if err != nil {
 		return nil, err
 	}

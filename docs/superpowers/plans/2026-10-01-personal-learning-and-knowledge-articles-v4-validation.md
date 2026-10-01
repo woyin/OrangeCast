@@ -40,6 +40,8 @@
 
 | R05 | 当前验证：ListeningReflection/DashboardNextActions/LearningHome race 通过（server 6.411s/store 17.080s）；SharedPlaybackController/RootEditor/Logout 通过；真实audio ended关闭/启用对照、无记录/无焦点变化、真实循环与控制睡眠期限对照，截图已查看；复用0070已安装默认关闭偏好，无额外模型迁移。 | 技术验证完成；独立待验见下 | `26e7513` |
 
+| R06 | 当前相关store/server/queue race通过；真实v2备份/恢复/重放/purge、Worker到期清理、实际浏览器offline开关与双窗口CAS/本地副本恢复，跨窗口退出旧播放缺口修复后重测/login且spec=null/正文副本空/本地清理；截图已查看。物理手机与真实Owner质量独立待验。 | 技术验证完成；独立待验见下 | `bf521e9` |
+
 ## 独立待验
 
 - 真实个人资料和Owner五维评分：待验证。

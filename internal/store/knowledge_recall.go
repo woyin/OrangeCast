@@ -24,7 +24,7 @@ func (s *Store) recallKnowledgePool(ctx context.Context, profile, name string, r
 	if len([]rune(q.Text)) > 200 {
 		q.Text = string([]rune(q.Text)[:200])
 	}
-	result, err := s.SearchKnowledge(ctx, q)
+	result, err := s.Retrieve(ctx, KnowledgeRetrieveQuery{Search: q, Purpose: RetrieveExternal})
 	if err != nil {
 		return req, err
 	}

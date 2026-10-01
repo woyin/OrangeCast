@@ -482,7 +482,7 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := knowledgeQuery(r)
-	result, err := srv.store.SearchKnowledge(r.Context(), q)
+	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal})
 	if err != nil {
 		code := 500
 		if errors.Is(err, store.ErrInvalidEditorialState) {
