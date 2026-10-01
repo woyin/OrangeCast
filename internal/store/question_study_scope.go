@@ -178,6 +178,7 @@ func (s *Store) freezeQuestionStudyMaterial(ctx context.Context, hit KnowledgeSe
 	}
 	material := &provider.QuestionStudyMaterial{Key: hit.Key, Kind: hit.Kind, SourceType: hit.SourceType, SourceID: hit.SourceID, Revision: revision, Content: body}
 	var refs []string
+	capturedSnapshot := ""
 	switch hit.Kind {
 	case "original", "document":
 		refs = []string{hit.SegmentID}
@@ -185,6 +186,16 @@ func (s *Store) freezeQuestionStudyMaterial(ctx context.Context, hit KnowledgeSe
 		note, err := s.GetOwnerNote(ctx, hit.ObjectID)
 		if err != nil {
 			return nil, err
+		}
+		if note.Revision != hit.Revision {
+			return nil, ErrConflict
+		}
+		if strings.TrimSpace(note.AnchorJSON) != "" {
+			var anchor models.NoteAnchor
+			if json.Unmarshal([]byte(note.AnchorJSON), &anchor) != nil {
+				return nil, ErrConflict
+			}
+			capturedSnapshot = anchor.SnapshotID
 		}
 		raw := note.CitationsJSON
 		if hit.Kind == "owner_reflection" {
@@ -214,9 +225,18 @@ func (s *Store) freezeQuestionStudyMaterial(ctx context.Context, hit KnowledgeSe
 		return nil, ErrConflict
 	}
 	if len(refs) > 0 {
-		snapshot, err := s.FreezeSourceSnapshot(ctx, models.SourceType(hit.SourceType), hit.SourceID)
+		var snapshot *models.SourceSnapshot
+		var err error
+		if capturedSnapshot != "" {
+			snapshot, err = s.GetSourceSnapshot(ctx, capturedSnapshot)
+		} else {
+			snapshot, err = s.FreezeSourceSnapshot(ctx, models.SourceType(hit.SourceType), hit.SourceID)
+		}
 		if err != nil {
 			return nil, err
+		}
+		if snapshot.SourceType != models.SourceType(hit.SourceType) || snapshot.SourceID != hit.SourceID {
+			return nil, ErrConflict
 		}
 		_, audio, docs, err := s.SnapshotContent(ctx, snapshot.ID)
 		if err != nil {

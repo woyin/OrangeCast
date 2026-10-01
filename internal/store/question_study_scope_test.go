@@ -188,3 +188,33 @@ func TestQuestionStudyScopeInvalidReferenceAndHistoryCapacity(t *testing.T) {
 		t.Fatal("oversized accepted history silently truncated", err)
 	}
 }
+
+func TestQuestionStudyScopeKeepsNoteCapturedVersion(t *testing.T) {
+	s := newTestStore(t)
+	episode := seedIntentEpisode(t, s, "study-old-note")
+	version := seedSnapshotTranscript(t, s, models.SourceEpisode, episode, "旧版本的条件")
+	snapshot, err := s.FreezeSourceSnapshot(t.Context(), models.SourceEpisode, episode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, _ := json.Marshal(models.NoteAnchor{SnapshotID: snapshot.ID, Version: version, SegmentIDs: []string{"seg-0001"}})
+	note, err := s.CreateOwnerNote(t.Context(), models.OwnerNote{SourceType: "episode", SourceID: episode, Kind: "source_note", Content: "我记录的旧条件", CitationsJSON: `["seg-0001"]`, AnchorJSON: string(anchor)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := createQuestion(t, s)
+	question = questionChange(t, s, question, LearningQuestionChange{Action: "link", Link: provider.LearningQuestionLink{Kind: "note", ObjectID: note.ID}})
+	session, err := s.StartQuestionStudySession(t.Context(), question.ID, "9c2a3b93-7a80-40bf-a7bb-20ee3a178c3e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedSnapshotTranscript(t, s, models.SourceEpisode, episode, "新版本的另一条件")
+	scope, err := s.FreezeQuestionStudyScope(t.Context(), session.ID, "理解旧笔记", "pod", nil)
+	if err != nil || len(scope.Materials) != 1 {
+		t.Fatal(scope, err)
+	}
+	material := scope.Materials[0]
+	if material.SnapshotID != snapshot.ID || len(material.Segments) != 1 || material.Segments[0].Text != "旧版本的条件" {
+		t.Fatal("note silently rebased onto current source", material)
+	}
+}
