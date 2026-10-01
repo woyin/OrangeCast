@@ -272,6 +272,9 @@ func (s *Store) CommitVoiceASR(ctx context.Context, jobID string, in VoiceASRInp
 		return err
 	}
 	defer tx.Rollback()
+	if err = checkRunControl(ctx, tx, jobID); err != nil {
+		return err
+	}
 	d, err := scanVoice(tx.QueryRowContext(ctx, `SELECT `+voiceColumns+` FROM voice_note_drafts WHERE id=?`, in.DraftID))
 	if err != nil {
 		return err

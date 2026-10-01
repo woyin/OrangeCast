@@ -27,7 +27,7 @@ func (srv *Server) Router() http.Handler {
 		if r.URL.Path == "/api/voice-notes/upload" {
 			r.Body = http.MaxBytesReader(w, r.Body, (20<<20)+(64<<10))
 		}
-		if r.URL.Path == "/review/daily/action" {
+		if r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		}
 		privateRoutes.ServeHTTP(w, r)
@@ -102,6 +102,10 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/workbench/reviews/claims", srv.handleClaimReviewRun) // R20：独立主张审校入队
 	mux.HandleFunc("/workbench/write", srv.handleArticleWriterRun)
 	mux.HandleFunc("/workbench/revise", srv.handleArticleRevisionWriterRun)
+	mux.HandleFunc("/automation", srv.handleAutomation)
+	mux.HandleFunc("/api/automation", srv.handleAutomation)
+	mux.HandleFunc("/automation/action", srv.handleAutomationAction)
+	mux.HandleFunc("/automation/", srv.handleAutomationDetail)
 	mux.HandleFunc("/progress", srv.handleProgress)
 	mux.HandleFunc("/api/progress", srv.handleProgressAPI)
 	mux.HandleFunc("/podcasts", srv.handlePodcasts)

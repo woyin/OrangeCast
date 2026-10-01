@@ -297,6 +297,9 @@ func (s *Store) CommitLearningReview(ctx context.Context, jobID, batchID string,
 		return err
 	}
 	defer tx.Rollback()
+	if err = checkRunControl(ctx, tx, jobID); err != nil {
+		return err
+	}
 	var state string
 	if err = tx.QueryRowContext(ctx, `SELECT result_state FROM processing_jobs WHERE id=? AND source_id=? AND source_type='learning_review'`, jobID, batchID).Scan(&state); err != nil {
 		return err

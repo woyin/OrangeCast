@@ -80,7 +80,7 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if os.Getenv("CWP_BROWSER_STAGE") == "p7" {
+	if os.Getenv("CWP_BROWSER_STAGE") == "p7" || os.Getenv("CWP_BROWSER_STAGE") == "p8" {
 		profile, err := srv.store.EnsureDefaultEditorialProfile(t.Context())
 		if err != nil {
 			t.Fatal(err)
@@ -102,7 +102,9 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 	}
 	workerCtx, workerCancel := context.WithCancel(t.Context())
 	defer workerCancel()
-	go srv.worker.Run(workerCtx)
+	if os.Getenv("CWP_BROWSER_STAGE") != "p8" {
+		go srv.worker.Run(workerCtx)
+	}
 
 	addr := os.Getenv("CWP_BROWSER_ADDR")
 	if addr == "" {

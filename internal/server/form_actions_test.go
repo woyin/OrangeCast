@@ -27,3 +27,13 @@ func TestQuestionFormNamedActionDraftIsolationAndConflict(t *testing.T) {
 		t.Fatal(err, string(out))
 	}
 }
+
+func TestAutomationFormsPreserveReasonAndOnlyPollVisibleStatus(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	if out, e := exec.Command(node, filepath.Join("testdata", "automation-forms.cjs")).CombinedOutput(); e != nil {
+		t.Fatal(e, string(out))
+	}
+}

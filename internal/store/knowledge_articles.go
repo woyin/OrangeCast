@@ -607,6 +607,9 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 		return err
 	}
 	defer tx.Rollback()
+	if err = checkRunControl(ctx, tx, job.ID); err != nil {
+		return err
+	}
 	var state string
 	if err := tx.QueryRowContext(ctx, `SELECT result_state FROM processing_jobs WHERE id=?`, job.ID).Scan(&state); err != nil {
 		return err

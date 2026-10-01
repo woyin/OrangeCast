@@ -139,10 +139,18 @@ func (s *Store) SaveJobResult(ctx context.Context, jobID, resultJSON, state stri
 // 模型调用前调用，崩溃/重启后失败收尾据此区分“调用前失败”与“远端结果未知”；
 // 幂等。仅 running/queued 任务可标记。
 func (s *Store) MarkJobRemoteCallStarted(ctx context.Context, jobID string) error {
-	_, err := s.DB.ExecContext(ctx,
-		`UPDATE processing_jobs SET remote_call_started = 1, updated_at = datetime('now') WHERE id = ? AND status IN ('queued','running')`,
-		jobID)
-	return err
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = checkRunControl(ctx, tx, jobID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE processing_jobs SET remote_call_started=1,updated_at=datetime('now') WHERE id=? AND status IN ('queued','running')`, jobID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // isUniqueConstraintErr 判定是否唯一约束冲突（modernc/sqlite 驱动错误文本）。

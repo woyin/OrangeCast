@@ -390,3 +390,8 @@ func (s *Store) getReservationByJob(ctx context.Context, jobID string) (*models.
 	}
 	return r, nil
 }
+
+// GetJobBudgetReservation reads an existing hold without admitting or settling a call.
+func (s *Store) GetJobBudgetReservation(ctx context.Context, jobID string) (*models.BudgetReservation, error) {
+	return s.getReservationByJob(ctx, jobID)
+}

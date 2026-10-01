@@ -121,8 +121,8 @@ func (s *Store) FreezeJobTaskConfig(ctx context.Context, jobID string, jobType m
 // MarkJobRunning 原子状态转换 queued→running，防止重复处理。返回是否成功 claim。
 func (s *Store) MarkJobRunning(ctx context.Context, jobID string) (bool, error) {
 	res, err := s.DB.ExecContext(ctx,
-		`UPDATE processing_jobs SET status = 'running', updated_at = datetime('now')
-		 WHERE id = ? AND status = 'queued'`, jobID)
+		`UPDATE processing_jobs SET status = 'running', control_revision=control_revision+1, updated_at = datetime('now')
+		 WHERE id = ? AND status = 'queued' AND `+runAllowedSQL, jobID)
 	if err != nil {
 		return false, err
 	}
@@ -317,9 +317,9 @@ func (s *Store) ClaimNextJob(ctx context.Context, leaseDuration string) (*models
 	var id string
 	err = tx.QueryRowContext(ctx,
 		`SELECT id FROM processing_jobs
-		 WHERE status = 'queued'
-		    OR (status = 'running' AND lease_until IS NOT NULL AND lease_until < datetime('now'))
-		 ORDER BY created_at LIMIT 1`).Scan(&id)
+		 WHERE (status = 'queued'
+		    OR (status = 'running' AND lease_until IS NOT NULL AND lease_until < datetime('now'))) AND `+runAllowedSQL+`
+		 ORDER BY priority DESC,created_at,rowid LIMIT 1`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -329,8 +329,8 @@ func (s *Store) ClaimNextJob(ctx context.Context, leaseDuration string) (*models
 
 	// 原子 claim：防止两个 worker 同时领取同一个 job。
 	res, err := tx.ExecContext(ctx,
-		`UPDATE processing_jobs SET status='running', lease_until=datetime('now', ?), heartbeat_at=datetime('now'), updated_at=datetime('now')
-		 WHERE id = ? AND (status='queued' OR (status='running' AND lease_until IS NOT NULL AND lease_until < datetime('now')))`,
+		`UPDATE processing_jobs SET status='running', control_revision=control_revision+1, lease_until=datetime('now', ?), heartbeat_at=datetime('now'), updated_at=datetime('now')
+		 WHERE id = ? AND (status='queued' OR (status='running' AND lease_until IS NOT NULL AND lease_until < datetime('now'))) AND `+runAllowedSQL,
 		leaseDuration, id)
 	if err != nil {
 		return nil, err

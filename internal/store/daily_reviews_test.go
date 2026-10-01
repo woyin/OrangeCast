@@ -494,7 +494,7 @@ func TestDailyReviewUpgradePreservesOldQuestionAndAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{`DROP TRIGGER review_item_schedule`, `DROP TABLE review_session_items`, `DROP TABLE review_sessions`, `DROP TABLE review_owner_actions`, `DROP TABLE review_schedules`, `DROP TABLE review_schedule_settings`, `ALTER TABLE learning_review_answers DROP COLUMN note_id`, `DELETE FROM schema_migrations WHERE version=68`} {
+	for _, statement := range []string{`DROP TRIGGER run_control_admission`, `DROP TRIGGER run_control_lane`, `DROP TABLE run_control_actions`, `DROP TABLE run_controls`, `DROP INDEX run_control_claim`, `ALTER TABLE processing_jobs DROP COLUMN run_lane`, `ALTER TABLE processing_jobs DROP COLUMN priority`, `ALTER TABLE processing_jobs DROP COLUMN stop_requested`, `ALTER TABLE processing_jobs DROP COLUMN control_revision`, `DELETE FROM schema_migrations WHERE version=69`, `DROP TRIGGER review_item_schedule`, `DROP TABLE review_session_items`, `DROP TABLE review_sessions`, `DROP TABLE review_owner_actions`, `DROP TABLE review_schedules`, `DROP TABLE review_schedule_settings`, `ALTER TABLE learning_review_answers DROP COLUMN note_id`, `DELETE FROM schema_migrations WHERE version=68`} {
 		if _, err = s.DB.Exec(statement); err != nil {
 			t.Fatal(statement, err)
 		}

@@ -194,6 +194,9 @@ func (s *Store) CommitKnowledgeUpdateAnalysis(ctx context.Context, job *models.P
 		return err
 	}
 	defer tx.Rollback()
+	if err = checkRunControl(ctx, tx, job.ID); err != nil {
+		return err
+	}
 	var resultState string
 	if err = tx.QueryRowContext(ctx, `SELECT result_state FROM processing_jobs WHERE id=?`, job.ID).Scan(&resultState); err != nil {
 		return err

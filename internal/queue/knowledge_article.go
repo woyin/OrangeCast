@@ -110,6 +110,9 @@ func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob
 	if err := validate(); err != nil {
 		return nil, err
 	}
+	if err := w.store.CheckRunControl(ctx, job.ID); err != nil {
+		return nil, err
+	}
 	if cp.Result == nil {
 		if exec.RemoteCallStarted {
 			if err := w.store.SaveJobResult(ctx, job.ID, "", models.JobResultUnknown); err != nil {

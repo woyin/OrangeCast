@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"path/filepath"
@@ -47,7 +48,27 @@ func TestKnowledgeWeightedSearchUpgradePreservesV3JobsAndNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finishKnowledgeTestStage(t, s, true)
+	// Seed the historical write stage with SQL; current control-aware execution
+	// cannot run against an intentionally pre-0069 schema.
+	topic := provider.KnowledgeTopic{Title: "旧方向", Thesis: "保留个人理解", Question: "如何保留理解？", Outline: "记录与解释", Rationale: "旧输入", MaterialIDs: []string{materials[0].ID, materials[1].ID}, Sufficient: true, Score: 90}
+	req.Topic = &topic
+	req.Stage = "write"
+	nextID := uuid.NewString()
+	expected := 0
+	input := KnowledgeStageInput{ArticleID: article.ID, Stage: "write", Request: req, ExpectedRevision: &expected}
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE processing_jobs SET status='succeeded',result_state='complete' WHERE source_type='knowledge_article' AND source_id=?`, []any{article.ID}},
+		{`UPDATE knowledge_articles SET stage='write',status='write',title=?,thesis=?,topic_json=? WHERE id=?`, []any{topic.Title, topic.Thesis, jsonString(topic), article.ID}},
+		{`INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,input_snapshot_json,config_version,configured_provider,configured_model)VALUES(?,'knowledge_article',?,'knowledge_article','queued',?,'knowledge-article-v3','pod','old-writer')`, []any{nextID, article.ID, jsonString(input)}},
+		{`INSERT INTO knowledge_article_runs(job_id,article_id,parent_revision,stage)VALUES(?,?,0,'write')`, []any{nextID, article.ID}},
+	} {
+		if _, e := db.ExecContext(ctx, statement.sql, statement.args...); e != nil {
+			t.Fatal(e)
+		}
+	}
 	jobs, err := s.ListQueuedOrRunning(ctx)
 	if err != nil || len(jobs) != 1 {
 		t.Fatal(jobs, err)
