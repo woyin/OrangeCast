@@ -15,7 +15,7 @@ import (
 func (s *Store) SetModelPrice(ctx context.Context, price models.ModelPrice) error {
 	price.Provider = strings.ToLower(strings.TrimSpace(price.Provider))
 	price.Model = strings.TrimSpace(price.Model)
-	if price.Provider == "" || price.Model == "" || price.InputCentsPerMillion < 0 || price.OutputCentsPerMillion < 0 {
+	if price.Provider == "" || price.Model == "" || price.InputCentsPerMillion < 0 || price.OutputCentsPerMillion < 0 || (strings.HasPrefix(price.Provider, "embedding-") && price.OutputCentsPerMillion != 0) {
 		return fmt.Errorf("%w: invalid model price", ErrInvalidEditorialState)
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO model_prices(provider,model,input_cents_per_million,output_cents_per_million)

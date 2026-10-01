@@ -18,6 +18,10 @@ import (
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
+	EmbeddingBaseURL       string
+	EmbeddingAPIKey        string
+	EmbeddingModel         string
+	EmbeddingDimensions    int
 	VoiceDir               string
 	VoiceASRProvider       string
 	VoiceASRModel          string
@@ -53,6 +57,9 @@ type Config struct {
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
+		EmbeddingBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_BASE_URL")), "/"),
+		EmbeddingAPIKey:        strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_API_KEY")),
+		EmbeddingModel:         strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_MODEL")),
 		VoiceASRProvider:       strings.TrimSpace(os.Getenv("VOICE_ASR_PROVIDER")),
 		VoiceASRModel:          strings.TrimSpace(os.Getenv("VOICE_ASR_MODEL")),
 		VoiceASRBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("VOICE_ASR_BASE_URL")), "/"),
@@ -94,6 +101,16 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SESSION_SECRET 必须设置")
 	}
 	if err := c.ValidatePod(); err != nil {
+		return nil, err
+	}
+	if raw := os.Getenv("LEARNING_EMBEDDING_DIMENSIONS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 2048 {
+			return nil, fmt.Errorf("LEARNING_EMBEDDING_DIMENSIONS 必须为1至2048的整数")
+		}
+		c.EmbeddingDimensions = n
+	}
+	if err := c.ValidateEmbedding(); err != nil {
 		return nil, err
 	}
 	// 受信任代理：逗号分隔的 CIDR（如 127.0.0.1/32, 10.0.0.0/8）
@@ -179,4 +196,28 @@ func (c *Config) KnowledgeStageModels() map[string]string {
 		"review": c.KnowledgeReviewModel(), "review_final": c.KnowledgeReviewModel(),
 		"weekly_review": fallback(c.PodLearningReviewModel),
 	}
+}
+
+// ValidateEmbedding never inherits credentials or a route from text/audio providers.
+func (c *Config) ValidateEmbedding() error {
+	count := 0
+	for _, v := range []string{c.EmbeddingBaseURL, c.EmbeddingAPIKey, c.EmbeddingModel} {
+		if v != "" {
+			count++
+		}
+	}
+	if count == 0 && c.EmbeddingDimensions == 0 {
+		return nil
+	}
+	if count != 3 {
+		return fmt.Errorf("LEARNING_EMBEDDING_BASE_URL / API_KEY / MODEL 必须成组配置")
+	}
+	u, err := url.Parse(c.EmbeddingBaseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("LEARNING_EMBEDDING_BASE_URL 必须为无认证信息、查询或片段的HTTP(S)地址")
+	}
+	if strings.ContainsAny(c.EmbeddingAPIKey+c.EmbeddingModel, "\r\n") || len(c.EmbeddingModel) > 200 || c.EmbeddingDimensions < 0 || c.EmbeddingDimensions > 2048 {
+		return fmt.Errorf("LEARNING_EMBEDDING 配置无效")
+	}
+	return nil
 }

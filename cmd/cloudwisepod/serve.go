@@ -42,6 +42,7 @@ func runServe() {
 	// provider 选择器 + worker + cron 刷新器
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
 	selector.WithPod(cfg.PodAPIKey, cfg.PodBaseURL, cfg.PodModel)
+	selector.WithEmbedding(cfg.EmbeddingAPIKey, cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingDimensions)
 	// 从 SQLite settings 覆盖 key/URL（可页面配置，ADR-0009 扩展）
 	if st, err := s.GetSettings(context.Background()); err == nil {
 		selector.ApplySettingsFrom(st)

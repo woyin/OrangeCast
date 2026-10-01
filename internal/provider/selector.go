@@ -15,12 +15,14 @@ import (
 // Selector 按 Provider 名称构造 provider bundle。
 // key 和 baseURL 可在运行时从 SQLite settings 覆盖（ADR-0009 扩展）。
 type Selector struct {
-	groqAPIKey                      string
-	groqBaseURL                     string
-	openaiAPIKey                    string
-	openaiBaseURL                   string
-	podAPIKey, podBaseURL, podModel string
-	narration                       NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
+	embeddingKey, embeddingURL, embeddingModel string
+	embeddingDimensions                        int
+	groqAPIKey                                 string
+	groqBaseURL                                string
+	openaiAPIKey                               string
+	openaiBaseURL                              string
+	podAPIKey, podBaseURL, podModel            string
+	narration                                  NarrationProvider // 自托管 Kokoro（独立于 groq/openai 开关，ADR-0019）
 }
 
 // NewSelector 构造一个 Selector，初始 key 来自环境变量；URL/baseURL 留空走各 Provider 默认。
@@ -224,4 +226,15 @@ func (sel *Selector) TranscriptionConnectionID(providerName string) string {
 		base = sel.openaiBaseURL
 	}
 	return TranscriptionConnectionFingerprint(providerName, base)
+}
+
+// WithEmbedding sets only the independent learning-index route. It does no I/O.
+func (sel *Selector) WithEmbedding(key, baseURL, model string, dimensions int) *Selector {
+	sel.embeddingKey, sel.embeddingURL, sel.embeddingModel, sel.embeddingDimensions = key, baseURL, model, dimensions
+	return sel
+}
+
+// Embedding returns an explicitly configured client; no other provider is a fallback.
+func (sel *Selector) Embedding() (*EmbeddingClient, error) {
+	return NewEmbeddingClient(sel.embeddingKey, sel.embeddingURL, sel.embeddingModel, sel.embeddingDimensions)
 }

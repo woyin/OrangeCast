@@ -1,6 +1,6 @@
 # 第四轮开发原子任务清单
 
-日期：2026-10-01。基线：`3024642`，迁移截止0069。状态：**实施中；技术完成13/73，剩余60张；产品待验单列**。
+日期：2026-10-01。基线：`3024642`，迁移截止0069。状态：**实施中；技术完成14/73，剩余59张；产品待验单列**。
 
 关联：[设计文档](../specs/2026-10-01-personal-learning-and-knowledge-articles-v4-design.md)、[开发计划](2026-10-01-personal-learning-and-knowledge-articles-v4.md)、[第三轮验收](../../acceptance/2026-10-personal-learning-v3.md)。
 
@@ -29,7 +29,7 @@
 | E 学习成果包 | M8 | 5 | E01–E05 |
 | O 离线设备路径 | M9 | 11 | O01–O11 |
 | V 综合交付 | M10 | 5 | V01–V05 |
-| 合计 | M0–M10 | 73 | 技术完成13/73 |
+| 合计 | M0–M10 | 73 | 技术完成14/73 |
 
 精确依赖已进行静态检查：身份唯一、依赖存在、无自依赖、无循环。此检查仅验证任务图，不验证生产实现。
 
@@ -48,7 +48,7 @@
 - [x] [R04 将VoiceDraft采用到整理输入](#r04)
 - [x] [R05 增加可选自然结束轻提示](#r05)
 - [x] [R06 完成整理的故障与恢复验收](#r06)
-- [ ] [S01 建立统一Retrieve与FTS Adapter](#s01)
+- [x] [S01 建立统一Retrieve与FTS Adapter](#s01)
 - [ ] [S02 实现独立embedding连接预检与计价](#s02)
 - [ ] [S03 交付版本化索引与增量事件](#s03)
 - [ ] [S04 实现内容向量持久任务](#s04)
@@ -341,7 +341,7 @@
 <a id="s01"></a>
 ### S01 — 建立统一Retrieve与FTS Adapter
 
-**状态**：待实施。**依赖**：A01。**粒度**：0.5–1.5日。
+**状态**：已提交/技术验证完成。**依赖**：A01。**粒度**：0.5–1.5日。
 
 **文件/所有权**：store/knowledge_search.go；store/knowledge_recall.go；store/semantic_search.go；provider检索投影类型。
 
@@ -353,7 +353,7 @@
 
 **建议提交**：`feat(learning): s01 建立统一Retrieve与FTS Adapter`。实际标题应描述最终行为。
 
-**完成记录**：commit待填；当前验证/证据待填；真实接口/人工/设备待验条件单列。
+**完成记录**：commit `a5028dd`；当前KnowledgeSearch/KnowledgeRecall/UnifiedKnowledgeSearch store测试通过（1.967s）；检索目的显式区分local/external、旧查询分页/范围/版本DeepEqual对照、本地private可见与外发不可见、模糊目的拒绝；普通读取total_changes不变，不扫描旧字符向量。语义请求尚未就绪明确返回FTS降级；S06将接入向量适配。；真实接口/人工/设备待验条件见实施记录。
 
 <a id="s02"></a>
 ### S02 — 实现独立embedding连接预检与计价

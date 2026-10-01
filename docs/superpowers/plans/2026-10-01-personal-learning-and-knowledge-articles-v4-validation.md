@@ -42,6 +42,8 @@
 
 | R06 | 当前相关store/server/queue race通过；真实v2备份/恢复/重放/purge、Worker到期清理、实际浏览器offline开关与双窗口CAS/本地副本恢复，跨窗口退出旧播放缺口修复后重测/login且spec=null/正文副本空/本地清理；截图已查看。物理手机与真实Owner质量独立待验。 | 技术验证完成；独立待验见下 | `bf521e9` |
 
+| S01 | 当前KnowledgeSearch/KnowledgeRecall/UnifiedKnowledgeSearch store测试通过（1.967s）；检索目的显式区分local/external、旧查询分页/范围/版本DeepEqual对照、本地private可见与外发不可见、模糊目的拒绝；普通读取total_changes不变，不扫描旧字符向量。语义请求尚未就绪明确返回FTS降级；S06将接入向量适配。 | 技术验证完成；独立待验见下 | `a5028dd` |
+
 ## 独立待验
 
 - 真实个人资料和Owner五维评分：待验证。
@@ -80,3 +82,11 @@ FTS测量：Apple M4 / darwin arm64，固定10,000/50,000条合成索引，20次
 - 双标签窗口：B 同步到修订3，A旧修订409且保留A文字；明确读取服务器后展示B文字，下方仍保留A副本，没有自动采用。截图 `m1/reflection-conflict-375.png` 已实际查看。新副本在保存/丢弃/退出清空。
 - 此测试发现旧的跨窗口播放退出缺口：之前另一标签草稿清空而 audio spec 尚在。已修复单向 storage reset → expire(false)（不会广播循环）；重测真实另标签点击退出后第一标签到/login，根 spec=null、整理正文/副本为空、本地条目=null。该scratch harness PASS 109.903s并已停止。
 - 丢失保存响应的同UUID/同payload再次核对、双击/输入保护、迟到ASR、权限不支持/取消边界由实际控制器与事务测试支持；不将自建/Fake工程测试计为真实Owner或真实供应商质量。物理手机录音/后台/离线仍待产品验收。
+
+### S02 独立embedding协议与计价（当前验证）
+
+- 新配置严格使用设计中的 `LEARNING_EMBEDDING_*`，三项成组；构造及普通查询不联网，不从POD/语音继承连接。预期维度0只供明确预检，实测后固定身份；请求未配置dimensions时即使固定期望值也不添加该参数。
+- 当前协议stub实际验证：乱序索引、重复/缺失/负索引、非有限/零向量、维度变化、模型不符、HTTP 429/302、截断响应、输入16项/8KiB边界、取消和计量缺失；零自动重试。响应标准化为float32供有界矩阵使用。
+- 输入单位为供应商报告的input tokens；缺usage保持未知。输入估算采用明确标记的UTF-8字节上界启发式，冻结精确连接/model价格，embedding输出价必须为0；未定价有预算阻断，不借用POD价。店内预算事务测试通过（race）。
+- 官方协议核对： [Create embeddings](https://developers.openai.com/api/reference/ruby/resources/embeddings/methods/create)、[Vector embeddings](https://developers.openai.com/api/docs/guides/embeddings)。兼容端点需实际预检；不假定所有模型支持dimensions，不硬编码供应商价格。
+- 真实接口质量/计量尚待S07明确预检与评测；本项协议stub不能证明语义质量。可见预检/开关入口按S07交付，持久调用及receipt按S04交付。
