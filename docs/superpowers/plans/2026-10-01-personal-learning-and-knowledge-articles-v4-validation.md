@@ -1,0 +1,26 @@
+# 第四轮实施与验证记录
+
+实施起点：2026-10-01，HEAD `3024642f1263c4c03c5d097dfa504ba652950cf6`，迁移0069。用户已授权按设计、计划及任务清单完成全部开发。现有未提交修改为同轮设计文档及领域术语，予以保留。
+
+## 证据规则
+
+只记录当前执行的验证。第三轮race、覆盖率与浏览器结果为继承证据，不作为第四轮通过记录。测试仅使用独立临时目录；不迁移或写入Owner默认数据库，不修改`.env`。
+
+工程、真实模型、Owner人工质量及实体手机状态分别登记。Owner尚无个人笔记，真实3集/20笔记/2问题及人工评分待日常积累；不重复索取资料。
+
+## 固定输入
+
+`internal/evalset/personal_learning_v4.go`提供3集自建来源、20条笔记、2个问题和40条固定检索查询；包含来源/Owner身份、不同适用目的、反例、没有效果数字和5条无答案查询。查询的相关段落必须存在于同一语料。哈希由`LearningEvaluationCorpus.Fingerprint()`产生，配置与生产代码指纹随实际评测写入报告。
+
+## 当前技术记录
+
+| 任务 | 验证 | 结果 | 提交/证据 |
+| --- | --- | --- | --- |
+| A01 | go test ./internal/evalset ./internal/server -run "PersonalLearning|LearningFixtures|CommonFormActions" -count=1（记录命令，测试通过；CommonFormActions属A02） | 固定语料及既有评测通过 | 提交后登记 |
+
+## 独立待验
+
+- 真实个人资料和Owner五维评分：待验证。
+- 新embedding连接及真实召回收益：待验证。
+- 新问题对话和用途模式真实接口：待验证。
+- iOS Safari/Android Chrome实体手机、自然录音、HTTPS、后台15分钟与离线：待验证。
