@@ -24,6 +24,7 @@ type KnowledgeSearchQuery struct {
 
 // KnowledgeSearchHit keeps an identity, ranking reason and source/paragraph position.
 type KnowledgeSearchHit struct {
+	MatchKind                                                                                                       string
 	Key, Kind, ObjectID, SourceType, SourceID, Title, Snippet, SegmentID, SnapshotID, Visibility, CreatedAt, Reason string
 	Revision                                                                                                        int
 	Position, Rank                                                                                                  float64
@@ -77,33 +78,41 @@ func knowledgeMatchQuery(text string) string {
 }
 
 // SearchKnowledge retrieves indexed content without scanning vectors or calling a model.
-func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (KnowledgeSearchResult, error) {
-	result := KnowledgeSearchResult{}
+type knowledgeSearchPlan struct {
+	Query      KnowledgeSearchQuery
+	From, Rank string
+	Args       []any
+	Empty      bool
+}
+
+// knowledgePlan centralizes source, version and Owner scope predicates for FTS
+// and vector candidates. Building a plan never queues or calls a provider.
+func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (knowledgeSearchPlan, error) {
 	if len([]rune(q.Text)) > 200 || len(q.Theme) > 200 || len(q.SourceID) > 200 || len(q.PodcastID) > 200 {
-		return result, ErrInvalidEditorialState
+		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
 	if q.SourceType != "" && !validSourceType(models.SourceType(q.SourceType)) {
-		return result, ErrInvalidEditorialState
+		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
 	for _, value := range []string{q.From, q.Until} {
 		if value != "" {
 			if _, err := time.Parse("2006-01-02", value); err != nil {
-				return result, ErrInvalidEditorialState
+				return knowledgeSearchPlan{}, ErrInvalidEditorialState
 			}
 		}
 	}
 	if q.From != "" && q.Until != "" && q.From > q.Until {
-		return result, ErrInvalidEditorialState
+		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
 	allowed := map[string]bool{"": true, "original": true, "document": true, "keypoint": true, "source_note": true, "owner_reflection": true, "article": true, "notes": true, "materials": true}
 	if !allowed[q.Kind] {
-		return result, ErrInvalidEditorialState
+		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
 	if q.Page < 1 {
 		q.Page = 1
 	}
 	if q.Page > 10000 {
-		return result, ErrInvalidEditorialState
+		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
 	maxPage := 100
 	if q.Recall && q.MetadataOnly {
@@ -112,14 +121,12 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if q.PerPage < 1 || q.PerPage > maxPage {
 		q.PerPage = 20
 	}
-	result.Page = q.Page
-	result.PerPage = q.PerPage
 	match := knowledgeMatchQuery(q.Text)
 	if q.Recall {
 		match = knowledgeRecallQuery(q.Text)
 	}
 	if strings.TrimSpace(q.Text) != "" && match == "" {
-		return result, nil
+		return knowledgeSearchPlan{Query: q, Empty: true}, nil
 	}
 	join := ""
 	rank := "0.0"
@@ -161,7 +168,7 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if q.Theme != "" {
 		themeMatch := knowledgeMatchQuery(q.Theme)
 		if themeMatch == "" {
-			return result, nil
+			return knowledgeSearchPlan{Query: q, Empty: true}, nil
 		}
 		if match == "" {
 			join = " JOIN knowledge_search_fts f ON f.rowid=d.rowid"
@@ -207,13 +214,45 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 	if q.Kind == "" || q.Kind == "original" {
 		var failures int
 		if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_search_docs WHERE kind='index_error' AND (?='' OR source_id=?)`, q.SourceID, q.SourceID).Scan(&failures); err != nil {
-			return result, err
+			return knowledgeSearchPlan{}, err
 		}
 		if failures > 0 {
-			return result, fmt.Errorf("来源转录损坏，全文索引不完整，请处理来源后重建")
+			return knowledgeSearchPlan{}, fmt.Errorf("来源转录损坏，全文索引不完整，请处理来源后重建")
 		}
 	}
 	from := " FROM knowledge_search_docs d" + join + " WHERE " + strings.Join(where, " AND ")
+	return knowledgeSearchPlan{Query: q, From: from, Rank: rank, Args: args}, nil
+}
+
+func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (KnowledgeSearchResult, error) {
+	return s.searchKnowledgeKeys(ctx, q, nil)
+}
+
+func (s *Store) searchKnowledgeKeys(ctx context.Context, q KnowledgeSearchQuery, keys []string) (KnowledgeSearchResult, error) {
+	plan, err := s.knowledgePlan(ctx, q)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	q = plan.Query
+	result := KnowledgeSearchResult{Page: q.Page, PerPage: q.PerPage}
+	if plan.Empty {
+		return result, nil
+	}
+	from, rank, args := plan.From, plan.Rank, plan.Args
+	if keys != nil {
+		if len(keys) == 0 {
+			return result, nil
+		}
+		if len(keys) > 400 {
+			return result, ErrInvalidEditorialState
+		}
+		marks := make([]string, len(keys))
+		for i, key := range keys {
+			marks[i] = "?"
+			args = append(args, key)
+		}
+		from += " AND d.key IN (" + strings.Join(marks, ",") + ")"
+	}
 	if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&result.Total); err != nil {
 		return result, fmt.Errorf("知识索引检索失败: %w", err)
 	}
@@ -235,11 +274,12 @@ func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (Kn
 			return result, err
 		}
 		hit.Snippet = knowledgeSnippet(body, q.Text, 280)
+		hit.MatchKind = "lexical"
 		hit.Reason = "本地全文/中文双字词匹配"
 		if q.Recall {
 			hit.Reason = "本地宽召回：词项重合"
 		}
-		if match == "" && q.Theme == "" {
+		if strings.TrimSpace(q.Text) == "" && q.Theme == "" {
 			hit.Reason = "按更新时间列出"
 		}
 		result.Hits = append(result.Hits, hit)

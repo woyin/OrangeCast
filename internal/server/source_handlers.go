@@ -486,6 +486,8 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	semanticConfig, _ := srv.currentKnowledgeEmbeddingConfig(r.Context(), semanticID)
 	if semanticConfig != nil {
 		semanticID = semanticConfig.ID
+	} else {
+		semanticID = ""
 	}
 	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal, Semantic: r.URL.Query().Get("semantic") == "1", EmbeddingConfigID: semanticID})
 	if err != nil {

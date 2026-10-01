@@ -22,6 +22,10 @@ type KnowledgeRetrieveQuery struct {
 }
 
 type KnowledgeRetrieveResult struct {
+	LexicalTotal   int
+	IndexedWindows int
+	CandidateLimit int
+	Coverage       string
 	KnowledgeSearchResult
 	Method        string
 	Degradation   string
@@ -58,9 +62,9 @@ func (s *Store) Retrieve(ctx context.Context, req KnowledgeRetrieveQuery) (Knowl
 	if err != nil {
 		return KnowledgeRetrieveResult{}, err
 	}
-	out := KnowledgeRetrieveResult{KnowledgeSearchResult: lexical, Method: "fts", LexicalCount: len(lexical.Hits)}
+	out := KnowledgeRetrieveResult{KnowledgeSearchResult: lexical, Method: "fts", LexicalCount: len(lexical.Hits), LexicalTotal: lexical.Total}
 	if req.Semantic {
-		out.Degradation = "语义检索尚未就绪，本次使用本地词项检索；相关排序不代表来源支持结论。"
+		return s.retrieveHybrid(ctx, req, q, lexical)
 	}
 	return out, nil
 }

@@ -94,7 +94,7 @@ func TestKnowledgeQueryEmbeddingHTTPGetDoesNotCallOrWrite(t *testing.T) {
 	var before, after int
 	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
 	page := doWithCookie(srv, cookie, "GET", "/search?q=主动回忆&semantic=1")
-	if page.Code != 200 || !strings.Contains(page.Body.String(), "semantic-query-form") || !strings.Contains(page.Body.String(), "本次使用本地词项检索") {
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "semantic-query-form") || !strings.Contains(page.Body.String(), "本次使用FTS") {
 		t.Fatal(page.Code, page.Body.String())
 	}
 	srv.store.DB.QueryRow(`SELECT total_changes()`).Scan(&after)
