@@ -307,11 +307,11 @@ func (s *Store) CommitKnowledgeEmbeddingResponse(ctx context.Context, id string,
 
 // RecordEmbeddingReceipt stores actual unit availability separately from price.
 func (s *Store) RecordEmbeddingReceipt(ctx context.Context, origin string, in KnowledgeEmbeddingJobInput, result *provider.EmbeddingResult) error {
-	if result == nil || result.InputTokens < 0 || (result.Model != in.Config.Model && result.Model != "unknown") {
+	if result == nil || result.InputTokens < 0 || (result.Model != in.Config.Model && !(result.UnverifiedModel && result.Model == "unknown")) {
 		return ErrInvalidEditorialState
 	}
 	cost, known := int64(0), false
-	if result.UsageKnown && result.Model == in.Config.Model {
+	if result.UsageKnown && !result.UnverifiedModel {
 		cost, known = in.Estimate.CostForUnits(result.InputTokens, 0)
 	}
 	var amount any

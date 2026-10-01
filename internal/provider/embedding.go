@@ -34,11 +34,12 @@ type EmbeddingConfig struct {
 }
 
 type EmbeddingResult struct {
-	Vectors     [][]float32 `json:"vectors"`
-	Model       string      `json:"model"`
-	Dimensions  int         `json:"dimensions"`
-	InputTokens int         `json:"input_tokens"`
-	UsageKnown  bool        `json:"usage_known"`
+	Vectors         [][]float32 `json:"vectors"`
+	Model           string      `json:"model"`
+	Dimensions      int         `json:"dimensions"`
+	InputTokens     int         `json:"input_tokens"`
+	UsageKnown      bool        `json:"usage_known"`
+	UnverifiedModel bool        `json:"unverified_model,omitempty"`
 }
 
 // EmbeddingClient deliberately has no automatic retry: an unknown remote result
@@ -169,7 +170,7 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *Embe
 		if wire.Model != p.model {
 			model = "unknown"
 		}
-		receipt = &EmbeddingResult{Model: model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
+		receipt = &EmbeddingResult{Model: model, UnverifiedModel: wire.Model != p.model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
 	}
 	if len(wire.Data) != len(inputs) || wire.Model != p.model {
 		return nil, errors.New("invalid embedding response identity or batch")
@@ -227,7 +228,7 @@ func EstimateEmbeddingInputs(inputs []string) (*KnowledgeEstimate, error) {
 // ValidateEmbeddingResult is also used when restoring a durable response. A
 // checkpoint is not an exemption from vector shape, identity, or unit checks.
 func ValidateEmbeddingResult(r *EmbeddingResult, model string, count, dimensions int) error {
-	if r == nil || r.Model != model || len(r.Vectors) != count || r.Dimensions < 1 || r.Dimensions > EmbeddingMaxDimensions || (dimensions != 0 && r.Dimensions != dimensions) || r.InputTokens < 0 {
+	if r == nil || r.UnverifiedModel || r.Model != model || len(r.Vectors) != count || r.Dimensions < 1 || r.Dimensions > EmbeddingMaxDimensions || (dimensions != 0 && r.Dimensions != dimensions) || r.InputTokens < 0 {
 		return errors.New("invalid embedding result identity")
 	}
 	for _, vec := range r.Vectors {

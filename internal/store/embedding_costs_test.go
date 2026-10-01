@@ -73,3 +73,31 @@ func TestEmbeddingConfigPriceAndBudget(t *testing.T) {
 		t.Fatal("overflow price accepted")
 	}
 }
+
+func TestEmbeddingUnverifiedModelUsageIsNeverPriced(t *testing.T) {
+	s := newTestStore(t)
+	client, err := provider.NewEmbeddingClient("secret", "https://embedding.example/v1", "unknown", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := client.Config()
+	if err = s.SetModelPrice(t.Context(), models.ModelPrice{Provider: cfg.Provider, Model: cfg.Model, InputCentsPerMillion: 1000000}); err != nil {
+		t.Fatal(err)
+	}
+	estimate, err := s.FreezeEmbeddingEstimate(t.Context(), cfg, []string{"材料"})
+	if err != nil || !estimate.PriceKnown {
+		t.Fatal(estimate, err)
+	}
+	input := KnowledgeEmbeddingJobInput{Kind: "preflight", Config: cfg, Estimate: estimate}
+	reported := &provider.EmbeddingResult{Model: "unknown", InputTokens: 31, UsageKnown: true, UnverifiedModel: true}
+	if err = s.RecordEmbeddingReceipt(t.Context(), "unverified-response", input, reported); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := s.ListRunUsage(t.Context(), "unverified-response")
+	if err != nil || len(usage) != 1 || usage[0].CostKnown || !usage[0].UnitsKnown || usage[0].InputUnits != 31 {
+		t.Fatal(usage, err)
+	}
+	if err = provider.ValidateEmbeddingResult(reported, "unknown", 1, 2); err == nil {
+		t.Fatal("unverified identity accepted")
+	}
+}
