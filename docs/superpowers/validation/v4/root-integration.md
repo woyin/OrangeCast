@@ -1,6 +1,6 @@
 # 第四轮集成验证记录
 
-日期：2026-10-02。状态：执行中，不是最终完成报告。
+日期：2026-10-02。状态：工程集成验收完成并提交410e774；以下按执行过程保留历史失败/阶段证据，当前最终结果见末尾及[交付记录](delivery-report.md)。真实质量与实体设备待验。
 
 ## 当前验证
 
@@ -89,3 +89,7 @@ V02.2补测 `TestPersonalLearningV4SameFixtureStopAndPurge` 实际目标race10.6
 最终冻结776个源码/夹具文件清单SHA256 **e65235091bf2adcacef751daa654b3def3d0a7e1343d2dee31c4d1d4b92aff32**；重核零变更。对应最终 `make test` session46720终态EXIT0，原日志 `gates/race.log`；`make cover-gate` session64085 EXIT0；`make lint` session5011 EXIT0；`go vet ./...`、`go build ./cmd/cloudwisepod`、所有静态JS `node --check`、`git diff --check` EXIT0。Go缓存输出按原日志保留，未称全部重新计算：Store源/测试未变，上一轮520.228s的相同输入race通过，本轮复用缓存；Server包含最后新增测试并重新执行。原95%规则、store78.4/server79.4地板及models豁免不变。
 
 V04终校与141条审计都已核对持久证据。尚待一致提交及主清单登记；真实笔记/人评/手机待验，语义cold失败保持关闭，真实文本write模型合同失败而未发review。未部署。
+
+## 交付登记
+
+功能实现及全部当前证据已提交 `410e774304e3907bc6cb81db321ba1e894a7cf5d`。47/141审计工程证明、V03门禁与V04终校已成立；主卡登记累计73/73工程交付，所有外部待验保留。完整交付及门禁缓存适用性见 `delivery-report.md`。最终状态文档将单独提交，然后实查工作树；没有将未执行的clean或部署预填成功。
