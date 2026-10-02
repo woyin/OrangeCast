@@ -1,0 +1,3 @@
+1399ae6d097a8905d61c3148503e2dc348c13c42eeaedc4806498aec7c361aae  internal/provider/embedding.go
+5ee92ea7428c5a35a4b3140b5ed53f96c7628099acc99aa83022d58bffbe4795  internal/provider/embedding_jina_test.go
+fc56079e2965e8060f5ffd19e1c5bea3e484e5532d19e624f0289bc966011368  cmd/cloudwisepod/main_test.go

@@ -49,6 +49,33 @@ type EmbeddingResult struct {
 	UnverifiedModel bool        `json:"unverified_model,omitempty"`
 }
 
+type embeddingWireUsage struct {
+	Prompt *int `json:"prompt_tokens"`
+	Total  *int `json:"total_tokens"`
+}
+
+// Jina's text embedding endpoint reports input usage as total_tokens alone.
+// Other OpenAI-compatible endpoints retain their existing two-field contract.
+func (p *EmbeddingClient) embeddingInputUsage(usage *embeddingWireUsage) (int, bool, error) {
+	if usage == nil || usage.Total == nil {
+		return 0, false, nil
+	}
+	if usage.Prompt != nil {
+		if *usage.Prompt < 0 || *usage.Total != *usage.Prompt {
+			return 0, false, errors.New("invalid embedding token usage")
+		}
+		return *usage.Prompt, true, nil
+	}
+	endpoint, _ := url.Parse(p.baseURL)
+	if endpoint == nil || endpoint.Scheme != "https" || !strings.EqualFold(endpoint.Hostname(), "api.jina.ai") {
+		return 0, false, nil
+	}
+	if *usage.Total < 0 {
+		return 0, false, errors.New("invalid embedding token usage")
+	}
+	return *usage.Total, true, nil
+}
+
 // EmbeddingClient deliberately has no automatic retry: an unknown remote result
 // must be resolved by the durable task, rather than silently billed a second time.
 type EmbeddingClient struct {
@@ -167,21 +194,19 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *Embe
 			Index     *int      `json:"index"`
 			Embedding []float64 `json:"embedding"`
 		} `json:"data"`
-		Model string `json:"model"`
-		Usage *struct {
-			Prompt *int `json:"prompt_tokens"`
-			Total  *int `json:"total_tokens"`
-		} `json:"usage"`
+		Model string              `json:"model"`
+		Usage *embeddingWireUsage `json:"usage"`
 	}
 	if json.Unmarshal(raw, &wire) != nil {
 		return nil, errors.New("invalid embedding response JSON")
 	}
-	if wire.Usage != nil && wire.Usage.Prompt != nil && wire.Usage.Total != nil && *wire.Usage.Prompt >= 0 && *wire.Usage.Total == *wire.Usage.Prompt {
+	inputTokens, usageKnown, usageErr := p.embeddingInputUsage(wire.Usage)
+	if usageKnown {
 		model := p.model
 		if wire.Model != p.model {
 			model = "unknown"
 		}
-		receipt = &EmbeddingResult{Model: model, UnverifiedModel: wire.Model != p.model, InputTokens: *wire.Usage.Prompt, UsageKnown: true}
+		receipt = &EmbeddingResult{Model: model, UnverifiedModel: wire.Model != p.model, InputTokens: inputTokens, UsageKnown: true}
 	}
 	if len(wire.Data) != len(inputs) || wire.Model != p.model {
 		return nil, errors.New("invalid embedding response identity or batch")
@@ -212,13 +237,10 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *Embe
 		}
 		result.Vectors[*item.Index] = vec
 	}
-	if wire.Usage != nil && wire.Usage.Prompt != nil && wire.Usage.Total != nil {
-		if *wire.Usage.Prompt < 0 || *wire.Usage.Total != *wire.Usage.Prompt {
-			return nil, errors.New("invalid embedding token usage")
-		}
-		result.InputTokens = *wire.Usage.Prompt
-		result.UsageKnown = true
+	if usageErr != nil {
+		return nil, usageErr
 	}
+	result.InputTokens, result.UsageKnown = inputTokens, usageKnown
 	return result, nil
 }
 
