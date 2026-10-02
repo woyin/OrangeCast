@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,57 +70,77 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 	if err = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_embedding_vectors WHERE config_id=?`, cfg.ID).Scan(&globalWindows); err != nil {
 		return nil, err
 	}
-	if globalWindows > KnowledgeEmbeddingCapacity {
+	if globalWindows > cfg.WindowCapacity {
 		return nil, errEmbeddingCapacity
 	}
 	from := strings.Replace(plan.From, " WHERE ", " JOIN knowledge_embedding_vectors v ON v.doc_key=d.key WHERE ", 1)
-	args := append(append([]any(nil), plan.Args...), embeddingSQLArgs(cfg)...)
-	from += ` AND v.config_id=:config AND v.revision=d.revision AND ` + embeddingDocumentQualified()
-	rows, err := s.DB.QueryContext(ctx, `SELECT d.key,d.revision,v.window_no,v.dimensions,v.vector`+from+` ORDER BY d.key,v.window_no LIMIT 50001`, args...)
+	// The CTE comes before the plan's positional placeholders. Name every filter
+	// so SQLite ordinal positions cannot silently bind scope values to config IDs.
+	args := make([]any, 0, len(plan.Args)+2)
+	for i, arg := range plan.Args {
+		if named, ok := arg.(sql.NamedArg); ok {
+			args = append(args, named)
+			continue
+		}
+		name := fmt.Sprintf("embedding_filter_%d", i)
+		from = strings.Replace(from, "?", ":"+name, 1)
+		args = append(args, sql.Named(name, arg))
+	}
+	args = append(args, embeddingSQLArgs(cfg)...)
+	from += ` AND v.config_id=:config AND v.revision=d.revision AND ` + embeddingMatrixDocumentQualified()
+	rows, err := s.DB.QueryContext(ctx, embeddingQualifiedSourcesCTE()+`SELECT d.key,d.revision,v.window_no,v.dimensions,v.vector`+from+` LIMIT 50001`, args...)
 	if err != nil {
 		return nil, err
 	}
-	// Release the database cursor before normalization/CPU comparison. Peak
-	// memory is bounded by 50k * 2048 dimensions; cold loading is measured separately.
-	type rawEntry struct {
-		Key                          string
-		Revision, Window, Dimensions int
-		Blob                         []byte
-	}
-	var raw []rawEntry
+	// Decode each row once, avoiding a retained second full 400MiB blob corpus.
+	// No unsafe aliasing: the SQL driver's reusable buffer never enters the cache.
+	matrix := &knowledgeEmbeddingMatrix{CacheKey: key, Entries: make([]embeddingMatrixEntry, 0, globalWindows)}
+	objects := make(map[string]bool, globalWindows)
+	var vectorArena []float32
 	for rows.Next() {
-		var item rawEntry
-		if err = rows.Scan(&item.Key, &item.Revision, &item.Window, &item.Dimensions, &item.Blob); err != nil {
+		if len(matrix.Entries)%256 == 0 && ctx.Err() != nil {
+			rows.Close()
+			return nil, ctx.Err()
+		}
+		var item embeddingMatrixEntry
+		var dimensions int
+		var blob sql.RawBytes
+		if err = rows.Scan(&item.Key, &item.Revision, &item.Window, &dimensions, &blob); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if item.Dimensions != cfg.Dimensions {
+		if dimensions != cfg.Dimensions {
 			rows.Close()
 			return nil, ErrInvalidEditorialState
 		}
-		raw = append(raw, item)
+		if len(vectorArena) < dimensions {
+			windows := 256
+			if remaining := globalWindows - len(matrix.Entries); remaining < windows {
+				windows = remaining
+			}
+			if windows < 1 {
+				windows = 1
+			}
+			vectorArena = make([]float32, windows*dimensions)
+		}
+		item.Vector = vectorArena[:dimensions:dimensions]
+		vectorArena = vectorArena[dimensions:]
+		err = decodeEmbeddingVectorInto(blob, item.Vector)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		matrix.Entries = append(matrix.Entries, item)
+		objects[item.Key] = true
+		if len(matrix.Entries) > KnowledgeEmbeddingCapacity {
+			rows.Close()
+			return nil, errEmbeddingCapacity
+		}
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return nil, err
-	}
-	if len(raw) > KnowledgeEmbeddingCapacity {
-		return nil, errEmbeddingCapacity
-	}
-	matrix := &knowledgeEmbeddingMatrix{CacheKey: key, Entries: make([]embeddingMatrixEntry, len(raw))}
-	objects := map[string]bool{}
-	for i, item := range raw {
-		if i%256 == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		vector, err := decodeEmbeddingVector(item.Blob, item.Dimensions)
-		if err != nil {
-			return nil, err
-		}
-		matrix.Entries[i] = embeddingMatrixEntry{Key: item.Key, Revision: item.Revision, Window: item.Window, Vector: vector}
-		objects[item.Key] = true
-		raw[i].Blob = nil
 	}
 	matrix.Objects = len(objects)
 	current, err := s.embeddingEpoch(ctx)
@@ -221,7 +242,7 @@ func semanticDegradation(err error) string {
 	}
 }
 
-func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, q KnowledgeSearchQuery, lexical KnowledgeSearchResult) (KnowledgeRetrieveResult, error) {
+func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, q KnowledgeSearchQuery, lexical KnowledgeSearchResult, evaluation bool) (KnowledgeRetrieveResult, error) {
 	fallback := func(reason string, fresh bool) (KnowledgeRetrieveResult, error) {
 		if fresh {
 			var err error
@@ -241,6 +262,18 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 	}
 	if !cfg.Enabled {
 		return fallback("语义索引已关闭，本次使用FTS。", false)
+	}
+	if !evaluation {
+		if !cfg.SemanticEnabled {
+			return fallback("语义检索未通过准入并开启，本次使用FTS。", false)
+		}
+		_, reason, e := s.KnowledgeEmbeddingQualityGate(ctx, cfg.ID)
+		if e != nil {
+			return fallback(semanticDegradation(e), false)
+		}
+		if reason != "" {
+			return fallback(reason, false)
+		}
 	}
 	epoch, err := s.embeddingEpoch(ctx)
 	if err != nil {
@@ -304,6 +337,19 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 	}
 	if current != epoch {
 		return fallback(semanticDegradation(ErrConflict), true)
+	}
+	if !evaluation {
+		refreshed, e := s.GetKnowledgeEmbeddingConfig(ctx, cfg.ID)
+		if e != nil {
+			return fallback(semanticDegradation(e), true)
+		}
+		_, reason, e := s.KnowledgeEmbeddingQualityGate(ctx, cfg.ID)
+		if e != nil {
+			return fallback(semanticDegradation(e), true)
+		}
+		if !refreshed.SemanticEnabled || reason != "" {
+			return fallback("检索期间准入或开关已失效，本次使用FTS。", true)
+		}
 	}
 	hits := make([]KnowledgeSearchHit, 0, len(ranked))
 	for _, item := range ranked {

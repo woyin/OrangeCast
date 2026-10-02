@@ -6,8 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/google/uuid"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/models"
@@ -164,149 +165,55 @@ func (srv *Server) handleParaphrase(w http.ResponseWriter, r *http.Request) {
 // 会话由 study_session_id 维持；首次提问自动建会话。
 func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		http.Error(w, "方法不允许", 405)
+		return
+	}
+	key := strings.TrimSpace(r.FormValue("request_key"))
+	if _, err := uuid.Parse(key); err != nil {
+		writeJSON(w, 428, map[string]any{"error": "学习对话已迁入持久任务；请更新客户端并在提交前保存 request_key，不会自动调用或重发", "code": "request_identity_required"})
 		return
 	}
 	sourceType := models.SourceType(r.FormValue("source_type"))
 	sourceID := r.FormValue("source_id")
 	sessionID := strings.TrimSpace(r.FormValue("session_id"))
 	question := strings.TrimSpace(r.FormValue("question"))
-	if question == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请输入问题"})
+	revision, err := strconv.Atoi(r.FormValue("revision"))
+	if err != nil || revision < 1 {
+		writeJSON(w, 400, map[string]any{"error": "缺少有效会话版本"})
 		return
 	}
-
-	// 读取当前 Transcript 作为可检索候选 Segment。
-	tp, ok := srv.loadTranscriptJSON(w, r.Context(), sourceType, sourceID)
-	if !ok {
-		return
-	}
-
-	sessionID, history, err := srv.studyChatSession(r.Context(), sourceType, sourceID, sessionID, question)
-	if err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, store.ErrConflict) {
-			code = http.StatusConflict
+	var cfg provider.QuestionStudyConfig
+	// Replay uses the original frozen connection identity, even after settings change.
+	if _, job, e := srv.store.LegacyStudyRequest(r.Context(), key); e == nil {
+		execution, e := srv.store.GetJobExecution(r.Context(), job.ID)
+		var in store.LegacyStudyJobInput
+		if e != nil || json.Unmarshal([]byte(execution.InputSnapshotJSON), &in) != nil || in.Version != store.LegacyStudyTaskVersion {
+			writeJSON(w, 409, map[string]any{"error": "原任务材料已失效，不能重发"})
+			return
 		}
-		writeJSON(w, code, map[string]any{"error": err.Error()})
+		cfg = in.Config
+	} else if !errors.Is(e, store.ErrNotFound) {
+		srv.legacyStudyError(w, e)
 		return
-	}
-
-	// 先持久化用户问题（无论后续是否生成）。
-	if _, err := srv.store.AppendStudyMessage(r.Context(), sessionID, "user", question, nil, false); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "记录问题失败"})
-		return
-	}
-
-	// 选 Provider（复用 QA Provider/Model 设置，学习对话与问答同属"对话型"任务）。
-	st, _ := srv.store.GetSettings(r.Context())
-	bundle, err := srv.bundleFor(taskConfigFrom(st.QAProvider, st.QAModel))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-
-	// 生成（硬约束一在 provider 内：无 Reference 不生成，返回 ScopeFeedback）。
-	result, err := bundle.StudyChat.StudyChatAnswer(question, history, tp.Segments)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "学习对话生成失败"})
-		return
-	}
-	if result.ScopeFeedback != "" || result.Answer == nil {
-		// 硬约束一触发：问题超出本集范围。已记录用户问题，不生成回答。
-		writeJSON(w, http.StatusOK, map[string]any{
-			"session_id":     sessionID,
-			"scope_feedback": result.ScopeFeedback,
-			"generated":      false,
-			"out_of_scope":   true,
-		})
-		return
-	}
-
-	refSegs := studyReferenceSegments(result.Answer.ReferenceSegmentIDs, tp.Segments)
-	check, err := bundle.RefChecker.CheckReference(question, result.Answer.Content, refSegs)
-	if err != nil {
-		// 校验本身失败：保守不呈现，记录被抑制的消息（含 suppress 标记）供评测。
-		_, _ = srv.store.AppendStudyMessage(r.Context(), sessionID, "assistant", result.Answer.Content, result.Answer.ReferenceSegmentIDs, true)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"session_id":     sessionID,
-			"scope_feedback": "我无法确认这个回答是否紧扣本集内容，暂时不展示。请尝试更贴近本集内容的问题。",
-			"generated":      false,
-			"check_error":    true,
-		})
-		return
-	}
-	if !check.Related {
-		// 硬约束二失败：虚挂或主题漂移。记录被抑制的消息，给可见反馈。
-		_, _ = srv.store.AppendStudyMessage(r.Context(), sessionID, "assistant", result.Answer.Content, result.Answer.ReferenceSegmentIDs, true)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"session_id":         sessionID,
-			"scope_feedback":     "这个回答似乎脱离了本集内容（" + check.Reason + "）。请尝试更贴近本集内容的问题。",
-			"generated":          false,
-			"reference_rejected": true,
-		})
-		return
-	}
-
-	// 通过两条硬约束：持久化并呈现。
-	if _, err := srv.store.AppendStudyMessage(r.Context(), sessionID, "assistant", result.Answer.Content, result.Answer.ReferenceSegmentIDs, false); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "持久化回答失败"})
-		return
-	}
-	start, end := provider.ResolveReferenceRange(result.Answer.ReferenceSegmentIDs, tp.Segments)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": sessionID,
-		"answer":     result.Answer.Content,
-		"references": result.Answer.ReferenceSegmentIDs,
-		"time_start": start,
-		"time_end":   end,
-		"generated":  true,
-		"ai_note":    "AI 讲解·非原文（参考，不可逐字核验）",
-	})
-}
-
-func (srv *Server) studyChatSession(ctx context.Context, sourceType models.SourceType, sourceID, sessionID, question string) (string, []provider.StudyChatMessage, error) {
-	if sessionID == "" {
-		title := question
-		if len([]rune(title)) > 40 {
-			title = string([]rune(title)[:40]) + "…"
+	} else {
+		settings, e := srv.store.GetSettings(r.Context())
+		if e != nil {
+			srv.legacyStudyError(w, e)
+			return
 		}
-		session, err := srv.store.CreateStudySession(ctx, sourceType, sourceID, title)
-		if err != nil {
-			return "", nil, fmt.Errorf("创建学习会话失败")
+		client, e := srv.selector.LegacyStudy(taskConfigFrom(settings.QAProvider, settings.QAModel))
+		if e != nil {
+			writeJSON(w, 503, map[string]any{"error": "旧问答 QA 连接不可用，尚未调用模型"})
+			return
 		}
-		sessionID = session.ID
+		cfg = client.Config()
 	}
-	bound, err := srv.store.GetStudySession(ctx, sessionID)
+	turn, job, _, err := srv.store.SubmitLegacyStudyTurn(r.Context(), sourceType, sourceID, sessionID, revision, question, key, cfg)
 	if err != nil {
-		return "", nil, fmt.Errorf("读取学习会话失败")
+		srv.legacyStudyError(w, err)
+		return
 	}
-	if bound.SourceType != sourceType || bound.SourceID != sourceID {
-		return "", nil, fmt.Errorf("%w: 学习会话属于其他来源，不能混入本集范围", store.ErrConflict)
-	}
-	rows, err := srv.store.ListStudyMessages(ctx, sessionID, false)
-	if err != nil {
-		return "", nil, fmt.Errorf("读取会话历史失败")
-	}
-	history := make([]provider.StudyChatMessage, 0, len(rows))
-	for _, row := range rows {
-		history = append(history, provider.StudyChatMessage{Role: row.Role, Content: row.Content, ReferenceSegmentIDs: row.ReferenceSegmentIDs})
-	}
-	return sessionID, history, nil
-}
-
-func studyReferenceSegments(referenceIDs []string, segments []provider.Segment) []provider.Segment {
-	byID := make(map[string]provider.Segment, len(segments))
-	for _, segment := range segments {
-		byID[segment.ID] = segment
-	}
-	references := make([]provider.Segment, 0, len(referenceIDs))
-	for _, id := range referenceIDs {
-		if segment, ok := byID[id]; ok {
-			references = append(references, segment)
-		}
-	}
-	return references
+	srv.writeLegacyStudyStatus(w, r, turn, job, http.StatusAccepted)
 }
 
 // handleStudyChatHistory 返回某会话的历史消息（用于回看）。
@@ -329,7 +236,13 @@ func (srv *Server) handleStudyChatHistory(w http.ResponseWriter, r *http.Request
 			"reference_segment_ids": m.ReferenceSegmentIDs,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": out})
+	session, err := srv.store.GetStudySession(r.Context(), sessionID)
+	if err != nil {
+		srv.legacyStudyError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"messages": out, "session_id": session.ID, "revision": session.Revision})
 }
 
 // loadTranscriptJSON 读取并解析当前 Transcript 版本，返回 TranscriptPayload。

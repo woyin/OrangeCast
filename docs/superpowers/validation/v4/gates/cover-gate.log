@@ -1,0 +1,42 @@
+bash scripts/cover-gate.sh
+==> 运行带覆盖率统计的测试...
+ok  	github.com/woyin/orangecast/cmd/cloudwisepod	(cached)	coverage: 95.4% of statements
+ok  	github.com/woyin/orangecast/cmd/quality-eval	(cached)	coverage: 96.5% of statements
+ok  	github.com/woyin/orangecast/internal/auth	(cached)	coverage: 95.4% of statements
+ok  	github.com/woyin/orangecast/internal/backup	(cached)	coverage: 95.2% of statements
+ok  	github.com/woyin/orangecast/internal/config	(cached)	coverage: 98.9% of statements
+ok  	github.com/woyin/orangecast/internal/evalset	(cached)	coverage: 97.5% of statements
+ok  	github.com/woyin/orangecast/internal/filehash	(cached)	coverage: 100.0% of statements
+ok  	github.com/woyin/orangecast/internal/learningbundle	(cached)	coverage: 97.9% of statements
+ok  	github.com/woyin/orangecast/internal/markdown	(cached)	coverage: 98.7% of statements
+	github.com/woyin/orangecast/internal/models		coverage: 0.0% of statements
+ok  	github.com/woyin/orangecast/internal/provider	(cached)	coverage: 95.0% of statements
+ok  	github.com/woyin/orangecast/internal/queue	(cached)	coverage: 95.0% of statements
+ok  	github.com/woyin/orangecast/internal/rss	(cached)	coverage: 96.2% of statements
+ok  	github.com/woyin/orangecast/internal/safehttp	(cached)	coverage: 97.4% of statements
+ok  	github.com/woyin/orangecast/internal/server	17.881s	coverage: 79.8% of statements
+ok  	github.com/woyin/orangecast/internal/store	(cached)	coverage: 79.2% of statements
+ok  	github.com/woyin/orangecast/internal/testdb	(cached)	coverage: 100.0% of statements
+ok  	github.com/woyin/orangecast/internal/voice	(cached)	coverage: 96.8% of statements
+
+==> 覆盖率门禁（阈值 95.0%，已知缺口包按登记地板值）
+  ok   github.com/woyin/orangecast/cmd/cloudwisepod — 95.4%
+  ok   github.com/woyin/orangecast/cmd/quality-eval — 96.5%
+  ok   github.com/woyin/orangecast/internal/auth — 95.4%
+  ok   github.com/woyin/orangecast/internal/backup — 95.2%
+  ok   github.com/woyin/orangecast/internal/config — 98.9%
+  ok   github.com/woyin/orangecast/internal/evalset — 97.5%
+  ok   github.com/woyin/orangecast/internal/filehash — 100.0%
+  ok   github.com/woyin/orangecast/internal/learningbundle — 97.9%
+  ok   github.com/woyin/orangecast/internal/markdown — 98.7%
+  (豁免) github.com/woyin/orangecast/internal/models — 0.0%
+  ok   github.com/woyin/orangecast/internal/provider — 95.0%
+  ok   github.com/woyin/orangecast/internal/queue — 95.0%
+  ok   github.com/woyin/orangecast/internal/rss — 96.2%
+  ok   github.com/woyin/orangecast/internal/safehttp — 97.4%
+  ok   github.com/woyin/orangecast/internal/server — 79.8%
+  ok   github.com/woyin/orangecast/internal/store — 79.2%
+  ok   github.com/woyin/orangecast/internal/testdb — 100.0%
+  ok   github.com/woyin/orangecast/internal/voice — 96.8%
+
+覆盖率门禁通过。

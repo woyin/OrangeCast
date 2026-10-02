@@ -209,6 +209,9 @@ func resolveQuestionRelation(ctx context.Context, tx *sql.Tx, l provider.Learnin
 		err = tx.QueryRowContext(ctx, `SELECT source_type,source_id,card_version FROM keypoint_index WHERE id=?`, l.ObjectID).Scan(&l.SourceType, &l.SourceID, &l.Version)
 	case "evidence":
 		err = tx.QueryRowContext(ctx, `SELECT source_type,source_id,content_version FROM source_snapshots WHERE id=? AND status!='purged'`, l.ObjectID).Scan(&l.SourceType, &l.SourceID, &l.Version)
+	case "understanding":
+		l.SourceType, l.SourceID = "", ""
+		err = tx.QueryRowContext(ctx, `SELECT u.version FROM understanding_snapshots u JOIN learning_questions q ON q.id=u.question_id WHERE u.id=?`, l.ObjectID).Scan(&l.Version)
 	case "article":
 		l.SourceType, l.SourceID = "", ""
 		err = tx.QueryRowContext(ctx, `SELECT working_revision FROM knowledge_articles WHERE id=?`, l.ObjectID).Scan(&l.Version)
@@ -355,6 +358,14 @@ func (s *Store) FreezeLearningQuestion(ctx context.Context, id string, automatic
 	if err != nil {
 		return nil, err
 	}
+	var current provider.LearningQuestionLink
+	err = tx.QueryRowContext(ctx, `SELECT u.id,u.version FROM understanding_heads h JOIN understanding_snapshots u ON u.id=h.current_snapshot_id WHERE h.question_id=?`, id).Scan(&current.ObjectID, &current.Version)
+	if err == nil {
+		current.Kind = "understanding"
+		f.Links = append(f.Links, current)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	for i := range f.Links {
 		l := &f.Links[i]
 		if l.Kind != "article" {
@@ -493,7 +504,7 @@ func questionMaterialFilter(f *provider.FrozenLearningQuestion) (string, []any) 
 	sources := map[string]bool{}
 	for _, l := range f.Links {
 		switch l.Kind {
-		case "note", "keypoint":
+		case "note", "keypoint", "understanding":
 			if !seen[l.ObjectID] {
 				seen[l.ObjectID] = true
 				ids = append(ids, l.ObjectID)
@@ -533,7 +544,7 @@ func questionAllowsMaterial(f *provider.FrozenLearningQuestion, m provider.Knowl
 	}
 	for _, l := range f.Links {
 		switch l.Kind {
-		case "note", "keypoint":
+		case "note", "keypoint", "understanding":
 			if l.ObjectID == m.ID {
 				return true
 			}

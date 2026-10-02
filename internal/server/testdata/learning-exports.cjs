@@ -1,0 +1,33 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+let mount,poll,response,cleared=0,visits=[];
+const state={textContent:'queued'},download={hidden:true,getAttribute:()=>'/learning-exports/export id/download',closest:()=>row},feedback={textContent:''},selection={value:'owner choice'};
+const row={dataset:{exportId:'export id'},querySelector:s=>s==='[data-export-state]'?state:s==='[data-export-download-feedback]'?downloadFeedback:download};
+let downloaded=0,revoked=0;const downloadFeedback={textContent:''};
+const events=new Map(),commandFeedback={textContent:'',dataset:{}};
+const previewForm={values:[['selection','question:owner choice'],['include_excerpts','yes']],querySelector:()=>commandFeedback,querySelectorAll:()=>[],getAttribute:()=>'/learning-exports/preview'};
+const createForm={...previewForm,values:[['preview_id','private-preview'],['preview_hash','frozen-hash'],['request_key','stable-uuid'],['confirmed','yes']],getAttribute:()=>'/learning-exports/create'};
+const root={querySelector:s=>s==='select[name="selection"]'?selection:feedback,querySelectorAll:s=>s==='[data-export-id]'?[row]:s==='[data-export-download]'?[download]:s==='.learning-export-command'?[previewForm,createForm]:[selection]};
+const window={CWPViews:{define:fn=>mount=fn},CWPPrivate:{clear:()=>cleared++},CWPNavigation:{visit:async v=>visits.push(v)}};
+const scope={signal:{aborted:false},on:(node,event,fn)=>events.set(node,fn),interval:fn=>poll=fn,fetch:async(url,opts)=>{if(opts.method==='POST'){assert.equal(opts.headers.Accept,'application/json');assert.ok(opts.body instanceof URLSearchParams);if(url.endsWith('/create'))assert.equal(opts.body.get('request_key'),'stable-uuid');return response;}if(url.endsWith('/download'))return response;assert.equal(url,'/learning-exports/export%20id/status');assert.equal(opts.cache,'no-store');return response;}};
+const context=vm.createContext({window,document:{hidden:false,body:{append:()=>{}},createElement:()=>({click:()=>downloaded++,remove:()=>{}})},URL:class extends URL{static createObjectURL(){return 'blob:private-archive';}static revokeObjectURL(){revoked++;}},encodeURIComponent,URLSearchParams,FormData:class{constructor(form){this.items=form.values;}[Symbol.iterator](){return this.items[Symbol.iterator]();}}});
+vm.runInContext(fs.readFileSync('static/form-actions.js','utf8'),context);vm.runInContext(fs.readFileSync('static/learning-exports.js','utf8'),context);mount({querySelector:()=>root},scope);
+(async()=>{
+let prevented=0;response={ok:true,status:200,json:async()=>({state:'saved',href:'/learning-exports?preview_id=private-preview'})};await events.get(previewForm)({preventDefault:()=>prevented++});assert.equal(prevented,1);assert.equal(visits.pop(),'/learning-exports?preview_id=private-preview');
+response={ok:true,status:200,json:async()=>({state:'saved',href:'/learning-exports#export-created'})};await events.get(createForm)({preventDefault:()=>prevented++});assert.equal(prevented,2);assert.equal(visits.pop(),'/learning-exports#export-created');
+response={ok:false,status:409,text:async()=> '预览已过期'};await events.get(createForm)({preventDefault:()=>prevented++});assert.equal(visits.length,0);assert.equal(createForm.values[2][1],'stable-uuid');assert.match(commandFeedback.textContent,/预览已过期/);
+
+response={ok:false,status:409,text:async()=> '预览已过期'};await events.get(download)({preventDefault:()=>prevented++});assert.match(downloadFeedback.textContent,/预览已过期/);assert.equal(visits.length,0);assert.equal(downloaded,0);
+response={ok:false,status:404,text:async()=> '文件不存在'};await events.get(download)({preventDefault:()=>prevented++});assert.match(downloadFeedback.textContent,/文件不存在/);assert.equal(visits.length,0);
+response={ok:true,status:200,headers:{get:n=>n==='Content-Type'?'application/zip':n==='Content-Disposition'?'attachment; filename=learning.zip':null},blob:async()=>({size:20})};await events.get(download)({preventDefault:()=>prevented++});assert.equal(downloaded,1);assert.equal(revoked,1);assert.equal(visits.length,0);
+response={ok:true,status:200,redirected:true,url:'http://localhost/login'};await events.get(download)({preventDefault:()=>prevented++});assert.equal(cleared,1);assert.equal(visits.pop(),'/login');
+response={ok:false,status:401};await events.get(download)({preventDefault:()=>prevented++});assert.equal(cleared,2);assert.equal(visits.pop(),'/login');
+const fetchOriginal=scope.fetch;scope.fetch=async()=>{throw Error('network')};await events.get(download)({preventDefault:()=>prevented++});assert.match(downloadFeedback.textContent,/下载暂未完成/);scope.fetch=fetchOriginal;
+response={ok:true,status:200,json:async()=>({status:'ready'})};await poll();assert.equal(state.textContent,'ready');assert.equal(download.hidden,false);assert.equal(selection.value,'owner choice');
+response={ok:true,status:200,json:async()=>({status:'expired'})};await poll();assert.equal(download.hidden,true);
+response={ok:false,status:404};await poll();assert.equal(selection.value,'owner choice');
+response={ok:false,status:401};await poll();assert.equal(cleared,3);assert.deepEqual(visits,['/login']);
+response={ok:true,status:200,headers:{get:n=>n==='Content-Type'?'application/zip':n==='Content-Disposition'?'attachment':null},blob:async()=>{scope.signal.aborted=true;return {size:20}}};await events.get(download)({preventDefault:()=>prevented++});assert.equal(downloaded,1);assert.equal(revoked,1);
+scope.signal.aborted=true;response={ok:false,status:409,text:async()=> '预览已过期'};await events.get(download)({preventDefault:()=>prevented++});assert.equal(downloaded,1);assert.equal(downloadFeedback.textContent,'正在下载…');
+response={ok:true,status:200,json:async()=>({status:'ready'})};await poll();assert.equal(state.textContent,'expired');
+console.log('learning export polling, download invalidation, auth and disposal passed');
+})().catch(e=>{console.error(e);process.exitCode=1;});

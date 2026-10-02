@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"github.com/woyin/orangecast/internal/models"
@@ -104,7 +105,7 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 	if q.From != "" && q.Until != "" && q.From > q.Until {
 		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
-	allowed := map[string]bool{"": true, "original": true, "document": true, "keypoint": true, "source_note": true, "owner_reflection": true, "article": true, "notes": true, "materials": true}
+	allowed := map[string]bool{"": true, "original": true, "document": true, "keypoint": true, "source_note": true, "owner_reflection": true, "article": true, "notes": true, "materials": true, "understanding": true}
 	if !allowed[q.Kind] {
 		return knowledgeSearchPlan{}, ErrInvalidEditorialState
 	}
@@ -148,7 +149,7 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 		}
 	}
 	if q.Kind == "materials" {
-		where = append(where, "d.kind IN ('keypoint','source_note','owner_reflection')")
+		where = append(where, "d.kind IN ('keypoint','source_note','owner_reflection','understanding')")
 	} else if q.Kind == "notes" {
 		where = append(where, "d.kind IN ('source_note','owner_reflection')")
 	} else if q.Kind != "" {
@@ -157,8 +158,8 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 	}
 	for _, filter := range []struct{ field, value string }{{"source_type", q.SourceType}, {"source_id", q.SourceID}} {
 		if filter.value != "" {
-			where = append(where, "(d."+filter.field+"=? OR (d.kind='article' AND EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision AND m."+filter.field+"=?)))")
-			args = append(args, filter.value, filter.value)
+			where = append(where, "(d."+filter.field+"=? OR (d.kind='article' AND EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision AND m."+filter.field+"=?)) OR (d.kind='understanding' AND EXISTS(SELECT 1 FROM understanding_references ur WHERE ur.snapshot_id=d.object_id AND ur.purged=0 AND (ur."+filter.field+"=? OR (ur.kind='article' AND EXISTS(SELECT 1 FROM knowledge_article_material_refs um WHERE um.article_id=ur.object_id AND um.revision=ur.version AND um."+filter.field+"=?))))))")
+			args = append(args, filter.value, filter.value, filter.value, filter.value)
 		}
 	}
 	if q.PodcastID != "" {
@@ -201,7 +202,8 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 			policies = append(policies, "(d.source_type='"+source.kind+"' AND EXISTS(SELECT 1 FROM "+source.table+" p WHERE p.id=d.source_id AND (p.model_data_policy='external_allowed' OR (p.model_data_policy='approved_providers_only' AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(p.approved_providers_json) THEN p.approved_providers_json ELSE '[]' END) a WHERE lower(trim(a.value))=lower(trim(?)))))))")
 			args = append(args, q.SendProvider)
 		}
-		where = append(where, "("+strings.Join(policies, " OR ")+")")
+		where = append(where, "("+strings.Join(policies, " OR ")+" OR "+understandingSendSQL("d", ":understanding_provider", false)+")")
+		args = append(args, sql.Named("understanding_provider", q.SendProvider))
 		where = append(where, "(d.kind!='keypoint' OR EXISTS(SELECT 1 FROM keypoint_index k WHERE k.id=d.object_id AND k.stale_at IS NULL AND k.evidence_status!='stale' AND k.production_status!='dismissed' AND k.quality_status IN ('ready','owner_confirmed')))")
 		if q.RecallProfileID != "" {
 			where = append(where, "(d.kind!='keypoint' OR NOT EXISTS(SELECT 1 FROM editorial_relevance er WHERE er.keypoint_id=d.object_id AND er.editorial_profile_id=? AND (er.owner_override='excluded' OR er.assessment='irrelevant')))")
@@ -336,6 +338,9 @@ func (s *Store) RebuildKnowledgeSearch(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_search_docs(key,kind,object_id,revision,title,body,tokens,visibility,created_at,updated_at) SELECT 'understanding:'||u.id,'understanding',u.id,u.version,q.body||' · 我的理解',u.answer||char(10)||u.uncertainty||char(10)||u.next_step,cwp_search_tokens(u.answer||' '||u.uncertainty||' '||u.next_step),CASE WHEN h.current_snapshot_id=u.id THEN 'current' ELSE 'history' END,u.created_at,u.created_at FROM understanding_snapshots u JOIN understanding_heads h ON h.question_id=u.question_id JOIN learning_questions q ON q.id=u.question_id`); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO knowledge_search_fts(knowledge_search_fts) VALUES('integrity-check')`); err != nil {
 		return err

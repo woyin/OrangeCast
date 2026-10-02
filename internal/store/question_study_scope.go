@@ -59,7 +59,7 @@ func (s *Store) FreezeQuestionStudyScope(ctx context.Context, sessionID, input, 
 			continue
 		}
 		sourceKey := hit.SourceType + ":" + hit.SourceID
-		if !sources[sourceKey] && len(sources) >= 8 {
+		if hit.SourceID != "" && !sources[sourceKey] && len(sources) >= 8 {
 			scope.Omissions = appendOnce(scope.Omissions, "材料超过8个来源，剩余来源未外发")
 			continue
 		}
@@ -75,12 +75,45 @@ func (s *Store) FreezeQuestionStudyScope(ctx context.Context, sessionID, input, 
 		if err != nil {
 			return nil, err
 		}
+		materialSourceKeys := []string{sourceKey}
+		if material.Understanding != nil {
+			materialSourceKeys = nil
+			rows, e := s.DB.QueryContext(ctx, understandingSourceRowsSQL(), material.Understanding.ID, material.Understanding.ID)
+			if e != nil {
+				return nil, e
+			}
+			for rows.Next() {
+				var kind, id string
+				if e = rows.Scan(&kind, &id); e != nil {
+					rows.Close()
+					return nil, e
+				}
+				materialSourceKeys = append(materialSourceKeys, kind+":"+id)
+			}
+			e = rows.Err()
+			rows.Close()
+			if e != nil {
+				return nil, e
+			}
+		}
+		additional := 0
+		for _, key := range materialSourceKeys {
+			if !sources[key] {
+				additional++
+			}
+		}
+		if len(sources)+additional > 8 {
+			scope.Omissions = appendOnce(scope.Omissions, "理解Reference聚合超过8个实际来源，未外发该材料")
+			continue
+		}
 		raw, _ := json.Marshal(material)
 		if len(raw) > 10*1024 || materialBytes+len(raw) > 40*1024 {
 			scope.Omissions = appendOnce(scope.Omissions, "完整材料超过上下文容量，未截断或外发该材料")
 			continue
 		}
-		sources[sourceKey] = true
+		for _, key := range materialSourceKeys {
+			sources[key] = true
+		}
 		scope.Materials = append(scope.Materials, *material)
 		materialBytes += len(raw)
 	}
@@ -117,7 +150,20 @@ func (s *Store) FreezeQuestionStudyScope(ctx context.Context, sessionID, input, 
 		if err != nil {
 			return nil, err
 		}
-		allowed := len(refs) > 0
+		var dependenciesJSON string
+		if e := s.DB.QueryRowContext(ctx, `SELECT COALESCE(json_group_array(json(frozen_json)),'[]') FROM question_study_understandings WHERE turn_id=?`, turn.ID).Scan(&dependenciesJSON); e != nil {
+			return nil, e
+		}
+		var understandingDependencies []provider.KnowledgeMaterial
+		if json.Unmarshal([]byte(dependenciesJSON), &understandingDependencies) != nil {
+			return nil, ErrConflict
+		}
+		allowed := len(refs) > 0 || len(understandingDependencies) > 0
+		for _, m := range understandingDependencies {
+			if e := checkUnderstandingMaterialReader(ctx, s.DB, providerName, m); e != nil {
+				allowed = false
+			}
+		}
 		for _, ref := range refs {
 			ok, e := s.canSendQuestionStudySource(ctx, QuestionStudySource{ref.SourceType, ref.SourceID}, providerName)
 			if e != nil {
@@ -132,7 +178,7 @@ func (s *Store) FreezeQuestionStudyScope(ctx context.Context, sessionID, input, 
 			scope.Omissions = appendOnce(scope.Omissions, "历史回答的来源现已限制外发，该轮未外发")
 			continue
 		}
-		item := provider.QuestionStudyHistoryItem{Ordinal: turn.Ordinal, OwnerInput: turn.OwnerInput, AcceptedJSON: turn.AcceptedJSON}
+		item := provider.QuestionStudyHistoryItem{UnderstandingDependencies: understandingDependencies, Ordinal: turn.Ordinal, OwnerInput: turn.OwnerInput, AcceptedJSON: turn.AcceptedJSON}
 		for _, ref := range refs {
 			item.SourceDependencies = append(item.SourceDependencies, provider.QuestionStudySourceDependency{SourceType: ref.SourceType, SourceID: ref.SourceID})
 		}
@@ -158,6 +204,18 @@ func appendOnce(values []string, value string) []string {
 var errQuestionStudyMaterialCapacity = errors.New("question study material capacity")
 
 func (s *Store) freezeQuestionStudyMaterial(ctx context.Context, hit KnowledgeSearchHit, name string) (*provider.QuestionStudyMaterial, error) {
+	if hit.Kind == "understanding" {
+		m, e := s.UnderstandingKnowledgeMaterial(ctx, hit.ObjectID, name)
+		if e != nil {
+			return nil, e
+		}
+		if m == nil || m.Version != hit.Revision {
+			return nil, ErrConflict
+		}
+		v := &provider.QuestionStudyMaterial{Key: hit.Key, Kind: "understanding", Revision: m.Version, Content: m.Content, Understanding: m, Segments: []provider.KnowledgeEvidenceSegment{}}
+		v.ContentHash = provider.QuestionStudyMaterialHash(*v)
+		return v, nil
+	}
 	allowed, err := s.canSendQuestionStudySource(ctx, QuestionStudySource{hit.SourceType, hit.SourceID}, name)
 	if err != nil {
 		return nil, err

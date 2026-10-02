@@ -1,0 +1,14 @@
+{
+  "scope": "theme",
+  "scopeID": "74bbd5c5-a087-4ee5-8e62-9f5e2c0d2d06",
+  "fileCount": 5,
+  "sha256": "3ef4e5bf2d16ff95c7ff49c56682c841c184953ba085932ed6f69e08d3b7515c",
+  "allManifestHashesMatched": true,
+  "paths": [
+    "index.md",
+    "keypoints/5dfd9b57-995f-4e6a-858f-2f6cc99de9a1-r1.md",
+    "keypoints/9398951d-a837-4df4-9849-08556965e239-r1.md",
+    "sources/episode-a28198e3-23ca-43ff-ad93-56ab958814cc-r1.md",
+    "sources/episode-f7c68c3e-bce6-4b9d-9d2a-5ffeeeecdd63-r1.md"
+  ]
+}

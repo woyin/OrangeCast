@@ -18,6 +18,8 @@ import (
 
 // KnowledgeArticleSettings controls explicit automation and article preferences.
 type KnowledgeArticleSettings struct {
+	WritingMode                 string
+	PreviewWritingPlan          bool
 	QuestionID                  string
 	Enabled                     bool
 	DailyLimit, DebounceMinutes int
@@ -45,12 +47,17 @@ type KnowledgeStageInput struct {
 // GetKnowledgeArticleSettings reads the singleton automatic-article policy.
 func (s *Store) GetKnowledgeArticleSettings(ctx context.Context) (KnowledgeArticleSettings, error) {
 	var v KnowledgeArticleSettings
-	err := s.DB.QueryRowContext(ctx, `SELECT enabled,daily_limit,debounce_minutes,audience,style,question_id FROM knowledge_article_settings WHERE id=1`).Scan(&v.Enabled, &v.DailyLimit, &v.DebounceMinutes, &v.Audience, &v.Style, &v.QuestionID)
+	err := s.DB.QueryRowContext(ctx, `SELECT enabled,daily_limit,debounce_minutes,audience,style,question_id,writing_mode,preview_writing_plan FROM knowledge_article_settings WHERE id=1`).Scan(&v.Enabled, &v.DailyLimit, &v.DebounceMinutes, &v.Audience, &v.Style, &v.QuestionID, &v.WritingMode, &v.PreviewWritingPlan)
 	return v, err
 }
 
 // SetKnowledgeArticleSettings updates the explicit opt-in and bounded frequency.
 func (s *Store) SetKnowledgeArticleSettings(ctx context.Context, v KnowledgeArticleSettings) error {
+	purpose, err := provider.FreezeWritingPurpose(v.WritingMode)
+	if err != nil {
+		return err
+	}
+	v.WritingMode = purpose.Mode
 	if v.DailyLimit < 1 || v.DailyLimit > 10 || v.DebounceMinutes < 0 || v.DebounceMinutes > 1440 || strings.TrimSpace(v.Audience) == "" || strings.TrimSpace(v.Style) == "" || len([]rune(v.Style)) > 2000 || len([]rune(v.Audience)) > 500 {
 		return fmt.Errorf("每日篇数需为1–10，防抖为0–1440分钟，读者和风格不能为空或过长")
 	}
@@ -65,7 +72,7 @@ func (s *Store) SetKnowledgeArticleSettings(ctx context.Context, v KnowledgeArti
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE knowledge_article_settings SET enabled=?,daily_limit=?,debounce_minutes=?,audience=?,style=?,question_id=?,updated_at=datetime('now') WHERE id=1`, v.Enabled, v.DailyLimit, v.DebounceMinutes, v.Audience, v.Style, v.QuestionID)
+	_, err = tx.ExecContext(ctx, `UPDATE knowledge_article_settings SET enabled=?,daily_limit=?,debounce_minutes=?,audience=?,style=?,question_id=?,writing_mode=?,preview_writing_plan=?,updated_at=datetime('now') WHERE id=1`, v.Enabled, v.DailyLimit, v.DebounceMinutes, v.Audience, v.Style, v.QuestionID, v.WritingMode, v.PreviewWritingPlan)
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -78,7 +85,11 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 	if err != nil {
 		return provider.KnowledgeArticleRequest{}, "", err
 	}
-	req := provider.KnowledgeArticleRequest{PromptVersion: provider.KnowledgeArticlePromptVersion, Stage: "discover", Audience: prefs.Audience, Style: prefs.Style}
+	purpose, err := provider.FreezeWritingPurpose(prefs.WritingMode)
+	if err != nil {
+		return provider.KnowledgeArticleRequest{}, "", err
+	}
+	req := provider.KnowledgeArticleRequest{PromptVersion: provider.KnowledgeArticlePurposePromptVersion, WritingPurpose: &purpose, PreviewWritingPlan: prefs.PreviewWritingPlan, Stage: "discover", Audience: prefs.Audience, Style: prefs.Style}
 	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM keypoint_index WHERE quality_status IN ('ready','owner_confirmed') AND stale_at IS NULL AND evidence_status!='stale' AND production_status!='dismissed' ORDER BY created_at DESC,id LIMIT 40`)
 	if err != nil {
 		return req, "", err
@@ -215,6 +226,14 @@ func (s *Store) BuildKnowledgeArticleRequest(ctx context.Context, profileID, pro
 }
 
 func (s *Store) prepareKnowledgeMaterial(ctx context.Context, profileID, name string, m *provider.KnowledgeMaterial) (bool, error) {
+	if m.Kind == "understanding" {
+		frozen, err := s.UnderstandingKnowledgeMaterial(ctx, m.ID, name)
+		if err != nil || frozen == nil {
+			return false, err
+		}
+		*m = *frozen
+		return true, nil
+	}
 	st := models.SourceType(m.SourceType)
 	usable, err := s.CanUseSourceForPublication(ctx, profileID, st, m.SourceID)
 	if err != nil {
@@ -282,6 +301,17 @@ func (s *Store) prepareKnowledgeMaterial(ctx context.Context, profileID, name st
 // CheckKnowledgeMaterials rechecks frozen material identities and live data policies.
 func (s *Store) CheckKnowledgeMaterials(ctx context.Context, profileID, name string, materials []provider.KnowledgeMaterial) error {
 	for _, m := range materials {
+		if m.Kind == "understanding" {
+			frozen, err := s.UnderstandingKnowledgeMaterial(ctx, m.ID, name)
+			if err != nil {
+				return err
+			}
+			m.RetrievalReason, m.PreviousContent = "", "" // Local recall annotations do not change the frozen Owner answer.
+			if frozen == nil || jsonString(*frozen) != jsonString(m) {
+				return fmt.Errorf("%w: 理解快照或Reference权限已变化", ErrConflict)
+			}
+			continue
+		}
 		usable, err := s.CanUseSourceForPublication(ctx, profileID, models.SourceType(m.SourceType), m.SourceID)
 		if err != nil {
 			return err
@@ -350,7 +380,7 @@ func (s *Store) ReserveKnowledgeArticle(ctx context.Context, profileID, name, mo
 	hashInput := req
 	hashInput.History = nil
 	raw, _ := json.Marshal(hashInput)
-	sum := sha256.Sum256(append(raw, []byte(name+"\x00"+model+provider.KnowledgeArticlePromptVersion)...))
+	sum := sha256.Sum256(append(raw, []byte(name+"\x00"+model+req.PromptVersion)...))
 	hash := fmt.Sprintf("%x", sum)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -584,6 +614,10 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 	default:
 		return fmt.Errorf("未知自动文章阶段")
 	}
+	previewPlan := next == "write" && req.PreviewWritingPlan
+	if previewPlan {
+		status, next, reason = "awaiting_plan", "", "选材已完成，等待确认冻结写作计划"
+	}
 	if next != "" {
 		status = next
 	}
@@ -705,6 +739,11 @@ func (s *Store) CommitKnowledgeStage(ctx context.Context, job *models.Processing
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE knowledge_topic_candidates SET status=?,reason=?,selection_json=CASE WHEN ?='select' THEN ? ELSE selection_json END,topic_json=CASE WHEN ?='select' THEN ? ELSE topic_json END WHERE id=?`, candidateStatus, reason, input.Stage, jsonString(result.Topics), input.Stage, topic, candidateID); err != nil {
+			return err
+		}
+	}
+	if previewPlan {
+		if err := createKnowledgeWritingPlan(ctx, tx, v.ID, req, v.Provider, v.Model, job.Automated); err != nil {
 			return err
 		}
 	}

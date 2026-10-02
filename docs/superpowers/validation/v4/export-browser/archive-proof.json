@@ -1,0 +1,193 @@
+{
+  "zip_sha256": "2f52d22f52f0b4957406519b4b0496203db8fc3eb412f8a1294ba446875fd78d",
+  "files": 9,
+  "file_hashes_verified": 9,
+  "internal_links_verified": 36,
+  "scope": "d837c482-bbe8-417d-9dac-0a9984d272dc",
+  "articles": [
+    "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r1.md",
+    "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md"
+  ],
+  "links": [
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r1.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "来源 episode:658e0b8e-2c2f-4f4f-95e0-42029fbeac45 定位 0"
+    },
+    {
+      "from": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "来源 episode:77f73c78-49df-4c75-a632-b4cf0d08a655 定位 0"
+    },
+    {
+      "from": "index.md",
+      "to": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r1.md",
+      "label": "怎样区分来源与个人理解 · synthesis"
+    },
+    {
+      "from": "index.md",
+      "to": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "label": "怎样区分来源与个人理解 · synthesis"
+    },
+    {
+      "from": "index.md",
+      "to": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "label": "自建问题1：怎样核对主动回忆条件？"
+    },
+    {
+      "from": "index.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "v4自建来源1 单集"
+    },
+    {
+      "from": "index.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "v4自建来源3 单集"
+    },
+    {
+      "from": "index.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "v4自建来源2 单集"
+    },
+    {
+      "from": "index.md",
+      "to": "understandings/5059f6f6-3dc8-47fb-93e6-4a25c5ea0d67-r1.md",
+      "label": "我的理解"
+    },
+    {
+      "from": "index.md",
+      "to": "understandings/843158b3-92fc-41b7-9419-6ed7a9e89028-r2.md",
+      "label": "我的理解"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "understandings/5059f6f6-3dc8-47fb-93e6-4a25c5ea0d67-r1.md",
+      "label": "我的理解"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "understandings/843158b3-92fc-41b7-9419-6ed7a9e89028-r2.md",
+      "label": "我的理解"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r1.md",
+      "label": "怎样区分来源与个人理解 · synthesis"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "articles/3c894375-559c-4bc1-8cd0-53960e32c896-r3.md",
+      "label": "怎样区分来源与个人理解 · synthesis"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "v4自建来源1 单集"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "sources/episode-658e0b8e-2c2f-4f4f-95e0-42029fbeac45-r1.md",
+      "label": "v4自建来源3 单集"
+    },
+    {
+      "from": "questions/d837c482-bbe8-417d-9dac-0a9984d272dc-r4.md",
+      "to": "sources/episode-77f73c78-49df-4c75-a632-b4cf0d08a655-r1.md",
+      "label": "v4自建来源2 单集"
+    },
+    {
+      "from": "understandings/5059f6f6-3dc8-47fb-93e6-4a25c5ea0d67-r1.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    },
+    {
+      "from": "understandings/843158b3-92fc-41b7-9419-6ed7a9e89028-r2.md",
+      "to": "sources/episode-1df5832c-f11e-495e-863b-3e5e65719e12-r1.md",
+      "label": "来源 episode:1df5832c-f11e-495e-863b-3e5e65719e12 定位 0"
+    }
+  ]
+}

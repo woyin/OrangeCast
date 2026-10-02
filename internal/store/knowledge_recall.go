@@ -60,6 +60,14 @@ func (s *Store) recallKnowledgePool(ctx context.Context, profile, name string, r
 			continue
 		}
 		allowed, err := s.CanSendSourceToProvider(ctx, models.SourceType(c.SourceType), c.SourceID, name)
+		if c.SourceID == "" {
+			v, e := s.GetUnderstandingSnapshot(ctx, c.MaterialID)
+			if e == nil {
+				allowed, err = s.UnderstandingMaySend(ctx, v.ID, v.Version, name)
+			} else if e != ErrNotFound {
+				return req, e
+			}
+		}
 		if err != nil {
 			return req, err
 		}

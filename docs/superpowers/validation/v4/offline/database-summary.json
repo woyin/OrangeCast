@@ -1,0 +1,157 @@
+{
+  "after_replay": {
+    "drafts": [
+      {
+        "id": "fixture-id-1",
+        "revision": 1,
+        "snapshot_id": "fixture-id-2",
+        "source_available": true,
+        "source_id": "fixture-id-3",
+        "source_type": "episode",
+        "updated_at": "2026-10-02 05:44:51"
+      }
+    ],
+    "excerpt_progress": null,
+    "learning_excerpt_progress": 0,
+    "listening_progress": 1,
+    "lost_acks": 7,
+    "notes": [
+      {
+        "CreatedAt": "2026-10-02 05:44:51",
+        "ID": "fixture-id-4",
+        "Kind": "owner_reflection",
+        "Revision": 1,
+        "SourceID": "fixture-id-3",
+        "SourceType": "episode",
+        "UpdatedAt": "2026-10-02 05:44:51"
+      }
+    ],
+    "offline_operation_receipts": 3,
+    "offline_organizing_drafts": 1,
+    "original_progress": {
+      "audio_sha256": "365ad446685cc0858298d7e3e79b7374c711a129ebec78dc39c3d4d3113ab267",
+      "end_seconds": 0,
+      "excerpt_id": "",
+      "highlight_id": "",
+      "id": "fixture-id-5",
+      "item_offset_seconds": 0.249037,
+      "item_position": 0,
+      "mode": "original",
+      "plan_id": "",
+      "plan_version": 0,
+      "revision": 1,
+      "segment_ids": null,
+      "seq": 1790919878695,
+      "snapshot_id": "",
+      "snapshot_version": 0,
+      "source_id": "fixture-id-3",
+      "source_type": "episode",
+      "speed": 1,
+      "start_seconds": 0,
+      "updated_at": "2026-10-02 05:44:51"
+    },
+    "owner_notes": 1,
+    "shell_excerpt_progress": null
+  },
+  "after_excerpt_and_source_change": {
+    "drafts": [
+      {
+        "id": "fixture-id-1",
+        "revision": 1,
+        "snapshot_id": "fixture-id-2",
+        "source_available": false,
+        "source_id": "fixture-id-3",
+        "source_type": "episode",
+        "updated_at": "2026-10-02 05:44:51"
+      }
+    ],
+    "excerpt_progress": {
+      "audio_sha256": "365ad446685cc0858298d7e3e79b7374c711a129ebec78dc39c3d4d3113ab267",
+      "end_seconds": 2,
+      "excerpt_id": "fixture-id-6",
+      "highlight_id": "",
+      "id": "fixture-id-7",
+      "item_offset_seconds": 0.75,
+      "item_position": 0,
+      "mode": "excerpt",
+      "plan_id": "",
+      "plan_version": 0,
+      "revision": 3,
+      "segment_ids": [
+        "seg-1",
+        "seg-2"
+      ],
+      "seq": 1790919894271,
+      "snapshot_id": "fixture-id-2",
+      "snapshot_version": 1,
+      "source_id": "fixture-id-3",
+      "source_type": "episode",
+      "speed": 1,
+      "start_seconds": 0,
+      "updated_at": "2026-10-02 05:44:57"
+    },
+    "learning_excerpt_progress": 2,
+    "listening_progress": 1,
+    "lost_acks": 7,
+    "notes": [
+      {
+        "CreatedAt": "2026-10-02 05:44:51",
+        "ID": "fixture-id-4",
+        "Kind": "owner_reflection",
+        "Revision": 1,
+        "SourceID": "fixture-id-3",
+        "SourceType": "episode",
+        "UpdatedAt": "2026-10-02 05:44:51"
+      }
+    ],
+    "offline_operation_receipts": 7,
+    "offline_organizing_drafts": 1,
+    "original_progress": {
+      "audio_sha256": "365ad446685cc0858298d7e3e79b7374c711a129ebec78dc39c3d4d3113ab267",
+      "end_seconds": 0,
+      "excerpt_id": "",
+      "highlight_id": "",
+      "id": "fixture-id-5",
+      "item_offset_seconds": 0.249037,
+      "item_position": 0,
+      "mode": "original",
+      "plan_id": "",
+      "plan_version": 0,
+      "revision": 1,
+      "segment_ids": null,
+      "seq": 1790919878695,
+      "snapshot_id": "",
+      "snapshot_version": 0,
+      "source_id": "fixture-id-3",
+      "source_type": "episode",
+      "speed": 1,
+      "start_seconds": 0,
+      "updated_at": "2026-10-02 05:44:51"
+    },
+    "owner_notes": 1,
+    "shell_excerpt_progress": {
+      "audio_sha256": "365ad446685cc0858298d7e3e79b7374c711a129ebec78dc39c3d4d3113ab267",
+      "end_seconds": 2,
+      "excerpt_id": "fixture-id-8",
+      "highlight_id": "",
+      "id": "fixture-id-9",
+      "item_offset_seconds": 1.5,
+      "item_position": 0,
+      "mode": "excerpt",
+      "plan_id": "",
+      "plan_version": 0,
+      "revision": 1,
+      "segment_ids": [
+        "seg-2"
+      ],
+      "seq": 1790919900224,
+      "snapshot_id": "fixture-id-2",
+      "snapshot_version": 1,
+      "source_id": "fixture-id-3",
+      "source_type": "episode",
+      "speed": 1,
+      "start_seconds": 1,
+      "updated_at": "2026-10-02 05:45:00"
+    }
+  }
+}

@@ -1,11 +1,36 @@
 {{define "title"}}搜索设置 · CloudWisePod{{end}}
 {{define "content"}}
-<h1>搜索设置</h1><p><a href="/search">返回搜索</a></p>
+<h1>搜索设置</h1><form method="get" action="/search/settings"><label>查找可选来源<input name="source_query"></label><button>查找来源</button></form><p><a href="/search">返回搜索</a></p>
 <p>FTS 始终可用。语义索引默认关闭；预检只发送固定测试短句，成功后登记连接和实际维度，不自动开启索引。</p>
-<p>容量上限：{{.Capacity}} 个完整窗口，向量最多 {{.MaxDimensions}} 维。质量与目标机性能验收尚未完成，开启入口暂不提供。</p>
+<p>容量上限：{{.Capacity}} 个完整窗口，向量最多 {{.MaxDimensions}} 维。来源范围与价格保存后不会自动开启语义检索；必须导入当前身份的真实质量报告，并满足冷检索性能门槛。</p>
 {{with .Connection}}<section id="embedding-settings" class="panel"><h2>独立语义连接</h2><p>模型：{{.Model}} · 连接身份：{{.Provider}}</p>
 <form id="embedding-preflight-form" method="post" action="/api/knowledge-semantic"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="request_key" value="{{runRequestKey}}"><button type="submit">明确预检连接（可能计费）</button><p aria-live="polite"></p></form><a id="embedding-preflight-job" hidden>查看任务、恢复操作与费用</a></section>
 {{else}}<p>独立 embedding 连接尚未配置。需同时设置 LEARNING_EMBEDDING_BASE_URL、LEARNING_EMBEDDING_API_KEY、LEARNING_EMBEDDING_MODEL。密钥只保留在服务端配置中。</p>{{end}}
-{{range .Statuses}}<section class="panel"><h2>已测量配置</h2><p>模型 {{.Config.Model}} · {{.Config.Dimensions}} 维 · {{if .Config.Enabled}}索引已授权{{else}}索引关闭{{end}} · 配置版本 {{.Config.Revision}}</p><p>已索引 {{.IndexedWindows}} 个窗口，待更新 {{.PendingObjects}} 个对象，完整段落超过输入容量而跳过 {{.SkippedObjects}} 个对象。{{if .CapacityBlocked}}容量阻断，继续使用 FTS。{{end}}</p><h3>明确选择的来源范围</h3>{{range .Sources}}<p><a href="/sources/{{.SourceType}}/{{.SourceID}}">{{.SourceType}} · {{.SourceID}}</a></p>{{else}}<p>尚未选择来源。</p>{{end}}</section>{{end}}
+{{range .Statuses}}{{$status:=.}}{{$detail:=index $.Details .Config.ID}}
+<section class="panel"><h2>已测量配置</h2><p>模型 {{.Config.Model}} · {{.Config.Dimensions}} 维 · {{if .Config.Enabled}}索引已授权{{else}}索引关闭{{end}} · 配置版本 {{.Config.Revision}}</p>
+<p>已索引 {{.IndexedWindows}} 个窗口，待更新 {{.PendingObjects}} 个对象，完整段落超过输入容量而跳过 {{.SkippedObjects}} 个对象。{{if .CapacityBlocked}}容量阻断，继续使用 FTS。{{end}}</p>
+<form method="post" action="/search/settings" data-embedding-settings>
+<input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="config_id" value="{{.Config.ID}}"><input type="hidden" name="expected_revision" value="{{.Config.Revision}}">
+<label><input type="checkbox" name="index_authorized" value="1" {{if .Config.Enabled}}checked{{end}}>授权已选来源建立索引（可能计费）</label>
+<label>窗口容量（最高 50000）<input type="number" name="window_capacity" min="1" max="50000" required value="{{.Config.WindowCapacity}}"></label>
+<label>每百万输入 token 的价格（分；留空表示未知）<input type="number" name="input_cents_per_million" min="0" value="{{with $detail.Price}}{{.InputCentsPerMillion}}{{end}}"></label>
+<ul data-embedding-selected></ul><details><summary>查看或直接编辑来源范围</summary><label>来源范围<textarea name="sources" rows="4" required>{{$detail.SourcesJSON}}</textarea></label></details>
+{{range $detail.Permissions}}<p>{{.SourceType}} · {{.SourceID}} · {{.Policy}}：{{.Reason}}</p>{{end}}
+<p>下方选择来源可添加到范围。保存会清空旧向量并重新排队，所有检索准入失效；未授权来源不会外发。</p>
+<select data-embedding-source><option value="">选择来源</option>{{range $.AvailableSources}}<option value="{{.SourceType}}:{{.SourceID}}">{{.Title}}（{{.SourceType}}）</option>{{end}}</select><button type="button" data-embedding-add>添加到范围</button>
+<ul data-embedding-selected-understandings></ul><details><summary>查看或直接编辑理解范围</summary><label>明确选择的当前理解快照<textarea name="understanding_snapshot_ids" rows="2">{{$detail.UnderstandingsJSON}}</textarea></label></details>
+<select data-embedding-understanding><option value="">选择我的当前理解</option>{{range $detail.UnderstandingChoices}}<option value="{{.SnapshotID}}">{{.Question}} · {{.Policy}} · {{if .MaySend}}当前外发许可有效{{else}}未允许此连接，不会外发{{end}}</option>{{end}}</select><button type="button" data-embedding-add-understanding>添加当前理解</button>
+<p>只索引明确选择的当前版本；无来源的个人想法也必须自身允许此连接。引用的全部来源仍需选入范围并具有有效权限。</p>
+<button type="submit" name="action" value="preview">预览所选来源的当前外发许可</button><button type="submit" name="action" value="settings">保存范围、价格与容量并重建索引</button>
+</form>
+<details><summary>明确准备一条评测查询（可能计费）</summary><p>供固定评测清单建立查询向量；不启用普通语义检索、不证明质量收益。已保存的同一查询会复用，未知远端结果需在任务页明确处理。</p><form method="post" action="/api/knowledge-semantic" data-embedding-evaluation><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="config_id" value="{{.Config.ID}}"><input type="hidden" name="expected_revision" value="{{.Config.Revision}}"><input type="hidden" name="request_key" value="{{runRequestKey}}"><label>评测查询<input name="query" maxlength="1000" required></label><button {{if not .Config.Enabled}}disabled{{end}}>明确准备查询向量</button><p aria-live="polite"></p><a hidden data-evaluation-job>查看任务</a></form></details>
+<h3>质量与性能准入</h3><p>当前评测身份：<code>{{$detail.Identity}}</code></p>
+{{if $detail.Reason}}<p role="status">{{$detail.Reason}}</p>{{else}}<p>当前报告通过；{{if .Config.SemanticEnabled}}语义检索已开启。{{else}}可以明确开启语义检索。{{end}}</p>{{end}}
+{{with $detail.Report}}<p>报告 {{.ID}} · {{.Queries}} 查询 · 冷 p95：1 万 {{.Cold10kP95MS}}ms / 5 万 {{.Cold50kP95MS}}ms · {{if .Passed}}报告指标通过{{else}}报告指标未通过{{end}}。报告失效时通过指标不能开启。</p>{{end}}
+<details><summary>导入真实评测报告</summary><p>固定 40 查询、至少 20 个冷样本，绑定查询/相关性/语料清单 SHA256、同机同维数 1 万/5 万实测。不可使用合成结果、热结果替代冷结果。导入不调用模型也不开启检索。</p>
+<form method="post" action="/search/settings"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="report"><input type="hidden" name="config_id" value="{{.Config.ID}}"><label>评测报告 JSON<textarea name="report" rows="14" required>{{$detail.ReportTemplate}}</textarea></label><button type="submit">保存并校验报告</button></form></details>
+<form method="post" action="/search/settings"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="action" value="activate"><input type="hidden" name="config_id" value="{{.Config.ID}}"><input type="hidden" name="expected_revision" value="{{.Config.Revision}}">
+{{if .Config.SemanticEnabled}}<input type="hidden" name="enabled" value="0"><button>关闭语义检索</button>{{else}}<input type="hidden" name="enabled" value="1"><button {{if $detail.Reason}}disabled{{end}}>明确开启语义检索</button>{{end}}</form>
+</section>{{end}}
 <p>价格未知不等于免费；实际供应商用量、冻结估价与预算状态见各任务记录。月预算可在<a href="/settings">设置</a>中核对。</p>
 {{end}}

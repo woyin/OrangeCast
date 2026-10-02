@@ -29,3 +29,14 @@ func TestSharedPlaybackControllerBehavior(t *testing.T) {
 		t.Fatalf("%v: %s", err, out)
 	}
 }
+
+func TestListeningExcerptBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable")
+	}
+	out, err := exec.Command(node, filepath.Join("testdata", "listening-excerpts.cjs")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+}

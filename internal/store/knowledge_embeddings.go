@@ -27,8 +27,10 @@ type EmbeddingSource struct {
 // KnowledgeEmbeddingConfig 保存独立 embedding 的启用、范围和安全身份。
 type KnowledgeEmbeddingConfig struct {
 	provider.EmbeddingConfig
-	Enabled  bool `json:"enabled"`
-	Revision int  `json:"revision"`
+	Enabled         bool `json:"enabled"`
+	Revision        int  `json:"revision"`
+	SemanticEnabled bool `json:"semantic_enabled"`
+	WindowCapacity  int  `json:"window_capacity"`
 }
 
 // EmbeddingWindow 绑定完整输入、来源、版本及向量索引身份。
@@ -71,7 +73,7 @@ func (s *Store) RegisterKnowledgeEmbeddingConfig(ctx context.Context, cfg provid
 // GetKnowledgeEmbeddingConfig 读取已保存配置，不触发预检或供应商调用。
 func (s *Store) GetKnowledgeEmbeddingConfig(ctx context.Context, id string) (*KnowledgeEmbeddingConfig, error) {
 	c := &KnowledgeEmbeddingConfig{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -100,7 +102,7 @@ func (s *Store) ChangeKnowledgeEmbeddingScope(ctx context.Context, id string, ex
 		return nil, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE knowledge_embedding_configs SET enabled=?,revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=?`, enabled, id, expected)
+	result, err := tx.ExecContext(ctx, `UPDATE knowledge_embedding_configs SET enabled=?,semantic_enabled=0,revision=revision+1,updated_at=datetime('now') WHERE id=? AND revision=?`, enabled, id, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +139,7 @@ func (s *Store) ChangeKnowledgeEmbeddingScope(ctx context.Context, id string, ex
 		return nil, err
 	}
 	cfg.Enabled = enabled
+	cfg.SemanticEnabled = false
 	cfg.Revision = expected + 1
 	return cfg, nil
 }
@@ -151,7 +154,7 @@ func embeddingSourceQualified(alias string) string {
 	return "(" + strings.Join(alternatives, " OR ") + ")"
 }
 func embeddingDocumentQualified() string {
-	return `d.visibility='current' AND d.kind IN ('original','document','keypoint','source_note','owner_reflection','article') AND (d.kind!='keypoint' OR EXISTS(SELECT 1 FROM keypoint_index k WHERE k.id=d.object_id AND k.stale_at IS NULL AND k.evidence_status!='stale' AND k.production_status!='dismissed' AND k.quality_status IN ('ready','owner_confirmed'))) AND (` + embeddingSourceQualified("d") + ` OR (d.kind='article' AND EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision) AND NOT EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision AND NOT ` + embeddingSourceQualified("m") + `)))`
+	return `d.visibility='current' AND d.kind IN ('original','document','keypoint','source_note','owner_reflection','article','understanding') AND (d.kind!='keypoint' OR EXISTS(SELECT 1 FROM keypoint_index k WHERE k.id=d.object_id AND k.stale_at IS NULL AND k.evidence_status!='stale' AND k.production_status!='dismissed' AND k.quality_status IN ('ready','owner_confirmed'))) AND (` + embeddingSourceQualified("d") + ` OR ` + understandingSendSQL("d", ":provider", true) + ` OR (d.kind='article' AND EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision) AND NOT EXISTS(SELECT 1 FROM knowledge_article_material_refs m WHERE m.article_id=d.object_id AND m.revision=d.revision AND NOT ` + embeddingSourceQualified("m") + `)))`
 }
 func embeddingSQLArgs(cfg *KnowledgeEmbeddingConfig) []any {
 	return []any{sql.Named("config", cfg.ID), sql.Named("provider", cfg.Provider)}
@@ -202,6 +205,22 @@ type embeddingDocument struct {
 }
 
 func (s *Store) embeddingWindowSources(ctx context.Context, doc embeddingDocument) ([]EmbeddingSource, error) {
+	if doc.kind == "understanding" {
+		rows, err := s.DB.QueryContext(ctx, understandingSourceRowsSQL(), doc.objectID, doc.objectID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []EmbeddingSource{}
+		for rows.Next() {
+			var v EmbeddingSource
+			if err = rows.Scan(&v.SourceType, &v.SourceID); err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+		return out, rows.Err()
+	}
 	if doc.kind != "article" {
 		return []EmbeddingSource{{doc.sourceType, doc.sourceID}}, nil
 	}
@@ -235,7 +254,7 @@ func (s *Store) PrepareKnowledgeEmbeddingBatch(ctx context.Context, id string) (
 	if err = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_embedding_vectors WHERE config_id=?`, id).Scan(&count); err != nil {
 		return nil, err
 	}
-	if count >= KnowledgeEmbeddingCapacity {
+	if count >= cfg.WindowCapacity {
 		return nil, fmt.Errorf("%w: embedding capacity reached", ErrInvalidEditorialState)
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT d.key,d.revision,d.title,d.body,d.kind,d.object_id,d.source_type,d.source_id FROM knowledge_embedding_events ev JOIN knowledge_search_docs d ON d.key=ev.doc_key WHERE ev.config_id=:config AND ev.action='upsert' AND ev.reason!='window_too_large' AND length(CAST(d.body AS BLOB))<=1048576 AND `+embeddingDocumentQualified()+` ORDER BY ev.created_at,ev.doc_key LIMIT 16`, embeddingSQLArgs(cfg)...)
@@ -279,7 +298,7 @@ func (s *Store) PrepareKnowledgeEmbeddingBatch(ctx context.Context, id string) (
 			}
 			window.Sources = refs
 			out = append(out, window)
-			if len(out) >= provider.EmbeddingMaxBatch || count+len(out) >= KnowledgeEmbeddingCapacity {
+			if len(out) >= provider.EmbeddingMaxBatch || count+len(out) >= cfg.WindowCapacity {
 				return out, nil
 			}
 		}
@@ -354,7 +373,7 @@ func (s *Store) adoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 			missing++
 		}
 	}
-	if count+missing > KnowledgeEmbeddingCapacity {
+	if count+missing > cfg.WindowCapacity {
 		return 0, ErrInvalidEditorialState
 	}
 	adopted := 0
@@ -453,12 +472,46 @@ func (s *Store) KnowledgeEmbeddingStatus(ctx context.Context, id string) (*Embed
 	if err = s.DB.QueryRowContext(ctx, `SELECT delete_epoch FROM knowledge_embedding_state WHERE id=1`).Scan(&status.DeleteEpoch); err != nil {
 		return nil, err
 	}
-	status.CapacityBlocked = status.IndexedWindows >= KnowledgeEmbeddingCapacity
+	status.CapacityBlocked = status.IndexedWindows >= cfg.WindowCapacity
 	return status, nil
 }
 
 // Frozen article provenance is compared as a complete set at dispatch and adopt.
 func embeddingSourcesMatch(ctx context.Context, tx *sql.Tx, d embeddingDocument, frozen []EmbeddingSource) (bool, error) {
+	if d.kind == "understanding" {
+		rows, e := tx.QueryContext(ctx, understandingSourceRowsSQL(), d.objectID, d.objectID)
+		if e != nil {
+			return false, e
+		}
+		defer rows.Close()
+		var actual []EmbeddingSource
+		for rows.Next() {
+			var r EmbeddingSource
+			if e = rows.Scan(&r.SourceType, &r.SourceID); e != nil {
+				return false, e
+			}
+			actual = append(actual, r)
+		}
+		if e = rows.Err(); e != nil {
+			return false, e
+		}
+		if len(actual) != len(frozen) {
+			return false, nil
+		}
+		seen := map[EmbeddingSource]bool{}
+		for _, r := range frozen {
+			if seen[r] {
+				return false, nil
+			}
+			seen[r] = true
+		}
+		for _, r := range actual {
+			if !seen[r] {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
 	if d.kind != "article" {
 		return len(frozen) == 1 && frozen[0].SourceType == d.sourceType && frozen[0].SourceID == d.sourceID, nil
 	}

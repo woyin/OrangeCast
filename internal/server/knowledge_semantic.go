@@ -112,10 +112,29 @@ func (srv *Server) handleKnowledgeSemantic(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			job, _, err = srv.store.ReserveKnowledgeEmbeddingPreflight(r.Context(), command.RequestKey, client.Config())
-		case "query":
+		case "query", "evaluation_query":
 			cfg, e := srv.currentKnowledgeEmbeddingConfig(r.Context(), command.ConfigID)
 			if e != nil {
 				semanticHTTPError(w, e)
+				return
+			}
+			if command.Action == "evaluation_query" && command.ExpectedRevision < 1 {
+				semanticHTTPError(w, store.ErrInvalidEditorialState)
+				return
+			}
+			if command.Action == "query" {
+				_, reason, e := srv.store.KnowledgeEmbeddingQualityGate(r.Context(), cfg.ID)
+				if e != nil {
+					semanticHTTPError(w, e)
+					return
+				}
+				if !cfg.SemanticEnabled || reason != "" {
+					http.Error(w, "语义检索尚未通过有效质量准入并开启；请继续使用FTS。", 409)
+					return
+				}
+			}
+			if command.ExpectedRevision > 0 && command.ExpectedRevision != cfg.Revision {
+				semanticHTTPError(w, store.ErrConflict)
 				return
 			}
 			job, _, err = srv.store.ReserveKnowledgeQueryEmbeddingRequest(r.Context(), cfg.ID, command.Query, command.RequestKey)

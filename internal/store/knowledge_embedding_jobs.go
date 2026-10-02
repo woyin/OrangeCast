@@ -331,7 +331,7 @@ func (s *Store) RecordEmbeddingReceipt(ctx context.Context, origin string, in Kn
 // EnabledKnowledgeEmbeddingConfigs only enumerates matching, Owner-enabled
 // connections. A different endpoint/model cannot pick up an old automatic scope.
 func (s *Store) EnabledKnowledgeEmbeddingConfigs(ctx context.Context, route provider.EmbeddingConfig) ([]*KnowledgeEmbeddingConfig, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision FROM knowledge_embedding_configs WHERE enabled=1 AND connection_id=? AND model=? AND (?=0 OR dimensions=?) AND NOT EXISTS(SELECT 1 FROM run_controls c WHERE c.kind='lane' AND c.target='index' AND c.paused=1) ORDER BY updated_at,id LIMIT 8`, route.ConnectionID, route.Model, route.Dimensions, route.Dimensions)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity FROM knowledge_embedding_configs WHERE enabled=1 AND connection_id=? AND model=? AND (?=0 OR dimensions=?) AND NOT EXISTS(SELECT 1 FROM run_controls c WHERE c.kind='lane' AND c.target='index' AND c.paused=1) ORDER BY updated_at,id LIMIT 8`, route.ConnectionID, route.Model, route.Dimensions, route.Dimensions)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (s *Store) EnabledKnowledgeEmbeddingConfigs(ctx context.Context, route prov
 	var out []*KnowledgeEmbeddingConfig
 	for rows.Next() {
 		c := &KnowledgeEmbeddingConfig{}
-		if err = rows.Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision); err != nil {
+		if err = rows.Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

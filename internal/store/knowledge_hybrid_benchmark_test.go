@@ -110,7 +110,7 @@ func BenchmarkKnowledgeHybridMaximumDimensions(b *testing.B) {
 							s.embeddingMatrixMu.Unlock()
 						}
 						start := time.Now()
-						result, err := s.Retrieve(b.Context(), request)
+						result, err := s.EvaluateKnowledgeRetrieval(b.Context(), request)
 						times = append(times, time.Since(start))
 						if err != nil || result.Method != "rrf" || result.IndexedCount != size {
 							b.Fatal(result, err)

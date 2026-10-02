@@ -1,0 +1,13 @@
+{
+  "downloads": [
+    {
+      "id": "bc1f72ca-72f3-4d08-97ca-3a2aa1b98798",
+      "state": "queued"
+    },
+    {
+      "id": "2fba004a-b7fc-4179-a831-dc9f057d98e4",
+      "state": "ready"
+    }
+  ],
+  "url": "http://127.0.0.1:18131/learning-exports#export-bc1f72ca-72f3-4d08-97ca-3a2aa1b98798"
+}

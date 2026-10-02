@@ -1,0 +1,38 @@
+PASS fresh isolated Go database
+PASS actual authenticated device defaults disabled
+PASS actual Go manifest bytes stored ready in IndexedDB
+PASS service worker range over actual local WAV
+PASS actual WAV playback and seek
+PASS actual offline reload and durable note/draft/progress outbox
+PASS actual browser unsupported-sw offers online fallback without private UI
+PASS capability failure retains only whitelisted static cache
+PASS real authenticated SSR works after unsupported-sw
+PASS existing durable drafts survive unsupported-sw unchanged
+PASS actual browser denied-sw offers online fallback without private UI
+PASS capability failure retains only whitelisted static cache
+PASS real authenticated SSR works after denied-sw
+PASS existing durable drafts survive denied-sw unchanged
+PASS actual browser failed-idb offers online fallback without private UI
+PASS capability failure retains only whitelisted static cache
+PASS real authenticated SSR works after failed-idb
+PASS existing durable drafts survive failed-idb unchanged
+PASS actual Chrome CDP service-worker bypass and worker-script block enabled
+PASS Chrome browser-level SW bypass reaches Go404 rather than ready audio blob, preserving API support and drafts
+PASS real SSR works while Chrome bypasses service worker
+PASS actual Chrome network event proves private SSR response bypassed service worker
+PASS Chrome worker-setting change preserves all existing IndexedDB drafts
+PASS Chrome worker bypass never caches private SSR or API responses
+PASS real Go acknowledgement drop armed after commit
+PASS native sync button committed then real HTTP connection closed before acknowledgement
+PASS server committed each offline operation exactly once despite lost ack
+PASS restore acknowledgements before explicit replay
+PASS same UUID/hash replay deduplicates real DB and clears durable outbox
+ROOT NAV [{'event': 'beforeunload', 'mode': 'excerpt', 'paused': True, 'time': 0.75, 'transport': {'conflict': False, 'deadline': 0, 'dirty': False, 'loaded': True, 'revision': 3, 'sleepExpired': False}}, {'event': 'pagehide', 'mode': 'excerpt', 'paused': True, 'time': 0.75, 'transport': {'conflict': False, 'deadline': 0, 'dirty': False, 'loaded': True, 'revision': 3, 'sleepExpired': False}}]
+PASS root downloaded excerpt playback sync leaves original progress revision unchanged
+PASS native offline shell frozen 1–2s interval clamps both seek bounds and pauses at end
+PASS offline shell reload restores frozen interval and exact position paused
+PASS shell second interval has independent real DB progress without overwriting first interval or original
+PASS actual source revision changed
+PASS real Go409 locks old source bytes and preserves copyable pending text
+PASS explicit exit clears real device private DB
+BROWSER Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/148.0.0.0 Safari/537.36

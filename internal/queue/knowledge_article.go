@@ -82,7 +82,7 @@ func (w *Worker) doKnowledgeArticle(ctx context.Context, job *models.ProcessingJ
 }
 
 func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob, bundle *provider.ProviderBundle, req provider.KnowledgeArticleRequest, exec *models.ProcessingJobExecution, validate func() error) (*provider.KnowledgeArticleResult, error) {
-	if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion {
+	if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion || exec.ConfigVersion == provider.KnowledgeArticlePurposePromptVersion {
 		cfg, err := provider.KnowledgeConfigForStage(req, exec.ConfiguredModel)
 		if err != nil || req.PromptVersion != exec.ConfigVersion || cfg.Model != exec.ConfiguredModel {
 			return nil, fmt.Errorf("阶段配置与冻结模型不匹配")
@@ -149,7 +149,7 @@ func (w *Worker) groundedTextStep(ctx context.Context, job *models.ProcessingJob
 	if err := w.recordKnowledgeUsage(ctx, job, req.Stage, cp); err != nil {
 		return nil, err
 	}
-	if req.PromptVersion == provider.KnowledgeArticlePromptVersion && req.Estimate != nil && cp.Usage.OutputUnits > req.Estimate.OutputTokens {
+	if (req.PromptVersion == provider.KnowledgeArticlePromptVersion || req.PromptVersion == provider.KnowledgeArticlePurposePromptVersion) && req.Estimate != nil && cp.Usage.OutputUnits > req.Estimate.OutputTokens {
 		return nil, fmt.Errorf("模型返回的计费输出超出冻结上限（%d > %d，可能包含推理用量）；已保留响应与用量，停止后续阶段，请校准配置后创建新任务", cp.Usage.OutputUnits, req.Estimate.OutputTokens)
 	}
 	if err := provider.ValidateKnowledgeResult(req, cp.Result); err != nil {

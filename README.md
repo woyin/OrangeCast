@@ -46,6 +46,8 @@
 
 详见[第三轮使用说明](docs/personal-learning-v3.md)、[开发与验证记录](docs/superpowers/plans/2026-10-01-personal-learning-and-knowledge-articles-v3-validation.md)和[综合验收报告](docs/acceptance/2026-10-personal-learning-v3.md)。真实个人笔记质量与手机后台体验仍待验证。
 
+第四轮入口与边界见[第四轮使用说明](docs/personal-learning-v4.md)、[配置示例](docs/configuration-v4.example.md)及[生产部署指南](docs/production-deployment.md)。语义准入、真实模型质量和实体手机体验分别验收，不以文档或工程测试替代。
+
 ### 内容生产
 
 - **跨集选题**：Theme 组织支持、补充与冲突材料；Scout 生成并去重候选提案
@@ -198,7 +200,7 @@ cmd/cloudwisepod/        入口（serve / backup / restore）
 internal/
   config/                环境变量 + DATA_DIR 布局
   store/                 SQLite + FTS5 + 迁移系统 + 全部仓储
-    migrations/          有序 SQL 迁移（0001–0069）
+    migrations/          有序 SQL 迁移
   auth/                  argon2id 密码 + cookie session + CSRF + 限流
   models/                领域类型
   provider/              Groq/OpenAI 实现 + Citation 校验 + Highlight

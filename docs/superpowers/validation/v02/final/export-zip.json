@@ -1,0 +1,22 @@
+{
+  "sha256": "736c243882c9332e10a090ab0ffe0dad19fcf9224a0a0911b6662b22491789e9",
+  "files": [
+    "articles/9436e19b-9fab-4ac0-af96-7fb5947ef52f-r1.md",
+    "articles/9436e19b-9fab-4ac0-af96-7fb5947ef52f-r3.md",
+    "index.md",
+    "manifest.json",
+    "notes/9bacc41e-d89c-4143-968b-f73d2e271a3a-r1.md",
+    "notes/cd94abb3-eb92-4b81-8a67-59f552f37187-r1.md",
+    "questions/485617f0-d5d0-4821-a7ce-2f5853fc4a2a-r7.md",
+    "sources/episode-2ea91920-0627-419b-a7c2-92fa61e461cd-r1.md",
+    "sources/episode-451b7edf-fefb-4f61-aeed-8ff59475deca-r1.md",
+    "sources/episode-a530cc9c-30c8-46d6-a366-5bcce739b799-r1.md",
+    "understandings/7263972e-a495-4786-b392-755ade6bbfc4-r1.md",
+    "understandings/f323132a-38bd-4758-94ea-e756a382a068-r2.md"
+  ],
+  "scope_kind": "question",
+  "scope_id": "485617f0-d5d0-4821-a7ce-2f5853fc4a2a",
+  "manifest_files": 11,
+  "hash_failures": [],
+  "crc_failure": null
+}

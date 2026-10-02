@@ -1,0 +1,6 @@
+=== RUN   TestPersonalLearningV4SameFixtureStopAndPurge
+2026/10/02 14:34:32 任务 ae1300ff-da5a-45f9-8837-c5acf3c4e96d 处理失败: 问题对话已知响应记账失败: constraint failed: journey receipt failure (1811)
+    personal_learning_v4_faults_test.go:225: SAME_FIXTURE_FAULTS question=bad2489b-a650-4576-be0f-d325a35865ee article=aebabf89-602b-4609-b8f9-de9bc2bf709b receipts=8 model_before=2/6 model_after=2/6 stop=OwnerHTTP purge=OwnerHTTP oldZIP=denied offlinePack=denied sourceDerived=cleared OwnerUnderstanding=retained committedOfflineDraft=retained callerPending=unchanged
+--- PASS: TestPersonalLearningV4SameFixtureStopAndPurge (8.91s)
+PASS
+ok  	github.com/woyin/orangecast/internal/server	10.652s

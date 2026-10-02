@@ -1,0 +1,204 @@
+{
+  "responses": [
+    {
+      "url": "http://127.0.0.1:18777/offline-audio?file_id=fixture-id-10",
+      "fromServiceWorker": false,
+      "status": 404
+    },
+    {
+      "url": "http://127.0.0.1:18777/dashboard",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/app.css",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/private-state.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/view-lifecycle.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/form-actions.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/playback-controller.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/safe-render.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/article-drafts.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/offline-core.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/listening-reflections.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/dj-player.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/offline-operations.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/offline-packs.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/owner-notes.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/offline-storage.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/listening-session.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/player.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/voice-notes.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/understandings.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/evidence-view.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/dj-view.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/learning-questions.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/question-study.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/evidence-gaps.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/learning-exports.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/quality-cases.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/knowledge-articles.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/knowledge-updates.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/daily-review.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/search.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/knowledge-search-settings.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/automation.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/review.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/listening-queue.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/app-navigation.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/page-actions.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/knowledge-source-picker.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/static/offline-update.js",
+      "fromServiceWorker": false,
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:18777/api/voice-notes/session",
+      "fromServiceWorker": false,
+      "status": 200
+    }
+  ]
+}

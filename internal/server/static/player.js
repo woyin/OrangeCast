@@ -225,35 +225,97 @@ window.CWPViews.define(function(view,scope) {
   }
 
   if (scForm) {
-    on(scForm,'submit', async (e) => {
-      e.preventDefault();
-      const q = scForm.querySelector('[name=question]').value;
-      if (!q.trim()) return;
-      // 即时显示用户问题
-      if (scThread) scThread.insertAdjacentHTML('beforeend', renderSCMessage('user', q, []));
-      const fd = new FormData(scForm);
-      scForm.querySelector('[name=question]').value = '';
-      if (scFeedback) scFeedback.innerHTML = '<p>思考中…</p>';
-      fd.append('source_type', spec.sourceType);
-      fd.append('source_id', spec.sourceId);
-      try {
-        const resp = await scope.fetch('/api/study-chat', { method: 'POST', body: fd });
-        const data = await resp.json();
-        if (data.error) {
-          if (scFeedback) scFeedback.innerHTML = '<p class="error">' + escapeHtml(data.error) + '</p>';
+    const pendingKey = 'cwp-study-command:' + spec.sourceType + ':' + spec.sourceId;
+    const sessionKey = pendingKey + ':session';
+    const draftKey = 'cwp-study-draft:' + spec.sourceType + ':' + spec.sourceId;
+    const questionInput = scForm.querySelector('[name=question]');
+    // Submitted command identity and the next editable question have separate
+    // lifetimes. Polling/completion may retire the command but never its draft.
+    function saveDraft() {
+      try { if(questionInput.value)sessionStorage.setItem(draftKey,JSON.stringify({version:1,text:questionInput.value}));else sessionStorage.removeItem(draftKey); }
+      catch(err){feedback('下一问草稿无法保存在本机，请先复制文字。','error');}
+    }
+    on(questionInput,'input',saveDraft);
+    let pending = null, revision = 1, polling = false, current = null;
+    function feedback(text, cls = '') { if(scFeedback) scFeedback.innerHTML='<p class="'+cls+'">'+escapeHtml(text)+'</p>'; }
+    function busy(value) { const button=scForm.querySelector('[type=submit]');if(button)button.disabled=value; }
+    function savePending(value) { sessionStorage.setItem(pendingKey,JSON.stringify(value));pending=value; }
+    async function history(id) {
+      if (!id) return;
+      const response=await scope.fetch('/api/study-chat/history?session_id='+encodeURIComponent(id),{cache:'no-store'});
+      if(response.status===404){sessionStorage.removeItem(sessionKey);if(scSessionInput)scSessionInput.value='';revision=1;return;}
+      if(!response.ok) return;
+      const data=await response.json();revision=data.revision||revision;
+      if(scThread)scThread.innerHTML=(data.messages||[]).map(m=>renderSCMessage(m.role,m.content,m.reference_segment_ids)).join('');
+    }
+    async function show(data) {
+      current=data;revision=data.revision||revision;
+      if(scSessionInput&&data.session_id)scSessionInput.value=data.session_id;
+      if(data.session_id)sessionStorage.setItem(sessionKey,JSON.stringify({id:data.session_id,revision}));
+      if (['accepted','insufficient'].includes(data.state)) {
+        if(data.session_id)await history(data.session_id);
+        sessionStorage.removeItem(pendingKey);pending=null;busy(false);
+        feedback(data.scope_feedback||'回答已通过检查并保存。');return;
+      }
+      if(data.result_unknown||data.state==='blocked'||data.job_status==='failed') {
+        busy(true);feedback(data.result_unknown?'远端结果未知，没有自动重发。新的付费尝试可能再次计费。':'任务已阻断。可恢复已保存响应，或在尚未调用时重新尝试。');
+        if(data.retry&&scFeedback){const button=document.createElement('button');button.type='button';button.textContent=data.result_unknown?'明确发起新的付费尝试':'恢复任务';on(button,'click',()=>retry(data));scFeedback.append(button);}return;
+      }
+      feedback(data.state==='checking'||data.state==='response_saved'?'回答已保存，正在独立检查…':'任务已保存，等待处理…');busy(true);
+    }
+    async function poll() {
+      if(!pending||polling||scope.signal.aborted)return;polling=true;
+      try{
+        const query=pending.turn_id?'turn_id='+encodeURIComponent(pending.turn_id):'request_key='+encodeURIComponent(pending.request_key);
+        const response=await scope.fetch('/api/study-chat/status?'+query,{cache:'no-store'});
+        if(response.status===404){
+          if(pending.turn_id){sessionStorage.removeItem(pendingKey);pending=null;busy(false);feedback('原会话或任务已清理，没有重新生成。');return;}
+          feedback('尚未查到原命令；可用原身份再次提交，服务器会去重。');
+          if(scFeedback){const button=document.createElement('button');button.type='button';button.textContent='核对并提交原命令';on(button,'click',submitPending);scFeedback.append(button);
+            const discard=document.createElement('button');discard.type='button';discard.textContent='放弃这条未查到的本地命令';on(discard,'click',()=>{if(!questionInput.value){questionInput.value=pending.question||'';saveDraft();}sessionStorage.removeItem(pendingKey);pending=null;busy(false);feedback('问题已恢复到输入框，尚未发起新任务。');});scFeedback.append(discard);}
           return;
         }
-        if (scSessionInput && data.session_id) scSessionInput.value = data.session_id;
-        if (data.generated && data.answer) {
-          if (scThread) scThread.insertAdjacentHTML('beforeend', renderSCMessage('assistant', data.answer, data.references || []));
-          if (scFeedback) scFeedback.innerHTML = '';
-        } else {
-          // 硬约束触发（超出本集范围 / ReferenceCheck 拒绝）
-          if (scFeedback) scFeedback.innerHTML = '<p class="scope-feedback">' + escapeHtml(data.scope_feedback || '该问题超出本集范围，未生成回答。') + '</p>';
-        }
-      } catch (err) {
-        if (scFeedback) scFeedback.innerHTML = '<p class="error">请求失败</p>';
-      }
+        const data=await response.json();if(!response.ok){feedback(data.error||'任务核对失败','error');return;}
+        if(data.turn_id&&!pending.turn_id)savePending({...pending,turn_id:data.turn_id});
+        await show(data);
+      }catch(err){if(!scope.signal.aborted)feedback('网络不可用，已保留原命令身份。恢复连接后只查询，不自动重发。','error');}
+      finally{polling=false;}
+    }
+    async function submitPending() {
+      if(!pending)return;busy(true);
+      const fd=new FormData(scForm);
+      for(const name of ['question','session_id','request_key','revision'])fd.set(name,String(pending[name]||''));
+      fd.set('source_type',spec.sourceType);fd.set('source_id',spec.sourceId);
+      try{
+        const response=await scope.fetch('/api/study-chat',{method:'POST',body:fd});const data=await response.json();
+        if(!response.ok){feedback(data.error||'命令冲突，请核对原任务','error');if(response.status===409)await poll();return;}
+        savePending({...pending,turn_id:data.turn_id});await show(data);
+      }catch(err){if(!scope.signal.aborted){feedback('提交响应丢失；已保留原身份，正在查询任务。','error');await poll();}}
+    }
+    async function retry(data) {
+      const key=crypto.randomUUID();
+      // A new paid attempt is only sent from this explicit control. Persist its
+      // receipt key before POST so a lost acknowledgement can be queried.
+      savePending({...pending,request_key:'retry:'+key,turn_id:data.turn_id});
+      const fd=new FormData(scForm);fd.set('request_key',key);fd.set('job_id',data.job_id);fd.set('job_revision',data.job_revision);fd.set('allow_unknown',data.result_unknown?'1':'0');
+      try{const response=await scope.fetch('/api/study-chat/retry',{method:'POST',body:fd});const result=await response.json();if(!response.ok){feedback(result.error||'恢复失败','error');return;}await show(result);}catch(err){if(!scope.signal.aborted){feedback('恢复响应丢失，继续核对原任务。','error');await poll();}}
+    }
+    try {
+      const saved=JSON.parse(sessionStorage.getItem(sessionKey)||'null');if(saved&&scSessionInput){scSessionInput.value=saved.id;revision=saved.revision;}
+      pending=JSON.parse(sessionStorage.getItem(pendingKey)||'null');
+      const draft=JSON.parse(sessionStorage.getItem(draftKey)||'null');
+      if(draft?.version===1&&typeof draft.text==='string')questionInput.value=draft.text;
+    } catch(err) {feedback('无法读取本地任务身份，请核对任务列表。','error');}
+    if(scSessionInput?.value)history(scSessionInput.value).catch(()=>{});
+    if(pending){busy(true);poll();}
+    scope.interval(()=>{if(pending&&!['unknown','blocked'].includes(current?.state))poll();},2000);
+    on(scForm,'submit',async(e)=>{
+      e.preventDefault();if(pending){await poll();return;}
+      const q=scForm.querySelector('[name=question]').value.trim();if(!q)return;
+      try {savePending({request_key:crypto.randomUUID(),question:q,session_id:scSessionInput?.value||'',revision});}
+      catch(err){feedback('无法持久保存请求身份，本次没有提交；请复制问题后重试。','error');return;}
+      if(scThread)scThread.insertAdjacentHTML('beforeend',renderSCMessage('user',q,[]));
+      questionInput.value='';saveDraft();feedback('正在提交持久任务…');await submitPending();
     });
   }
 

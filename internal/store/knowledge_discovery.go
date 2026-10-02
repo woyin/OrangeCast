@@ -17,6 +17,8 @@ import (
 
 // KnowledgeScope expresses human-selected learning material scope and history cursor.
 type KnowledgeScope struct {
+	WritingMode                                         string                           `json:"writing_mode,omitempty"`
+	PreviewWritingPlan                                  *bool                            `json:"preview_writing_plan,omitempty"`
 	ExpectedQuestionRevision                            int                              `json:"expected_question_revision,omitempty"`
 	QuestionID                                          string                           `json:"question_id,omitempty"`
 	Question                                            *provider.FrozenLearningQuestion `json:"frozen_question,omitempty"`
@@ -57,7 +59,11 @@ func (s *Store) knowledgeMaterial(ctx context.Context, profile, name, id string)
 	} else if errors.Is(err, ErrNotFound) {
 		note, e := s.GetOwnerNote(ctx, id)
 		if errors.Is(e, ErrNotFound) {
-			return nil, nil
+			m, e := s.UnderstandingKnowledgeMaterial(ctx, id, name)
+			if errors.Is(e, ErrNotFound) {
+				return nil, nil
+			}
+			return m, e
 		}
 		if e != nil {
 			return nil, e
@@ -101,27 +107,39 @@ func (s *Store) scopeAllows(ctx context.Context, scope KnowledgeScope, m provide
 	if !questionAllowsMaterial(scope.Question, m) {
 		return false, nil
 	}
-	if scope.SourceID != "" && m.SourceID != scope.SourceID {
-		return false, nil
-	}
-	if scope.SourceType != "" && m.SourceType != scope.SourceType {
-		return false, nil
-	}
-	if scope.PodcastID != "" {
-		if m.SourceType != "episode" {
+	if m.Kind == "understanding" && (scope.SourceID != "" || scope.SourceType != "" || scope.PodcastID != "") {
+		var included bool
+		e := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM understanding_references ur WHERE ur.snapshot_id=? AND ur.purged=0 AND (?='' OR ur.source_id=?) AND (?='' OR ur.source_type=?) AND (?='' OR ur.source_type='episode' AND EXISTS(SELECT 1 FROM episodes ep WHERE ep.id=ur.source_id AND ep.podcast_id=?)))`, m.ID, scope.SourceID, scope.SourceID, scope.SourceType, scope.SourceType, scope.PodcastID, scope.PodcastID).Scan(&included)
+		if e != nil {
+			return false, e
+		}
+		if !included {
 			return false, nil
 		}
-		ep, err := s.GetEpisodeByID(ctx, m.SourceID)
-		if err != nil {
-			return false, err
-		}
-		if ep.PodcastID != scope.PodcastID {
+	} else {
+		if scope.SourceID != "" && m.SourceID != scope.SourceID {
 			return false, nil
 		}
+		if scope.SourceType != "" && m.SourceType != scope.SourceType {
+			return false, nil
+		}
+		if scope.PodcastID != "" {
+			if m.SourceType != "episode" {
+				return false, nil
+			}
+			ep, err := s.GetEpisodeByID(ctx, m.SourceID)
+			if err != nil {
+				return false, err
+			}
+			if ep.PodcastID != scope.PodcastID {
+				return false, nil
+			}
+		}
+
 	}
 	if scope.From != "" || scope.Until != "" {
 		var created string
-		err := s.DB.QueryRowContext(ctx, `SELECT created_at FROM knowledge_search_docs WHERE object_id=? AND kind IN ('source_note','owner_reflection','keypoint') LIMIT 1`, m.ID).Scan(&created)
+		err := s.DB.QueryRowContext(ctx, `SELECT created_at FROM knowledge_search_docs WHERE object_id=? AND kind IN ('source_note','owner_reflection','keypoint','understanding') LIMIT 1`, m.ID).Scan(&created)
 		if err != nil {
 			return false, err
 		}
@@ -140,6 +158,16 @@ func (s *Store) BuildKnowledgeDiscoveryRequest(ctx context.Context, profile, nam
 	base, latest, err := s.BuildKnowledgeArticleRequest(ctx, profile, name)
 	if err != nil {
 		return base, 0, "", err
+	}
+	if scope.WritingMode != "" {
+		purpose, e := provider.FreezeWritingPurpose(scope.WritingMode)
+		if e != nil {
+			return base, 0, "", e
+		}
+		base.WritingPurpose = &purpose
+	}
+	if scope.PreviewWritingPlan != nil {
+		base.PreviewWritingPlan = *scope.PreviewWritingPlan
 	}
 	if _, e := s.SearchKnowledge(ctx, scopeQuery(scope)); e != nil {
 		return base, 0, "", e
@@ -160,7 +188,7 @@ func (s *Store) BuildKnowledgeDiscoveryRequest(ctx context.Context, profile, nam
 		latest = latestQuestion.UpdatedAt
 		clause, args := questionMaterialFilter(scope.Question)
 		var changed string
-		if e = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(d.updated_at),'') FROM knowledge_search_docs d WHERE d.kind IN ('keypoint','source_note','owner_reflection') AND `+clause, args...).Scan(&changed); e != nil {
+		if e = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(d.updated_at),'') FROM knowledge_search_docs d WHERE d.kind IN ('keypoint','source_note','owner_reflection','understanding') AND `+clause, args...).Scan(&changed); e != nil {
 			return base, 0, "", e
 		}
 		if changed > latest {
@@ -310,7 +338,7 @@ func knowledgeExclusions(candidates, admitted []provider.KnowledgeMaterial) []pr
 
 // RecallKnowledgeMaterials recalls metadata locally and sends bounded complete evidence.
 func (s *Store) RecallKnowledgeMaterials(ctx context.Context, profile, name string, req provider.KnowledgeArticleRequest, topic provider.KnowledgeTopic) (provider.KnowledgeArticleRequest, error) {
-	if req.PromptVersion == provider.KnowledgeArticlePromptVersion {
+	if req.PromptVersion == provider.KnowledgeArticlePromptVersion || req.PromptVersion == provider.KnowledgeArticlePurposePromptVersion {
 		return s.recallKnowledgePool(ctx, profile, name, req, topic)
 	}
 	return s.recallLegacyKnowledgeMaterials(ctx, profile, name, req, topic)
@@ -337,7 +365,9 @@ func (s *Store) recallLegacyKnowledgeMaterials(ctx context.Context, profile, nam
 		if err != nil {
 			return req, err
 		}
-		if m == nil {
+		if m == nil || m.Kind == "understanding" {
+			// Understanding snapshots belong to v5; never add their body to a
+			// frozen legacy prompt that cannot preserve their attribution.
 			continue
 		}
 		m.RetrievalReason = "历史召回：" + hit.Reason

@@ -11,6 +11,7 @@
 <script src="/static/playback-controller.js"></script>
 <script src="/static/article-drafts.js"></script>
 <script src="/static/knowledge-source-picker.js" defer></script>
+<script src="/static/offline-update.js" defer></script>
 </head>
 <body>
 <nav class="navbar">
@@ -19,6 +20,7 @@
     <a class="nav-primary" href="/dashboard">首页</a><a class="nav-primary" href="/podcasts">资料</a><a class="nav-primary" href="/questions">问题</a><a class="nav-primary" href="/knowledge-articles">文章</a>
     <span class="nav-secondary">
     <a href="/knowledge-updates">文章更新</a>
+    <a href="/learning-exports">学习成果导出</a><a href="/quality-cases">质量案例</a><a href="/offline">离线学习</a>
  <a href="/voice-notes">语音笔记</a>
     <a href="/notes">笔记/重点</a><a href="/search">搜索</a><a href="/questions">学习问题</a><a href="/automation">任务与成本</a>
 <a href="/review">回顾</a><a href="/listening-queue">稍后听</a>
@@ -88,6 +90,10 @@
 })();
 </script>
 <script src="/static/safe-render.js"></script>
+<script src="/static/offline-core.js"></script>
+<script src="/static/offline-storage.js"></script>
+<script src="/static/offline-packs.js"></script>
+<script src="/static/offline-operations.js"></script>
 <script src="/static/dj-player.js"></script>
 <script src="/static/listening-session.js"></script>
 <script src="/static/listening-reflections.js"></script>
@@ -95,10 +101,14 @@
 <script src="/static/player.js"></script>
 <script src="/static/owner-notes.js"></script>
 <script src="/static/learning-questions.js"></script>
+<script src="/static/understandings.js"></script>
 <script src="/static/question-study.js"></script>
+<script src="/static/evidence-gaps.js"></script>
 <script src="/static/evidence-view.js"></script>
 <script src="/static/dj-view.js"></script>
 <script src="/static/knowledge-articles.js"></script>
+<script src="/static/learning-exports.js"></script>
+<script src="/static/quality-cases.js"></script>
 <script src="/static/knowledge-updates.js"></script>
 <script src="/static/review.js"></script>
 <script src="/static/daily-review.js"></script>

@@ -1,0 +1,16 @@
+{
+  "README.md": "49faaed7959d322e90e7948a7329b2bbd83741af0372e6f99d7b0c513063e2e4",
+  "chrome-network-settings.json": "6b0b5a426fe70a6347ff7d3e2592f29d0ed41463080046e00594930b549f4dc3",
+  "chromium-26-observation.json": "519b8ad9619b77cf8b523e02e018b05aacf68bc14ddca2159f8637b82f82ddc7",
+  "database-summary.json": "84cddf3359c6adb0bdb30c194fe38f45a62431c9e03321e5021724f331ca50b2",
+  "go-harness-observation.txt": "8acfd1db66caf5627bba14223131c400ea8edf6d008fd630dfd68aed9917aacc",
+  "node-24.log": "902ebd913d5b66ebe538901b8660e8d89182a6ea82f89b5fb97f0e9dba99bbab",
+  "real-go-driver-excerpt.log": "634ef13ca69e9f6a482adfcd5bbbd5047b1f87a80552ac6d86b1efba53c7739e",
+  "screenshots/real-go-chrome-worker-bypassed.png": "f627fefc1089059e4e6e4ec438668031d6ea200ba19edc971417a30c5849468e",
+  "screenshots/real-go-denied-sw.png": "adfebabcceadc2dab9167ff2bb3ddd7d95d7e21141ee555468a2ffe863190732",
+  "screenshots/real-go-failed-idb.png": "4911453e656d49fb3df76f0fd7b97acc02f294b07abaeb1dfc8b3cec39d10112",
+  "screenshots/real-go-shell-excerpt.png": "62852b9dbd519d9e9c2fd8e276c4a9a292b766d9fbc178b5af81918cc4eb4149",
+  "screenshots/real-go-source-change-locked.png": "d146dc17971d3edc68fc39f1753cd340f764fa5b00c780ae8d7b3bec1a94872c",
+  "screenshots/real-go-unsupported-sw.png": "36f34be3c23f5ea6465d9fc06a21e8a26c5e05356481a0c84aa0c98d6fdc9255",
+  "screenshots/synthetic-schema2-copy.png": "e4de4740ad1f04c440b230830ec6db49e4621fbc7e666f54fd84811809860517"
+}

@@ -129,20 +129,32 @@ func decodeEmbeddingVector(blob []byte, dimensions int) ([]float32, error) {
 		return nil, ErrInvalidEditorialState
 	}
 	out := make([]float32, dimensions)
+	if err := decodeEmbeddingVectorInto(blob, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Decode into an owned bounded arena; no SQL RawBytes aliases escape the current row.
+func decodeEmbeddingVectorInto(blob []byte, out []float32) error {
+	if len(out) < 1 || len(out) > provider.EmbeddingMaxDimensions || len(blob) != len(out)*4 {
+		return ErrInvalidEditorialState
+	}
 	var norm float64
 	for i := range out {
 		v := math.Float32frombits(binary.LittleEndian.Uint32(blob[i*4:]))
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-			return nil, ErrInvalidEditorialState
+			return ErrInvalidEditorialState
 		}
 		out[i] = v
 		norm += float64(v) * float64(v)
 	}
 	if math.Abs(norm-1) > .0001 {
-		return nil, ErrInvalidEditorialState
+		return ErrInvalidEditorialState
 	}
-	return out, nil
+	return nil
 }
+
 func (s *Store) commitKnowledgeQueryEmbedding(ctx context.Context, id string, in KnowledgeEmbeddingJobInput, result *provider.EmbeddingResult) error {
 	if provider.ValidateEmbeddingResult(result, in.Config.Model, 1, in.Config.Dimensions) != nil {
 		return ErrInvalidEditorialState

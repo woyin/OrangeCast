@@ -1,0 +1,15 @@
+'use strict';
+const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');
+(async()=>{
+ const factories=[],storage=new Map(),bodies=[];let mode='conflict';
+ const context={console,URLSearchParams,crypto:{randomUUID(){return 'frozen-request';}},sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},CWPViews:{define(fn){factories.push(fn);}},FormData:class{constructor(form){return new Map(form.elements.filter(input=>input.name).map(input=>[input.name,input.value]));}}};context.window=context;
+ vm.runInNewContext(fs.readFileSync('internal/server/static/form-actions.js','utf8'),context);
+ vm.runInNewContext(fs.readFileSync('internal/server/static/quality-cases.js','utf8'),context);
+ assert.equal(factories.length,1); // Preload registers a mount; it must not bind global document nodes.
+ function mount(){const fields=[{name:'action',value:'accept'},{name:'feedback_id',value:'feedback'},{name:'version',value:'0'},{name:'expected',value:'Owner未保存的期望'},{name:'request_key',value:''}];fields.namedItem=name=>fields.find(item=>item.name===name)||null;const status={textContent:'',dataset:{}};const button={disabled:false};const listeners=new Map();const form={elements:fields,getAttribute(){return '/quality-cases/action';},querySelector(){return status;},querySelectorAll(){return [button];}};const root={querySelectorAll(){return [form];},querySelector(){return form;}};const scope={signal:{aborted:false},on(el,event,fn){listeners.set(el,event==='submit'?fn:listeners.get(el));},async fetch(url,opts){bodies.push(opts.body.toString());if(mode==='unknown')throw Error('lost response');return {ok:mode==='success',status:mode==='conflict'?409:200,text:async()=> 'conflict',json:async()=>({result:{ID:'case',Version:1}})};}};factories[0]({querySelector(){return root;}},scope);return {form,fields,status,button,scope,submit:()=>listeners.get(form)({preventDefault(){}})};}
+ const first=mount();await first.submit();assert.match(first.status.textContent,/冲突/);assert.equal(first.fields.namedItem('request_key').value,'frozen-request');assert.equal(first.button.disabled,false);
+ mode='unknown';await first.submit();assert.match(first.status.textContent,/尚未确认/);assert.equal(bodies[0],bodies[1]);assert.equal(storage.size,1);
+ first.scope.signal.aborted=true;const before=bodies.length;await first.submit();assert.equal(bodies.length,before); // Unmounted views never send a command.
+ const remounted=mount();assert.equal(remounted.fields.namedItem('request_key').value,'frozen-request');assert.equal(remounted.fields.namedItem('expected').value,'Owner未保存的期望');mode='success';await remounted.submit();assert.match(remounted.status.textContent,/案例 ID：case/);assert.equal(bodies[1],bodies[2]);assert.equal(remounted.button.disabled,false);assert.equal(storage.size,0);assert.equal(remounted.fields.namedItem('version').value,'1');
+ console.log('quality-cases actual CWPViews/CWPForms: mount/remount, conflict, unknown, same identity, abort disposal passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});

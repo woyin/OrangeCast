@@ -4,6 +4,8 @@
 
 主设计：[设计文档](../specs/2026-10-01-personal-learning-and-knowledge-articles-v4-design.md)。执行入口：[原子任务清单](2026-10-01-personal-learning-and-knowledge-articles-v4-tasks.md)。继承依据：[第三轮验收](../../acceptance/2026-10-personal-learning-v3.md)。领域词汇中的“第四轮设计术语”只定义计划使用的概念。
 
+剩余任务执行细化：[2026-10-02 剩余 47 项详细工作计划](2026-10-02-personal-learning-v4-remaining-47-work-plan.md)。原编号与完成状态保持不变。
+
 ## 1. 交付目标与范围
 
 围绕听后整理、问题对话、材料缺口和文章反馈形成优先使用路径，再补齐理解快照、用途模式、学习成果导出及离线学习。同步优化首页、检索、质量回归、前端表单和付费调用恢复。

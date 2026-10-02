@@ -13,6 +13,7 @@ window.CWPViews.define(function(view,scope){
  root.querySelectorAll('.question-study-claim').forEach(claim=>{
   const draft=()=>{const refs=Array.from(claim.querySelectorAll('a')).map(a=>a.textContent+' '+a.href);return '[AI 辅助问答草稿 · '+claim.dataset.kind+'；未经你确认]\n'+claim.dataset.text+(refs.length?'\n\n冻结依据：\n'+refs.join('\n'):'');};
   scope.on(claim.querySelector('[data-study-copy]'),'click',async()=>{const feedback=claim.querySelector('[aria-live]');try{await navigator.clipboard.writeText(draft());if(!scope.signal.aborted)feedback.textContent='已复制，尚未保存为笔记。';}catch(_){if(!scope.signal.aborted)feedback.textContent='复制失败，请手动选择正文。';}});
+  scope.on(claim.querySelector('[data-study-understanding]'),'click',async()=>{try{sessionStorage.setItem('cwp-question-study-adopt:'+root.dataset.question,JSON.stringify({content:draft(),session:root.dataset.session}));await window.CWPNavigation?.visit('/questions/'+encodeURIComponent(root.dataset.question)+'/understandings');}catch(_){claim.querySelector('[aria-live]').textContent='理解草稿采用失败，请复制文字。';}});
   scope.on(claim.querySelector('[data-study-adopt]'),'click',async()=>{const feedback=claim.querySelector('[aria-live]');try{sessionStorage.setItem('cwp-question-study-adopt:'+root.dataset.question,JSON.stringify({content:draft(),session:root.dataset.session}));await window.CWPNavigation?.visit('/questions/'+encodeURIComponent(root.dataset.question)+'#question-note');}catch(_){feedback.textContent='草稿采用失败，请复制文字。';}});
  });
  let busy=false;const feedback=root.querySelector('#question-study-poll');

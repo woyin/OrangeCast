@@ -31,7 +31,7 @@ window.CWPViews.define(function(view,scope){
    // Keep an incompatible old draft intact until an explicit merge/discard.
    save();if(recoveryPending)feedback.textContent='旧草稿与当前输入分别保留，请比对后处理。';
   });
-  window.CWPForms.bind(form,scope,{feedback,before:save,navigate:false,success:async(value,data)=>{
+  window.CWPForms.bind(form,scope,{feedback,before:(event)=>{save();if(event?.submitter?.value==='plan_confirm'){const outline=form.elements.namedItem('outline');if(outline&&outline.value!==outline.defaultValue)throw new Error('大纲已修改，请先保存计划，再确认。');const mode=form.elements.namedItem('writing_mode');const original=mode?.options&&Array.from(mode.options).find(option=>option.defaultSelected);if(original&&mode.value!==original.value)throw new Error('用途已修改，请先保存计划，再确认。');}},navigate:false,success:async(value,data)=>{
    localStorage.removeItem(currentKey);if(!recoveryPending){localStorage.removeItem(draftKey);sessionStorage.removeItem(legacyKey);}draft=null;
    if(data.get('action')==='feedback'){feedback.textContent='反馈已记录，偏好未自动改变。';}else{await window.CWPNavigation.visit(value.redirect);}
   }});

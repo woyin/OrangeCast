@@ -1,0 +1,74 @@
+{
+  "fixture_version": "writing-purpose-fixture-v1",
+  "source": "self-made",
+  "prompt_version": "knowledge-article-v5",
+  "rule_version": "writing-purpose-v1",
+  "quality_verdict": "not_evaluated",
+  "question": "如何核对学习理解？",
+  "materials": [
+    {
+      "id": "source-a",
+      "kind": "keypoint",
+      "source_type": "episode",
+      "source_id": "self-made-a",
+      "content": "核对来源上下文，区分个人理解与来源表达。",
+      "evidence": "[a-1] 核对来源上下文，区分个人理解与来源表达。",
+      "citations": [
+        "a-1"
+      ]
+    },
+    {
+      "id": "source-b",
+      "kind": "keypoint",
+      "source_type": "episode",
+      "source_id": "self-made-b",
+      "content": "表达自己的理解时标出不确定之处，回看原文确认适用条件。",
+      "evidence": "[b-1] 表达自己的理解时标出不确定之处，回看原文确认适用条件。",
+      "citations": [
+        "b-1"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "mode": "synthesis",
+      "required_sections": [],
+      "review_focus": "来源、Owner理解与AI综合身份清楚，不为结构或字数补事实。"
+    },
+    {
+      "mode": "explanation",
+      "required_sections": [
+        "question",
+        "concept",
+        "example",
+        "boundary"
+      ],
+      "review_focus": "解释问题和概念；本材料没有具体案例，example须说明材料不足，不编造案例。"
+    },
+    {
+      "mode": "comparison",
+      "required_sections": [
+        "positions",
+        "agreement",
+        "disagreement",
+        "conditions"
+      ],
+      "review_focus": "区分两来源表达、共识和适用条件；本材料没有实质矛盾，不强行制造分歧。"
+    },
+    {
+      "mode": "practice",
+      "required_sections": [
+        "scenario",
+        "steps",
+        "limits",
+        "checks"
+      ],
+      "review_focus": "仅给资料支持的核对建议，缺实践经历和效果证据须说明；不能称Owner亲身验证。"
+    }
+  ],
+  "reproduction": [
+    "同一materials分别冻结四用途，记录实际system/user消息、模型、价格与usage receipt。",
+    "逐段检查material_ids、身份、purpose_section以及不充分依据，不预先填评分。",
+    "真实模型与人工有用性均待验证；queue fixture只证明结构、冻结、失败保留和零重复付费调用。"
+  ]
+}

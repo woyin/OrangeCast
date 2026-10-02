@@ -1,0 +1,19 @@
+go test ./... -race -timeout 30m
+ok  	github.com/woyin/orangecast/cmd/cloudwisepod	(cached)
+ok  	github.com/woyin/orangecast/cmd/quality-eval	(cached)
+ok  	github.com/woyin/orangecast/internal/auth	(cached)
+ok  	github.com/woyin/orangecast/internal/backup	(cached)
+ok  	github.com/woyin/orangecast/internal/config	(cached)
+ok  	github.com/woyin/orangecast/internal/evalset	(cached)
+ok  	github.com/woyin/orangecast/internal/filehash	(cached)
+ok  	github.com/woyin/orangecast/internal/learningbundle	(cached)
+ok  	github.com/woyin/orangecast/internal/markdown	(cached)
+?   	github.com/woyin/orangecast/internal/models	[no test files]
+ok  	github.com/woyin/orangecast/internal/provider	(cached)
+ok  	github.com/woyin/orangecast/internal/queue	(cached)
+ok  	github.com/woyin/orangecast/internal/rss	(cached)
+ok  	github.com/woyin/orangecast/internal/safehttp	(cached)
+ok  	github.com/woyin/orangecast/internal/server	154.586s
+ok  	github.com/woyin/orangecast/internal/store	(cached)
+ok  	github.com/woyin/orangecast/internal/testdb	(cached)
+ok  	github.com/woyin/orangecast/internal/voice	(cached)

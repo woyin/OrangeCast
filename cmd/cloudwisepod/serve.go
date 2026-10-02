@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -60,7 +61,6 @@ func runServe() {
 
 	// SQLite 驱动 worker：启动恢复 + 周期领取（ADR-0006）
 	workerCtx, workerCancel := context.WithCancel(context.Background())
-	go worker.Run(workerCtx)
 	defer workerCancel()
 
 	// HTTP server
@@ -68,6 +68,12 @@ func runServe() {
 	if err != nil {
 		log.Fatalf("初始化 server: %v", err)
 	}
+	go worker.Run(workerCtx)
+	go func() {
+		if err := queue.RunLearningExportCleanup(workerCtx, s, filepath.Join(cfg.DataDir, "learning-exports")); err != nil && workerCtx.Err() == nil {
+			log.Printf("学习成果包清理失败: %v", err)
+		}
+	}()
 	srv.StartAutomaticDiscovery(workerCtx)
 	srv.StartKnowledgeArticles(workerCtx)
 	srv.StartLearningReviews(workerCtx)

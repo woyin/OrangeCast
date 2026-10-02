@@ -1,0 +1,8 @@
+{{define "title"}}索引范围预览 · CloudWisePod{{end}}
+{{define "content"}}
+<h1>索引范围预览</h1><p>这里只核对当前权限，没有保存范围、重建索引或调用模型。保存时会再次核对版本与权限。</p>
+{{range .Preview}}<p>{{.SourceType}} · {{.SourceID}} · {{.Policy}}：{{.Reason}}</p>{{else}}<p>没有选择来源。</p>{{end}}
+<p>理解快照需要自身允许独立 embedding 连接，引用的全部来源也要选入范围且具有有效权限；没有来源不表示允许外发。</p>
+<form method="post" action="/search/settings"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="settings"><input type="hidden" name="config_id" value="{{.Command.ConfigID}}"><input type="hidden" name="expected_revision" value="{{.Command.ExpectedRevision}}"><input type="hidden" name="window_capacity" value="{{.Command.WindowCapacity}}"><input type="hidden" name="index_authorized" value="{{if .Command.IndexAuthorized}}1{{else}}0{{end}}"><input type="hidden" name="input_cents_per_million" value="{{with .Command.InputCentsPerMillion}}{{.}}{{end}}"><input type="hidden" name="sources" value="{{.SourcesJSON}}"><input type="hidden" name="understanding_snapshot_ids" value="{{.UnderstandingsJSON}}"><button>明确保存所预览的范围、价格与容量</button></form>
+<p><a href="/search/settings">返回设置，放弃这份预览</a></p>
+{{end}}

@@ -49,7 +49,7 @@ func KnowledgeConfigForStage(req KnowledgeArticleRequest, fallbackModel string) 
 	if (req.Stage == "review" || req.Stage == "review_final") && req.ReviewModel != "" {
 		fallbackModel = req.ReviewModel
 	}
-	if req.PromptVersion != KnowledgeArticlePromptVersion {
+	if req.PromptVersion != KnowledgeArticlePromptVersion && req.PromptVersion != KnowledgeArticlePurposePromptVersion {
 		return KnowledgeStageConfig{Model: fallbackModel, MaxOutputTokens: 8192}, nil
 	}
 	cfg, ok := req.StageConfigs[req.Stage]
@@ -66,10 +66,13 @@ func KnowledgeConfigForStage(req KnowledgeArticleRequest, fallbackModel string) 
 // KnowledgeArticleMessages is the exact system/user serialization sent by the
 // transport. Local audit/config metadata is omitted only for the new contract.
 func KnowledgeArticleMessages(req KnowledgeArticleRequest) (string, string, error) {
+	if err := ValidateWritingPurposeRequest(req); err != nil {
+		return "", "", err
+	}
 	if req.PromptVersion != "" && !KnowledgeArticlePromptSupported(req.PromptVersion) {
 		return "", "", fmt.Errorf("未知文章提示版本")
 	}
-	if req.PromptVersion == KnowledgeArticlePromptVersion {
+	if req.PromptVersion == KnowledgeArticlePromptVersion || req.PromptVersion == KnowledgeArticlePurposePromptVersion {
 		req.Estimate = nil
 		req.StageConfigs = nil
 		if req.Question != nil {

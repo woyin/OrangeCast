@@ -68,5 +68,12 @@ const fetcher=async(url,opts)=>{
  const endState={spec:{mode:'original'},audio:{ended:true,error:null,currentTime:100,duration:100},transport:{status:()=>({})},player:null,loop:null};
  assert.equal(CWPPlayback.canOfferReflection(endState,1000),true);
  for(const value of [{...endState,spec:{mode:'dj'}},{...endState,spec:{mode:'original',excerptId:'excerpt'}},{...endState,player:{}},{...endState,loop:{start:1,end:2}},{...endState,audio:{...endState.audio,error:{code:4}}},{...endState,audio:{...endState.audio,ended:false}},{...endState,audio:{...endState.audio,currentTime:10}},{...endState,audio:{...endState.audio,duration:NaN}},{...endState,transport:{status:()=>({sleepExpired:true})}},{...endState,transport:{status:()=>({deadline:999})}}])assert.equal(CWPPlayback.canOfferReflection(value,1000),false,'partial/error/sleep end cannot prompt');
+ let excerptRead='',excerptBody,resumes=0,excerptPosition=35;
+ const excerpt=CWPPlayback.create({sourceType:'episode',sourceId:'same-source',mode:'excerpt',excerptId:'interval-a',snapshotId:'snapshot',audioSHA:'hash',
+ fetch:async(url,opts)=>{if(opts?.method==='POST'){excerptBody=JSON.parse(opts.body);return {ok:true,json:async()=>({revision:1})};}excerptRead=url;return {ok:true,json:async()=>({id:'p',revision:0,audio_sha256:'hash',excerpt_id:'interval-b',snapshot_id:'snapshot'})};},
+ adapter:{play:()=>{},pause:()=>{},paused:()=>true,time:()=>excerptPosition,seek:n=>{excerptPosition=n;},setRate:()=>{},getRate:()=>1,snapshot:()=>({item_offset_seconds:excerptPosition}),restore:()=>{}},onResume:()=>{resumes++;}});
+ await flush();assert.match(excerptRead,/mode=excerpt&excerpt_id=interval-a/);assert.equal(resumes,0,'another interval never restores this interval');
+ excerpt.seek(39);await flush();assert.equal(excerptBody.excerpt_id,'interval-a');assert.equal(excerptBody.snapshot_id,'snapshot');assert.equal(excerptBody.item_offset_seconds,39,'position remains absolute audio time');excerpt.destroy();
+ assert.equal(CWPPlayback.canOfferReflection({...endState,spec:{mode:'excerpt',excerptId:'interval-a'}},1000),false);
  process.stdout.write('playback behavior passed');
 })().catch(err=>{process.stderr.write(String(err.stack));process.exitCode=1;});

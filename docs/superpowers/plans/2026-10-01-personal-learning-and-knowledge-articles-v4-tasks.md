@@ -4,6 +4,8 @@
 
 关联：[设计文档](../specs/2026-10-01-personal-learning-and-knowledge-articles-v4-design.md)、[开发计划](2026-10-01-personal-learning-and-knowledge-articles-v4.md)、[第三轮验收](../../acceptance/2026-10-personal-learning-v3.md)。
 
+剩余任务执行细化：[2026-10-02 剩余 47 项详细工作计划](2026-10-02-personal-learning-v4-remaining-47-work-plan.md)。原编号与完成状态保持不变。
+
 ## 1. 卡片规则
 
 - 一卡交付一个有界行为；包含该行为必要的schema、失败处理、测试和说明。默认0.5–1.5个专注工程日，超过2日再拆。技术验收可为单个稳定Interface，不要求未完成页面提前启用。

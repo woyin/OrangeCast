@@ -23,6 +23,13 @@ func progressMode(p *models.ListeningProgress) string {
 
 // SaveListeningProgress supports older seq-based clients. New clients use CAS.
 func (s *Store) SaveListeningProgress(ctx context.Context, p *models.ListeningProgress) error {
+	if p != nil && p.Mode == "excerpt" {
+		_, err := s.saveLearningExcerptProgress(ctx, p, 0, false)
+		return err
+	}
+	if p != nil && p.ExcerptID != "" {
+		return ErrInvalidEditorialState
+	}
 	if p == nil || p.SourceID == "" || !validSourceType(p.SourceType) {
 		return ErrInvalidEditorialState
 	}
@@ -74,6 +81,12 @@ func (s *Store) SaveListeningProgress(ctx context.Context, p *models.ListeningPr
 // SaveListeningProgressCAS saves only the expected server revision (zero creates).
 // Source and plan identities are authoritative; stale saves never overwrite.
 func (s *Store) SaveListeningProgressCAS(ctx context.Context, p *models.ListeningProgress, expected int64) (*models.ListeningProgress, error) {
+	if p != nil && p.Mode == "excerpt" {
+		return s.saveLearningExcerptProgress(ctx, p, expected, true)
+	}
+	if p != nil && p.ExcerptID != "" {
+		return nil, ErrInvalidEditorialState
+	}
 	if p == nil || p.SourceID == "" || !validSourceType(p.SourceType) || (p.Mode != "original" && p.Mode != "dj") || expected < 0 ||
 		math.IsNaN(p.ItemOffsetSeconds) || math.IsInf(p.ItemOffsetSeconds, 0) || p.ItemOffsetSeconds < 0 || p.ItemPosition < 0 ||
 		math.IsNaN(p.Speed) || math.IsInf(p.Speed, 0) || p.Speed < 0.75 || p.Speed > 2 {
@@ -171,7 +184,11 @@ func (s *Store) getProgress(ctx context.Context, sourceType models.SourceType, s
 
 // DeleteListeningProgress removes both modes when the source is purged.
 func (s *Store) DeleteListeningProgress(ctx context.Context, sourceType models.SourceType, sourceID string) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM listening_progress WHERE source_type=? AND source_id=?`, sourceType, sourceID)
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM learning_excerpt_progress WHERE excerpt_id IN(SELECT id FROM learning_excerpts WHERE source_type=? AND source_id=?)`, sourceType, sourceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.ExecContext(ctx, `DELETE FROM listening_progress WHERE source_type=? AND source_id=?`, sourceType, sourceID)
 	return err
 }
 

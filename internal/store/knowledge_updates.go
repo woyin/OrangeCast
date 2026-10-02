@@ -351,6 +351,14 @@ func (s *Store) freezeKnowledgeUpdate(ctx context.Context, a *KnowledgeArticleRe
 			return old, err
 		}
 	}
+	// Incremental updates preserve the parent purpose; a purpose change is an explicit revision, never a material increment.
+	if old.WritingPurpose != nil {
+		scope.WritingMode = old.WritingPurpose.Mode
+	} else {
+		scope.WritingMode = "synthesis"
+	}
+	preview := false
+	scope.PreviewWritingPlan = &preview
 	scope.Question = nil
 	scope.ExploreHistory = false
 	scope.HistoryCursor = 0
@@ -432,7 +440,7 @@ func (s *Store) freezeKnowledgeUpdate(ctx context.Context, a *KnowledgeArticleRe
 	if req.Coverage != nil {
 		req.Coverage.AdmittedCount = len(req.Materials)
 	}
-	req.Stage, req.PromptVersion, req.Topic, req.Blocks, req.History = "update_propose", provider.KnowledgeArticlePromptVersion, old.Topic, blocks, nil
+	req.Stage, req.PromptVersion, req.Topic, req.Blocks, req.History = "update_propose", provider.KnowledgeArticlePurposePromptVersion, old.Topic, blocks, nil
 	req.StageConfigs = provider.FreezeKnowledgeStageConfigs(models)
 	cfg := req.StageConfigs["discover"]
 	cfg.MaxOutputTokens = max(cfg.MaxOutputTokens, 4096)
@@ -464,7 +472,7 @@ func (s *Store) ReserveKnowledgeUpdateProposal(ctx context.Context, articleID st
 				questionMissing = true
 				req = old
 				req.Blocks, err = updateParentBlocks(parent)
-				req.Stage, req.PromptVersion, req.Estimate, req.History = "update_propose", provider.KnowledgeArticlePromptVersion, nil, nil
+				req.Stage, req.Estimate, req.History = "update_propose", nil, nil
 				req.StageConfigs = provider.FreezeKnowledgeStageConfigs(models)
 				cfg := req.StageConfigs["discover"]
 				cfg.MaxOutputTokens = max(4096, cfg.MaxOutputTokens)

@@ -109,7 +109,7 @@ func ValidateQuestionStudyAnswer(scope QuestionStudyScope, answer QuestionStudyA
 	seenOwners := map[string]bool{}
 	for _, ref := range answer.OwnerUnderstanding {
 		material, ok := materials[ref.MaterialKey]
-		if !ok || seenOwners[ref.MaterialKey] || material.Kind != "owner_reflection" || material.Revision != ref.Revision {
+		if !ok || seenOwners[ref.MaterialKey] || (material.Kind != "owner_reflection" && material.Kind != "understanding") || material.Revision != ref.Revision {
 			return errors.New("invented Owner understanding")
 		}
 		seenOwners[ref.MaterialKey] = true
@@ -130,10 +130,10 @@ func ValidateQuestionStudyAnswer(scope QuestionStudyScope, answer QuestionStudyA
 					return errors.New("invented question study material version")
 				}
 				keys[ref.MaterialKey] = true
-				if kind != "ai" && material.Kind == "owner_reflection" {
+				if kind != "ai" && (material.Kind == "owner_reflection" || material.Kind == "understanding") {
 					return errors.New("Owner understanding cannot establish source claims")
 				}
-				if material.Kind != "owner_reflection" && len(ref.SegmentIDs) == 0 {
+				if material.Kind != "owner_reflection" && material.Kind != "understanding" && len(ref.SegmentIDs) == 0 {
 					return errors.New("missing actual question study segment")
 				}
 				segments := map[string]bool{}

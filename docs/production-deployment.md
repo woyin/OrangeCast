@@ -129,3 +129,41 @@ DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz --fo
 1. 启动服务后访问 `/register` 认领唯一 Owner（ADR-0003）。
 2. 添加 RSS / 上传音频 → 选择处理 → worker 自动完成转录与分析（ADR-0006）。
 3. 处理后页面可播放 EvidenceAudio、搜索跳转、下载带 Citation 的 Markdown。
+
+## 第四轮配置与离线运维
+
+配置及使用说明见[第四轮配置示例](configuration-v4.example.md)和[第四轮使用说明](personal-learning-v4.md)。这些说明不代表真实模型质量或手机体验已通过。
+
+
+仓库 Compose 从源码构建，但其 `environment` 当前只传入会话、Groq、OpenAI、公网和代理基础项。仅在宿主 `.env` 填入 `POD_*`、`VOICE_ASR_*` 或 `LEARNING_EMBEDDING_*` 不会自动把这些项送入容器。使用私有 Compose override 显式传入所需变量，或运行容器时用 `--env-file`；不要把密钥写入仓库或镜像。
+
+```sh
+docker build -t cloudwisepod:local .
+docker run -d --name cloudwisepod --restart unless-stopped \
+  --env-file .env -e DATA_DIR=/app/data \
+  -p 127.0.0.1:8080:8080 -v "$(pwd)/data:/app/data" \
+  cloudwisepod:local
+```
+
+检查反向代理实际来源，设置对应 `TRUSTED_PROXIES`，不要信任全部公网。`PUBLIC_URL` 必须是实际 HTTPS URL，影响 Secure Cookie 和来源链接。参考 [Caddy](deploy/Caddyfile.example) 或 [Nginx](deploy/nginx.example) 配置，TLS 在代理终止。代理地址、证书和防火墙须按实际环境配置，不把示例域名当成已部署地址。
+
+手机录音及离线 Service Worker 需要安全上下文；HTTPS 部署后仍需真实设备验证麦克风、后台播放、缓存配额及登录清理。scope `/` 只决定 SW 控制路径，动态认证页面不应被缓存。离线限制和撤回延迟见[使用说明](personal-learning-v4.md#离线听与学)。
+
+
+### 第四轮升级与任务恢复
+
+
+```sh
+./cloudwisepod backup /private/path/cwp-v2.tar.gz
+DATA_DIR=/new/instance ./cloudwisepod restore /private/path/cwp-v2.tar.gz
+```
+
+使用空目标目录；已有数据仅在明确接受覆盖时加 `--force`。先在隔离目录恢复，核对 manifest、文件校验、登录、来源和任务记录再切换服务。v2 兼容旧 v1，备份包括明确保留的私人录音；未保存录音、Narration、临时导出与浏览器离线副本不能据此恢复。
+
+数据库设置可能包含模型密钥，备份包按敏感文件私有保存及加密传输，不作公开发布附件。恢复/重启更换离线 epoch，设备回网先核对并重新授权。已发生模型用量与未知远端状态保留，重启不意味着免费重发。不能在恢复后让过期、撤回、停止或已知响应任务重新调用付费模型。
+
+## 运行核对与未验项
+
+验证服务能登录，数据目录写入正常，启动无迁移错误；在 `/automation` 查看任务恢复和费用状态。不要为健康检查自动触发生成、ASR 或 embedding。模型连接和费用另行明确测试，记录实际调用及结果。质量 CLI 的 `--run` 同样经过持久阶段预算准入、派发 CAS 锁及月度 receipt 幂等记账；已知响应恢复零新调用，未知不得伪记零或自动重发。数据库迁移包含 0088 理解关系和 0089 doc_key 索引；索引优化后仍未满足语义冷性能门槛，保持 FTS 可用、语义关闭。
+
+仓库工程测试与部署验收分别记录。当前本说明没有执行公网部署、升级已有生产数据库、真实 Provider 质量评测或实体手机测试；按[验证记录](superpowers/plans/2026-10-01-personal-learning-and-knowledge-articles-v4-validation.md)和[手机验收表](acceptance/2026-10-02-v4-offline-mobile.md)补充实际证据后才能声明相应通过。

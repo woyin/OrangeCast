@@ -1,0 +1,8 @@
+工具终态观察摘录；不是完整原始磁盘日志。
+命令：CWP_OFFLINE_GO_BROWSER=1 CWP_OFFLINE_GO_STOP=/tmp/cwp-offline-go-stop go test ./internal/server -run '^TestOfflineGoBrowserHarness$' -v -count=1 -timeout=30m
+工具 exec session: 24234
+最终 exit_code: 0
+--- PASS: TestOfflineGoBrowserHarness (154.44s)
+PASS
+ok  github.com/woyin/orangecast/internal/server 154.823s
+stop 文件触发后取得该终态；真实 driver session80259 exit0，保存的PASS摘录来自磁盘 /tmp/cwp-offline-go-final.log。

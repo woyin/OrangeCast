@@ -45,6 +45,8 @@ func (srv *Server) registerStaticRoutes(mux *http.ServeMux) {
 }
 
 func (srv *Server) registerPublicRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/offline", srv.handleOfflineShell)
+	mux.HandleFunc("/sw.js", srv.handleOfflineWorker)
 	mux.Handle("/login", auth.CSRFProtect(http.HandlerFunc(srv.handleLogin)))
 	mux.Handle("/register", auth.CSRFProtect(http.HandlerFunc(srv.handleRegister)))
 	mux.Handle("/logout", auth.CSRFProtect(http.HandlerFunc(srv.handleLogout)))
@@ -65,7 +67,13 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/voice-notes/", srv.handleVoiceDraft)
 	mux.HandleFunc("/questions", srv.handleLearningQuestions)
 	mux.HandleFunc("/questions/action", srv.handleLearningQuestionAction)
+	srv.registerUnderstandingRoutes(mux)
 	mux.HandleFunc("/questions/", srv.handleLearningQuestionDetail)
+	mux.HandleFunc("/api/learning-excerpts", srv.handleLearningExcerpts)
+	mux.HandleFunc("/api/offline/", srv.handleOfflineLearning)
+	mux.HandleFunc("/quality-cases", srv.handleArticleQualityCases)
+	mux.HandleFunc("/quality-cases/action", srv.handleArticleQualityAction)
+	srv.registerLearningExportRoutes(mux)
 	mux.HandleFunc("/knowledge-articles", srv.handleKnowledgeArticles)
 	mux.HandleFunc("/knowledge-updates", srv.handleKnowledgeUpdates)
 	mux.HandleFunc("/knowledge-updates/action", srv.handleKnowledgeUpdateAction)
@@ -135,6 +143,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/notes", srv.handleNotes)
 	mux.HandleFunc("/search", srv.handleSearch)
 	mux.HandleFunc("/search/settings", srv.handleKnowledgeSearchSettings)
+	mux.HandleFunc("/api/knowledge-search-settings", srv.handleKnowledgeSearchSettings)
 	mux.HandleFunc("/keypoints", srv.handleKeyPoints)
 	mux.HandleFunc("/graph", srv.handleGraph)
 	mux.HandleFunc("/api/graph", srv.handleGraphAPI)
@@ -152,6 +161,8 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/paraphrase", srv.handleParaphrase)               // Paraphrase（GeneratedDerivative，ADR-0018 R2）
 	mux.HandleFunc("/api/study-chat", srv.handleStudyChat)                // StudyChat（GeneratedDerivative，ADR-0018 R3）
 	mux.HandleFunc("/api/study-chat/history", srv.handleStudyChatHistory) // StudyChat 历史回看
+	mux.HandleFunc("/api/study-chat/status", srv.handleLegacyStudyStatus)
+	mux.HandleFunc("/api/study-chat/retry", srv.handleLegacyStudyRetry)
 	mux.HandleFunc("/api/process", srv.handleProcess)
 	mux.HandleFunc("/api/source-policy", srv.handleSourcePolicy)
 	mux.HandleFunc("/evidence/", srv.handleFrozenEvidence)

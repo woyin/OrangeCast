@@ -91,6 +91,14 @@ func (srv *Server) handleLearningQuestions(w http.ResponseWriter, r *http.Reques
 	}
 }
 func (srv *Server) handleLearningQuestionDetail(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/understandings") {
+		srv.handleQuestionUnderstandings(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/gaps") {
+		srv.handleEvidenceGaps(w, r)
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, "/study") {
 		srv.handleQuestionStudy(w, r)
 		return

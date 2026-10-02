@@ -9,7 +9,7 @@ import (
 )
 
 func ensureKnowledgeStageConfigs(req *provider.KnowledgeArticleRequest, model string) {
-	if req.PromptVersion != provider.KnowledgeArticlePromptVersion || len(req.StageConfigs) != 0 {
+	if (req.PromptVersion != provider.KnowledgeArticlePromptVersion && req.PromptVersion != provider.KnowledgeArticlePurposePromptVersion) || len(req.StageConfigs) != 0 {
 		return
 	}
 	models := map[string]string{}
@@ -27,7 +27,7 @@ func freezeKnowledgeEstimate(ctx context.Context, tx *sql.Tx, name, model string
 	if err != nil {
 		return "", err
 	}
-	if req.PromptVersion != provider.KnowledgeArticlePromptVersion {
+	if req.PromptVersion != provider.KnowledgeArticlePromptVersion && req.PromptVersion != provider.KnowledgeArticlePurposePromptVersion {
 		return cfg.Model, nil
 	}
 	req.Estimate = nil // Each newly admitted stage estimates its own final messages.

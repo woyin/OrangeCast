@@ -9,7 +9,8 @@
     var now = options.now || Date.now;
     var lastSeq=0;
     var mediaActions = [], abort = typeof root.AbortController === 'function' ? new root.AbortController() : null;
-    var pendingKey = 'cwp-pending-progress:' + options.sourceType + ':' + options.sourceId + ':' + options.mode + ':' + (options.audioSHA || '') + ':' + (options.planId || '');
+    var pendingKey = 'cwp-pending-progress:' + options.sourceType + ':' + options.sourceId + ':' + options.mode + ':' + (options.audioSHA || '') + ':' + (options.planId || '') + (options.mode === 'excerpt' ? ':' + options.excerptId : '');
+    function progressURL() { return '/api/listening-progress?source_type=' + encodeURIComponent(options.sourceType) + '&source_id=' + encodeURIComponent(options.sourceId) + '&mode=' + options.mode + (options.mode === 'excerpt' ? '&excerpt_id=' + encodeURIComponent(options.excerptId) : ''); }
     function persist(snap) { try { root.localStorage.setItem(pendingKey, JSON.stringify(snap)); } catch (_) { notify('本地位置保存失败，请保留页面或记下时间。'); } }
     function clearPending(snap) { try { if(root.localStorage.getItem(pendingKey) === JSON.stringify(snap))root.localStorage.removeItem(pendingKey); } catch (_) {} }
     function storedRate() { try { return Number(root.localStorage.getItem('cwp-playback-rate')) || 1; } catch (_) { return 1; } }
@@ -22,7 +23,7 @@
     function skip(delta) { seek(a.time() + delta); }
     async function load() {
       try {
-        var response = await fetcher('/api/listening-progress?source_type=' + encodeURIComponent(options.sourceType) + '&source_id=' + encodeURIComponent(options.sourceId) + '&mode=' + options.mode, abort ? {signal:abort.signal} : undefined);
+        var response = await fetcher(progressURL(), abort ? {signal:abort.signal} : undefined);
         if (!response.ok) throw new Error('read');
         saved = await response.json(); if(stopped)return; revision = saved.revision || 0;
         if (saved.speed && !dirty) { setRate(saved.speed);dirty=false; }
@@ -37,10 +38,11 @@
         } catch (_) {}
       } catch (_) { if(stopped)return;notify('无法读取续听进度，收听仍可继续。'); }
     }
-    function sameSaved(pending,saved){return ['source_type','source_id','mode','audio_sha256','plan_id','plan_version','item_position','highlight_id','item_offset_seconds','seq','speed'].every(function(key){return (pending[key]===undefined?(['plan_version','item_position'].includes(key)?0:''):pending[key])===(saved[key]===undefined?(['plan_version','item_position'].includes(key)?0:''):saved[key]);});}
+    function sameSaved(pending,saved){return ['source_type','source_id','mode','excerpt_id','snapshot_id','audio_sha256','plan_id','plan_version','item_position','highlight_id','item_offset_seconds','seq','speed'].every(function(key){return (pending[key]===undefined?(['plan_version','item_position'].includes(key)?0:''):pending[key])===(saved[key]===undefined?(['plan_version','item_position'].includes(key)?0:''):saved[key]);});}
     function identityMatches(saved) {
       if ((saved.audio_sha256 || '') !== (options.audioSHA || '')) { notify('原音指纹已变化，旧位置无法自动恢复。');return false; }
       if (options.mode === 'dj' && options.planId && (saved.plan_id !== options.planId || saved.plan_version !== options.planVersion)) { notify('DJ清单已变化，旧位置无法恢复。');return false; }
+      if (options.mode === 'excerpt' && (saved.excerpt_id !== options.excerptId || saved.snapshot_id !== options.snapshotId)) { notify('补听区间依据已变化，旧位置无法恢复。');return false; }
       return true;
     }
     async function save() {
@@ -48,6 +50,7 @@
       var snap = a.snapshot(); if (!snap) return;
       snap.source_type = options.sourceType; snap.source_id = options.sourceId; snap.mode = options.mode;
       snap.audio_sha256 = options.audioSHA || '';
+      if(options.mode === 'excerpt'){snap.excerpt_id=options.excerptId;snap.snapshot_id=options.snapshotId;}
       snap.expected_revision = revision; snap.seq = lastSeq=Math.max(now(),lastSeq+1); snap.speed = a.getRate();
       persist(snap); if (!loaded || busy || conflict) return; busy = true; dirty = false; var accepted=false;
       try {
@@ -60,7 +63,7 @@
     }
     async function resolveConflict() {
       try {
-        var response = await fetcher('/api/listening-progress?source_type=' + encodeURIComponent(options.sourceType) + '&source_id=' + encodeURIComponent(options.sourceId) + '&mode=' + options.mode, abort ? {signal:abort.signal} : undefined);
+        var response = await fetcher(progressURL(), abort ? {signal:abort.signal} : undefined);
         if (!response.ok) throw new Error('read');
         var result = await response.json(); if(stopped)return; revision = result.revision || 0; conflict = false; dirty = true; await save();
       } catch (_) { notify('未能取得新版本，请联网后重试。', resolveConflict); }
@@ -74,7 +77,7 @@
     function online() { if (!loaded) load().then(save); else save(); }
     root.addEventListener('pagehide', save); root.addEventListener('online', online);
     if (root.navigator && 'mediaSession' in root.navigator) {
-      if(root.MediaMetadata){try{root.navigator.mediaSession.metadata=new root.MediaMetadata({title:options.title||'CloudWisePod',artist:options.mode==='dj'?'DJ 精听':'原音收听',album:'CloudWisePod'});}catch(_){}}
+      if(root.MediaMetadata){try{root.navigator.mediaSession.metadata=new root.MediaMetadata({title:options.title||'CloudWisePod',artist:options.mode==='dj'?'DJ 精听':options.mode==='excerpt'?'区间补听':'原音收听',album:'CloudWisePod'});}catch(_){}}
       var handlers = { play:play, pause:pause, seekbackward:function (d) { skip(-(d.seekOffset || 15)); }, seekforward:function (d) { skip(d.seekOffset || 15); }, seekto:function (d) { seek(d.seekTime); } };
       if (a.next) handlers.nexttrack = a.next; if (a.prev) handlers.previoustrack = a.prev;
       mediaActions = Object.keys(handlers);

@@ -1,0 +1,17 @@
+{{define "title"}}理解尚未保存 · 恢复草稿{{end}}
+{{define "content"}}
+<section class="panel"><h1>理解尚未保存</h1><p role="alert">{{.Message}}</p><p>下面保留本次提交的草稿及原始修订身份。请先核对当前问题与理解版本，再复制合并到新的编辑器；重复提交旧修订仍会冲突。</p>{{if .Omitted}}<p>超过字段限制或格式无效的值未放入恢复表单；其他有界草稿仍保留。</p>{{end}}
+{{if .Draft}}
+<a href="/questions/{{index .Draft "question_id"}}/understandings">打开当前理解，核对后合并</a>
+<form method="post" action="/questions/understanding-action" data-understanding-recovery>
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+{{range $field := jsonArray "[\"action\",\"question_id\",\"question_revision\",\"head_revision\",\"parent_id\",\"request_key\",\"snapshot_id\"]"}}<input type="hidden" name="{{$field}}" value="{{index $.Draft $field}}">{{end}}
+<label>我目前的回答<textarea name="answer" rows="6">{{index .Draft "answer"}}</textarea></label>
+<label>仍不确定什么<textarea name="uncertainty" rows="3">{{index .Draft "uncertainty"}}</textarea></label>
+<label>下一步<textarea name="next_step" rows="3">{{index .Draft "next_step"}}</textarea></label>
+<label>本次模型策略<input name="model_data_policy" value="{{index .Draft "model_data_policy"}}"></label>
+<label>允许的Provider<input name="approved_providers" value="{{index .Draft "approved_providers"}}"></label>
+{{range .References}}<input type="hidden" name="reference" value="{{.}}">{{end}}
+<label><input type="checkbox" name="owner_confirmed" value="yes" required>重新核对并确认这是我的个人理解</label>
+<button type="submit">使用原修订身份重试</button></form>{{else}}<p>没有可恢复的提交草稿。</p>{{end}}</section>
+{{end}}

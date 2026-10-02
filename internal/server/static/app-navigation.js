@@ -1,7 +1,7 @@
 // Conservative GET navigation. SSR remains authoritative; fetched scripts are never executed.
 (function(root){
  'use strict';
- const allowed=/^\/(?:dashboard|automation(?:\/[^/]+)?|voice-notes|listening-reflections(?:\/[^/]+)?|podcasts(?:\/[^/]+)?|sources\/(?:episode|upload)\/[^/]+(?:\/dj)?|search|evidence\/[^/]+|notes(?:\/[^/]+\/history)?|questions(?:\/[^/]+(?:\/study)?)?|knowledge-updates(?:\/[^/]+)?|knowledge-articles(?:\/[^/]+(?:\/revisions\/[^/]+)?)?|review(?:\/daily)?|listening-queue|documents(?:\/[^/]+)?|uploads)$/;
+ const allowed=/^\/(?:dashboard|automation(?:\/[^/]+)?|voice-notes|listening-reflections(?:\/[^/]+)?|podcasts(?:\/[^/]+)?|sources\/(?:episode|upload)\/[^/]+(?:\/dj)?|search|evidence\/[^/]+|notes(?:\/[^/]+\/history)?|questions(?:\/[^/]+(?:\/(?:study|gaps|understandings))?)?|knowledge-updates(?:\/[^/]+)?|knowledge-articles(?:\/[^/]+(?:\/revisions\/[^/]+)?)?|review(?:\/daily)?|learning-exports(?:\/preview)?|quality-cases|listening-queue|documents(?:\/[^/]+)?|uploads)$/;
  let seq=0,pending=null,expired=false;
  const feedback=document.getElementById('navigation-feedback');
  const privateClear=(broadcast=true)=>root.CWPPrivate.clear(broadcast);

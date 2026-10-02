@@ -14,6 +14,7 @@ import (
 // StudySessionRow 学习会话容器（GeneratedDerivative，ADR-0018 R3）。
 type StudySessionRow struct {
 	ID         string
+	Revision   int
 	SourceType models.SourceType
 	SourceID   string
 	Title      string
@@ -48,8 +49,8 @@ func (s *Store) CreateStudySession(ctx context.Context, sourceType models.Source
 func (s *Store) GetStudySession(ctx context.Context, id string) (*StudySessionRow, error) {
 	r := &StudySessionRow{}
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT id, source_type, source_id, title, created_at, updated_at FROM study_sessions WHERE id=?`, id).
-		Scan(&r.ID, &r.SourceType, &r.SourceID, &r.Title, &r.CreatedAt, &r.UpdatedAt)
+		`SELECT id, source_type, source_id, title, created_at, updated_at, revision FROM study_sessions WHERE id=?`, id).
+		Scan(&r.ID, &r.SourceType, &r.SourceID, &r.Title, &r.CreatedAt, &r.UpdatedAt, &r.Revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -59,7 +60,7 @@ func (s *Store) GetStudySession(ctx context.Context, id string) (*StudySessionRo
 // ListStudySessions 列出某 Source 的会话（最近在前）。
 func (s *Store) ListStudySessions(ctx context.Context, sourceType models.SourceType, sourceID string) ([]*StudySessionRow, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, source_type, source_id, title, created_at, updated_at
+		`SELECT id, source_type, source_id, title, created_at, updated_at, revision
 		 FROM study_sessions WHERE source_type=? AND source_id=? ORDER BY created_at DESC, rowid DESC`,
 		string(sourceType), sourceID)
 	if err != nil {
@@ -69,7 +70,7 @@ func (s *Store) ListStudySessions(ctx context.Context, sourceType models.SourceT
 	var out []*StudySessionRow
 	for rows.Next() {
 		r := &StudySessionRow{}
-		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.Title, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.SourceType, &r.SourceID, &r.Title, &r.CreatedAt, &r.UpdatedAt, &r.Revision); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

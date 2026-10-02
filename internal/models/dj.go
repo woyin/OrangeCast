@@ -50,6 +50,12 @@ type DJPlanItem struct {
 // 位置（plan_items.position，含解说与原音）；恢复以 item_position + highlight_id
 // 定位，不混用"含解说的索引"与"仅原音的索引"。
 type ListeningProgress struct {
+	ExcerptID         string     `json:"excerpt_id"`
+	SnapshotID        string     `json:"snapshot_id"`
+	SnapshotVersion   int        `json:"snapshot_version"`
+	SegmentIDs        []string   `json:"segment_ids"`
+	StartSeconds      float64    `json:"start_seconds"`
+	EndSeconds        float64    `json:"end_seconds"`
 	AudioSHA256       string     `json:"audio_sha256"`
 	Mode              string     `json:"mode"`
 	Revision          int64      `json:"revision"`

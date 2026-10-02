@@ -173,7 +173,7 @@ func (s *Store) ReserveLearningReview(ctx context.Context, profile, name, model 
 		return nil, false, nil
 	}
 	for i, m := range req.Materials {
-		if m.Kind != "keypoint" {
+		if m.Kind == "source_note" || m.Kind == "owner_reflection" {
 			versions, e := s.ListOwnerNoteRevisions(ctx, m.ID)
 			if e != nil {
 				return nil, false, e
@@ -188,6 +188,17 @@ func (s *Store) ReserveLearningReview(ctx context.Context, profile, name, model 
 	req.Topic = nil
 	req.DiscoveryBatchID = ""
 	req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	// Weekly review keeps its independent v4 contract; article preferences must
+	// not silently upgrade its frozen protocol or add article-only controls.
+	req.WritingPurpose = nil
+	req.PreviewWritingPlan = false
+	legacyMaterials := req.Materials[:0]
+	for _, m := range req.Materials {
+		if m.Kind != "understanding" {
+			legacyMaterials = append(legacyMaterials, m)
+		}
+	}
+	req.Materials = legacyMaterials
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err

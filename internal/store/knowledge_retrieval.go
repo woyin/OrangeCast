@@ -41,6 +41,17 @@ type KnowledgeRetrieveResult struct {
 // Retrieve is the single bounded retrieval seam. The existing FTS projection is
 // its default adapter; no read generates vectors or starts a remote operation.
 func (s *Store) Retrieve(ctx context.Context, req KnowledgeRetrieveQuery) (KnowledgeRetrieveResult, error) {
+	return s.retrieveKnowledge(ctx, req, false)
+}
+
+// EvaluateKnowledgeRetrieval compares the authorized index before search activation.
+// This explicit read-only measurement entry never enables search or sends content.
+// It retains all source permissions, versions, capacity and invalidation checks.
+func (s *Store) EvaluateKnowledgeRetrieval(ctx context.Context, req KnowledgeRetrieveQuery) (KnowledgeRetrieveResult, error) {
+	return s.retrieveKnowledge(ctx, req, true)
+}
+
+func (s *Store) retrieveKnowledge(ctx context.Context, req KnowledgeRetrieveQuery, evaluation bool) (KnowledgeRetrieveResult, error) {
 	q := req.Search
 	if req.Purpose == "" {
 		req.Purpose = RetrieveLocal
@@ -68,7 +79,7 @@ func (s *Store) Retrieve(ctx context.Context, req KnowledgeRetrieveQuery) (Knowl
 	}
 	out := KnowledgeRetrieveResult{KnowledgeSearchResult: lexical, Method: "fts", LexicalCount: len(lexical.Hits), LexicalTotal: lexical.Total}
 	if req.Semantic {
-		return s.retrieveHybrid(ctx, req, q, lexical)
+		return s.retrieveHybrid(ctx, req, q, lexical, evaluation)
 	}
 	return out, nil
 }

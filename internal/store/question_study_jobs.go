@@ -135,6 +135,9 @@ func (s *Store) SubmitQuestionStudyTurn(ctx context.Context, sessionID string, e
 	seen := map[QuestionStudySource]bool{}
 	for _, material := range scope.Materials {
 		source := QuestionStudySource{material.SourceType, material.SourceID}
+		if material.Kind == "understanding" {
+			continue
+		}
 		if !seen[source] {
 			sources = append(sources, source)
 			seen[source] = true
@@ -157,6 +160,24 @@ func (s *Store) SubmitQuestionStudyTurn(ctx context.Context, sessionID string, e
 	turn, _, err := reserveQuestionStudyTurn(ctx, tx, sessionID, expected, input, key, string(frozenScope), sources)
 	if err != nil {
 		return nil, nil, false, err
+	}
+	var understandingDependencies []provider.KnowledgeMaterial
+	for _, m := range scope.Materials {
+		if m.Understanding != nil {
+			understandingDependencies = append(understandingDependencies, *m.Understanding)
+		}
+	}
+	for _, h := range scope.History {
+		understandingDependencies = append(understandingDependencies, h.UnderstandingDependencies...)
+	}
+	for _, m := range understandingDependencies {
+		if e := checkUnderstandingMaterialTransaction(ctx, tx, cfg.Provider, m); e != nil {
+			return nil, nil, false, e
+		}
+		raw, _ := json.Marshal(m)
+		if _, e := tx.ExecContext(ctx, `INSERT OR IGNORE INTO question_study_understandings(turn_id,snapshot_id,frozen_json)VALUES(?,?,?)`, turn.ID, m.ID, string(raw)); e != nil {
+			return nil, nil, false, e
+		}
 	}
 	jobID = uuid.NewString()
 	in := QuestionStudyJobInput{Version: QuestionStudyTaskVersion, Stage: "generate", TurnID: turn.ID, Scope: *scope, Config: cfg, Estimate: estimate, ReviewIntent: "question-study:" + turn.ID + ":review"}
@@ -217,6 +238,22 @@ func checkQuestionStudyScope(ctx context.Context, q reviewReader, scope provider
 		return err
 	}
 	for _, material := range scope.Materials {
+		if material.Kind == "understanding" {
+			if material.Understanding == nil {
+				return ErrConflict
+			}
+			if e := checkUnderstandingMaterialReader(ctx, q, name, *material.Understanding); e != nil {
+				return e
+			}
+			var member bool
+			if e := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM understanding_snapshots u WHERE u.id=? AND u.question_id=?)`, material.Understanding.ID, scope.Question.ID).Scan(&member); e != nil {
+				return e
+			}
+			if !member {
+				return ErrConflict
+			}
+			continue
+		}
 		if !validSourceType(models.SourceType(material.SourceType)) {
 			return ErrInvalidEditorialState
 		}
@@ -573,12 +610,28 @@ func checkQuestionStudyDependencies(ctx context.Context, q reviewReader, turnID,
 		return err
 	}
 	var sources []provider.QuestionStudySourceDependency
-	if json.Unmarshal([]byte(raw), &sources) != nil || len(sources) == 0 || len(sources) > 96 {
+	if json.Unmarshal([]byte(raw), &sources) != nil || len(sources) > 96 {
 		return ErrInvalidEditorialState
 	}
 	for _, source := range sources {
 		if err := checkQuestionStudySource(ctx, q, QuestionStudySource{source.SourceType, source.SourceID}, name); err != nil {
 			return err
+		}
+	}
+	var ownerRaw string
+	if e := q.QueryRowContext(ctx, `SELECT COALESCE(json_group_array(json(frozen_json)),'[]') FROM question_study_understandings WHERE turn_id=?`, turnID).Scan(&ownerRaw); e != nil {
+		return e
+	}
+	var owners []provider.KnowledgeMaterial
+	if json.Unmarshal([]byte(ownerRaw), &owners) != nil || len(owners) > 120 {
+		return ErrConflict
+	}
+	if len(sources) == 0 && len(owners) == 0 {
+		return ErrConflict
+	}
+	for _, m := range owners {
+		if e := checkUnderstandingMaterialReader(ctx, q, name, m); e != nil {
+			return e
 		}
 	}
 	return nil

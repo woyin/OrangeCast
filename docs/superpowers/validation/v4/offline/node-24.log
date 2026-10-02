@@ -1,0 +1,32 @@
+✔ grant locks expiry, clock rollback, bad schema and >24 hour policy (1.072917ms)
+✔ range returns byte boundaries including suffix, EOF, bad/multiple range (0.502833ms)
+✔ manifest rejects remote/private recordings, missing identity, bad size/hash and limits (0.302541ms)
+✔ outbox accepts text and original progress only and binds namespace/anchor (0.135667ms)
+✔ canonical hashes ignore object insertion order but detect changed payload (2.967875ms)
+✔ actual outbox script retains operation after lost ack, reuses UUID, clears only acknowledged command (1.875416ms)
+✔ actual outbox keeps conflict and quota failure never claims durable save (0.927875ms)
+✔ actual download verifies complete blob and eviction invalidates ready index (1.05525ms)
+✔ actual download rejects bad hash and canceled download without ready pack (0.811459ms)
+✔ outbox batches by both 100 commands and UTF8 64KiB, preserves mixed 409 receipts (6.981209ms)
+✔ 101 actual outbox commands split 100/1 with ack cleanup (8.881459ms)
+✔ failed next pack keeps previous playable manifest; removal rebuilds shared members without outbox loss (1.109041ms)
+✔ ten distinct source identities plus an article do not invent an eleventh source (0.080375ms)
+✔ progress revisions chain across pending operations and true acknowledgements only (0.7935ms)
+✔ random UUID order cannot invert CAS revisions; conflict blocks later same-object commands (0.497833ms)
+✔ actual root bridge denies revoked and new-session grants before downloaded playback (0.907917ms)
+✔ actual root bridge permits only TypeError network-down fallback with current bounded grant (0.277708ms)
+✔ malformed online status is not misclassified as a network-offline permission (0.327875ms)
+✔ offline reading projects human text rather than private JSON identifiers (0.149084ms)
+✔ same ready file ID is reused without remote fetch and changed identity cannot overwrite it (0.734875ms)
+✔ same pack retry cancel, publish quota and expiry preserve original ready pack and bytes (0.743458ms)
+✔ incomplete pack cleanup removes only its staging, keeps shared ready audio and outbox (0.333667ms)
+✔ certified offline interval binds immutable source snapshot and clamps absolute audio positions (0.091458ms)
+✔ unknown operation schema is preserved and cannot trigger a synchronization request (0.299209ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34.975375

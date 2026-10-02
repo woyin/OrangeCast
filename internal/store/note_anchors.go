@@ -27,7 +27,7 @@ func (s *Store) prepareNoteAnchor(ctx context.Context, note *models.OwnerNote, c
 	if a.NoPosition && (len(ids) > 0 || a.Position != 0 || a.Mode != "" || a.PlanID != "" || a.PlanVersion != 0 || a.AudioSHA256 != "") {
 		return "", ErrInvalidEditorialState
 	}
-	if (a.Mode != "" && a.Mode != "original" && a.Mode != "dj") || len(a.AudioSHA256) > 128 || len(a.PlanID) > 200 || a.PlanVersion < 0 || (a.Mode != "dj" && (a.PlanID != "" || a.PlanVersion != 0)) || (a.Mode == "dj" && (a.PlanID == "" || a.PlanVersion < 1)) {
+	if (a.Mode != "" && a.Mode != "original" && a.Mode != "dj" && a.Mode != "excerpt") || len(a.AudioSHA256) > 128 || len(a.PlanID) > 200 || a.PlanVersion < 0 || (a.Mode != "dj" && (a.PlanID != "" || a.PlanVersion != 0)) || (a.Mode == "dj" && (a.PlanID == "" || a.PlanVersion < 1)) {
 		return "", ErrInvalidEditorialState
 	}
 	if len(ids) == 0 && (note.AnchorJSON == "" || strings.TrimSpace(note.AnchorJSON) == "{}") {

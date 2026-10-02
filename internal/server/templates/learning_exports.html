@@ -1,0 +1,29 @@
+{{define "title"}}学习资料导出{{end}}
+{{define "content"}}
+<div id="learning-exports-view">
+<div class="page-head"><h1>学习资料导出</h1><a href="/questions">返回学习问题</a></div>
+<p>导出本地 Markdown 和索引 ZIP；不调用模型。最多 500 个对象、100 MiB；导出文件保留 24 小时。来源撤回、清理或内容变化后，请重新预览和生成。</p>
+<section class="panel"><h2>选择范围</h2>
+<details><summary>从已有问题或主题选择</summary><h3>学习问题</h3><ul>{{range .Questions}}<li><a href="/learning-exports?kind=question&amp;id={{.ID}}">{{.Body}}</a></li>{{else}}<li>暂无学习问题</li>{{end}}</ul><h3>跨集主题</h3><ul>{{range .Themes}}<li><a href="/learning-exports?kind=theme&amp;id={{.ID}}">{{.Label}}</a></li>{{else}}<li>暂无主题</li>{{end}}</ul></details>
+<form class="learning-export-command" method="post" action="/learning-exports/preview">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<label>选择学习问题或主题 <select name="selection" required><option value="">请选择要导出的学习问题或主题</option>{{range .Choices}}<option value="{{.ID}}" {{if eq $.Selection .ID}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+<label><input type="checkbox" name="include_history" value="yes" {{if .Scope.IncludeHistory}}checked{{end}}>包含历史版本</label>
+<label><input type="checkbox" name="include_drafts" value="yes" {{if .Scope.IncludeDrafts}}checked{{end}}>包含草稿（未经确认的内容会标注）</label>
+<label><input type="checkbox" name="include_excerpts" value="yes" {{if .Scope.IncludeExcerpts}}checked{{end}}>包含来源摘录</label>
+<button class="btn">预览数量和范围</button>
+<p aria-live="polite"></p></form>
+</section>
+{{with .Preview}}<section class="panel"><h2>确认预览</h2><p>{{.Count}} 个对象，约 {{.Bytes}} 字节。范围：{{$.ScopeLabel}}。预览有效期至 {{.ExpiresAt}}。</p>
+<p>修改上方选项后请先重新预览；下方确认只生成此处冻结的预览。</p>
+<form class="learning-export-command" method="post" action="/learning-exports/create">
+<input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="preview_id" value="{{.ID}}"><input type="hidden" name="preview_hash" value="{{.Hash}}"><input type="hidden" name="request_key" value="{{runRequestKey}}">
+<label><input type="checkbox" name="confirmed" value="yes" required>我确认以上范围及选项，生成 ZIP</label><button class="btn">生成导出</button>
+<p aria-live="polite"></p></form></section>{{end}}
+<section class="panel"><h2>导出记录</h2><p id="learning-export-poll" aria-live="polite">可刷新此页查看后台状态。刷新不会自动重新生成。</p>
+{{range .Exports}}<article id="export-{{.ID}}" data-export-id="{{.ID}}"><h3>{{index $.ScopeLabels (printf "%s:%s" .Preview.Scope.Kind .Preview.Scope.ID)}}</h3><p>状态：<span data-export-state>{{.Status}}</span> · {{.Preview.Count}} 个对象 · 到期 {{.ExpiresAt}}</p>
+<a data-export-download href="/learning-exports/{{.ID}}/download" {{if ne .Status "ready"}}hidden{{end}}>下载 ZIP</a><p data-export-download-feedback aria-live="polite"></p>
+<a href="/learning-exports?kind={{.Preview.Scope.Kind}}&amp;id={{.Preview.Scope.ID}}">重新选择和预览</a>
+</article>{{else}}<p>尚无导出记录。先选择问题或主题，预览后确认。</p>{{end}}
+</section></div>
+{{end}}

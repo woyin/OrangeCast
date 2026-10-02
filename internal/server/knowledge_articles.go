@@ -92,7 +92,20 @@ func (srv *Server) enqueueKnowledgeArticleScope(ctx context.Context, profileID s
 			return nil, false, err
 		}
 		if a != nil {
-			if a.Status != "discover" && a.Status != "select" && a.Status != "write" && a.Status != "review" && a.Status != "revise" && a.Status != "review_final" {
+			if scope.WritingMode != "" {
+				var existing provider.KnowledgeArticleRequest
+				if json.Unmarshal([]byte(a.InputJSON), &existing) != nil {
+					return nil, false, fmt.Errorf("文章冻结输入损坏")
+				}
+				mode := "synthesis"
+				if existing.WritingPurpose != nil {
+					mode = existing.WritingPurpose.Mode
+				}
+				if scope.WritingMode != mode {
+					return nil, false, fmt.Errorf("该学习问题已有文章，请在文章页明确创建用途新修订")
+				}
+			}
+			if a.Status != "discover" && a.Status != "select" && a.Status != "write" && a.Status != "review" && a.Status != "revise" && a.Status != "review_final" && a.Status != "awaiting_plan" {
 				if _, _, err = srv.store.ReserveKnowledgeUpdateProposal(ctx, a.ID, a.WorkingRevision, srv.cfg.KnowledgeStageModels()); err != nil {
 					return nil, false, err
 				}
@@ -223,7 +236,12 @@ func (srv *Server) renderKnowledgeArticles(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"SelectedQuestionSetting": selectedQuestionSetting, "Questions": questions, "Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates.Items, "CandidatePage": knowledgeListView(r, "candidate", candidates.Page, candidates.PerPage, candidates.Total), "Sources": sources.Items, "SourcePage": knowledgeListView(r, "source", sources.Page, sources.PerPage, sources.Total), "SourceMissing": sources.SelectedUnavailable, "Podcasts": podcasts, "Articles": records.Items, "ArticlePage": knowledgeListView(r, "article", records.Page, records.PerPage, records.Total), "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
+	unknownWritingMode := false
+	if submitted := r.Form.Get("writing_mode"); submitted != "" {
+		_, modeErr := provider.FreezeWritingPurpose(submitted)
+		unknownWritingMode = modeErr != nil
+	}
+	if err := srv.tmpl.Render(w, "knowledge_articles.html", map[string]any{"UnknownWritingMode": unknownWritingMode, "WritingModes": provider.WritingModes(), "SelectedQuestionSetting": selectedQuestionSetting, "Questions": questions, "Form": r.Form, "ErrorAction": action, "Error": message, "SelectedMaterials": selected, "Materials": materials.Hits, "NextCursor": nextCursor, "Candidates": candidates.Items, "CandidatePage": knowledgeListView(r, "candidate", candidates.Page, candidates.PerPage, candidates.Total), "Sources": sources.Items, "SourcePage": knowledgeListView(r, "source", sources.Page, sources.PerPage, sources.Total), "SourceMissing": sources.SelectedUnavailable, "Podcasts": podcasts, "Articles": records.Items, "ArticlePage": knowledgeListView(r, "article", records.Page, records.PerPage, records.Total), "Settings": settings, "Available": srv.cfg.PodAvailable(), "Model": srv.cfg.PodModel, "CSRF": auth.CSRFValue(r)}); err != nil {
 		http.Error(w, "渲染文章列表失败", 500)
 	}
 }
@@ -247,7 +265,11 @@ func (srv *Server) handleKnowledgeArticleGenerate(w http.ResponseWriter, r *http
 		http.Error(w, "读取默认文章偏好失败", 500)
 		return
 	}
-	scope := store.KnowledgeScope{QuestionID: r.FormValue("question_id"), PodcastID: r.FormValue("podcast"), Theme: r.FormValue("theme"), From: r.FormValue("from"), Until: r.FormValue("until"), ExploreHistory: r.FormValue("explore_history") == "on"}
+	scope := store.KnowledgeScope{WritingMode: r.FormValue("writing_mode"), QuestionID: r.FormValue("question_id"), PodcastID: r.FormValue("podcast"), Theme: r.FormValue("theme"), From: r.FormValue("from"), Until: r.FormValue("until"), ExploreHistory: r.FormValue("explore_history") == "on"}
+	if r.FormValue("writing_options_present") == "1" {
+		preview := r.FormValue("preview_writing_plan") == "on"
+		scope.PreviewWritingPlan = &preview
+	}
 	if source := strings.SplitN(r.FormValue("source"), ":", 2); len(source) == 2 {
 		scope.SourceType, scope.SourceID = source[0], source[1]
 	}
@@ -278,7 +300,15 @@ func (srv *Server) handleKnowledgeArticleSettings(w http.ResponseWriter, r *http
 	}
 	daily, e1 := strconv.Atoi(r.FormValue("daily_limit"))
 	debounce, e2 := strconv.Atoi(r.FormValue("debounce_minutes"))
-	settings := store.KnowledgeArticleSettings{Enabled: r.FormValue("enabled") == "on", DailyLimit: daily, DebounceMinutes: debounce, Audience: r.FormValue("audience"), Style: r.FormValue("style"), QuestionID: r.FormValue("question_id")}
+	settings := store.KnowledgeArticleSettings{Enabled: r.FormValue("enabled") == "on", DailyLimit: daily, DebounceMinutes: debounce, Audience: r.FormValue("audience"), Style: r.FormValue("style"), WritingMode: r.FormValue("writing_mode"), PreviewWritingPlan: r.FormValue("preview_writing_plan") == "on", QuestionID: r.FormValue("question_id")}
+	if _, present := r.Form["writing_mode"]; !present {
+		previous, getErr := srv.store.GetKnowledgeArticleSettings(r.Context())
+		if getErr != nil {
+			http.Error(w, "读取文章偏好失败", 500)
+			return
+		}
+		settings.WritingMode, settings.PreviewWritingPlan = previous.WritingMode, previous.PreviewWritingPlan
+	}
 	if e1 != nil || e2 != nil {
 		srv.renderKnowledgeArticles(w, r, 400, "频率必须为整数", "settings")
 		return
@@ -308,9 +338,9 @@ func (srv *Server) handleKnowledgeArticleRetry(w http.ResponseWriter, r *http.Re
 }
 
 type knowledgeArticleView struct {
-	Kind, Text string
-	RichHTML   template.HTML
-	Links      []knowledgeMaterialLink
+	Kind, Text, ID string
+	RichHTML       template.HTML
+	Links          []knowledgeMaterialLink
 }
 type knowledgeMaterialLink struct{ Label, Href, Preview, Kind string }
 
@@ -322,7 +352,7 @@ func knowledgeArticleViews(req provider.KnowledgeArticleRequest, blocks []provid
 	labels := map[string]string{"source": "来源整理", "reflection": "个人笔记", "synthesis": "AI 综合"}
 	views := make([]knowledgeArticleView, 0, len(blocks))
 	for _, b := range blocks {
-		v := knowledgeArticleView{Kind: labels[b.Kind], Text: b.Text, RichHTML: template.HTML(wechatRichText(b.Text))}
+		v := knowledgeArticleView{ID: b.ID, Kind: labels[b.Kind], Text: b.Text, RichHTML: template.HTML(wechatRichText(b.Text))}
 		for _, id := range b.MaterialIDs {
 			m, ok := materials[id]
 			if !ok {
@@ -496,6 +526,10 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 			http.Error(w, "读取工作稿失败", 500)
 			return
 		}
+		// Decode independently: shared purpose/question pointers and material
+		// slices must not rewrite the selected historical request in memory.
+		workReq = provider.KnowledgeArticleRequest{}
+		workBlocks = nil
 		if json.Unmarshal([]byte(working.InputJSON), &workReq) != nil || json.Unmarshal([]byte(working.BlocksJSON), &workBlocks) != nil {
 			http.Error(w, "工作稿损坏", 500)
 			return
@@ -531,7 +565,13 @@ func (srv *Server) handleKnowledgeArticleDetail(w http.ResponseWriter, r *http.R
 		editBlocks = append(editBlocks, knowledgeEditBlock{Block: block, Materials: choices, Key: knowledgeBlockKey(block, article.WorkingRevision, i)})
 	}
 	diffs := knowledgeDiffs(revisions)
-	data := map[string]any{"Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
+	data := map[string]any{"WritingModes": provider.WritingModes(), "WritingPurpose": req.WritingPurpose, "WorkWritingPurpose": workReq.WritingPurpose, "Exclusions": req.Exclusions, "Article": article, "Selected": selected, "SelectedRevision": selectedRevision, "EvidenceState": evidenceState, "EvidenceReason": evidenceReason, "Blocks": views, "Issues": issues, "Topics": topics, "Revisions": revisions, "Reviews": reviews, "Feedback": feedback, "Executions": executions, "EditBlocks": editBlocks, "EditTitle": workTitle, "WorkHash": workHash, "Materials": materials, "Diffs": diffs, "CSRF": auth.CSRFValue(r)}
+	plan, planErr := srv.store.GetKnowledgeWritingPlan(r.Context(), article.ID)
+	if planErr != nil && !errors.Is(planErr, store.ErrNotFound) {
+		http.Error(w, "读取写作计划失败", 500)
+		return
+	}
+	data["WritingPlan"] = plan
 	data["Coverage"], data["Candidates"] = req.Coverage, req.Candidates
 	updates, e := srv.store.ListKnowledgeUpdateProposals(r.Context(), article.ID, "")
 	if e != nil {
@@ -616,6 +656,29 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 	}
 	action := r.FormValue("action")
 	switch action {
+	case "plan_save":
+		_, err = srv.store.EditKnowledgeWritingPlanPurpose(r.Context(), id, expected, r.FormValue("plan_hash"), r.FormValue("outline"), r.FormValue("writing_mode"))
+	case "plan_confirm":
+		plan, getErr := srv.store.GetKnowledgeWritingPlan(r.Context(), id)
+		if getErr != nil {
+			err = getErr
+			break
+		}
+		if outline := r.FormValue("outline"); outline != "" && outline != plan.Request.Topic.Outline {
+			err = fmt.Errorf("大纲已修改，请先保存计划，再确认")
+			break
+		}
+		if mode := r.FormValue("writing_mode"); mode != "" && (plan.Request.WritingPurpose == nil || mode != plan.Request.WritingPurpose.Mode) {
+			err = fmt.Errorf("用途已修改，请先保存计划，再确认")
+			break
+		}
+		_, err = srv.store.ConfirmKnowledgeWritingPlan(r.Context(), id, expected, r.FormValue("plan_hash"))
+	case "revise_purpose":
+		if !srv.cfg.PodAvailable() {
+			err = fmt.Errorf("POD_* 配置不完整")
+		} else {
+			err = srv.store.QueueKnowledgePurposeRevision(r.Context(), id, expected, r.FormValue("writing_mode"), r.FormValue("instructions"), srv.cfg.KnowledgeReviewModel())
+		}
 	case "feedback":
 		err = srv.store.RecordKnowledgeFeedback(r.Context(), id, expected, r.FormValue("category"), r.FormValue("comment"))
 	case "review", "revise":
@@ -654,6 +717,14 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 			err = store.ErrInvalidEditorialState
 			break
 		}
+		var previousBlocks []provider.KnowledgeBlock
+		if err = json.Unmarshal([]byte(working.BlocksJSON), &previousBlocks); err != nil {
+			break
+		}
+		purposeSections := map[string]string{}
+		for _, block := range previousBlocks {
+			purposeSections[block.ID] = block.PurposeSection
+		}
 		used := map[string]bool{}
 		var blocks []provider.KnowledgeBlock
 		for i, text := range texts {
@@ -668,7 +739,12 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 					break
 				}
 			}
-			blocks = append(blocks, provider.KnowledgeBlock{ID: r.FormValue(fmt.Sprintf("block_id_%d", i)), Text: text, Kind: r.FormValue(fmt.Sprintf("block_kind_%d", i)), MaterialIDs: ids, Quotes: quotes})
+			blockID := r.FormValue(fmt.Sprintf("block_id_%d", i))
+			purposeSection := purposeSections[blockID]
+			if blockID == "" && i < len(previousBlocks) {
+				purposeSection = previousBlocks[i].PurposeSection
+			}
+			blocks = append(blocks, provider.KnowledgeBlock{ID: blockID, PurposeSection: purposeSection, Text: text, Kind: r.FormValue(fmt.Sprintf("block_kind_%d", i)), MaterialIDs: ids, Quotes: quotes})
 		}
 		for _, mid := range r.Form["extra_material"] {
 			used[mid] = true
@@ -698,11 +774,15 @@ func (srv *Server) handleKnowledgeArticleAction(w http.ResponseWriter, r *http.R
 			return
 		}
 		w.WriteHeader(code)
-		_ = srv.tmpl.Render(w, "knowledge_action_error.html", map[string]any{"Error": err.Error(), "Article": article, "DraftTitle": r.FormValue("title"), "DraftBlocks": r.Form["block_text"]})
+		_ = srv.tmpl.Render(w, "knowledge_action_error.html", map[string]any{"Error": err.Error(), "Article": article, "DraftTitle": r.FormValue("title"), "DraftBlocks": r.Form["block_text"], "DraftOutline": r.FormValue("outline"), "DraftInstructions": r.FormValue("instructions"), "DraftWritingMode": r.FormValue("writing_mode")})
 		return
 	}
 	target := fmt.Sprintf("/knowledge-articles/%s?revision=%d", id, article.WorkingRevision)
-	if action == "save" {
+	if action == "plan_save" || action == "plan_confirm" {
+		// A plan version is not a body revision; a pre-write article has no v0.
+		target = "/knowledge-articles/" + id
+	}
+	if action == "save" || action == "revise_purpose" {
 		fresh, _ := srv.store.GetKnowledgeArticle(r.Context(), id)
 		target = fmt.Sprintf("/knowledge-articles/%s?revision=%d", id, fresh.WorkingRevision)
 	}

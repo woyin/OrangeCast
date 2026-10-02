@@ -144,11 +144,14 @@ func (srv *Server) handleListeningSession(w http.ResponseWriter, r *http.Request
 		}
 		version = value
 	}
-	item, err := srv.store.CheckListeningIdentity(r.Context(), models.ListeningQueueItem{SourceType: models.SourceType(query.Get("source_type")), SourceID: query.Get("source_id"), Mode: query.Get("mode"), PlanID: query.Get("plan_id"), PlanVersion: version, AudioSHA256: query.Get("audio_sha256")})
+	item, err := srv.store.CheckListeningIdentity(r.Context(), models.ListeningQueueItem{ExcerptID: query.Get("excerpt_id"), SourceType: models.SourceType(query.Get("source_type")), SourceID: query.Get("source_id"), Mode: query.Get("mode"), PlanID: query.Get("plan_id"), PlanVersion: version, AudioSHA256: query.Get("audio_sha256")})
 	if err != nil {
 		code := 500
 		if errors.Is(err, store.ErrInvalidEditorialState) {
 			code = 400
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			code = 404
 		}
 		http.Error(w, "检查播放身份失败", code)
 		return

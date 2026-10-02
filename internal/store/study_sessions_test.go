@@ -155,6 +155,11 @@ func TestStudyMessages_AppendAndSuppress(t *testing.T) {
 func TestStudySessions_DBErrors(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	// Remove dependent durable-task fixtures before deliberately destroying the
+	// historical message table. This keeps the test about query error handling.
+	if _, err := s.DB.ExecContext(ctx, `DROP TABLE legacy_study_requests; DROP TABLE legacy_study_turns`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.DB.ExecContext(ctx, `DROP TABLE study_messages`); err != nil {
 		t.Fatal(err)
 	}

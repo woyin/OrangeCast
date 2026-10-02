@@ -66,11 +66,11 @@ func TestKnowledgeHybridRetrieveRRFAndFilters(t *testing.T) {
 	request := KnowledgeRetrieveQuery{Search: KnowledgeSearchQuery{Text: "反例", SourceType: "document", SourceID: doc.ID}, Semantic: true, EmbeddingConfigID: cfg.ID}
 	before := 0
 	s.DB.QueryRow(`SELECT total_changes()`).Scan(&before)
-	cold, err := s.Retrieve(ctx, request)
+	cold, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || cold.Method != "rrf" || cold.SemanticCount != 3 || cold.IndexedCount != 3 || cold.Total != 3 || cold.Coverage == "" {
 		t.Fatalf("%+v %v", cold, err)
 	}
-	hot, err := s.Retrieve(ctx, request)
+	hot, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || !reflect.DeepEqual(cold, hot) {
 		t.Fatal("cold/hot mismatch", cold, hot, err)
 	}
@@ -100,27 +100,27 @@ func TestKnowledgeHybridRetrieveRRFAndFilters(t *testing.T) {
 		t.Fatal("match explanation incorrect", both, semantic)
 	}
 	request.Search.Kind = "owner_reflection"
-	notes, err := s.Retrieve(ctx, request)
+	notes, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || notes.Total != 1 || notes.Hits[0].ObjectID != note.ID {
 		t.Fatal(notes, err)
 	}
 	request.Search.Kind = ""
 	request.Search.Page = 2
 	request.Search.PerPage = 1
-	page, err := s.Retrieve(ctx, request)
+	page, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || len(page.Hits) != 1 || page.Total != 3 || page.Hits[0].Key != cold.Hits[1].Key {
 		t.Fatal(page, err)
 	}
 	request.Search.Page = 1
 	request.Search.PerPage = 20
 	request.Search.Theme = "适用条件"
-	themed, err := s.Retrieve(ctx, request)
+	themed, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || themed.Total != 1 {
 		t.Fatal(themed, err)
 	}
 	request.Search.Theme = ""
 	request.Search.From = "2100-01-01"
-	dated, err := s.Retrieve(ctx, request)
+	dated, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || dated.Method != "fts" || dated.Total != 0 {
 		t.Fatal(dated, err)
 	}
@@ -131,7 +131,7 @@ func TestKnowledgeHybridRetrieveDegradationAndProviderPurpose(t *testing.T) {
 	ctx := t.Context()
 	enableEmbeddingDoc(t, s, cfg, doc)
 	request := KnowledgeRetrieveQuery{Search: KnowledgeSearchQuery{Text: "反例"}, Semantic: true, EmbeddingConfigID: cfg.ID}
-	fallback, err := s.Retrieve(ctx, request)
+	fallback, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || fallback.Method != "fts" || fallback.Degradation == "" {
 		t.Fatal(fallback, err)
 	}
@@ -140,7 +140,7 @@ func TestKnowledgeHybridRetrieveDegradationAndProviderPurpose(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheSyntheticQuery(t, s, cfg, "反例")
-	hot, err := s.Retrieve(ctx, request)
+	hot, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || hot.Method != "rrf" {
 		t.Fatal(hot, err)
 	}
@@ -148,7 +148,7 @@ func TestKnowledgeHybridRetrieveDegradationAndProviderPurpose(t *testing.T) {
 	if _, err = s.DB.Exec(`UPDATE knowledge_embedding_vectors SET dimensions=3`); err != nil {
 		t.Fatal(err)
 	}
-	wrong, err := s.Retrieve(ctx, request)
+	wrong, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || wrong.Method != "fts" || !strings.Contains(wrong.Degradation, "不合格") {
 		t.Fatal(wrong, err)
 	}
@@ -169,25 +169,25 @@ func TestKnowledgeHybridRetrieveDegradationAndProviderPurpose(t *testing.T) {
 	remote := request
 	remote.Purpose = RetrieveExternal
 	remote.Search.SendProvider = "pod"
-	denied, err := s.Retrieve(ctx, remote)
+	denied, err := s.EvaluateKnowledgeRetrieval(ctx, remote)
 	if err != nil || denied.Total != 0 {
 		t.Fatal("embedding authorization leaked text-provider material", denied, err)
 	}
-	allowed, err := s.Retrieve(ctx, request)
+	allowed, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || allowed.Method != "rrf" {
 		t.Fatal(allowed, err)
 	}
 	if err = s.SetSourceProductionPolicy(ctx, models.SourceDocument, doc.ID, "internal", models.ModelDataLocalOnly); err != nil {
 		t.Fatal(err)
 	}
-	withdrawn, err := s.Retrieve(ctx, request)
+	withdrawn, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || withdrawn.Method != "fts" || withdrawn.Total == 0 {
 		t.Fatal("withdrawal must retain Owner FTS", withdrawn, err)
 	}
 	if err = s.DeleteSourceRows(ctx, models.SourceDocument, doc.ID); err != nil {
 		t.Fatal(err)
 	}
-	purged, err := s.Retrieve(ctx, request)
+	purged, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 	if err != nil || purged.Total != 0 || purged.Method != "fts" {
 		t.Fatal("purged matrix resurrected content", purged, err)
 	}
@@ -256,11 +256,11 @@ func TestKnowledgeHybridRetrieveFortyFrozenQueriesHaveStableAdapterResults(t *te
 			s.embeddingMatrixMu.Lock()
 			s.embeddingMatrix = nil
 			s.embeddingMatrixMu.Unlock()
-			cold, err := s.Retrieve(ctx, request)
+			cold, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 			if err != nil || cold.Method != "rrf" || cold.IndexedCount != 29 {
 				t.Fatal(cold, err)
 			}
-			hot, err := s.Retrieve(ctx, request)
+			hot, err := s.EvaluateKnowledgeRetrieval(ctx, request)
 			if err != nil || !reflect.DeepEqual(cold, hot) {
 				t.Fatal("frozen query cold/hot changed", err)
 			}
@@ -299,7 +299,7 @@ func TestKnowledgeHybridRetrieveCapacityDegradesBeforeMatrixLoad(t *testing.T) {
 	if _, err := s.DB.Exec(`WITH RECURSIVE numbers(n) AS(VALUES(1) UNION ALL SELECT n+1 FROM numbers WHERE n<50001) INSERT INTO knowledge_embedding_vectors(config_id,doc_key,window_no,revision,content_hash,dimensions,vector) SELECT ?,?,n,1,'synthetic-capacity-only',2,X'0000803f00000000' FROM numbers`, cfg.ID, windows[0].DocKey); err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.Retrieve(ctx, KnowledgeRetrieveQuery{Search: KnowledgeSearchQuery{Text: "反例"}, Semantic: true, EmbeddingConfigID: cfg.ID})
+	result, err := s.EvaluateKnowledgeRetrieval(ctx, KnowledgeRetrieveQuery{Search: KnowledgeSearchQuery{Text: "反例"}, Semantic: true, EmbeddingConfigID: cfg.ID})
 	if err != nil || result.Method != "fts" || !strings.Contains(result.Degradation, "50,000") || result.Total == 0 {
 		t.Fatal(result, err)
 	}

@@ -17,15 +17,16 @@ const QuestionStudySystem = `你帮助Owner围绕一个学习问题理解已有�
 
 // QuestionStudyMaterial 冻结完整材料正文与实际来源片段。
 type QuestionStudyMaterial struct {
-	Key         string                     `json:"key"`
-	Kind        string                     `json:"kind"`
-	SourceType  string                     `json:"source_type"`
-	SourceID    string                     `json:"source_id"`
-	SnapshotID  string                     `json:"snapshot_id"`
-	ContentHash string                     `json:"content_hash"`
-	Revision    int                        `json:"revision"`
-	Content     string                     `json:"content"`
-	Segments    []KnowledgeEvidenceSegment `json:"segments"`
+	Understanding *KnowledgeMaterial         `json:"understanding,omitempty"`
+	Key           string                     `json:"key"`
+	Kind          string                     `json:"kind"`
+	SourceType    string                     `json:"source_type"`
+	SourceID      string                     `json:"source_id"`
+	SnapshotID    string                     `json:"snapshot_id"`
+	ContentHash   string                     `json:"content_hash"`
+	Revision      int                        `json:"revision"`
+	Content       string                     `json:"content"`
+	Segments      []KnowledgeEvidenceSegment `json:"segments"`
 }
 
 // QuestionStudySourceDependency 保留对话历史所依赖的来源身份。
@@ -36,9 +37,10 @@ type QuestionStudySourceDependency struct {
 
 // QuestionStudyHistoryItem 携带已接受历史及仅供授权复查的来源血缘。
 type QuestionStudyHistoryItem struct {
-	Ordinal                  int
-	OwnerInput, AcceptedJSON string
-	SourceDependencies       []QuestionStudySourceDependency `json:"-"`
+	Ordinal                   int
+	OwnerInput, AcceptedJSON  string
+	SourceDependencies        []QuestionStudySourceDependency `json:"-"`
+	UnderstandingDependencies []KnowledgeMaterial             `json:"-"`
 }
 
 // QuestionStudyScope 限制本轮问题、材料和已接受历史的外发范围。
@@ -68,21 +70,26 @@ func QuestionStudyMessages(scope QuestionStudyScope) ([]QuestionStudyMessage, er
 	materialBytes := 0
 	historyBytes := 0
 	for _, m := range scope.Materials {
-		if m.Key == "" || keys[m.Key] || m.Revision < 1 || m.SourceID == "" || m.SourceType == "" || m.ContentHash != QuestionStudyMaterialHash(m) || strings.TrimSpace(m.Content) == "" || !utf8.ValidString(m.Content) {
+		if m.Key == "" || keys[m.Key] || (m.Revision < 0 || (m.Kind != "keypoint" && m.Revision < 1)) || (m.Kind != "understanding" && (m.SourceID == "" || m.SourceType == "")) || m.ContentHash != QuestionStudyMaterialHash(m) || strings.TrimSpace(m.Content) == "" || !utf8.ValidString(m.Content) {
 			return nil, errors.New("invalid question study material")
 		}
-		switch m.SourceType {
-		case "episode", "upload", "document":
-		default:
-			return nil, errors.New("invalid question study source")
+		if m.Kind != "understanding" {
+			switch m.SourceType {
+			case "episode", "upload", "document":
+			default:
+				return nil, errors.New("invalid question study source")
+			}
 		}
 		switch m.Kind {
-		case "original", "document", "source_note", "owner_reflection", "keypoint":
+		case "original", "document", "source_note", "owner_reflection", "keypoint", "understanding":
 		default:
 			return nil, errors.New("invalid question study material kind")
 		}
-		if m.Kind != "owner_reflection" && (m.SnapshotID == "" || len(m.Segments) == 0) {
+		if m.Kind != "owner_reflection" && m.Kind != "understanding" && (m.SnapshotID == "" || len(m.Segments) == 0) {
 			return nil, errors.New("missing question study evidence")
+		}
+		if m.Kind == "understanding" && (m.Understanding == nil || m.Understanding.Kind != "understanding" || m.Understanding.Version != m.Revision || m.Understanding.Content != m.Content || len(m.Segments) > 0 || m.SourceID != "" || m.SourceType != "") {
+			return nil, errors.New("invalid Owner understanding")
 		}
 		segmentIDs := map[string]bool{}
 		for _, segment := range m.Segments {
@@ -92,7 +99,9 @@ func QuestionStudyMessages(scope QuestionStudyScope) ([]QuestionStudyMessage, er
 			segmentIDs[segment.SegmentID] = true
 		}
 		keys[m.Key] = true
-		sources[m.SourceType+":"+m.SourceID] = true
+		if m.Kind != "understanding" {
+			sources[m.SourceType+":"+m.SourceID] = true
+		}
 		raw, err := json.Marshal(m)
 		if err != nil || len(raw) > 10*1024 {
 			return nil, errors.New("question study material capacity exceeded")

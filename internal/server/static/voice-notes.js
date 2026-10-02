@@ -71,7 +71,7 @@
  byId('voice-delete').onclick=()=>perform(async()=>{if(current.server)await post('delete');await removeLocal(current.id);current=null;text.value='';panel.hidden=true;say('已删除草稿，录音已安排清理；已发生的远端调用与用量记录仍保留。');},true);
  function clearPrivate(){epoch++;permissionSeq++;pendingCapture=null;waiting=false;afterStop=false;clearInterval(timer);timer=null;stream?.getTracks().forEach(track=>track.stop());if(recorder?.state==='recording')recorder.stop();recorder=null;stream=null;chunks=[];recordBytes=0;current=null;session=null;busy=false;requests.forEach(c=>c.abort());db?.close();db=null;dbPromise=null;panel.hidden=true;text.value='';status.textContent='';byId('voice-asr-text').textContent='';byId('voice-anchor').textContent='';byId('voice-asr-result').hidden=true;byId('voice-question').replaceChildren(new Option('不关联',''));try{const req=indexedDB.deleteDatabase(dbName);req.onblocked=()=>{};}catch(_){} }
  render();
- root.CWPVoice={start,clearPrivate};
+ root.CWPVoice={start,clearPrivate,busy:()=>busy||waiting||!!recorder};
  // Logout in another tab immediately stops microphone access and clears memory.
  root.addEventListener('storage',event=>{if(event.key==='cwp-private-reset')clearPrivate();});
  root.addEventListener('pagehide',()=>{if(recorder?.state==='recording')stop(false);});

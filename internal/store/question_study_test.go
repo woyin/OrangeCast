@@ -166,7 +166,10 @@ func TestQuestionStudySessionHistoricalUpgradeAndBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := old.CreateStudySession(t.Context(), models.SourceDocument, doc.ID, "旧学习对话")
+	// Seed the v69 schema using its historic columns; current methods include
+	// the v80 revision and must not pretend the old database already has it.
+	legacy := &StudySessionRow{ID: uuid.NewString()}
+	_, err = old.DB.ExecContext(t.Context(), `INSERT INTO study_sessions(id,source_type,source_id,title) VALUES(?,?,?,?)`, legacy.ID, models.SourceDocument, doc.ID, "旧学习对话")
 	if err != nil {
 		t.Fatal(err)
 	}

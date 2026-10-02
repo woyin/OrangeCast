@@ -20,7 +20,9 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 		sourceID := r.URL.Query().Get("source_id")
 		var p *models.ListeningProgress
 		var err error
-		if mode := r.URL.Query().Get("mode"); mode != "" {
+		if r.URL.Query().Get("mode") == "excerpt" {
+			p, err = srv.store.GetLearningExcerptProgress(r.Context(), sourceType, sourceID, r.URL.Query().Get("excerpt_id"))
+		} else if mode := r.URL.Query().Get("mode"); mode != "" {
 			p, err = srv.store.GetListeningProgressMode(r.Context(), sourceType, sourceID, mode)
 		} else {
 			p, err = srv.store.GetListeningProgress(r.Context(), sourceType, sourceID)
@@ -39,6 +41,8 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 		_ = json.NewEncoder(w).Encode(p)
 	case http.MethodPost:
 		var body struct {
+			ExcerptID        string  `json:"excerpt_id"`
+			SnapshotID       string  `json:"snapshot_id"`
 			Mode             string  `json:"mode"`
 			AudioSHA256      string  `json:"audio_sha256"`
 			ExpectedRevision *int64  `json:"expected_revision"`
@@ -58,8 +62,8 @@ func (srv *Server) handleListeningProgress(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		p := &models.ListeningProgress{
-			AudioSHA256: body.AudioSHA256,
-			Mode:        body.Mode, SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
+			AudioSHA256: body.AudioSHA256, ExcerptID: body.ExcerptID, SnapshotID: body.SnapshotID,
+			Mode: body.Mode, SourceType: models.SourceType(body.SourceType), SourceID: body.SourceID,
 			PlanID: body.PlanID, PlanVersion: body.PlanVersion,
 			ItemPosition: body.ItemPosition, HighlightID: body.HighlightID,
 			ItemOffsetSeconds: body.Offset, Speed: body.Speed, Seq: body.Seq,

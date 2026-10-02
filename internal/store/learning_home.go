@@ -111,7 +111,29 @@ func (s *Store) LearningNextActions(ctx context.Context, now time.Time) ([]Learn
 			return nil, e
 		}
 		if e == nil && q.Status == "active" {
-			out = append(out, LearningAction{"question", q.Body, "你选定的当前学习问题", "/questions/" + url.PathEscape(q.ID)})
+			gaps, e := s.ListEvidenceGaps(ctx, "question", q.ID)
+			if e != nil {
+				return nil, e
+			}
+			count := 0
+			origins := map[string]bool{}
+			for _, g := range gaps {
+				if g.State == "pending" || g.State == "insufficient" {
+					count++
+					origins[g.Origin] = true
+				}
+			}
+			if count > 0 {
+				provenance := "我的记录"
+				if origins["model"] {
+					provenance = "含模型建议，需我判断"
+				} else if origins["program"] {
+					provenance = "含程序记录的材料限制"
+				}
+				out = append(out, LearningAction{"gap", "补充当前问题的材料", fmt.Sprintf("当前范围有%d项待处理缺口；%s，未检验全库", count, provenance), "/questions/" + url.PathEscape(q.ID) + "/gaps"})
+			} else {
+				out = append(out, LearningAction{"question", q.Body, "你选定的当前学习问题", "/questions/" + url.PathEscape(q.ID)})
+			}
 		}
 	}
 	listening, err := s.RecentListening(ctx)

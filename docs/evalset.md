@@ -108,3 +108,9 @@ go test ./internal/server -run '^TestVoiceLiveAcceptance$' -count=1 -v -timeout 
 该测试从指定既有数据库以`mode=ro`读取站内转录连接，在独立测试数据库执行，不修改默认库，也不复制密钥进入测试库。已有月预算时读取用量与预占，按剩余额度和确切音频价格准入；旧结构没有预算字段时明确记录该事实，不伪造已设预算。此入口验证站内配置回退；语音专用`.env`配置契约另由config/queue测试覆盖。
 
 私有目录保存自建音频和脱敏报告，`human`保持缺省，实际价格未知继续标记未知。2026-10-01实测Groq `whisper-large-v3`技术通过：5.3289375秒、3个预期用语命中、Owner文字保留、1条receipt及响应断点。真实语音质量仍需不同设备、噪声和自然表达样本；当前结果只适用于这一次样本和连接。
+
+## 私有质量案例回归（v4 F01–F06）
+
+明确接纳的案例可通过 `go run ./cmd/quality-eval --db /absolute/owner.db --case CASE_UUID --output /private/run-A` 预览，添加 `--run` 才调用一次写作和一次独立审校。每个阶段拥有独立的冻结输入和私有 receipt；未知 dispatch 不自动重发。模型对照使用不同目录，但保留同一案例及用途起点。
+
+详见 [质量案例操作与验收边界](quality-cases.md)。自动测试使用自建素材，不证明真实个人笔记的质量；实际费用、未知价格/usage 和缺失人工评分分别报告。私有 manifest/receipt 含原文，不能复制到公开验证报告。

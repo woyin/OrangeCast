@@ -1,0 +1,16 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const callbacks=[],bindings=[],storage=new Map();let poll;
+const outline={value:'原计划',defaultValue:'原计划'},feedback={textContent:''},mode={value:'synthesis',options:[{value:'synthesis',defaultSelected:true}]};
+const form={dataset:{draftPurpose:'writing-plan',parentHash:'hash'},elements:{namedItem:name=>name==='writing_mode'?mode:name==='outline'?outline:name==='expected_revision'?{value:'1'}:null},querySelector:()=>feedback};
+const state={dataset:{id:'article'}};
+const view={querySelector:selector=>selector==='#article-state'?state:selector==='#article-update'?feedback:null,querySelectorAll:selector=>selector==='.knowledge-form'?[form]:[]};
+const scope={on:()=>{},interval:fn=>{poll=fn;return 1;},fetch:async()=>({ok:true,json:async()=>({Status:'ready',ID:'article'})})};
+const drafts={prefix:'draft:',capture:()=>({fields:{outline:{value:outline.value}}}),restore:()=>({missing:[]})};
+const window={CWPViews:{define:fn=>callbacks.push(fn)},CWPArticleDrafts:drafts,CWPForms:{bind:(form,scope,opts)=>bindings.push(opts)},CWPNavigation:{visit:async()=>{}}};
+const document={hidden:false,createElement:()=>({})};feedback.appendChild=()=>{};
+vm.runInNewContext(fs.readFileSync('static/knowledge-articles.js','utf8'),{window,document,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},sessionStorage:{getItem:()=>null},clearInterval:()=>{}});
+callbacks[0](view,scope);assert.equal(bindings.length,1);
+outline.value='编辑中的计划';assert.throws(()=>bindings[0].before({submitter:{value:'plan_confirm'}}),/先保存/);assert.ok([...storage.values()].some(v=>v.includes('编辑中的计划')));
+bindings[0].before({submitter:{value:'plan_save'}});
+outline.value=outline.defaultValue;mode.value='practice';assert.throws(()=>bindings[0].before({submitter:{value:'plan_confirm'}}),/用途已修改/);outline.value='编辑中的计划';bindings[0].before({submitter:{value:'plan_save'}});
+(async()=>{await poll();assert.equal(outline.value,'编辑中的计划');assert.ok([...storage.values()].some(v=>v.includes('编辑中的计划')));console.log('plan drafts and polling preserved');})().catch(error=>{console.error(error);process.exit(1);});

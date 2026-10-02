@@ -1,0 +1,17 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const names=['answer','uncertainty','next_step','parent_id','request_key','model_data_policy','approved_providers','owner_confirmed'];
+const fields=Object.fromEntries(names.map(n=>[n,{value:n==='model_data_policy'?'local_only':'',checked:false,focus(){this.focused=true}}]));
+const feedback={textContent:''},events=[],bindings=[],children=[];
+const editor={elements:{namedItem:n=>fields[n]},querySelector:s=>feedback,querySelectorAll:()=>[],append:n=>children.push(n),prepend:n=>children.push(n)};
+const values=new Map([['cwp-understanding-draft:q:4',JSON.stringify({answer:'未提交旧头草稿'})],['cwp-question-study-adopt:q',JSON.stringify({content:'AI输出待确认'})]]);
+const storage={get length(){return values.size},key:i=>Array.from(values.keys())[i],getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
+const root={dataset:{question:'q',head:'5'},querySelector:()=>editor,querySelectorAll:s=>s==='.understanding-form'?[editor]:[]};
+let mount;
+const context={window:{CWPViews:{define:f=>mount=f},CWPForms:{bind:(form,scope,options)=>bindings.push(options)}},sessionStorage:storage,document:{createElement:tag=>({tag,textContent:'',append(){},remove(){this.removed=true}})},confirm:()=>true,crypto:{randomUUID:()=> 'next-uuid'}};
+vm.runInNewContext(fs.readFileSync('static/understandings.js','utf8'),context);
+mount({querySelector:()=>root},{on:(node,event,callback)=>events.push({node,event,callback})});
+assert.equal(fields.answer.value,'');assert.ok(values.has('cwp-understanding-draft:q:4'));assert.ok(children.length>=2);assert.equal(fields.owner_confirmed.checked,false);
+const importButton=children.find(n=>n.tag==='button');assert.ok(importButton);events.find(e=>e.node===importButton).callback();
+assert.equal(fields.answer.value,'AI输出待确认');assert.equal(fields.owner_confirmed.checked,false);assert.equal(fields.answer.focused,true);assert.ok(!values.has('cwp-question-study-adopt:q'));assert.match(values.get('cwp-understanding-draft:q:5'),/AI输出待确认/);assert.ok(values.has('cwp-understanding-draft:q:4'));
+assert.equal(bindings.length,1);bindings[0].success();assert.ok(!values.has('cwp-understanding-draft:q:5'));assert.ok(values.has('cwp-understanding-draft:q:4'));
+console.log('understanding draft namespaces, old-head preservation and explicit model import confirmation pass');

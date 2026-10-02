@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 // ListeningQueueChange is an explicit queue edit, guarded by an order revision.
 type ListeningQueueChange struct {
+	ExcerptID   string            `json:"excerpt_id"`
 	Action      string            `json:"action"` // add | play | remove | clear | move_last | reorder | autoplay | stop
 	ItemID      string            `json:"item_id"`
 	SourceType  models.SourceType `json:"source_type"`
@@ -27,8 +29,11 @@ type ListeningQueueChange struct {
 const listeningQueueRows = `SELECT q.id,q.source_type,q.source_id,q.mode,q.plan_id,q.plan_version,q.audio_sha256,
  COALESCE(e.title,u.original_filename,q.title),q.position,q.invalid_reason,
  COALESCE(e.id,u.id,''),COALESCE(e.archived_at,u.archived_at,''),COALESCE(e.audio_url,''),
- COALESCE(a.status,''),COALESCE(a.sha256,''),COALESCE(p.id,''),COALESCE(p.version,0),COALESCE(CASE WHEN json_valid(p.input_snapshot_json) THEN json_extract(p.input_snapshot_json,'$.source_snapshot_id') ELSE '' END,''),COALESCE(snap.audio_sha256,'')
+ COALESCE(a.status,''),COALESCE(a.sha256,''),COALESCE(p.id,''),COALESCE(p.version,0),COALESCE(CASE WHEN json_valid(p.input_snapshot_json) THEN json_extract(p.input_snapshot_json,'$.source_snapshot_id') ELSE '' END,''),COALESCE(snap.audio_sha256,''),q.excerpt_id,COALESCE(x.snapshot_id,''),COALESCE(x.segment_ids_json,'[]'),COALESCE(x.start_seconds,0),COALESCE(x.end_seconds,0),COALESCE(xs.status,''),COALESCE(xs.audio_sha256,''),COALESCE(xv.id,''),COALESCE(xs.content_version,0)
  FROM listening_queue_entries q
+ LEFT JOIN learning_excerpts x ON x.id=q.excerpt_id AND x.source_type=q.source_type AND x.source_id=q.source_id
+ LEFT JOIN source_snapshots xs ON xs.id=x.snapshot_id
+ LEFT JOIN artifact_versions xv ON xv.id=xs.content_version_id
  LEFT JOIN episodes e ON q.source_type='episode' AND e.id=q.source_id
  LEFT JOIN uploads u ON q.source_type='upload' AND u.id=q.source_id
  LEFT JOIN evidence_audio a ON a.source_type=q.source_type AND a.source_id=q.source_id
@@ -39,10 +44,13 @@ func scanListeningQueueItem(row interface{ Scan(...any) error }) (models.Listeni
 	var item models.ListeningQueueItem
 	var invalid, exists, archived, remote, status, hash, plan string
 	var planVersion int
-	var frozenID, frozenAudio string
-	err := row.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Mode, &item.PlanID, &item.PlanVersion, &item.AudioSHA256, &item.Title, &item.Position, &invalid, &exists, &archived, &remote, &status, &hash, &plan, &planVersion, &frozenID, &frozenAudio)
+	var frozenID, frozenAudio, segmentJSON, excerptStatus, excerptAudio, excerptVersion string
+	err := row.Scan(&item.ID, &item.SourceType, &item.SourceID, &item.Mode, &item.PlanID, &item.PlanVersion, &item.AudioSHA256, &item.Title, &item.Position, &invalid, &exists, &archived, &remote, &status, &hash, &plan, &planVersion, &frozenID, &frozenAudio, &item.ExcerptID, &item.SnapshotID, &segmentJSON, &item.StartSeconds, &item.EndSeconds, &excerptStatus, &excerptAudio, &excerptVersion, &item.SnapshotVersion)
 	if err != nil {
 		return item, err
+	}
+	if json.Unmarshal([]byte(segmentJSON), &item.SegmentIDs) != nil {
+		return item, ErrInvalidEditorialState
 	}
 	item.Unfrozen = item.AudioSHA256 == ""
 	switch {
@@ -52,6 +60,8 @@ func scanListeningQueueItem(row interface{ Scan(...any) error }) (models.Listeni
 		item.Reason = "来源已删除"
 	case archived != "":
 		item.Reason = "来源已归档"
+	case item.Mode == "excerpt" && (item.SnapshotID == "" || excerptStatus == "purged" || excerptVersion == "" || excerptAudio == "" || excerptAudio != hash || status != "ready" || item.AudioSHA256 != excerptAudio):
+		item.Reason = "补听区间的快照或冻结原音已失效"
 	case item.Mode == "dj" && (plan == "" || planVersion != item.PlanVersion):
 		item.Reason = "冻结DJ清单不可用"
 	case item.Mode == "dj" && frozenID != "" && (frozenAudio == "" || frozenAudio != hash):
@@ -101,7 +111,23 @@ func (s *Store) GetListeningQueue(ctx context.Context) (*models.ListeningQueue, 
 // the existing identity and position even when the caller's revision is stale.
 // Other edits require an exact revision; none delete sources or enqueue models.
 func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change ListeningQueueChange) (*models.ListeningQueue, error) {
-	if expected < 0 || len(change.Order) > 500 || len(change.ItemID) > 200 || len(change.SourceID) > 200 || len(change.PlanID) > 200 {
+	if expected < 0 || len(change.Order) > 500 || len(change.ItemID) > 200 || len(change.SourceID) > 200 || len(change.PlanID) > 200 || len(change.ExcerptID) > 200 {
+		return nil, ErrInvalidEditorialState
+	}
+	var excerpt *models.LearningExcerpt
+	if change.Action == "add" && change.Mode == "excerpt" {
+		var e error
+		excerpt, e = s.GetLearningExcerpt(ctx, change.ExcerptID)
+		if e != nil {
+			return nil, e
+		}
+		if excerpt.SourceType != change.SourceType || excerpt.SourceID != change.SourceID || change.PlanID != "" || change.PlanVersion != 0 {
+			return nil, ErrInvalidEditorialState
+		}
+		if _, e = s.CheckLearningExcerpt(ctx, excerpt); e != nil {
+			return nil, e
+		}
+	} else if change.Action == "add" && change.ExcerptID != "" {
 		return nil, ErrInvalidEditorialState
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -115,7 +141,7 @@ func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change
 	}
 	if change.Action == "add" {
 		var existing string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM listening_queue_entries WHERE source_type=? AND source_id=? AND mode=? AND plan_id=? AND plan_version=?`, change.SourceType, change.SourceID, change.Mode, change.PlanID, change.PlanVersion).Scan(&existing)
+		err := tx.QueryRowContext(ctx, `SELECT id FROM listening_queue_entries WHERE source_type=? AND source_id=? AND mode=? AND plan_id=? AND plan_version=? AND excerpt_id=?`, change.SourceType, change.SourceID, change.Mode, change.PlanID, change.PlanVersion, change.ExcerptID).Scan(&existing)
 		if err == nil {
 			tx.Rollback()
 			return s.GetListeningQueue(ctx)
@@ -129,7 +155,7 @@ func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change
 	}
 	switch change.Action {
 	case "add":
-		if (change.SourceType != models.SourceEpisode && change.SourceType != models.SourceUpload) || strings.TrimSpace(change.SourceID) == "" || (change.Mode != "original" && change.Mode != "dj") {
+		if (change.SourceType != models.SourceEpisode && change.SourceType != models.SourceUpload) || strings.TrimSpace(change.SourceID) == "" || (change.Mode != "original" && change.Mode != "dj" && change.Mode != "excerpt") {
 			return nil, ErrInvalidEditorialState
 		}
 		if change.Mode == "original" && (change.PlanID != "" || change.PlanVersion != 0) {
@@ -155,6 +181,9 @@ func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
+		if change.Mode == "excerpt" && (excerpt == nil || hash != excerpt.AudioSHA256 || status != "ready") {
+			return nil, ErrConflict
+		}
 		if change.Mode == "dj" {
 			var version int
 			if err := tx.QueryRowContext(ctx, `SELECT version FROM dj_plans WHERE id=? AND source_type=? AND source_id=?`, change.PlanID, change.SourceType, change.SourceID).Scan(&version); errors.Is(err, sql.ErrNoRows) {
@@ -173,7 +202,7 @@ func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change
 		if count >= 500 {
 			return nil, fmt.Errorf("%w: 收听队列最多500项，请移除已听条目", ErrInvalidEditorialState)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO listening_queue_entries(id,source_type,source_id,mode,plan_id,plan_version,audio_sha256,title,position)VALUES(?,?,?,?,?,?,?,?,?)`, uuid.NewString(), change.SourceType, change.SourceID, change.Mode, change.PlanID, change.PlanVersion, hash, title, position); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO listening_queue_entries(id,source_type,source_id,mode,plan_id,plan_version,audio_sha256,title,position,excerpt_id)VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), change.SourceType, change.SourceID, change.Mode, change.PlanID, change.PlanVersion, hash, title, position, change.ExcerptID); err != nil {
 			return nil, err
 		}
 	case "play":
@@ -265,9 +294,39 @@ func (s *Store) ChangeListeningQueue(ctx context.Context, expected int64, change
 // CheckListeningIdentity reads availability of a current session independently
 // of queue membership, retaining its original audio/plan identity.
 func (s *Store) CheckListeningIdentity(ctx context.Context, identity models.ListeningQueueItem) (models.ListeningQueueItem, error) {
+	if identity.Mode == "excerpt" {
+		if len(identity.ExcerptID) > 200 || len(identity.SourceID) > 200 || len(identity.AudioSHA256) > 128 {
+			return identity, ErrInvalidEditorialState
+		}
+		e, err := s.GetLearningExcerpt(ctx, identity.ExcerptID)
+		if err != nil {
+			return identity, err
+		}
+		if e.SourceType != identity.SourceType || e.SourceID != identity.SourceID || e.AudioSHA256 != identity.AudioSHA256 || identity.PlanID != "" || identity.PlanVersion != 0 {
+			return identity, ErrInvalidEditorialState
+		}
+		snap, err := s.GetSourceSnapshot(ctx, e.SnapshotID)
+		if err != nil {
+			return identity, err
+		}
+		identity.SnapshotVersion = snap.ContentVersion
+		identity.SnapshotID = e.SnapshotID
+		identity.StartSeconds = e.StartSeconds
+		identity.EndSeconds = e.EndSeconds
+		identity.SegmentIDs = e.SegmentIDs
+		_, err = s.CheckLearningExcerpt(ctx, e)
+		identity.Available = err == nil
+		if err != nil {
+			identity.Reason = "补听区间的快照或冻结原音已失效"
+		}
+		return identity, nil
+	}
+	if identity.ExcerptID != "" {
+		return identity, ErrInvalidEditorialState
+	}
 	if (identity.SourceType != models.SourceEpisode && identity.SourceType != models.SourceUpload) || identity.SourceID == "" || len(identity.SourceID) > 200 || len(identity.AudioSHA256) > 128 || len(identity.PlanID) > 200 || (identity.Mode != "original" && identity.Mode != "dj") || identity.PlanVersion < 0 || (identity.Mode == "original" && (identity.PlanID != "" || identity.PlanVersion != 0)) || (identity.Mode == "dj" && (identity.PlanID == "" || identity.PlanVersion < 1)) {
 		return identity, ErrInvalidEditorialState
 	}
-	query := strings.Replace(listeningQueueRows, "FROM listening_queue_entries q", `FROM (SELECT '' AS id,? AS source_type,? AS source_id,? AS mode,? AS plan_id,? AS plan_version,? AS audio_sha256,'' AS title,0 AS position,'' AS invalid_reason) q`, 1)
+	query := strings.Replace(listeningQueueRows, "FROM listening_queue_entries q", `FROM (SELECT '' AS id,? AS source_type,? AS source_id,? AS mode,? AS plan_id,? AS plan_version,? AS audio_sha256,'' AS title,0 AS position,'' AS invalid_reason,'' AS excerpt_id) q`, 1)
 	return scanListeningQueueItem(s.DB.QueryRowContext(ctx, query, identity.SourceType, identity.SourceID, identity.Mode, identity.PlanID, identity.PlanVersion, identity.AudioSHA256))
 }

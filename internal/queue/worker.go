@@ -257,7 +257,11 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 				_ = w.store.FailKnowledgeArticleRun(ctx, job.ID, "远端结果未知，请显式重试")
 			}
 			if job.JobType == models.JobQuestionStudy {
-				_ = w.store.FailQuestionStudyGeneration(ctx, job.ID)
+				if job.SourceType == "study_chat" {
+					_ = w.store.FailLegacyStudy(ctx, job.ID)
+				} else {
+					_ = w.store.FailQuestionStudyGeneration(ctx, job.ID)
+				}
 			}
 			if job.JobType == models.JobWeeklyReview {
 				_ = w.store.FailLearningReview(ctx, job.SourceID, "远端结果未知，请显式重试")
@@ -446,7 +450,7 @@ func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) e
 		if err := json.Unmarshal([]byte(exec.InputSnapshotJSON), &snapshot); err != nil {
 			return err
 		}
-		if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion {
+		if exec.ConfigVersion == provider.KnowledgeArticlePromptVersion || exec.ConfigVersion == provider.KnowledgeArticlePurposePromptVersion {
 			if _, err := w.store.HoldKnowledgeBudget(ctx, job.ID, string(job.JobType), job.Automated, tc.Provider, model, snapshot.Request.Estimate); err != nil {
 				return fmt.Errorf("预算检查拒绝任务: %w", err)
 			}
@@ -545,6 +549,9 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doKnowledgeEmbedding(ctx, job)
 	}
 	if job.JobType == models.JobQuestionStudy {
+		if job.SourceType == "study_chat" {
+			return w.doLegacyStudy(ctx, job)
+		}
 		return w.doQuestionStudy(ctx, job)
 	}
 	if job.JobType == models.JobLearningExport {
@@ -803,15 +810,33 @@ func (w *Worker) reusableEvidencePath(ctx context.Context, job *models.Processin
 	if err != nil || ev.Status != "ready" {
 		return "", false
 	}
+	if !filepath.IsLocal(ev.RelPath) {
+		return "", false
+	}
+	recordedPath := filepath.Join(w.evidenceDir, ev.RelPath)
+	// The persisted path is authoritative, including restored WAV evidence.
+	// Resolve both paths before reading so a symlink cannot escape the evidence root.
+	root, err := filepath.EvalSymlinks(w.evidenceDir)
+	if err != nil {
+		return "", false
+	}
+	path, err = filepath.EvalSymlinks(filepath.Join(root, ev.RelPath))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", false
+	}
 	fi, err := os.Stat(path)
-	if err != nil || fi.Size() <= 0 || fi.Size() > maxTranscriptionUploadBytes {
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() <= 0 || fi.Size() > maxTranscriptionUploadBytes {
 		return "", false
 	}
 	hash, err := filehash.SHA256(path)
 	if err != nil || hash != ev.SHA256 {
 		return "", false
 	}
-	return path, true
+	return recordedPath, true
 }
 
 func (w *Worker) transcodeEvidence(ctx context.Context, job *models.ProcessingJob, rawPath, path, rel string) (string, error) {
@@ -918,6 +943,28 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 		return err
 	}
 	for _, p := range purges {
+		// Keep the audio row until its actual file is gone. The DB deletion below
+		// is the last phase, so an interrupted purge can resolve this path again.
+		audio, audioErr := w.store.GetEvidenceAudio(ctx, p.SourceType, p.SourceID)
+		if audioErr != nil && !errors.Is(audioErr, store.ErrNotFound) {
+			return fmt.Errorf("purge 读取原音位置: %w", audioErr)
+		}
+		if audio != nil {
+			if !filepath.IsLocal(audio.RelPath) {
+				return fmt.Errorf("purge 原音路径不在证据目录内")
+			}
+			root, err := os.OpenRoot(w.evidenceDir)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("purge 打开证据目录: %w", err)
+			}
+			if root != nil {
+				err = root.Remove(audio.RelPath)
+				root.Close()
+				if err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("purge 删除已记录原音: %w", err)
+				}
+			}
+		}
 		// 1) 删除文件（EvidenceAudio + upload 原始文件；不存在视为已删，幂等）
 		for _, path := range []string{
 			filepath.Join(w.evidenceDir, fmt.Sprintf("%s_%s.mp3", p.SourceType, p.SourceID)),

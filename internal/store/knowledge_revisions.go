@@ -91,7 +91,14 @@ func (s *Store) SaveKnowledgeDraft(ctx context.Context, id string, expected int,
 	if err != nil {
 		return nil, err
 	}
-	req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	if req.WritingPurpose == nil {
+		req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	} else {
+		req.PromptVersion = provider.KnowledgeArticlePurposePromptVersion
+	}
+	if err := provider.ValidateWritingPurposeRequest(req); err != nil {
+		return nil, err
+	}
 	if req.Topic == nil {
 		var topic provider.KnowledgeTopic
 		if json.Unmarshal([]byte(article.TopicJSON), &topic) == nil && topic.Title != "" {
@@ -125,7 +132,7 @@ func (s *Store) SaveKnowledgeDraft(ctx context.Context, id string, expected int,
 	if n, _ := res.RowsAffected(); n != 1 {
 		return nil, ErrConflict
 	}
-	revision, err := appendKnowledgeRevision(ctx, tx, id, expected, title, req, blocks, "owner", article.Provider, article.Model, provider.KnowledgeArticlePromptVersion)
+	revision, err := appendKnowledgeRevision(ctx, tx, id, expected, title, req, blocks, "owner", article.Provider, article.Model, req.PromptVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +169,11 @@ func (s *Store) QueueKnowledgeRevision(ctx context.Context, id string, expected 
 	if len([]rune(instructions)) > 4000 {
 		return ErrInvalidEditorialState
 	}
-	req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	if req.WritingPurpose == nil {
+		req.PromptVersion = provider.KnowledgeArticlePromptVersion
+	} else {
+		req.PromptVersion = provider.KnowledgeArticlePurposePromptVersion
+	}
 	if req.Update != nil {
 		p, e := s.GetKnowledgeUpdateProposal(ctx, req.Update.ProposalID)
 		if e != nil {
