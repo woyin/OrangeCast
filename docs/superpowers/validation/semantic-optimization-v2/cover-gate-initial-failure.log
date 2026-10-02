@@ -1,0 +1,25 @@
+bash scripts/cover-gate.sh
+==> 运行带覆盖率统计的测试...
+测试失败：
+# github.com/woyin/orangecast/internal/server [github.com/woyin/orangecast/internal/server.test]
+internal/server/semantic_quality_runner_test.go:29:14: assignment mismatch: 2 variables but srv.store.RegisterKnowledgeEmbeddingConfig returns 1 value
+ok  	github.com/woyin/orangecast/cmd/cloudwisepod	4.201s	coverage: 95.4% of statements
+ok  	github.com/woyin/orangecast/cmd/quality-eval	3.449s	coverage: 96.5% of statements
+ok  	github.com/woyin/orangecast/internal/auth	1.621s	coverage: 95.4% of statements
+ok  	github.com/woyin/orangecast/internal/backup	10.136s	coverage: 95.2% of statements
+ok  	github.com/woyin/orangecast/internal/config	(cached)	coverage: 98.9% of statements
+ok  	github.com/woyin/orangecast/internal/evalset	(cached)	coverage: 97.5% of statements
+ok  	github.com/woyin/orangecast/internal/filehash	(cached)	coverage: 100.0% of statements
+ok  	github.com/woyin/orangecast/internal/learningbundle	(cached)	coverage: 97.9% of statements
+ok  	github.com/woyin/orangecast/internal/markdown	(cached)	coverage: 98.7% of statements
+	github.com/woyin/orangecast/internal/models		coverage: 0.0% of statements
+ok  	github.com/woyin/orangecast/internal/provider	(cached)	coverage: 95.0% of statements
+ok  	github.com/woyin/orangecast/internal/queue	45.498s	coverage: 95.0% of statements
+ok  	github.com/woyin/orangecast/internal/rss	1.500s	coverage: 96.2% of statements
+ok  	github.com/woyin/orangecast/internal/safehttp	(cached)	coverage: 97.4% of statements
+FAIL	github.com/woyin/orangecast/internal/server [build failed]
+ok  	github.com/woyin/orangecast/internal/store	25.544s	coverage: 79.3% of statements
+ok  	github.com/woyin/orangecast/internal/testdb	(cached)	coverage: 100.0% of statements
+ok  	github.com/woyin/orangecast/internal/voice	(cached)	coverage: 96.8% of statements
+FAIL
+make: *** [cover-gate] Error 1

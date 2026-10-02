@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const knowledgeSemanticCandidateLimit = 200
@@ -30,6 +32,16 @@ type knowledgeEmbeddingMatrix struct {
 	Objects   int
 	Documents []semanticDocumentRank
 }
+
+// One load per Store bounds duplicate allocations, even for different filters.
+// Waiters retain their own cancellation; a cancelled owner does not poison them.
+type embeddingMatrixLoad struct {
+	Key    string
+	Done   chan struct{}
+	Matrix *knowledgeEmbeddingMatrix
+	Err    error
+}
+
 type semanticDocumentRank struct {
 	Key      string
 	Revision int
@@ -64,12 +76,50 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 	normalized.PerPage = 0
 	filter, _ := json.Marshal(normalized)
 	key := fmt.Sprintf("%s:%d:%d:%d:%x", cfg.ID, cfg.Revision, epoch.Index, epoch.Delete, sha256.Sum256(filter))
-	s.embeddingMatrixMu.Lock()
-	cached := s.embeddingMatrix
-	s.embeddingMatrixMu.Unlock()
-	if cached != nil && cached.CacheKey == key {
-		return cached, nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.embeddingMatrixMu.Lock()
+		if cached := s.embeddingMatrix; cached != nil && cached.CacheKey == key {
+			s.embeddingMatrixMu.Unlock()
+			return cached, nil
+		}
+		if loading := s.embeddingMatrixLoad; loading != nil {
+			s.embeddingMatrixMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-loading.Done:
+			}
+			if loading.Key == key {
+				if loading.Err == nil {
+					return loading.Matrix, nil
+				}
+				if !errors.Is(loading.Err, context.Canceled) && !errors.Is(loading.Err, context.DeadlineExceeded) {
+					return nil, loading.Err
+				}
+			}
+			continue
+		}
+		loading := &embeddingMatrixLoad{Key: key, Done: make(chan struct{})}
+		s.embeddingMatrixLoad = loading
+		s.embeddingMatrixMu.Unlock()
+		matrix, err := s.loadEmbeddingMatrix(ctx, cfg, plan, key, epoch)
+		s.embeddingMatrixMu.Lock()
+		loading.Matrix, loading.Err = matrix, err
+		if err == nil {
+			s.embeddingMatrix = matrix
+		}
+		s.embeddingMatrixLoad = nil
+		close(loading.Done)
+		s.embeddingMatrixMu.Unlock()
+		return matrix, err
 	}
+}
+
+func (s *Store) loadEmbeddingMatrix(ctx context.Context, cfg *KnowledgeEmbeddingConfig, plan knowledgeSearchPlan, key string, epoch embeddingEpoch) (*knowledgeEmbeddingMatrix, error) {
+	var err error
 	var globalWindows int
 	if err = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM knowledge_embedding_vectors WHERE config_id=?`, cfg.ID).Scan(&globalWindows); err != nil {
 		return nil, err
@@ -160,9 +210,6 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 	if current != epoch {
 		return nil, ErrConflict
 	}
-	s.embeddingMatrixMu.Lock()
-	s.embeddingMatrix = matrix
-	s.embeddingMatrixMu.Unlock()
 	return matrix, nil
 }
 
@@ -173,19 +220,13 @@ func semanticRanks(ctx context.Context, matrix *knowledgeEmbeddingMatrix, query 
 	for i := range best {
 		best[i] = math.Inf(-1)
 	}
+	scores, err := semanticWindowScores(ctx, matrix, query)
+	if err != nil {
+		return nil, err
+	}
 	for i, entry := range matrix.Entries {
-		if i%256 == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if len(entry.Vector) != len(query) || entry.Document < 0 || entry.Document >= len(best) {
-			return nil, ErrInvalidEditorialState
-		}
-		var dot float64
-		for j, v := range entry.Vector {
-			dot += float64(v) * float64(query[j])
-		}
-		if dot > best[entry.Document] {
-			best[entry.Document] = dot
+		if scores[i] > best[entry.Document] {
+			best[entry.Document] = scores[i]
 		}
 	}
 	// Document slots are assigned once when loading the immutable matrix. Each
@@ -209,6 +250,69 @@ func semanticRanks(ctx context.Context, matrix *knowledgeEmbeddingMatrix, query 
 		ordered[i] = heap.Pop(&ranks).(semanticDocumentRank)
 	}
 	return ordered, nil
+}
+
+// Large dot products use at most four workers, with one large computation at a
+// time across the process. Small queries bypass the gate. No worker outlives its
+// request: all partitions finish before scores or an error can be returned.
+var semanticComputeSlots = make(chan struct{}, 1)
+
+func semanticWindowScores(ctx context.Context, matrix *knowledgeEmbeddingMatrix, query []float32) ([]float64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	workers := 1
+	if len(matrix.Entries)*len(query) >= 1<<20 {
+		workers = min(4, runtime.GOMAXPROCS(0))
+	}
+	if workers > 1 {
+		select {
+		case semanticComputeSlots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { <-semanticComputeSlots }()
+	}
+	scores := make([]float64, len(matrix.Entries))
+	run := func(start, end int) error {
+		for i := start; i < end; i++ {
+			if (i-start)%256 == 0 && ctx.Err() != nil {
+				return ctx.Err()
+			}
+			entry := matrix.Entries[i]
+			if len(entry.Vector) != len(query) || entry.Document < 0 || entry.Document >= len(matrix.Documents) {
+				return ErrInvalidEditorialState
+			}
+			var dot float64
+			for j, v := range entry.Vector {
+				dot += float64(v) * float64(query[j])
+			}
+			scores[i] = dot
+		}
+		return nil
+	}
+	if workers == 1 {
+		if err := run(0, len(scores)); err != nil {
+			return nil, err
+		}
+		return scores, nil
+	}
+	errors := make([]error, workers)
+	var done sync.WaitGroup
+	chunk := (len(scores) + workers - 1) / workers
+	for worker := 0; worker < workers-1; worker++ {
+		start, end := worker*chunk, min((worker+1)*chunk, len(scores))
+		done.Add(1)
+		go func() { defer done.Done(); errors[worker] = run(start, end) }()
+	}
+	errors[workers-1] = run((workers-1)*chunk, len(scores))
+	done.Wait()
+	for _, err := range errors {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return scores, nil
 }
 
 func semanticRankBetter(a, b semanticDocumentRank) bool {

@@ -30,7 +30,7 @@
 
 设置页提供质量报告 JSON 模板。报告需 Owner 实际测量确认，至少 40 条查询、20 个冷样本，并记录 2048 维、1 万/5 万规模的查询/素材/相关性 hash、运行代码与机器、冷热 p95、峰值内存和已知费用。准入要求 Recall 不低于 FTS、改写查询收益至少 0.1、冷 p95 分别不高于 150/500 毫秒；报告导入不调用模型，也不自动开启，仍须另行激活。源码、机器、范围、配置、索引 epoch、价格或理解选择变化都会使旧准入失效，不能用热缓存替代冷启动结果。
 
-评测准备单条查询可在设置页明确提交（`/api/knowledge-semantic` 的 `evaluation_query`），这是可能付费的持久任务，冻结版本与预算，但不激活普通搜索。只读 `/api/knowledge-search-settings?config_id=...` 返回当前报告、失效原因及 `effective_semantic_enabled`；另加 `action=evaluate&q=...` 比较既有向量的 FTS/hybrid，GET 不生成向量、不付费。普通 `query` 仍须通过完整门禁。当前没有批量真实语义评测 CLI，不能据合成向量 benchmark 宣称真实 Recall 收益。后续检索优化同机 2048 维、20 样本冷 p95 为 124.8/690.6 毫秒，10k通过150ms、50k仍超过500ms门槛；实际语义保持关闭。最新[对照结果](superpowers/validation/semantic-optimization/README.md)保留全部样本与内存代价。完整原始证据见[语义性能记录](superpowers/validation/v4/semantic-performance.md)。
+评测准备单条查询可在设置页明确提交（`/api/knowledge-semantic` 的 `evaluation_query`），这是可能付费的持久任务，冻结版本与预算，但不激活普通搜索。只读 `/api/knowledge-search-settings?config_id=...` 返回当前报告、失效原因及 `effective_semantic_enabled`；另加 `action=evaluate&q=...` 比较既有向量的 FTS/hybrid，GET 不生成向量、不付费。普通 `query` 仍须通过完整门禁。批量只读评测现可使用 `scripts/semantic-quality-eval.py`，见[真实质量评测说明](semantic-quality-evaluation.md)。真实配置与人工标注仍未齐备，不能据合成向量 benchmark 宣称真实 Recall 收益。最新同机2048维、20样本冷p95为107.1/499.6毫秒，低于150/500ms门槛；50k仅有0.4ms余量，尚不代表不同负载下稳定达标，实际语义继续关闭。[最新对照结果](superpowers/validation/semantic-optimization-v2/README.md)保留样本与内存代价，[上一轮记录](superpowers/validation/semantic-optimization/README.md)保留历史结果。完整原始证据见[语义性能记录](superpowers/validation/v4/semantic-performance.md)。
 
 ## 问答、写作与费用
 

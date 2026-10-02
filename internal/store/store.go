@@ -25,9 +25,10 @@ var schemaSQL string
 // narrations/...）、FTS5 全文索引、备份一致性快照都集中在此。所有方法都基于单个
 // *sql.DB（Open 设置 MaxOpenConns=1 以匹配 SQLite 单写者模型）。
 type Store struct {
-	DB                *sql.DB
-	embeddingMatrixMu sync.Mutex
-	embeddingMatrix   *knowledgeEmbeddingMatrix
+	DB                  *sql.DB
+	embeddingMatrixMu   sync.Mutex
+	embeddingMatrix     *knowledgeEmbeddingMatrix
+	embeddingMatrixLoad *embeddingMatrixLoad
 }
 
 // Open 打开数据库并执行有序迁移。

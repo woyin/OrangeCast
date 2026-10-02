@@ -1,0 +1,21 @@
+# github.com/woyin/orangecast/internal/server [github.com/woyin/orangecast/internal/server.test]
+internal/server/semantic_quality_runner_test.go:29:14: assignment mismatch: 2 variables but srv.store.RegisterKnowledgeEmbeddingConfig returns 1 value
+ok  	github.com/woyin/orangecast/cmd/cloudwisepod	58.783s
+ok  	github.com/woyin/orangecast/cmd/quality-eval	48.992s
+ok  	github.com/woyin/orangecast/internal/auth	13.361s
+ok  	github.com/woyin/orangecast/internal/backup	226.141s
+ok  	github.com/woyin/orangecast/internal/config	(cached)
+ok  	github.com/woyin/orangecast/internal/evalset	(cached)
+ok  	github.com/woyin/orangecast/internal/filehash	(cached)
+ok  	github.com/woyin/orangecast/internal/learningbundle	(cached)
+ok  	github.com/woyin/orangecast/internal/markdown	(cached)
+?   	github.com/woyin/orangecast/internal/models	[no test files]
+ok  	github.com/woyin/orangecast/internal/provider	(cached)
+ok  	github.com/woyin/orangecast/internal/queue	209.612s
+ok  	github.com/woyin/orangecast/internal/rss	13.338s
+ok  	github.com/woyin/orangecast/internal/safehttp	(cached)
+FAIL	github.com/woyin/orangecast/internal/server [build failed]
+ok  	github.com/woyin/orangecast/internal/store	542.419s
+ok  	github.com/woyin/orangecast/internal/testdb	(cached)
+ok  	github.com/woyin/orangecast/internal/voice	(cached)
+FAIL
