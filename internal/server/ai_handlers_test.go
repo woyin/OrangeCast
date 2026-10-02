@@ -783,9 +783,7 @@ func TestStudyChat_ListMessagesDBError(t *testing.T) {
 	}
 }
 
-// TestStudyChat_AppendMessageDBError 通过删除 study_sessions 表触发记录问题失败分支。
-// ListStudyMessages 只查 study_messages（成功返回空历史）；AppendStudyMessage 写入
-// study_messages 成功后执行 UPDATE study_sessions → 报错 → 500 "记录问题失败"。
+// TestStudyChat_AppendMessageDBError 保持会话与来源校验可用，注入用户消息写入故障。
 func TestStudyChat_AppendMessageDBError(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "schist7@example.com", "password123")
@@ -797,10 +795,9 @@ func TestStudyChat_AppendMessageDBError(t *testing.T) {
 	seedTranscript(t, srv, sourceID)
 	// 预建会话（ListStudyMessages 会读到空历史，返回 nil slice 不报错）
 	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
-	// 删除 study_sessions 表 → AppendStudyMessage 的 UPDATE study_sessions 报错
-	// （INSERT study_messages 成功，但后续 UPDATE 失败 → 记录问题失败 500）
-	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
-		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	// 注入真实写入故障，不破坏新加入的会话来源校验。
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER fail_study_user BEFORE INSERT ON study_messages WHEN new.role='user' BEGIN SELECT RAISE(FAIL,'user write fault'); END`); err != nil {
+		t.Fatalf("inject study user failure: %v", err)
 	}
 	rec := postForm(t, srv, cookie, "/api/study-chat",
 		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=任意问题")
@@ -843,8 +840,7 @@ func TestParaphraseHandler_PersistError(t *testing.T) {
 
 // TestStudyChat_PersistAnswerError 验证通过两条硬约束后持久化回答失败时返回 500。
 // 覆盖 handleStudyChat 中 "持久化回答失败" 错误分支。
-// 为让 AppendStudyMessage(assistant) 在 ListStudyMessages 成功后失败，删除
-// study_sessions 表：INSERT study_messages 成功，但 UPDATE study_sessions 报错。
+// 注入用户消息写入故障；assistant 写入故障由后续独立测试覆盖。
 func TestStudyChat_PersistAnswerError(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "scpersist@example.com", "password123")
@@ -856,9 +852,9 @@ func TestStudyChat_PersistAnswerError(t *testing.T) {
 	seedTranscript(t, srv, sourceID)
 	// 预建会话
 	sess, _ := srv.store.CreateStudySession(ctx, models.SourceEpisode, sourceID, "会话")
-	// 删除 study_sessions 表 → AppendStudyMessage(assistant) 的 UPDATE study_sessions 失败
-	if _, err := srv.store.DB.Exec(`DROP TABLE study_sessions`); err != nil {
-		t.Fatalf("DROP TABLE study_sessions: %v", err)
+	// 保持会话来源可核对，令用户消息写入失败。
+	if _, err := srv.store.DB.Exec(`CREATE TRIGGER fail_study_user BEFORE INSERT ON study_messages WHEN new.role='user' BEGIN SELECT RAISE(FAIL,'user write fault'); END`); err != nil {
+		t.Fatalf("inject study user failure: %v", err)
 	}
 
 	srv.bundleFor = fakeBundleFor(nil, nil,
@@ -869,8 +865,7 @@ func TestStudyChat_PersistAnswerError(t *testing.T) {
 
 	rec := postForm(t, srv, cookie, "/api/study-chat",
 		"source_type=episode&source_id="+sourceID+"&session_id="+sess.ID+"&question=通胀")
-	// 注意：用户问题 AppendStudyMessage 也会触发 UPDATE study_sessions 失败，
-	// 所以会在 "记录问题失败" 分支先返回（同样覆盖了 AppendStudyMessage 失败路径）。
+	// 用户消息未成功持久化，不能继续生成回答。
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("持久化失败应 500，实际 %d: %s", rec.Code, rec.Body.String())
 	}
@@ -952,5 +947,42 @@ func TestParaphraseHandler_MissingTranscript(t *testing.T) {
 		"source_type=episode&source_id="+eps[0].ID+"&segment_ids=[\"seg-0001\"]&question=解释一下")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("无转录稿应 404，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStudyChatForeignSessionNeverDispatchesOrAppends(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "study-bound@example.com", "password123")
+	p, err := srv.store.CreatePodcast(t.Context(), "https://study-bound.example/feed", "范围测试", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = srv.store.MergeEpisodes(t.Context(), p.ID, []models.Episode{{GUID: "a", Title: "A", AudioURL: "https://audio.example/a"}, {GUID: "b", Title: "B", AudioURL: "https://audio.example/b"}}); err != nil {
+		t.Fatal(err)
+	}
+	episodes, err := srv.store.ListEpisodes(t.Context(), p.ID)
+	if err != nil || len(episodes) != 2 {
+		t.Fatal(episodes, err)
+	}
+	seedTranscript(t, srv, episodes[0].ID)
+	session, err := srv.store.CreateStudySession(t.Context(), models.SourceEpisode, episodes[1].ID, "其他来源历史")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = srv.store.AppendStudyMessage(t.Context(), session.ID, "user", "其他来源的私有问题", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	srv.bundleFor = func(provider.TaskConfig) (*provider.ProviderBundle, error) {
+		calls++
+		return nil, errors.New("must not dispatch")
+	}
+	rec := postForm(t, srv, cookie, "/api/study-chat", "source_type=episode&source_id="+episodes[0].ID+"&session_id="+session.ID+"&question=解释条件")
+	if rec.Code != 409 || calls != 0 {
+		t.Fatal(rec.Code, rec.Body.String(), calls)
+	}
+	messages, err := srv.store.ListStudyMessages(t.Context(), session.ID, true)
+	if err != nil || len(messages) != 1 || messages[0].Content != "其他来源的私有问题" {
+		t.Fatal(messages, err)
 	}
 }

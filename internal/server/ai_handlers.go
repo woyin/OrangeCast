@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -183,7 +184,11 @@ func (srv *Server) handleStudyChat(w http.ResponseWriter, r *http.Request) {
 
 	sessionID, history, err := srv.studyChatSession(r.Context(), sourceType, sourceID, sessionID, question)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		code := http.StatusInternalServerError
+		if errors.Is(err, store.ErrConflict) {
+			code = http.StatusConflict
+		}
+		writeJSON(w, code, map[string]any{"error": err.Error()})
 		return
 	}
 
@@ -271,6 +276,13 @@ func (srv *Server) studyChatSession(ctx context.Context, sourceType models.Sourc
 			return "", nil, fmt.Errorf("创建学习会话失败")
 		}
 		sessionID = session.ID
+	}
+	bound, err := srv.store.GetStudySession(ctx, sessionID)
+	if err != nil {
+		return "", nil, fmt.Errorf("读取学习会话失败")
+	}
+	if bound.SourceType != sourceType || bound.SourceID != sourceID {
+		return "", nil, fmt.Errorf("%w: 学习会话属于其他来源，不能混入本集范围", store.ErrConflict)
 	}
 	rows, err := srv.store.ListStudyMessages(ctx, sessionID, false)
 	if err != nil {
