@@ -19,14 +19,15 @@ import (
 const QuestionStudyTaskVersion = "question-study-task-v1"
 
 type QuestionStudyJobInput struct {
-	Version      string                       `json:"version"`
-	Stage        string                       `json:"stage"`
-	TurnID       string                       `json:"turn_id"`
-	Scope        provider.QuestionStudyScope  `json:"scope"`
-	Config       provider.QuestionStudyConfig `json:"config"`
-	Estimate     *provider.KnowledgeEstimate  `json:"estimate"`
-	ReviewIntent string                       `json:"review_intent"`
-	OriginJobID  string                       `json:"origin_job_id,omitempty"`
+	Version      string                        `json:"version"`
+	Stage        string                        `json:"stage"`
+	TurnID       string                        `json:"turn_id"`
+	Scope        provider.QuestionStudyScope   `json:"scope"`
+	Config       provider.QuestionStudyConfig  `json:"config"`
+	Estimate     *provider.KnowledgeEstimate   `json:"estimate"`
+	ReviewIntent string                        `json:"review_intent"`
+	Answer       *provider.QuestionStudyAnswer `json:"answer,omitempty"`
+	OriginJobID  string                        `json:"origin_job_id,omitempty"`
 }
 
 func (in QuestionStudyJobInput) Operation() string { return "question_study_" + in.Stage }
@@ -308,7 +309,7 @@ func (s *Store) MarkQuestionStudyCallStarted(ctx context.Context, jobID string, 
 	if err = checkQuestionStudyScope(ctx, tx, in.Scope, in.Config.Provider); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET remote_call_started=1 WHERE id=? AND status='running' AND remote_call_started=0 AND EXISTS(SELECT 1 FROM question_study_turns WHERE id=? AND generation_job_id=? AND purged=0)`, jobID, in.TurnID, jobID)
+	result, err := tx.ExecContext(ctx, `UPDATE processing_jobs SET remote_call_started=1 WHERE id=? AND status='running' AND remote_call_started=0 AND EXISTS(SELECT 1 FROM question_study_turns WHERE id=? AND (CASE WHEN ?='review' THEN check_job_id ELSE generation_job_id END)=? AND purged=0)`, jobID, in.TurnID, in.Stage, jobID)
 	if err != nil {
 		return err
 	}
@@ -316,7 +317,7 @@ func (s *Store) MarkQuestionStudyCallStarted(ctx context.Context, jobID string, 
 	if n != 1 {
 		return ErrConflict
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE question_study_turns SET state='running',updated_at=datetime('now') WHERE id=?`, in.TurnID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE question_study_turns SET state=CASE WHEN ?='review' THEN 'checking' ELSE 'running' END,updated_at=datetime('now') WHERE id=?`, in.Stage, in.TurnID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -346,6 +347,9 @@ func (s *Store) RecordQuestionStudyReceipt(ctx context.Context, origin string, i
 	return err
 }
 func (s *Store) CommitQuestionStudyGeneration(ctx context.Context, jobID string, in QuestionStudyJobInput, answer provider.QuestionStudyAnswer) error {
+	if in.Stage != "generate" {
+		return ErrInvalidEditorialState
+	}
 	if err := provider.ValidateQuestionStudyAnswer(in.Scope, answer); err != nil {
 		return err
 	}
@@ -363,13 +367,42 @@ func (s *Store) CommitQuestionStudyGeneration(ctx context.Context, jobID string,
 	if err = checkQuestionStudyScope(ctx, tx, in.Scope, in.Config.Provider); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE question_study_turns SET state='response_saved',updated_at=datetime('now') WHERE id=? AND generation_job_id=? AND purged=0`, in.TurnID, jobID)
+	result, err := tx.ExecContext(ctx, `UPDATE question_study_turns SET state='response_saved',updated_at=datetime('now') WHERE id=? AND generation_job_id=? AND purged=0 AND state!='accepted'`, in.TurnID, jobID)
 	if err != nil {
 		return err
 	}
 	n, _ := result.RowsAffected()
 	if n != 1 {
 		return ErrConflict
+	}
+	var checkID string
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(check_job_id,'') FROM question_study_turns WHERE id=?`, in.TurnID).Scan(&checkID); err != nil {
+		return err
+	}
+	if checkID == "" {
+		review := in
+		review.Stage = "review"
+		review.Answer = &answer
+		review.OriginJobID = ""
+		review.Estimate, err = provider.EstimateQuestionStudyReview(in.Scope, answer)
+		if err != nil {
+			return err
+		}
+		if err = freezeQuestionStudyPrice(ctx, tx, in.Config.Provider, in.Config.ReviewModel, review.Estimate); err != nil {
+			return err
+		}
+		frozen, err := json.Marshal(review)
+		if err != nil {
+			return err
+		}
+		checkID = uuid.NewString()
+		_, err = tx.ExecContext(ctx, `INSERT INTO processing_jobs(id,source_type,source_id,job_type,status,intent_id,input_snapshot_json,config_version,configured_provider,configured_model,run_lane) VALUES(?,'question_study',?,'question_study','queued',?,?,?,?,?,'study')`, checkID, in.Scope.Question.ID, in.ReviewIntent, string(frozen), in.Version, in.Config.Provider, in.Config.ReviewModel)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE question_study_turns SET check_job_id=? WHERE id=?`, checkID, in.TurnID); err != nil {
+			return err
+		}
 	}
 	raw, _ := json.Marshal(map[string]string{"turn_id": in.TurnID, "stage": "generate", "review_intent": in.ReviewIntent})
 	if _, err = tx.ExecContext(ctx, `UPDATE processing_jobs SET result_json=?,result_state='complete' WHERE id=?`, string(raw), jobID); err != nil {
@@ -378,7 +411,7 @@ func (s *Store) CommitQuestionStudyGeneration(ctx context.Context, jobID string,
 	return tx.Commit()
 }
 func (s *Store) FailQuestionStudyGeneration(ctx context.Context, jobID string) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE question_study_turns SET state=CASE WHEN EXISTS(SELECT 1 FROM processing_jobs WHERE id=? AND remote_call_started=1 AND checkpoint_json='') THEN 'unknown' ELSE 'blocked' END,updated_at=datetime('now') WHERE generation_job_id=? AND purged=0 AND state!='accepted'`, jobID, jobID)
+	_, err := s.DB.ExecContext(ctx, `UPDATE question_study_turns SET state=CASE WHEN EXISTS(SELECT 1 FROM processing_jobs WHERE id=? AND remote_call_started=1 AND checkpoint_json='') THEN 'unknown' ELSE 'blocked' END,updated_at=datetime('now') WHERE (generation_job_id=? OR check_job_id=?) AND purged=0 AND state!='accepted'`, jobID, jobID, jobID)
 	return err
 }
 
@@ -430,11 +463,11 @@ func (s *Store) RetryQuestionStudyGeneration(ctx context.Context, id, key string
 		return nil, false, ErrConflict
 	}
 	var in QuestionStudyJobInput
-	if json.Unmarshal([]byte(frozen), &in) != nil || in.Version != QuestionStudyTaskVersion || in.Stage != "generate" || in.Scope.Question == nil {
+	if json.Unmarshal([]byte(frozen), &in) != nil || in.Version != QuestionStudyTaskVersion || (in.Stage != "generate" && in.Stage != "review") || in.Scope.Question == nil {
 		return nil, false, ErrInvalidEditorialState
 	}
 	var active bool
-	if err = tx.QueryRowContext(ctx, `SELECT purged=0 AND generation_job_id=? FROM question_study_turns WHERE id=?`, id, in.TurnID).Scan(&active); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT purged=0 AND (CASE WHEN ?='review' THEN check_job_id ELSE generation_job_id END)=? FROM question_study_turns WHERE id=?`, in.Stage, id, in.TurnID).Scan(&active); err != nil {
 		return nil, false, err
 	}
 	if !active {
@@ -460,7 +493,11 @@ func (s *Store) RetryQuestionStudyGeneration(ctx context.Context, id, key string
 			return nil, false, fmt.Errorf("%w: 远端结果未知，重发可能再次计费，需要明确确认", ErrConflict)
 		}
 		in.OriginJobID = ""
-		in.Estimate, err = provider.EstimateQuestionStudy(in.Scope)
+		if in.Stage == "review" && in.Answer != nil {
+			in.Estimate, err = provider.EstimateQuestionStudyReview(in.Scope, *in.Answer)
+		} else {
+			in.Estimate, err = provider.EstimateQuestionStudy(in.Scope)
+		}
 		if err != nil {
 			return nil, false, err
 		}
@@ -487,7 +524,7 @@ func (s *Store) RetryQuestionStudyGeneration(ctx context.Context, id, key string
 	if _, err = tx.ExecContext(ctx, `UPDATE processing_jobs SET control_revision=control_revision+1 WHERE id=?`, id); err != nil {
 		return nil, false, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE question_study_turns SET generation_job_id=?,state='queued',updated_at=datetime('now') WHERE id=?`, jobID, in.TurnID); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE question_study_turns SET generation_job_id=CASE WHEN ?='generate' THEN ? ELSE generation_job_id END,check_job_id=CASE WHEN ?='review' THEN ? ELSE check_job_id END,state='queued',updated_at=datetime('now') WHERE id=?`, in.Stage, jobID, in.Stage, jobID, in.TurnID); err != nil {
 		return nil, false, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE question_study_sessions SET revision=revision+1,updated_at=datetime('now') WHERE id=(SELECT session_id FROM question_study_turns WHERE id=?)`, in.TurnID); err != nil {

@@ -25,10 +25,16 @@ func (w *Worker) doQuestionStudy(ctx context.Context, job *models.ProcessingJob)
 		return err
 	}
 	var in store.QuestionStudyJobInput
-	if json.Unmarshal([]byte(execution.InputSnapshotJSON), &in) != nil || in.Version != store.QuestionStudyTaskVersion || execution.ConfigVersion != in.Version || in.Stage != "generate" || in.Scope.Question == nil || in.Scope.Question.ID != job.SourceID || execution.ConfiguredProvider != in.Config.Provider || execution.ConfiguredModel != in.Model() || in.Estimate == nil {
+	if json.Unmarshal([]byte(execution.InputSnapshotJSON), &in) != nil || in.Version != store.QuestionStudyTaskVersion || execution.ConfigVersion != in.Version || (in.Stage != "generate" && in.Stage != "review") || in.Scope.Question == nil || in.Scope.Question.ID != job.SourceID || execution.ConfiguredProvider != in.Config.Provider || execution.ConfiguredModel != in.Model() || in.Estimate == nil {
 		return store.ErrInvalidEditorialState
 	}
 	estimate, err := provider.EstimateQuestionStudy(in.Scope)
+	if in.Stage == "review" {
+		if in.Answer == nil {
+			return store.ErrInvalidEditorialState
+		}
+		estimate, err = provider.EstimateQuestionStudyReview(in.Scope, *in.Answer)
+	}
 	if err != nil || estimate.InputFingerprint != in.Estimate.InputFingerprint || estimate.Method != in.Estimate.Method || estimate.InputTokens != in.Estimate.InputTokens || estimate.OutputTokens != in.Estimate.OutputTokens {
 		return store.ErrInvalidEditorialState
 	}
@@ -58,7 +64,12 @@ func (w *Worker) doQuestionStudy(ctx context.Context, job *models.ProcessingJob)
 		if err = w.store.MarkQuestionStudyCallStarted(ctx, job.ID, in); err != nil {
 			return err
 		}
-		response, err := client.Generate(ctx, in.Scope)
+		var response *provider.QuestionStudyResponse
+		if in.Stage == "review" {
+			response, err = client.Review(ctx, in.Scope, *in.Answer)
+		} else {
+			response, err = client.Generate(ctx, in.Scope)
+		}
 		if err != nil {
 			return err
 		}
@@ -92,6 +103,13 @@ func (w *Worker) doQuestionStudy(ctx context.Context, job *models.ProcessingJob)
 	}
 	if checkpoint.Response.Failure != "" || checkpoint.Response.UnverifiedModel || checkpoint.Response.Model != in.Model() {
 		return fmt.Errorf("问题对话响应不合格，已保留实际用量；未采用为回答")
+	}
+	if in.Stage == "review" {
+		review, err := provider.ParseQuestionStudyReview(*in.Answer, checkpoint.Response.Content)
+		if err != nil {
+			return err
+		}
+		return w.store.CommitQuestionStudyReview(ctx, job.ID, in, *review)
 	}
 	answer, err := provider.ParseQuestionStudyAnswer(in.Scope, checkpoint.Response.Content)
 	if err != nil {
