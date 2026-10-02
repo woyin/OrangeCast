@@ -3,6 +3,8 @@ package queue
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -29,7 +31,17 @@ func studyTwoStageReply(t *testing.T, verdict string, beforeReview func()) func(
 				t.Error(err)
 				return
 			}
-			m := scope.Materials[0]
+			var m provider.QuestionStudyMaterial
+			for _, candidate := range scope.Materials {
+				if len(candidate.Segments) > 0 {
+					m = candidate
+					break
+				}
+			}
+			if len(m.Segments) == 0 {
+				t.Error("test reply requires an evidence material with segments")
+				return
+			}
 			answer := provider.QuestionStudyAnswer{Version: provider.QuestionStudyPromptVersion, State: "answered", SourceClaims: []provider.QuestionStudyClaim{{Text: "需要核对条件。", References: []provider.QuestionStudyReference{{MaterialKey: m.Key, Revision: m.Revision, SegmentIDs: []string{m.Segments[0].SegmentID}}}}}}
 			raw, _ := json.Marshal(answer)
 			content = string(raw)
@@ -192,5 +204,24 @@ func TestQuestionStudyCommitBudgetBlocksOnlyReviewStage(t *testing.T) {
 	history, err := s.QuestionStudyHistory(t.Context(), turn.SessionID)
 	if err != nil || len(history) != 0 {
 		t.Fatal(history, err)
+	}
+}
+
+// This fixture sees the same valid mixed scope as production. Its source claim
+// must select Evidence rather than assume the first material has segments.
+func TestStudyTwoStageReplyMixedMaterialOrder(t *testing.T) {
+	scope := provider.QuestionStudyScope{Materials: []provider.QuestionStudyMaterial{{Key: "understanding", Kind: "understanding", Revision: 1}, {Key: "source", Kind: "document", Revision: 1, Segments: []provider.KnowledgeEvidenceSegment{{SegmentID: "paragraph"}}}}}
+	raw, _ := json.Marshal(scope)
+	payload, _ := json.Marshal(map[string]any{"model": "generate", "messages": []provider.QuestionStudyMessage{{Content: "system"}, {Content: string(raw)}}})
+	req := httptest.NewRequest("POST", "/", strings.NewReader(string(payload)))
+	rec := httptest.NewRecorder()
+	defer func() {
+		if v := recover(); v != nil {
+			t.Errorf("valid understanding before source panicked: %v", v)
+		}
+	}()
+	studyTwoStageReply(t, "accept", nil)(rec, req)
+	if !strings.Contains(rec.Body.String(), "source") || !strings.Contains(rec.Body.String(), "paragraph") {
+		t.Fatal(rec.Body.String())
 	}
 }
