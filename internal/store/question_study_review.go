@@ -7,7 +7,7 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
-// Only a validated check can publish a response. Source permissions and stop
+// CommitQuestionStudyReview Only a validated check can publish a response. Source permissions and stop
 // controls are checked in the same transaction as the visible history write.
 func (s *Store) CommitQuestionStudyReview(ctx context.Context, jobID string, in QuestionStudyJobInput, review provider.QuestionStudyReview) error {
 	if in.Stage != "review" || in.Answer == nil {

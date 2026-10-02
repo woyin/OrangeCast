@@ -164,3 +164,33 @@ func TestQuestionStudyCommitStopAfterPaidReviewSuppressesAnswer(t *testing.T) {
 		t.Fatal(usage, err)
 	}
 }
+
+func TestQuestionStudyCommitBudgetBlocksOnlyReviewStage(t *testing.T) {
+	s, w, turn, _, calls := studyGenerationFixture(t, studyTwoStageReply(t, "accept", nil), true)
+	if err := w.ProcessOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.GetQuestionStudyTurn(t.Context(), turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := int64(100)
+	if err = s.SetOwnerMonthlyBudget(t.Context(), &budget); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ProcessOne(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.GetJob(t.Context(), current.CheckJobID)
+	if err != nil || string(job.Status) != "failed" || calls.Load() != 1 {
+		t.Fatal(job, err, calls.Load())
+	}
+	ex, err := s.GetJobExecution(t.Context(), current.CheckJobID)
+	if err != nil || ex.RemoteCallStarted || ex.CheckpointJSON != "" {
+		t.Fatal(ex, err)
+	}
+	history, err := s.QuestionStudyHistory(t.Context(), turn.SessionID)
+	if err != nil || len(history) != 0 {
+		t.Fatal(history, err)
+	}
+}

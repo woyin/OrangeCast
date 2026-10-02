@@ -16,10 +16,16 @@ import (
 	"unicode/utf8"
 )
 
+// EmbeddingMaxDimensions 限制可接纳的单个向量维数。
 const EmbeddingMaxDimensions = 2048
+
+// EmbeddingMaxBatch 限制单次 embedding 请求的输入项数。
 const EmbeddingMaxBatch = 16
+
+// EmbeddingMaxInputBytes 限制单项完整输入的字节数，不静默截断。
 const EmbeddingMaxInputBytes = 8192
 
+// ErrEmbeddingUnavailable 表示连接未配置或不可用，检索应解释性降级。
 var ErrEmbeddingUnavailable = errors.New("independent embedding connection is not configured")
 
 // EmbeddingConfig contains only safe provenance, never an endpoint or credential.
@@ -33,6 +39,7 @@ type EmbeddingConfig struct {
 	Unit         string `json:"unit"`
 }
 
+// EmbeddingResult 保留向量、模型身份和实际输入用量。
 type EmbeddingResult struct {
 	Vectors         [][]float32 `json:"vectors"`
 	Model           string      `json:"model"`
@@ -51,6 +58,7 @@ type EmbeddingClient struct {
 	client              *http.Client
 }
 
+// NewEmbeddingClient 校验独立 embedding 连接，构造时不调用供应商。
 func NewEmbeddingClient(key, baseURL, model string, dimensions int) (*EmbeddingClient, error) {
 	key, baseURL, model = strings.TrimSpace(key), strings.TrimRight(strings.TrimSpace(baseURL), "/"), strings.TrimSpace(model)
 	if key == "" || baseURL == "" || model == "" {
@@ -63,6 +71,7 @@ func NewEmbeddingClient(key, baseURL, model string, dimensions int) (*EmbeddingC
 	return &EmbeddingClient{key: key, baseURL: baseURL, model: model, dimensions: dimensions, requestDimensions: dimensions, client: &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
+// Config 返回无凭据的冻结配置身份。
 func (p *EmbeddingClient) Config() EmbeddingConfig {
 	connection := fmt.Sprintf("%x", sha256.Sum256([]byte("embedding\x00"+p.baseURL)))
 	id := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", connection, p.model, p.dimensions))))
@@ -81,6 +90,7 @@ func (c EmbeddingConfig) WithDimensions(n int) (EmbeddingConfig, error) {
 	return c, nil
 }
 
+// WithDimensions 设置请求维数并保持接纳上限。
 func (p *EmbeddingClient) WithDimensions(n int) (*EmbeddingClient, error) {
 	if n < 1 || n > EmbeddingMaxDimensions {
 		return nil, errors.New("embedding dimension outside capacity")
@@ -102,7 +112,7 @@ func embeddingInputs(inputs []string) error {
 	return nil
 }
 
-// Embed only runs when explicitly called by preflight or an admitted persistent job.
+// EmbeddingResponseError Embed only runs when explicitly called by preflight or an admitted persistent job.
 // EmbeddingResponseError preserves supplier-reported numeric usage when the
 // returned vectors are unusable. It never retains response bodies or vectors.
 type EmbeddingResponseError struct {
@@ -113,6 +123,7 @@ type EmbeddingResponseError struct {
 func (e *EmbeddingResponseError) Error() string { return e.Cause.Error() }
 func (e *EmbeddingResponseError) Unwrap() error { return e.Cause }
 
+// Embed 执行单次有界请求并校验返回的模型与向量。
 func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *EmbeddingResult, err error) {
 	var receipt *EmbeddingResult
 	defer func() {

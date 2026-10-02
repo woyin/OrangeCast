@@ -19,8 +19,11 @@ type QuestionStudySession struct {
 	ID, QuestionID, CreatedAt, UpdatedAt string
 	Revision                             int
 }
+
+// QuestionStudySource 标识一轮所依赖的来源类型及身份。
 type QuestionStudySource struct{ SourceType, SourceID string }
 
+// QuestionStudyTurn 保存轮身份、冻结范围和通过检查后的可见回答。
 type QuestionStudyTurn struct {
 	ID, SessionID, RequestKey, PayloadHash, State, OwnerInput, FrozenJSON, AcceptedJSON string
 	GenerationJobID, CheckJobID, CreatedAt, UpdatedAt                                   string
@@ -28,6 +31,7 @@ type QuestionStudyTurn struct {
 	Purged                                                                              bool
 }
 
+// StartQuestionStudySession 按请求身份幂等建立会话，不触发模型调用。
 func (s *Store) StartQuestionStudySession(ctx context.Context, questionID, key string) (*QuestionStudySession, error) {
 	if _, err := uuid.Parse(key); err != nil {
 		return nil, ErrInvalidEditorialState
@@ -62,6 +66,8 @@ func (s *Store) StartQuestionStudySession(ctx context.Context, questionID, key s
 	}
 	return s.GetQuestionStudySession(ctx, id)
 }
+
+// GetQuestionStudySession 读取会话身份与当前修订。
 func (s *Store) GetQuestionStudySession(ctx context.Context, id string) (*QuestionStudySession, error) {
 	out := &QuestionStudySession{}
 	err := s.DB.QueryRowContext(ctx, `SELECT id,question_id,revision,created_at,updated_at FROM question_study_sessions WHERE id=?`, id).Scan(&out.ID, &out.QuestionID, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
@@ -81,6 +87,8 @@ func scanQuestionStudyTurn(row interface{ Scan(...any) error }) (*QuestionStudyT
 	}
 	return out, err
 }
+
+// GetQuestionStudyTurn 读取内部轮事实，界面使用独立的安全投影。
 func (s *Store) GetQuestionStudyTurn(ctx context.Context, id string) (*QuestionStudyTurn, error) {
 	return scanQuestionStudyTurn(s.DB.QueryRowContext(ctx, `SELECT `+questionStudyTurnColumns+` FROM question_study_turns WHERE id=?`, id))
 }
@@ -154,7 +162,7 @@ func reserveQuestionStudyTurn(ctx context.Context, tx *sql.Tx, sessionID string,
 	return out, true, err
 }
 
-// Accepted history never exposes generation/checkpoint bodies or unreviewed text.
+// QuestionStudyHistory Accepted history never exposes generation/checkpoint bodies or unreviewed text.
 func (s *Store) QuestionStudyHistory(ctx context.Context, sessionID string) ([]QuestionStudyTurn, error) {
 	if _, err := s.GetQuestionStudySession(ctx, sessionID); err != nil {
 		return nil, err

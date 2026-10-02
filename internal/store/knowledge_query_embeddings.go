@@ -179,7 +179,7 @@ func (s *Store) commitKnowledgeQueryEmbedding(ctx context.Context, id string, in
 	return tx.Commit()
 }
 
-// Owner request identity freezes the cache epoch as well as query/config. A lost
+// ReserveKnowledgeQueryEmbeddingRequest Owner request identity freezes the cache epoch as well as query/config. A lost
 // acknowledgement followed by an edited query cannot start a different paid job.
 func (s *Store) ReserveKnowledgeQueryEmbeddingRequest(ctx context.Context, id, query, key string) (*models.ProcessingJob, bool, error) {
 	if _, err := uuid.Parse(key); err != nil {

@@ -10,10 +10,13 @@ import (
 type RetrievalPurpose string
 
 const (
-	RetrieveLocal    RetrievalPurpose = "local"
+	// RetrieveLocal 选择本地检索用途，不授予模型外发权限。
+	RetrieveLocal RetrievalPurpose = "local"
+	// RetrieveExternal 仅返回所选供应商当前允许外发的材料。
 	RetrieveExternal RetrievalPurpose = "external"
 )
 
+// KnowledgeRetrieveQuery 区分检索用途、查询范围及显式向量身份。
 type KnowledgeRetrieveQuery struct {
 	Search            KnowledgeSearchQuery
 	Purpose           RetrievalPurpose
@@ -21,6 +24,7 @@ type KnowledgeRetrieveQuery struct {
 	EmbeddingConfigID string
 }
 
+// KnowledgeRetrieveResult 返回有界结果与融合、降级的解释。
 type KnowledgeRetrieveResult struct {
 	LexicalTotal   int
 	IndexedWindows int

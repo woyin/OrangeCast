@@ -24,6 +24,7 @@ type ListeningCapture struct {
 	Anchor     models.NoteAnchor `json:"anchor"`
 }
 
+// ReflectionAnswers 区分听后所得、疑问和下一步个人记录。
 type ReflectionAnswers struct {
 	Remember  string `json:"remember"`
 	Uncertain string `json:"uncertain"`
@@ -49,6 +50,7 @@ func (a ReflectionAnswers) Content() string {
 	return strings.Join(parts, "\n\n")
 }
 
+// ListeningReflection 保存独立修订的听后整理及采用关系。
 type ListeningReflection struct {
 	ID               string            `json:"id"`
 	Capture          ListeningCapture  `json:"capture"`
@@ -94,6 +96,7 @@ func reflectionHash(v any) string {
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
 
+// GetListeningReflection 读取已有整理，不自动创建或推进状态。
 func (s *Store) GetListeningReflection(ctx context.Context, id string) (*ListeningReflection, error) {
 	return scanReflection(s.DB.QueryRowContext(ctx, `SELECT `+reflectionColumns+` FROM listening_reflections WHERE id=?`, id))
 }

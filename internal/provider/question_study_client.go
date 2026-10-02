@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// QuestionStudyConfig 冻结无凭据的连接身份和生成、检查模型。
 type QuestionStudyConfig struct {
 	Provider         string `json:"provider"`
 	ConnectionID     string `json:"connection_id"`
@@ -21,6 +22,8 @@ type QuestionStudyConfig struct {
 	ReviewModel      string `json:"review_model"`
 	IndependentModel bool   `json:"independent_model"`
 }
+
+// QuestionStudyResponse 保留内容及数值用量，包括不可采用的响应。
 type QuestionStudyResponse struct {
 	Content         string `json:"content"`
 	Model           string `json:"model"`
@@ -30,13 +33,15 @@ type QuestionStudyResponse struct {
 	UnverifiedModel bool   `json:"unverified_model"`
 	Failure         string `json:"failure,omitempty"`
 }
+
+// QuestionStudyClient 执行单次有界调用，不自动重发未知结果。
 type QuestionStudyClient struct {
 	config       QuestionStudyConfig
 	key, baseURL string
 	http         *http.Client
 }
 
-// Uses the existing POD connection, with models resolved by Config's new task
+// QuestionStudy Uses the existing POD connection, with models resolved by Config's new task
 // fallback chain. Construction performs no request and freezes no credentials.
 func (sel *Selector) QuestionStudy(generation, review string) (*QuestionStudyClient, error) {
 	if generation == "" {
@@ -59,7 +64,11 @@ func (sel *Selector) QuestionStudy(generation, review string) (*QuestionStudyCli
 	cfg := QuestionStudyConfig{Provider: "pod", ConnectionID: fingerprint, GenerationModel: generation, ReviewModel: review, IndependentModel: generation != review}
 	return &QuestionStudyClient{config: cfg, key: sel.podAPIKey, baseURL: base, http: &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
+
+// Config 返回无凭据的冻结配置身份。
 func (c *QuestionStudyClient) Config() QuestionStudyConfig { return c.config }
+
+// Generate 生成待检查回答，不直接发布到历史。
 func (c *QuestionStudyClient) Generate(ctx context.Context, scope QuestionStudyScope) (*QuestionStudyResponse, error) {
 	messages, err := QuestionStudyMessages(scope)
 	if err != nil {
@@ -67,6 +76,8 @@ func (c *QuestionStudyClient) Generate(ctx context.Context, scope QuestionStudyS
 	}
 	return c.call(ctx, c.config.GenerationModel, 4096, messages)
 }
+
+// Review 使用冻结回答及材料执行独立检查阶段。
 func (c *QuestionStudyClient) Review(ctx context.Context, scope QuestionStudyScope, answer QuestionStudyAnswer) (*QuestionStudyResponse, error) {
 	messages, err := QuestionStudyReviewMessages(scope, answer)
 	if err != nil {
@@ -135,6 +146,8 @@ func (c *QuestionStudyClient) call(ctx context.Context, model string, cap int, m
 	result.Content = wire.Choices[0].Message.Content
 	return result, nil
 }
+
+// EstimateQuestionStudyReview 按实际序列化检查消息计算有界估计。
 func EstimateQuestionStudyReview(scope QuestionStudyScope, answer QuestionStudyAnswer) (*KnowledgeEstimate, error) {
 	messages, err := QuestionStudyReviewMessages(scope, answer)
 	if err != nil {

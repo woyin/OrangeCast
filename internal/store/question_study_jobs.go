@@ -16,8 +16,10 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+// QuestionStudyTaskVersion 标识对话阶段的持久输入及断点协议。
 const QuestionStudyTaskVersion = "question-study-task-v1"
 
+// QuestionStudyJobInput 冻结阶段、材料、模型、估价和待检查回答。
 type QuestionStudyJobInput struct {
 	Version      string                        `json:"version"`
 	Stage        string                        `json:"stage"`
@@ -30,7 +32,10 @@ type QuestionStudyJobInput struct {
 	OriginJobID  string                        `json:"origin_job_id,omitempty"`
 }
 
+// Operation 返回阶段对应的费用操作类别。
 func (in QuestionStudyJobInput) Operation() string { return "question_study_" + in.Stage }
+
+// Model 返回当前阶段使用的冻结模型。
 func (in QuestionStudyJobInput) Model() string {
 	if in.Stage == "review" {
 		return in.Config.ReviewModel
@@ -38,6 +43,7 @@ func (in QuestionStudyJobInput) Model() string {
 	return in.Config.GenerationModel
 }
 
+// QuestionStudyCheckpoint 绑定任务及输入哈希，保存单次付费响应。
 type QuestionStudyCheckpoint struct {
 	Version   string                          `json:"version"`
 	JobID     string                          `json:"job_id"`
@@ -64,7 +70,7 @@ func validateQuestionStudyConfig(cfg provider.QuestionStudyConfig) error {
 	return nil
 }
 
-// Submit stores the command receipt, session revision, frozen input and task in
+// SubmitQuestionStudyTurn Submit stores the command receipt, session revision, frozen input and task in
 // one transaction. A repeated command reuses the original frozen scope even if
 // materials have subsequently changed.
 func (s *Store) SubmitQuestionStudyTurn(ctx context.Context, sessionID string, expected int, input, key string, selected []string, cfg provider.QuestionStudyConfig) (*QuestionStudyTurn, *models.ProcessingJob, bool, error) {
@@ -294,6 +300,8 @@ func checkQuestionStudyScope(ctx context.Context, q reviewReader, scope provider
 	}
 	return nil
 }
+
+// MarkQuestionStudyCallStarted 同事务复查权限和停止控制后标记远端边界。
 func (s *Store) MarkQuestionStudyCallStarted(ctx context.Context, jobID string, in QuestionStudyJobInput) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -322,6 +330,8 @@ func (s *Store) MarkQuestionStudyCallStarted(ctx context.Context, jobID string, 
 	}
 	return tx.Commit()
 }
+
+// SaveQuestionStudyCheckpoint 按冻结输入 CAS 保存响应，清理后不重新附着正文。
 func (s *Store) SaveQuestionStudyCheckpoint(ctx context.Context, id, frozen, checkpoint string) error {
 	result, err := s.DB.ExecContext(ctx, `UPDATE processing_jobs SET checkpoint_json=? WHERE id=? AND job_type='question_study' AND input_snapshot_json=? AND status IN('queued','running')`, checkpoint, id, frozen)
 	if err != nil {
@@ -333,6 +343,8 @@ func (s *Store) SaveQuestionStudyCheckpoint(ctx context.Context, id, frozen, che
 	}
 	return nil
 }
+
+// RecordQuestionStudyReceipt 按原付费任务去重记录数值用量及冻结价格。
 func (s *Store) RecordQuestionStudyReceipt(ctx context.Context, origin string, in QuestionStudyJobInput, response *provider.QuestionStudyResponse) error {
 	if response == nil || response.InputUnits < 0 || response.OutputUnits < 0 {
 		return ErrInvalidEditorialState
@@ -346,6 +358,8 @@ func (s *Store) RecordQuestionStudyReceipt(ctx context.Context, origin string, i
 	_, err := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO usage_records(id,operation,provider,model,input_units,output_units,estimated_cost,receipt_id,attempt_id,unit_kind,units_known)VALUES(?,?,?,?,?,?,?,?,?,'tokens',?)`, uuid.NewString(), in.Operation(), in.Config.Provider, response.Model, response.InputUnits, response.OutputUnits, amount, origin+":"+in.Operation(), origin+":response", response.UsageKnown)
 	return err
 }
+
+// CommitQuestionStudyGeneration 原子保留私有结果并接续检查任务。
 func (s *Store) CommitQuestionStudyGeneration(ctx context.Context, jobID string, in QuestionStudyJobInput, answer provider.QuestionStudyAnswer) error {
 	if in.Stage != "generate" {
 		return ErrInvalidEditorialState
@@ -410,12 +424,14 @@ func (s *Store) CommitQuestionStudyGeneration(ctx context.Context, jobID string,
 	}
 	return tx.Commit()
 }
+
+// FailQuestionStudyGeneration 将未接受的失败轮标为未知或阻断，不覆盖接受历史。
 func (s *Store) FailQuestionStudyGeneration(ctx context.Context, jobID string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE question_study_turns SET state=CASE WHEN EXISTS(SELECT 1 FROM processing_jobs WHERE id=? AND remote_call_started=1 AND checkpoint_json='') THEN 'unknown' ELSE 'blocked' END,updated_at=datetime('now') WHERE (generation_job_id=? OR check_job_id=?) AND purged=0 AND state!='accepted'`, jobID, jobID, jobID)
 	return err
 }
 
-// Explicit recovery reuses a known response's paid origin. Without a response,
+// RetryQuestionStudyGeneration Explicit recovery reuses a known response's paid origin. Without a response,
 // crossing the remote boundary requires separate consent to a new paid attempt.
 func (s *Store) RetryQuestionStudyGeneration(ctx context.Context, id, key string, expected int, allowUnknown bool) (*models.ProcessingJob, bool, error) {
 	if _, err := uuid.Parse(key); err != nil || expected < 1 {

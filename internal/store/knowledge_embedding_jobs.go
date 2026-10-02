@@ -13,8 +13,10 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+// KnowledgeEmbeddingJobVersion 标识向量任务的持久输入协议。
 const KnowledgeEmbeddingJobVersion = "knowledge-embedding-v1"
 
+// KnowledgeEmbeddingJobInput 冻结连接、窗口、计价估计及任务类别。
 type KnowledgeEmbeddingJobInput struct {
 	Query         string                      `json:"query,omitempty"`
 	QueryHash     string                      `json:"query_hash,omitempty"`
@@ -31,6 +33,7 @@ type KnowledgeEmbeddingJobInput struct {
 	OriginJobID   string                      `json:"origin_job_id,omitempty"`
 }
 
+// Inputs 返回冻结窗口的完整供应商输入。
 func (in KnowledgeEmbeddingJobInput) Inputs() []string {
 	if in.Kind == "query" {
 		return []string{in.Query}
@@ -44,6 +47,8 @@ func (in KnowledgeEmbeddingJobInput) Inputs() []string {
 	}
 	return out
 }
+
+// Operation 返回阶段对应的费用操作类别。
 func (in KnowledgeEmbeddingJobInput) Operation() string { return "embedding_" + in.Kind }
 
 // ReserveKnowledgeEmbeddingBatch freezes a complete input and an input-only
@@ -235,6 +240,7 @@ func validateEmbeddingWindows(ctx context.Context, tx *sql.Tx, in KnowledgeEmbed
 	return nil
 }
 
+// MarkKnowledgeEmbeddingCallStarted 同事务核对权限、版本和运行控制后标记远端边界。
 func (s *Store) MarkKnowledgeEmbeddingCallStarted(ctx context.Context, id string, in KnowledgeEmbeddingJobInput) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -417,7 +423,7 @@ func (s *Store) RetryKnowledgeEmbeddingJob(ctx context.Context, id, key string, 
 	return s.reserveKnowledgeEmbeddingJob(ctx, "retry:"+key, in)
 }
 
-// Source purge can race a supplier response. The frozen-input comparison ensures
+// SaveKnowledgeEmbeddingCheckpoint Source purge can race a supplier response. The frozen-input comparison ensures
 // a redacted task never regains a derived vector checkpoint after purge.
 func (s *Store) SaveKnowledgeEmbeddingCheckpoint(ctx context.Context, id, frozenInput, checkpoint string) error {
 	result, err := s.DB.ExecContext(ctx, `UPDATE processing_jobs SET checkpoint_json=?,updated_at=datetime('now') WHERE id=? AND job_type='knowledge_embedding' AND input_snapshot_json=? AND status IN('queued','running')`, checkpoint, id, frozenInput)

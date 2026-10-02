@@ -15,18 +15,23 @@ import (
 	"github.com/woyin/orangecast/internal/provider"
 )
 
+// KnowledgeEmbeddingCapacity 限制索引窗口总量。
 const KnowledgeEmbeddingCapacity = 50000
 
-// Source choices are Owner-confirmed, not inferred from a successful model call.
+// EmbeddingSource Source choices are Owner-confirmed, not inferred from a successful model call.
 type EmbeddingSource struct {
 	SourceType string `json:"source_type"`
 	SourceID   string `json:"source_id"`
 }
+
+// KnowledgeEmbeddingConfig 保存独立 embedding 的启用、范围和安全身份。
 type KnowledgeEmbeddingConfig struct {
 	provider.EmbeddingConfig
 	Enabled  bool `json:"enabled"`
 	Revision int  `json:"revision"`
 }
+
+// EmbeddingWindow 绑定完整输入、来源、版本及向量索引身份。
 type EmbeddingWindow struct {
 	DocKey        string            `json:"doc_key"`
 	WindowNo      int               `json:"window_no"`
@@ -37,6 +42,7 @@ type EmbeddingWindow struct {
 	Sources       []EmbeddingSource `json:"sources"`
 }
 
+// EmbeddingIndexStatus 投影当前索引规模、待处理事件及配置。
 type EmbeddingIndexStatus struct {
 	Config                                         *KnowledgeEmbeddingConfig
 	Sources                                        []EmbeddingSource
@@ -62,6 +68,7 @@ func (s *Store) RegisterKnowledgeEmbeddingConfig(ctx context.Context, cfg provid
 	return err
 }
 
+// GetKnowledgeEmbeddingConfig 读取已保存配置，不触发预检或供应商调用。
 func (s *Store) GetKnowledgeEmbeddingConfig(ctx context.Context, id string) (*KnowledgeEmbeddingConfig, error) {
 	c := &KnowledgeEmbeddingConfig{}
 	err := s.DB.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision)
@@ -413,6 +420,7 @@ func (s *Store) adoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 	return adopted, nil
 }
 
+// KnowledgeEmbeddingStatus 读取索引状态，不启动增量任务。
 func (s *Store) KnowledgeEmbeddingStatus(ctx context.Context, id string) (*EmbeddingIndexStatus, error) {
 	cfg, err := s.GetKnowledgeEmbeddingConfig(ctx, id)
 	if err != nil {

@@ -224,6 +224,7 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 	return knowledgeSearchPlan{Query: q, From: from, Rank: rank, Args: args}, nil
 }
 
+// SearchKnowledge 通过统一检索入口读取本地知识结果。
 func (s *Store) SearchKnowledge(ctx context.Context, q KnowledgeSearchQuery) (KnowledgeSearchResult, error) {
 	return s.searchKnowledgeKeys(ctx, q, nil)
 }
