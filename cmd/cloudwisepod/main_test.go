@@ -225,7 +225,9 @@ func TestMainServeStartsAndStops(t *testing.T) {
 
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	url := "http://127.0.0.1:" + strconv.Itoa(port) + "/login"
-	deadline := time.Now().Add(10 * time.Second)
+	// Race-instrumented migrations on shared CI runners exceeded the former
+	// 10-second startup budget. Poll readiness, allowing up to one minute.
+	deadline := time.Now().Add(60 * time.Second)
 	var response *http.Response
 	for time.Now().Before(deadline) {
 		response, err = client.Get(url)
