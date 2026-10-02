@@ -1,0 +1,567 @@
+{
+  "description": "Authored Chinese controlled evaluation; real model vectors, fixture text and relevance labels; not personal corpus or human-attested quality gate",
+  "corpus": [
+    {
+      "id": "target-01",
+      "text": "主动回忆是在不查看资料时尝试从记忆中提取答案，再核对遗漏和错误。"
+    },
+    {
+      "id": "distractor-01-a",
+      "text": "重读课文是在答案持续可见时反复阅读，熟悉感不等于能够独立作答。"
+    },
+    {
+      "id": "distractor-01-b",
+      "text": "用荧光笔标记重点便于以后定位段落，但标记本身没有要求提取答案。"
+    },
+    {
+      "id": "target-02",
+      "text": "间隔重复把同一知识的多次复习分散在不同日期，逐步拉长两次练习之间的时间。"
+    },
+    {
+      "id": "distractor-02-a",
+      "text": "集中练习把同一内容的练习挤在一个晚上，不涉及跨日期安排。"
+    },
+    {
+      "id": "distractor-02-b",
+      "text": "遗忘曲线描述记忆随时间减弱的趋势，是观察模型而不是具体复习日程。"
+    },
+    {
+      "id": "target-03",
+      "text": "交错练习在一次练习中混合不同类型的题目，让学习者先辨认问题类型再选择方法。"
+    },
+    {
+      "id": "distractor-03-a",
+      "text": "成块练习连续完成同一类型题目，然后才切换到下一类。"
+    },
+    {
+      "id": "distractor-03-b",
+      "text": "随机打乱题目编号不一定改变题型，也不一定要求选择不同解法。"
+    },
+    {
+      "id": "target-04",
+      "text": "费曼学习法尝试用简单语言向初学者解释概念，遇到说不清的地方再回到资料补足理解。"
+    },
+    {
+      "id": "distractor-04-a",
+      "text": "专业术语表收集概念的标准名称，可以用于查询定义。"
+    },
+    {
+      "id": "distractor-04-b",
+      "text": "背诵标准答案能训练文字复现，但不一定能用自己的话解释。"
+    },
+    {
+      "id": "target-05",
+      "text": "精细加工把新知识与已有知识联系起来，说明原因、举例并形成有意义的关联。"
+    },
+    {
+      "id": "distractor-05-a",
+      "text": "机械复述只重复原文，没有解释新知识与已有经验的关系。"
+    },
+    {
+      "id": "distractor-05-b",
+      "text": "思维导图是一种展示结构的形式，空有节点并不自动形成有意义的知识联系。"
+    },
+    {
+      "id": "target-06",
+      "text": "双重编码用相互配合的文字和图像表达同一概念，让信息有语言与视觉两种表征。"
+    },
+    {
+      "id": "distractor-06-a",
+      "text": "装饰图片只增加视觉元素，没有表达需要学习的概念。"
+    },
+    {
+      "id": "distractor-06-b",
+      "text": "多屏同时播放不同内容会分散注意力，并不等于配合两种表征学习。"
+    },
+    {
+      "id": "target-07",
+      "text": "认知负荷关注处理任务对有限工作记忆的要求。分步讲解、去掉无关信息可以减少额外负担。"
+    },
+    {
+      "id": "distractor-07-a",
+      "text": "工作记忆临时保持和操作少量信息，其容量和保持时间有限。"
+    },
+    {
+      "id": "distractor-07-b",
+      "text": "长时记忆保存长期知识，不等于当前任务占用的处理资源。"
+    },
+    {
+      "id": "target-08",
+      "text": "注意力残留是从未完成任务切换到另一任务后，思绪仍停留在前一个任务上，影响新的工作。"
+    },
+    {
+      "id": "distractor-08-a",
+      "text": "多任务处理尝试同时推进多个活动，频繁切换会产生额外开销。"
+    },
+    {
+      "id": "distractor-08-b",
+      "text": "通知打断是外部信号吸引注意力，与任务切换后持续惦记旧任务的现象不同。"
+    },
+    {
+      "id": "target-09",
+      "text": "检索增强生成先从资料库取出与问题相关的片段，再让语言模型参考这些片段组织回答。"
+    },
+    {
+      "id": "distractor-09-a",
+      "text": "模型微调通过训练更新模型参数，并非在每次回答前查找外部资料。"
+    },
+    {
+      "id": "distractor-09-b",
+      "text": "向量检索负责找相似内容，本身不会把材料组织成自然语言回答。"
+    },
+    {
+      "id": "target-10",
+      "text": "提示注入把恶意指令藏在网页或资料中，试图让模型忽略原有规则并执行攻击者的要求。"
+    },
+    {
+      "id": "distractor-10-a",
+      "text": "用户正常提出任务指令，是授权交互的一部分。"
+    },
+    {
+      "id": "distractor-10-b",
+      "text": "内容审核检查文本是否包含违规内容，与识别外部资料中的越权指令不同。"
+    },
+    {
+      "id": "target-11",
+      "text": "模型幻觉指模型生成听起来可信但没有依据或与事实不符的内容，例如编造引用、数据和事件。"
+    },
+    {
+      "id": "distractor-11-a",
+      "text": "表达不确定性是说明证据不足，不能单靠语气判断答案是否正确。"
+    },
+    {
+      "id": "distractor-11-b",
+      "text": "随机采样会改变输出措辞，生成差异并不必然意味着事实错误。"
+    },
+    {
+      "id": "target-12",
+      "text": "来源归因记录某个论断出自哪份原始资料和具体位置，使读者能够返回来源核对。"
+    },
+    {
+      "id": "distractor-12-a",
+      "text": "主题标签用于分类内容，不说明某一论断的证据位置。"
+    },
+    {
+      "id": "distractor-12-b",
+      "text": "参考书目列出资料名称，但缺少段落位置时仍不容易核对具体论断。"
+    },
+    {
+      "id": "target-13",
+      "text": "幸存者偏差只观察留下或成功的样本，却忽略失败和退出者，从而得出有偏的结论。"
+    },
+    {
+      "id": "distractor-13-a",
+      "text": "选择偏差来自样本选择机制，使样本不能代表目标总体。"
+    },
+    {
+      "id": "distractor-13-b",
+      "text": "发表偏差使显著结果更容易公开，不能代表所有已开展的研究。"
+    },
+    {
+      "id": "target-14",
+      "text": "确认偏误倾向于寻找和相信支持既有看法的信息，而忽略或苛责反对自己的证据。"
+    },
+    {
+      "id": "distractor-14-a",
+      "text": "证伪主动寻找能够推翻假设的观察和反例。"
+    },
+    {
+      "id": "distractor-14-b",
+      "text": "锚定效应使后续判断受最先看到的数字影响。"
+    },
+    {
+      "id": "target-15",
+      "text": "沉没成本是已经付出且无法收回的投入。决定是否继续项目时，应关注未来收益和代价。"
+    },
+    {
+      "id": "distractor-15-a",
+      "text": "预算约束是当前可用于新决策的资源上限。"
+    },
+    {
+      "id": "distractor-15-b",
+      "text": "边际成本是多生产或执行一个单位时新增的成本。"
+    },
+    {
+      "id": "target-16",
+      "text": "机会成本是选择一个方案时放弃的最佳替代方案的价值。时间投入也会有这种代价。"
+    },
+    {
+      "id": "distractor-16-a",
+      "text": "现金支出是实际付款金额，不包括被放弃的时间用途。"
+    },
+    {
+      "id": "distractor-16-b",
+      "text": "投资回报率比较收益和投入，不直接说明被放弃的替代选择。"
+    },
+    {
+      "id": "target-17",
+      "text": "执行意图把目标写成明确的如果那么计划：如果出现某个情境，就执行预先决定的行动。"
+    },
+    {
+      "id": "distractor-17-a",
+      "text": "目标意图只说明想达到的结果，没有约定触发情境和具体动作。"
+    },
+    {
+      "id": "distractor-17-b",
+      "text": "习惯追踪记录行为是否完成，本身不规定情境触发的行动计划。"
+    },
+    {
+      "id": "target-18",
+      "text": "番茄工作法把工作分成固定的专注时段和短休息，通常用计时器减少漫无目的的拖延。"
+    },
+    {
+      "id": "distractor-18-a",
+      "text": "时间块安排在日历上分配任务时段，不一定穿插固定短休息。"
+    },
+    {
+      "id": "distractor-18-b",
+      "text": "截止日期限定任务完成时间，不规定中间的专注和休息节奏。"
+    },
+    {
+      "id": "target-19",
+      "text": "版本控制保存文件修改的历史，支持比较差异、恢复旧状态和合并不同人的改动。"
+    },
+    {
+      "id": "distractor-19-a",
+      "text": "文件备份保存副本便于灾难恢复，不一定提供逐次修改差异与合并。"
+    },
+    {
+      "id": "distractor-19-b",
+      "text": "实时同步让多个设备看到相同文件，不保证保留完整历史。"
+    },
+    {
+      "id": "target-20",
+      "text": "语音转录把录音中的口头表达转换成文字，通常可结合时间戳定位说话片段。"
+    },
+    {
+      "id": "distractor-20-a",
+      "text": "语音合成把文字转换成音频，与从录音提取文字方向相反。"
+    },
+    {
+      "id": "distractor-20-b",
+      "text": "说话人分离识别录音中不同发言者，本身不负责识别说出的全部词语。"
+    }
+  ],
+  "queries": [
+    {
+      "id": "original-01",
+      "group": "original",
+      "query": "主动回忆",
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "id": "rewrite-01",
+      "group": "rewrite",
+      "query": "读完合上书自测能帮助记忆吗",
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "id": "original-02",
+      "group": "original",
+      "query": "间隔重复",
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "id": "rewrite-02",
+      "group": "rewrite",
+      "query": "复习为什么要隔几天再做",
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "id": "original-03",
+      "group": "original",
+      "query": "交错练习",
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "id": "rewrite-03",
+      "group": "rewrite",
+      "query": "做题时轮换不同题型有什么用",
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "id": "original-04",
+      "group": "original",
+      "query": "费曼学习法",
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "id": "rewrite-04",
+      "group": "rewrite",
+      "query": "给新手讲明白能检验自己是否懂了",
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "id": "original-05",
+      "group": "original",
+      "query": "精细加工",
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "id": "rewrite-05",
+      "group": "rewrite",
+      "query": "把新概念和旧经验联系起来",
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "id": "original-06",
+      "group": "original",
+      "query": "双重编码",
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "id": "rewrite-06",
+      "group": "rewrite",
+      "query": "同时用文字和示意图来学",
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "id": "original-07",
+      "group": "original",
+      "query": "认知负荷",
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "id": "rewrite-07",
+      "group": "rewrite",
+      "query": "信息太多脑子处理不过来怎么办",
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "id": "original-08",
+      "group": "original",
+      "query": "注意力残留",
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "id": "rewrite-08",
+      "group": "rewrite",
+      "query": "换任务后脑子还想着上一件事",
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "id": "original-09",
+      "group": "original",
+      "query": "检索增强生成",
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "id": "rewrite-09",
+      "group": "rewrite",
+      "query": "先查资料再让模型回答是什么方法",
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "id": "original-10",
+      "group": "original",
+      "query": "提示注入",
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "id": "rewrite-10",
+      "group": "rewrite",
+      "query": "网页里藏着让助手改规则的命令",
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "id": "original-11",
+      "group": "original",
+      "query": "模型幻觉",
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "id": "rewrite-11",
+      "group": "rewrite",
+      "query": "模型说得很肯定却编了不存在的引用",
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "id": "original-12",
+      "group": "original",
+      "query": "来源归因",
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "id": "rewrite-12",
+      "group": "rewrite",
+      "query": "这句话到底来自哪一段原文",
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "id": "original-13",
+      "group": "original",
+      "query": "幸存者偏差",
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "id": "rewrite-13",
+      "group": "rewrite",
+      "query": "只看成功案例会漏掉什么",
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "id": "original-14",
+      "group": "original",
+      "query": "确认偏误",
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "id": "rewrite-14",
+      "group": "rewrite",
+      "query": "为什么只愿意看支持自己观点的证据",
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "id": "original-15",
+      "group": "original",
+      "query": "沉没成本",
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "id": "rewrite-15",
+      "group": "rewrite",
+      "query": "因为已经花了很多钱就不肯放弃",
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "id": "original-16",
+      "group": "original",
+      "query": "机会成本",
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "id": "rewrite-16",
+      "group": "rewrite",
+      "query": "选了这件事就不能做另一件事的代价",
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "id": "original-17",
+      "group": "original",
+      "query": "执行意图",
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "id": "rewrite-17",
+      "group": "rewrite",
+      "query": "到了指定场景就做预定动作",
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "id": "original-18",
+      "group": "original",
+      "query": "番茄工作法",
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "id": "rewrite-18",
+      "group": "rewrite",
+      "query": "计时专注一会再短暂休息",
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "id": "original-19",
+      "group": "original",
+      "query": "版本控制",
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "id": "rewrite-19",
+      "group": "rewrite",
+      "query": "保存修改历史以便回退和合并",
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "id": "original-20",
+      "group": "original",
+      "query": "语音转录",
+      "relevant_ids": [
+        "target-20"
+      ]
+    },
+    {
+      "id": "rewrite-20",
+      "group": "rewrite",
+      "query": "把播客录音变成可搜索的文字",
+      "relevant_ids": [
+        "target-20"
+      ]
+    }
+  ]
+}

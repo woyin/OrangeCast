@@ -36,6 +36,6 @@ python3 scripts/semantic-quality-eval.py \
 
 报告始终写 `real_embeddings_verified=false`、`quality_gate_passed=false`、`cost=null`。只读接口不能证明向量来自真实模型，也不能补齐价格、延迟或人工评分。Owner 仍需核对真实模型执行记录、费用及完整要求，在设置页完成既有准入流程；脚本输出不是直接导入格式。
 
-本地已接入并实测 Jina `jina-embeddings-v5-text-small`，配置和供应商用量识别通过验证；尚未建立真实资料索引及40查询人工标注集，因此没有执行真实 Recall 评测。三条示例文本的相似度不能替代 Recall 验收。模拟单测与实际 API 集成只验证计算、失效、降级及只读契约。
+本地已接入并实测 Jina `jina-embeddings-v5-text-small`，配置和供应商用量识别通过验证；尚未建立真实资料索引及40查询人工标注集，因此尚未完成个人实际查询的 Recall 验收。已补充[真实Jina向量的受控检索评测](superpowers/validation/jina-retrieval-quality/README.md)：60条助手构造资料、40查询；改写组前十命中100%、首条命中75%，标注未由Owner复核，不用于自动准入。三条示例文本的相似度不能替代 Recall 验收。模拟单测与实际 API 集成只验证计算、失效、降级及只读契约。
 
 验证：`python3 -B scripts/semantic-quality-eval-test.py`；API 集成：`go test ./internal/server -run TestKnowledgeSemanticQualityRunnerReadonly -count=1`。
