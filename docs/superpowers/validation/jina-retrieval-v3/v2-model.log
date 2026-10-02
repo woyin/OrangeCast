@@ -1,0 +1,13 @@
+=== RUN   TestKnowledgeSemanticJinaLive
+    knowledge_jina_live_test.go:179: prepared 10/40 queries
+    knowledge_jina_live_test.go:179: prepared 20/40 queries
+    knowledge_jina_live_test.go:179: prepared 30/40 queries
+    knowledge_jina_live_test.go:179: prepared 40/40 queries
+    knowledge_jina_live_test.go:179: prepared 50/40 queries
+    knowledge_jina_live_test.go:179: prepared 60/40 queries
+    knowledge_jina_live_test.go:179: prepared 70/40 queries
+    knowledge_jina_live_test.go:179: prepared 80/40 queries
+    knowledge_jina_live_test.go:357: live report written; calls=84 tokens=2683 groups=map[holdout:map[hybrid:map[mrr_at_10:0.8391666666666666 recall_at_1:0.75 recall_at_10:1 recall_at_5:1] lexical:map[mrr_at_10:0 recall_at_1:0 recall_at_10:0 recall_at_5:0] rerank:map[mrr_at_10:0.8800000000000001 recall_at_1:0.8 recall_at_10:1 recall_at_5:0.95]] holdout_v3:map[hybrid:map[mrr_at_10:0.9291666666666666 recall_at_1:0.9 recall_at_10:1 recall_at_5:1] lexical:map[mrr_at_10:0 recall_at_1:0 recall_at_10:0 recall_at_5:0] rerank:map[mrr_at_10:0.875 recall_at_1:0.8 recall_at_10:0.95 recall_at_5:0.95]] original:map[hybrid:map[mrr_at_10:1 recall_at_1:1 recall_at_10:1 recall_at_5:1] lexical:map[mrr_at_10:1 recall_at_1:1 recall_at_10:1 recall_at_5:1] rerank:map[mrr_at_10:1 recall_at_1:1 recall_at_10:1 recall_at_5:1]] rewrite:map[hybrid:map[mrr_at_10:0.8833333333333334 recall_at_1:0.8 recall_at_10:1 recall_at_5:1] lexical:map[mrr_at_10:0 recall_at_1:0 recall_at_10:0 recall_at_5:0] rerank:map[mrr_at_10:0.527142857142857 recall_at_1:0.5 recall_at_10:0.65 recall_at_5:0.6]]]
+--- PASS: TestKnowledgeSemanticJinaLive (57.04s)
+PASS
+ok  	github.com/woyin/orangecast/internal/store	57.648s

@@ -18,7 +18,7 @@ func qualityGateFixture(t *testing.T, s *Store, id string) EmbeddingQualityRepor
 	if err != nil {
 		t.Fatal(err)
 	}
-	return EmbeddingQualityReport{Identity: identity, QueryManifestSHA256: strings.Repeat("a", 64), CorpusManifestSHA256: strings.Repeat("b", 64), RelevanceManifestSHA256: strings.Repeat("c", 64), SourceRevision: "test-fixture-not-quality-proof", Machine: "test-fixture", Method: "test-only declared fields", Fusion: "rrf-k60-lexical-semantic-v1", RealMeasurements: true, Queries: 40, Samples: 20, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000, FTSRecall10: .5, HybridRecall10: .6, RewriteFTSRecall10: .4, RewriteHybridRecall10: .6, Cold10kP95MS: 100, Cold50kP95MS: 400, Warm10kP95MS: 50, Warm50kP95MS: 100, EstimatedCostKnown: true, ActualCostKnown: true, PeakRSSBytes: 1024}
+	return EmbeddingQualityReport{Identity: identity, QueryManifestSHA256: strings.Repeat("a", 64), CorpusManifestSHA256: strings.Repeat("b", 64), RelevanceManifestSHA256: strings.Repeat("c", 64), SourceRevision: "test-fixture-not-quality-proof", Machine: "test-fixture", Method: "test-only declared fields", Fusion: KnowledgeFusionVersion, RealMeasurements: true, Queries: 40, Samples: 20, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000, FTSRecall10: .5, HybridRecall10: .6, RewriteFTSRecall10: .4, RewriteHybridRecall10: .6, Cold10kP95MS: 100, Cold50kP95MS: 400, Warm10kP95MS: 50, Warm50kP95MS: 100, EstimatedCostKnown: true, ActualCostKnown: true, PeakRSSBytes: 1024}
 }
 
 func TestEmbeddingSettingsCASAtomicScopePriceCapacity(t *testing.T) {

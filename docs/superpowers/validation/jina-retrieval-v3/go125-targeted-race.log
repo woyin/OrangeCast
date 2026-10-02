@@ -1,0 +1,4 @@
+ok  	github.com/woyin/orangecast/internal/store	11.164s
+ok  	github.com/woyin/orangecast/internal/provider	1.745s
+ok  	github.com/woyin/orangecast/internal/queue	16.337s
+ok  	github.com/woyin/orangecast/internal/server	11.289s

@@ -13,7 +13,7 @@ import (
 )
 
 func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
-	for _, mode := range []string{"success", "invalid-response", "unknown", "checkpoint", "route", "malformed", "stopped", "revoked", "bad-checkpoint", "unavailable", "unpriced", "checkpoint-write", "receipt-write", "error-receipt-write", "unknown-write"} {
+	for _, mode := range []string{"success", "invalid-response", "unknown", "checkpoint", "route", "malformed", "stopped", "revoked", "bad-checkpoint", "unavailable", "unpriced", "checkpoint-write", "receipt-write", "error-receipt-write", "unknown-write", "started-unknown-write", "checkpoint-receipt-write"} {
 		t.Run(mode, func(t *testing.T) {
 			s, w := newTestWorker(t)
 			ctx := t.Context()
@@ -39,7 +39,7 @@ func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
 			}
 			s.DB.Exec(`UPDATE processing_jobs SET status='running' WHERE id=?`, job.ID)
 			switch mode {
-			case "unknown":
+			case "unknown", "started-unknown-write":
 				s.DB.Exec(`UPDATE processing_jobs SET remote_call_started=1 WHERE id=?`, job.ID)
 			case "checkpoint":
 				if err = w.processJob(ctx, job); err != nil {
@@ -54,7 +54,7 @@ func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
 				if err = s.SetOwnerMonthlyBudget(ctx, &budget); err != nil {
 					t.Fatal(err)
 				}
-			case "checkpoint-write":
+			case "checkpoint-write", "checkpoint-receipt-write":
 				_, err = s.DB.Exec(`CREATE TRIGGER fail_checkpoint BEFORE UPDATE OF checkpoint_json ON processing_jobs BEGIN SELECT RAISE(ABORT,'test persistence failure'); END`)
 				if err != nil {
 					t.Fatal(err)
@@ -82,6 +82,18 @@ func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
 			case "bad-checkpoint":
 				s.DB.Exec(`UPDATE processing_jobs SET checkpoint_json='{}' WHERE id=?`, job.ID)
 			}
+			if mode == "started-unknown-write" {
+				_, err = s.DB.Exec(`CREATE TRIGGER fail_started_unknown BEFORE UPDATE OF result_state ON processing_jobs WHEN NEW.result_state='unknown' BEGIN SELECT RAISE(ABORT,'test unknown failure'); END`)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "checkpoint-receipt-write" {
+				_, err = s.DB.Exec(`CREATE TRIGGER fail_both_receipt BEFORE INSERT ON usage_records BEGIN SELECT RAISE(ABORT,'test receipt failure'); END`)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			err = w.processJob(ctx, job)
 			if mode == "success" || mode == "checkpoint" {
 				if err != nil || calls != 1 {
@@ -90,7 +102,7 @@ func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
 			} else if err == nil {
 				t.Fatal("accepted", mode)
 			}
-			if mode != "success" && mode != "checkpoint" && mode != "invalid-response" && mode != "checkpoint-write" && mode != "receipt-write" && mode != "error-receipt-write" && mode != "unknown-write" && calls != 0 {
+			if mode != "success" && mode != "checkpoint" && mode != "invalid-response" && mode != "checkpoint-write" && mode != "receipt-write" && mode != "error-receipt-write" && mode != "unknown-write" && mode != "checkpoint-receipt-write" && calls != 0 {
 				t.Fatal("unauthorized replay", calls)
 			}
 			if mode == "unknown" || mode == "invalid-response" {
@@ -100,6 +112,22 @@ func TestKnowledgeRerankWorkerRecovery(t *testing.T) {
 				}
 				if w.processJob(ctx, job) == nil || calls > 1 {
 					t.Fatal("unknown replay")
+				}
+			}
+			if mode == "checkpoint-write" || mode == "checkpoint-receipt-write" {
+				var receipts int
+				if err := s.DB.QueryRow(`SELECT COUNT(*) FROM usage_records WHERE receipt_id=?`, job.ID+":knowledge_rerank").Scan(&receipts); err != nil {
+					t.Fatal(err)
+				}
+				want := 1
+				if mode == "checkpoint-receipt-write" {
+					want = 0
+				}
+				if receipts != want {
+					t.Fatal("lost usage", receipts, want)
+				}
+				if w.processJob(ctx, job) == nil || calls != 1 {
+					t.Fatal("paid replay", calls)
 				}
 			}
 			if mode == "success" {

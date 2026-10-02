@@ -200,7 +200,7 @@ func embeddingQualityIdentity(ctx context.Context, q reviewReader, id string) (s
 	if err != nil {
 		return "", err
 	}
-	payload, _ := json.Marshal([]any{runtimeIdentity, understandings, cfg.ID, cfg.ConnectionID, cfg.Provider, cfg.Model, cfg.Dimensions, cfg.Unit, cfg.Enabled, cfg.Revision, cfg.WindowCapacity, index, del, price, updated, "rrf-k60-lexical-semantic-v1"})
+	payload, _ := json.Marshal([]any{runtimeIdentity, understandings, cfg.ID, cfg.ConnectionID, cfg.Provider, cfg.Model, cfg.Dimensions, cfg.Unit, cfg.Enabled, cfg.Revision, cfg.WindowCapacity, index, del, price, updated, KnowledgeFusionVersion})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
 }
@@ -215,7 +215,7 @@ func validRecall(v float64) bool     { return !math.IsNaN(v) && !math.IsInf(v, 0
 func positiveMeasure(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v > 0 }
 
 func validateEmbeddingQualityReport(r EmbeddingQualityReport) error {
-	if !validQualityHash(r.Identity) || !validQualityHash(r.QueryManifestSHA256) || !validQualityHash(r.CorpusManifestSHA256) || !validQualityHash(r.RelevanceManifestSHA256) || !r.RealMeasurements || r.PerformanceDimensions != 2048 || r.Windows10k != 10000 || r.Windows50k != 50000 || r.Queries != 40 || r.Samples < 20 || strings.TrimSpace(r.SourceRevision) == "" || len(r.SourceRevision) > 200 || strings.TrimSpace(r.Machine) == "" || len(r.Machine) > 1000 || strings.TrimSpace(r.Method) == "" || len(r.Method) > 4000 || r.Fusion != "rrf-k60-lexical-semantic-v1" || r.PeakRSSBytes <= 0 || !r.EstimatedCostKnown || !r.ActualCostKnown || r.EstimatedCents < 0 || r.ActualCents < 0 {
+	if !validQualityHash(r.Identity) || !validQualityHash(r.QueryManifestSHA256) || !validQualityHash(r.CorpusManifestSHA256) || !validQualityHash(r.RelevanceManifestSHA256) || !r.RealMeasurements || r.PerformanceDimensions != 2048 || r.Windows10k != 10000 || r.Windows50k != 50000 || r.Queries != 40 || r.Samples < 20 || strings.TrimSpace(r.SourceRevision) == "" || len(r.SourceRevision) > 200 || strings.TrimSpace(r.Machine) == "" || len(r.Machine) > 1000 || strings.TrimSpace(r.Method) == "" || len(r.Method) > 4000 || r.Fusion != KnowledgeFusionVersion || r.PeakRSSBytes <= 0 || !r.EstimatedCostKnown || !r.ActualCostKnown || r.EstimatedCents < 0 || r.ActualCents < 0 {
 		return ErrInvalidEditorialState
 	}
 	for _, v := range []float64{r.FTSRecall10, r.HybridRecall10, r.RewriteFTSRecall10, r.RewriteHybridRecall10} {

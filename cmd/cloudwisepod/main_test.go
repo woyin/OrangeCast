@@ -661,3 +661,34 @@ func TestRunTTSCheck_EngineUnavailableExits(t *testing.T) {
 	os.Args = []string{"cloudwisepod", "tts-check"}
 	runTTSCheck([]string{})
 }
+
+func TestRunServeRejectsMalformedEnvironmentFile(t *testing.T) {
+	if os.Getenv("CWP_TEST_MALFORMED_ENV") == "1" {
+		runServe()
+		return
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("INVALID LINE WITHOUT EQUALS\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunServeRejectsMalformedEnvironmentFile$")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CWP_TEST_MALFORMED_ENV=1")
+	output, err := cmd.CombinedOutput()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 || !strings.Contains(string(output), "加载环境配置失败") {
+		t.Fatalf("startup did not reject malformed env: %s %v", output, err)
+	}
+}
+
+func TestFileSizeForExportArtifactAndMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "export.json")
+	if fileSize(path) != 0 {
+		t.Fatal("missing artifact has size")
+	}
+	if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if fileSize(path) != 2 {
+		t.Fatal("wrong exported byte count")
+	}
+}

@@ -1,0 +1,3642 @@
+{
+  "fixture_sha256": "6804dddd3f3f9b15f6907eb9eb552bddacfc411cfdd777ddf30887a6ab688fa2",
+  "fts_regressions": 0,
+  "groups": {
+    "holdout": {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid": {
+        "mrr_at_10": 0.8391666666666666,
+        "recall_at_1": 0.75,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    "holdout_v3": {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "guarded_rerank": {
+        "mrr_at_10": 0.975,
+        "recall_at_1": 0.95,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid": {
+        "mrr_at_10": 0.9291666666666666,
+        "recall_at_1": 0.9,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "raw_rerank": {
+        "mrr_at_10": 0.975,
+        "recall_at_1": 0.95,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    "original": {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    "rewrite": {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid": {
+        "mrr_at_10": 0.8833333333333334,
+        "recall_at_1": 0.8,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "raw_rerank": {
+        "mrr_at_10": 0.9550000000000001,
+        "recall_at_1": 0.95,
+        "recall_at_10": 1,
+        "recall_at_5": 0.95
+      }
+    }
+  },
+  "human_attested_relevance": false,
+  "personal_corpus": false,
+  "quality_gate_passed": false,
+  "queries": 80,
+  "ranking_policy": "rrf-k60-lexical-prefix-v2",
+  "remote_calls_in_replay": 0,
+  "replay_source_sha256": "f9ea2121391f576668dd8c20ce0b259c6f69ab3c222747ed7d101de01ab14175",
+  "rerank_policy": "rerank-top10-lexical-disagreement-guard-v3",
+  "results": [
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-01",
+        "distractor-14-a",
+        "target-02",
+        "distractor-05-a",
+        "distractor-07-b",
+        "target-08",
+        "distractor-02-b",
+        "distractor-17-b",
+        "distractor-04-b",
+        "distractor-14-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-01",
+      "query": "主动回忆",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-01",
+        "distractor-04-b",
+        "distractor-05-a",
+        "distractor-01-a",
+        "distractor-02-b",
+        "target-02",
+        "distractor-03-a",
+        "distractor-07-b",
+        "distractor-07-a",
+        "distractor-02-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-01",
+      "query": "读完合上书自测能帮助记忆吗",
+      "raw_rerank": {
+        "mrr_at_10": 0.1,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 0
+      },
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-02",
+        "distractor-02-a",
+        "distractor-05-a",
+        "distractor-03-a",
+        "distractor-18-a",
+        "distractor-01-a",
+        "target-03",
+        "target-18",
+        "distractor-08-b",
+        "distractor-04-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-02",
+      "query": "间隔重复",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-02",
+        "distractor-02-b",
+        "distractor-02-a",
+        "distractor-03-a",
+        "distractor-01-a",
+        "distractor-05-a",
+        "distractor-18-b",
+        "target-18",
+        "distractor-04-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-02",
+      "query": "复习为什么要隔几天再做",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-03",
+        "distractor-03-a",
+        "distractor-03-b",
+        "target-02",
+        "distractor-02-a",
+        "distractor-08-a",
+        "distractor-01-a",
+        "distractor-06-b",
+        "distractor-18-a",
+        "target-18"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-03",
+      "query": "交错练习",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-03",
+        "distractor-03-a",
+        "distractor-03-b",
+        "target-02",
+        "distractor-18-b",
+        "distractor-04-b",
+        "target-18",
+        "distractor-02-a",
+        "distractor-01-a",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-03",
+      "query": "做题时轮换不同题型有什么用",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-04",
+        "target-05",
+        "distractor-03-a",
+        "target-02",
+        "distractor-02-a",
+        "target-03",
+        "distractor-01-a",
+        "distractor-02-b",
+        "target-18",
+        "distractor-06-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-04",
+      "query": "费曼学习法",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-04",
+        "distractor-04-b",
+        "distractor-11-a",
+        "distractor-01-a",
+        "distractor-14-a",
+        "distractor-05-a",
+        "target-05",
+        "distractor-03-a",
+        "target-01",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-04",
+      "query": "给新手讲明白能检验自己是否懂了",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-05",
+        "distractor-08-a",
+        "target-07",
+        "distractor-04-a",
+        "distractor-03-a",
+        "distractor-18-b",
+        "distractor-09-a",
+        "target-08",
+        "distractor-02-a",
+        "distractor-01-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-05",
+      "query": "精细加工",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-05",
+        "distractor-05-a",
+        "target-04",
+        "distractor-03-a",
+        "target-02",
+        "distractor-07-b",
+        "distractor-02-a",
+        "distractor-04-b",
+        "distractor-02-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-05",
+      "query": "把新概念和旧经验联系起来",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-06",
+        "distractor-06-b",
+        "target-09",
+        "distractor-05-a",
+        "target-02",
+        "target-10",
+        "distractor-19-a",
+        "distractor-20-b",
+        "distractor-08-a",
+        "distractor-19-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-06",
+      "query": "双重编码",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-06",
+        "distractor-06-b",
+        "distractor-06-a",
+        "target-04",
+        "target-03",
+        "distractor-05-b",
+        "distractor-04-b",
+        "distractor-03-a",
+        "distractor-01-b",
+        "target-02"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-06",
+      "query": "同时用文字和示意图来学",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-07",
+        "distractor-08-a",
+        "distractor-07-b",
+        "distractor-07-a",
+        "target-08",
+        "distractor-06-b",
+        "distractor-15-a",
+        "distractor-02-b",
+        "target-14",
+        "distractor-05-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-07",
+      "query": "认知负荷",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-07",
+        "target-18",
+        "distractor-07-a",
+        "distractor-07-b",
+        "target-05",
+        "target-08",
+        "distractor-08-a",
+        "target-04",
+        "distractor-06-b",
+        "distractor-08-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-07",
+      "query": "信息太多脑子处理不过来怎么办",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-08",
+        "distractor-08-b",
+        "distractor-07-a",
+        "distractor-07-b",
+        "distractor-02-b",
+        "target-07",
+        "distractor-14-b",
+        "target-18",
+        "target-01",
+        "target-13"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-08",
+      "query": "注意力残留",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-08",
+        "distractor-08-b",
+        "distractor-07-a",
+        "target-07",
+        "distractor-08-a",
+        "distractor-07-b",
+        "distractor-18-b",
+        "distractor-03-a",
+        "distractor-17-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-08",
+      "query": "换任务后脑子还想着上一件事",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-09",
+        "distractor-09-b",
+        "target-11",
+        "distractor-11-b",
+        "distractor-05-a",
+        "target-10",
+        "distractor-20-a",
+        "distractor-10-b",
+        "target-01",
+        "target-02"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-09",
+      "query": "检索增强生成",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-09",
+        "distractor-09-a",
+        "distractor-09-b",
+        "distractor-12-b",
+        "target-01",
+        "distractor-03-a",
+        "target-04",
+        "distractor-14-a",
+        "target-11",
+        "distractor-01-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-09",
+      "query": "先查资料再让模型回答是什么方法",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-10",
+        "distractor-01-b",
+        "distractor-10-a",
+        "target-09",
+        "target-17",
+        "distractor-14-b",
+        "target-08",
+        "distractor-12-a",
+        "distractor-08-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-10",
+      "query": "提示注入",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-10",
+        "distractor-10-b",
+        "target-17",
+        "distractor-09-a",
+        "distractor-10-a",
+        "target-09",
+        "target-19",
+        "distractor-01-b",
+        "distractor-19-b",
+        "distractor-08-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-10",
+      "query": "网页里藏着让助手改规则的命令",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-11",
+        "distractor-09-a",
+        "target-09",
+        "target-10",
+        "distractor-06-a",
+        "target-14",
+        "distractor-14-b",
+        "distractor-02-b",
+        "distractor-14-a",
+        "distractor-05-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-11",
+      "query": "模型幻觉",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-11",
+        "distractor-09-a",
+        "distractor-11-a",
+        "distractor-12-b",
+        "distractor-11-b",
+        "target-12",
+        "distractor-12-a",
+        "target-14",
+        "target-10",
+        "distractor-14-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-11",
+      "query": "模型说得很肯定却编了不存在的引用",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-12",
+        "distractor-12-b",
+        "distractor-13-a",
+        "target-05",
+        "target-09",
+        "target-13",
+        "target-14",
+        "target-01",
+        "distractor-05-a",
+        "distractor-14-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-12",
+      "query": "来源归因",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-12",
+        "distractor-12-b",
+        "distractor-05-a",
+        "distractor-11-a",
+        "target-09",
+        "distractor-01-a",
+        "distractor-01-b",
+        "distractor-04-b",
+        "distractor-11-b",
+        "target-04"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-12",
+      "query": "这句话到底来自哪一段原文",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-13",
+        "distractor-13-a",
+        "distractor-13-b",
+        "target-14",
+        "distractor-02-b",
+        "distractor-11-b",
+        "distractor-14-b",
+        "distractor-19-a",
+        "target-08",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-13",
+      "query": "幸存者偏差",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-13",
+        "distractor-13-a",
+        "distractor-13-b",
+        "distractor-17-b",
+        "distractor-16-b",
+        "distractor-12-b",
+        "distractor-03-a",
+        "distractor-05-a",
+        "distractor-04-b",
+        "target-04"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-13",
+      "query": "只看成功案例会漏掉什么",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-14",
+        "target-13",
+        "distractor-13-b",
+        "distractor-13-a",
+        "distractor-11-b",
+        "distractor-14-a",
+        "distractor-11-a",
+        "distractor-14-b",
+        "target-11",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-14",
+      "query": "确认偏误",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-14",
+        "distractor-13-a",
+        "target-13",
+        "distractor-12-a",
+        "distractor-13-b",
+        "distractor-11-a",
+        "distractor-14-a",
+        "distractor-14-b",
+        "distractor-12-b",
+        "target-12"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-14",
+      "query": "为什么只愿意看支持自己观点的证据",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-15",
+        "distractor-15-b",
+        "distractor-16-a",
+        "distractor-15-a",
+        "target-16",
+        "distractor-02-b",
+        "target-13",
+        "target-10",
+        "target-08",
+        "target-07"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-15",
+      "query": "沉没成本",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-15",
+        "distractor-16-a",
+        "distractor-16-b",
+        "target-16",
+        "distractor-15-a",
+        "distractor-17-b",
+        "target-08",
+        "distractor-08-a",
+        "distractor-11-a",
+        "target-13"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-15",
+      "query": "因为已经花了很多钱就不肯放弃",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-16",
+        "distractor-16-b",
+        "distractor-15-a",
+        "distractor-16-a",
+        "distractor-15-b",
+        "target-15",
+        "distractor-08-a",
+        "target-13",
+        "distractor-13-a",
+        "target-02"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-16",
+      "query": "机会成本",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-16",
+        "distractor-08-a",
+        "target-08",
+        "distractor-15-b",
+        "distractor-16-b",
+        "distractor-15-a",
+        "distractor-13-a",
+        "distractor-18-b",
+        "target-15",
+        "target-07"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-16",
+      "query": "选了这件事就不能做另一件事的代价",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-17",
+        "distractor-17-a",
+        "distractor-10-a",
+        "distractor-17-b",
+        "target-10",
+        "distractor-10-b",
+        "distractor-18-b",
+        "distractor-02-a",
+        "target-02",
+        "distractor-08-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-17",
+      "query": "执行意图",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-17",
+        "distractor-17-b",
+        "distractor-17-a",
+        "distractor-10-a",
+        "distractor-18-b",
+        "distractor-03-a",
+        "target-10",
+        "distractor-18-a",
+        "distractor-14-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-17",
+      "query": "到了指定场景就做预定动作",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-18",
+        "distractor-18-b",
+        "distractor-18-a",
+        "distractor-03-a",
+        "target-02",
+        "distractor-07-a",
+        "distractor-03-b",
+        "target-07",
+        "target-03",
+        "target-04"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-18",
+      "query": "番茄工作法",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-18",
+        "distractor-18-b",
+        "distractor-18-a",
+        "target-08",
+        "distractor-07-a",
+        "distractor-08-b",
+        "target-02",
+        "target-07",
+        "distractor-07-b",
+        "distractor-02-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-18",
+      "query": "计时专注一会再短暂休息",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-19-b",
+        "target-12",
+        "distractor-10-b",
+        "distractor-05-a",
+        "target-02",
+        "distractor-09-a",
+        "distractor-10-a",
+        "target-18"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-19",
+      "query": "版本控制",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-19-b",
+        "target-12",
+        "distractor-07-b",
+        "distractor-05-a",
+        "target-02",
+        "distractor-01-b",
+        "target-09",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-19",
+      "query": "保存修改历史以便回退和合并",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "group": "original",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-20",
+        "distractor-20-a",
+        "distractor-20-b",
+        "distractor-10-a",
+        "distractor-05-a",
+        "target-09",
+        "distractor-09-b",
+        "target-19",
+        "distractor-04-b",
+        "target-06"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "original-20",
+      "query": "语音转录",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-20"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "rewrite",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-20",
+        "distractor-20-a",
+        "distractor-20-b",
+        "distractor-01-b",
+        "distractor-09-b",
+        "distractor-05-a",
+        "target-09",
+        "distractor-04-b",
+        "target-19",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "rewrite-20",
+      "query": "把播客录音变成可搜索的文字",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-20"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-01",
+        "distractor-03-a",
+        "distractor-01-a",
+        "target-03",
+        "target-04",
+        "distractor-04-b",
+        "distractor-02-a",
+        "target-02",
+        "distractor-03-b",
+        "distractor-01-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.2,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-01",
+      "query": "不翻课本先写答案然后查漏补缺，属于哪种练习？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-02",
+        "distractor-02-b",
+        "distractor-02-a",
+        "distractor-03-a",
+        "target-03",
+        "distractor-18-a",
+        "target-18",
+        "distractor-18-b",
+        "distractor-07-b",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-02",
+      "query": "复习日程不是都放在同一天，而是越隔越久，是什么方法？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-03",
+        "distractor-03-b",
+        "distractor-03-a",
+        "distractor-04-b",
+        "distractor-06-b",
+        "distractor-13-a",
+        "target-02",
+        "distractor-01-a",
+        "distractor-02-a",
+        "target-04"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-03",
+      "query": "一组题里同时放几种解法，让我先判断选哪种，这是怎样训练？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-04",
+        "target-01",
+        "distractor-03-a",
+        "distractor-05-a",
+        "distractor-01-a",
+        "target-02",
+        "target-03",
+        "distractor-04-b",
+        "distractor-02-a",
+        "target-18"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-04",
+      "query": "我讲给完全没基础的人听，卡住就重新查资料，这是什么学习方式？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-05",
+        "distractor-05-a",
+        "target-02",
+        "target-04",
+        "distractor-03-a",
+        "distractor-04-b",
+        "target-03",
+        "target-12",
+        "target-01",
+        "distractor-02-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-05",
+      "query": "把刚学到的内容和过去经验连接并解释原因，有什么方法？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-06",
+        "distractor-06-a",
+        "target-04",
+        "target-05",
+        "distractor-04-b",
+        "distractor-05-b",
+        "distractor-01-b",
+        "distractor-05-a",
+        "distractor-01-a",
+        "target-03"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-06",
+      "query": "用解释文字配上表达同一意思的图，怎样帮助学习？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-07",
+        "distractor-06-a",
+        "distractor-03-a",
+        "distractor-04-b",
+        "target-05",
+        "target-04",
+        "distractor-01-a",
+        "target-02",
+        "distractor-05-a",
+        "distractor-02-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-07",
+      "query": "删掉讲义的花哨背景再逐步讲解，是为了减轻什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-08",
+        "distractor-08-b",
+        "distractor-18-b",
+        "target-07",
+        "target-18",
+        "distractor-03-a",
+        "distractor-17-b",
+        "distractor-08-a",
+        "target-17",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-08",
+      "query": "开始下一件事后还总想着没做完的上一件事，是什么现象？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-09",
+        "distractor-12-b",
+        "distractor-09-a",
+        "distractor-01-b",
+        "target-12",
+        "distractor-09-b",
+        "target-01",
+        "distractor-01-a",
+        "distractor-04-b",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-09",
+      "query": "回答之前先查自己的资料库并挑出有关段落，叫什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-10",
+        "distractor-10-b",
+        "target-09",
+        "target-17",
+        "distractor-10-a",
+        "target-01",
+        "distractor-14-a",
+        "target-07",
+        "distractor-08-b",
+        "target-08"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-10",
+      "query": "资料里让助手放弃系统规则的隐藏命令，是什么攻击？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-11",
+        "target-12",
+        "distractor-12-b",
+        "distractor-13-b",
+        "distractor-14-a",
+        "target-09",
+        "target-10",
+        "distractor-10-b",
+        "distractor-09-b",
+        "target-14"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-11",
+      "query": "助手给出查不到的出处和捏造的数据，这属于什么问题？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-12",
+        "distractor-12-b",
+        "distractor-01-b",
+        "distractor-12-a",
+        "target-01",
+        "distractor-04-b",
+        "target-05",
+        "distractor-05-a",
+        "distractor-14-b",
+        "target-04"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-12",
+      "query": "怎样记下结论对应原始材料中的位置方便核对？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-13",
+        "distractor-13-a",
+        "distractor-16-b",
+        "distractor-13-b",
+        "distractor-16-a",
+        "distractor-11-b",
+        "target-14",
+        "target-15",
+        "distractor-14-b",
+        "distractor-03-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-13",
+      "query": "研究赢家却没有计算退出的人，会产生什么统计偏差？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-14",
+        "distractor-14-a",
+        "distractor-13-a",
+        "distractor-13-b",
+        "distractor-14-b",
+        "target-13",
+        "distractor-11-a",
+        "distractor-11-b",
+        "target-11",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-14",
+      "query": "我总是相信赞同自己的证据，对反证却特别挑剔，是什么偏差？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-15",
+        "distractor-16-b",
+        "distractor-16-a",
+        "target-16",
+        "distractor-15-a",
+        "distractor-07-b",
+        "distractor-14-b",
+        "target-08",
+        "target-04",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-15",
+      "query": "钱已经花掉也拿不回来了，继续之前应如何看待这笔投入？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-16",
+        "distractor-16-b",
+        "distractor-15-a",
+        "target-15",
+        "distractor-14-b",
+        "distractor-02-b",
+        "distractor-13-a",
+        "target-13",
+        "distractor-03-b",
+        "target-14"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-16",
+      "query": "选了现在这条路就不能选的最好另一条路，其价值叫什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-17",
+        "target-18",
+        "distractor-17-b",
+        "distractor-18-b",
+        "distractor-02-a",
+        "distractor-03-a",
+        "distractor-18-a",
+        "target-02",
+        "target-01",
+        "distractor-04-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.25,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-17",
+      "query": "如果晚饭结束我就复习十分钟，这种预设行动计划是什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-18",
+        "distractor-18-a",
+        "distractor-18-b",
+        "distractor-03-a",
+        "distractor-02-a",
+        "distractor-08-a",
+        "target-08",
+        "target-02",
+        "distractor-07-a",
+        "distractor-08-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-18",
+      "query": "用计时器安排一段集中工作再短暂休息，是什么方法？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-19-b",
+        "distractor-05-a",
+        "distractor-08-a",
+        "target-01",
+        "distractor-01-b",
+        "distractor-10-b",
+        "target-09",
+        "distractor-06-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-19",
+      "query": "多人修改同一文件，要对比差异并找回旧状态，需要什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-20",
+        "distractor-20-a",
+        "distractor-01-b",
+        "distractor-20-b",
+        "target-09",
+        "distractor-09-b",
+        "distractor-18-a",
+        "distractor-04-b",
+        "distractor-19-b",
+        "distractor-10-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-20",
+      "query": "把访谈声音变成带时间位置的文字，是什么功能？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-20"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-01",
+        "distractor-05-a",
+        "distractor-04-b",
+        "distractor-01-a",
+        "target-02",
+        "distractor-03-a",
+        "distractor-02-a",
+        "target-04",
+        "target-03",
+        "distractor-01-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-01",
+      "query": "拿一张白纸，把学过的内容默写出来再核对遗漏，这类学习动作叫什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-01"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "distractor-02-a",
+        "target-02",
+        "distractor-03-a",
+        "distractor-18-a",
+        "target-18",
+        "target-03",
+        "distractor-18-b",
+        "distractor-01-a",
+        "target-04",
+        "distractor-06-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-02",
+      "query": "同一章节下周和下个月再各练一次，而不是一晚刷完，适合怎样安排？",
+      "raw_rerank": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-02"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-03",
+        "distractor-03-a",
+        "distractor-03-b",
+        "target-02",
+        "target-05",
+        "distractor-02-a",
+        "distractor-01-a",
+        "target-04",
+        "distractor-06-a",
+        "distractor-06-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-03",
+      "query": "把代数与几何题穿插起来，先判断需要哪种解法，可以怎样练习？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-03"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-04",
+        "target-05",
+        "distractor-05-a",
+        "target-01",
+        "distractor-03-a",
+        "target-02",
+        "target-03",
+        "distractor-01-a",
+        "distractor-04-b",
+        "distractor-02-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-04",
+      "query": "我试着给孩子解释一个概念，发现讲不清再查资料，属于什么学习方法？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-04"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-05",
+        "target-04",
+        "distractor-05-a",
+        "distractor-05-b",
+        "distractor-03-a",
+        "distractor-04-b",
+        "target-02",
+        "target-01",
+        "distractor-01-a",
+        "distractor-02-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-05",
+      "query": "通过自己的经验和例子理解新概念，并解释其中联系，是什么策略？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-05"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-06",
+        "distractor-06-a",
+        "target-04",
+        "target-05",
+        "distractor-03-a",
+        "target-03",
+        "target-02",
+        "distractor-05-b",
+        "distractor-04-b",
+        "distractor-01-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 0.25,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-06",
+      "query": "概念既写成说明，又画成表达同一含义的图，会用到什么学习策略？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-06"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-07",
+        "target-04",
+        "target-05",
+        "distractor-03-a",
+        "target-02",
+        "distractor-05-a",
+        "target-18",
+        "distractor-06-b",
+        "target-03",
+        "distractor-04-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-07",
+      "query": "复杂教程拆成步骤，并移除多余细节，可以降低哪一种学习负担？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-07"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-08",
+        "distractor-08-b",
+        "distractor-18-b",
+        "target-07",
+        "distractor-08-a",
+        "target-01",
+        "target-18",
+        "distractor-07-b",
+        "distractor-17-b",
+        "distractor-02-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-08",
+      "query": "邮件没处理完就开始写报告，却总想着邮件，如何描述这种影响？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-08"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-09",
+        "distractor-09-b",
+        "distractor-12-b",
+        "distractor-01-b",
+        "distractor-03-a",
+        "target-01",
+        "target-05",
+        "target-03",
+        "distractor-08-b",
+        "target-18"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-09",
+      "query": "让助手先从笔记库挑出有关段落，再结合这些材料回答，叫什么技术？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-09"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-10",
+        "distractor-10-b",
+        "distractor-10-a",
+        "target-08",
+        "distractor-19-b",
+        "target-07",
+        "distractor-08-b",
+        "target-14",
+        "distractor-07-b",
+        "distractor-08-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-10",
+      "query": "网页里出现让助手忽略系统要求并交出密钥的命令，属于哪类问题？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-10"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-11",
+        "distractor-13-b",
+        "target-12",
+        "distractor-12-b",
+        "target-10",
+        "distractor-11-b",
+        "target-09",
+        "distractor-14-a",
+        "target-14",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-11",
+      "query": "助手一本正经地捏造不存在的论文出处和数字，如何称呼这种现象？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-11"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-12",
+        "distractor-12-b",
+        "distractor-12-a",
+        "distractor-01-b",
+        "distractor-05-a",
+        "distractor-01-a",
+        "target-09",
+        "distractor-04-b",
+        "target-20",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-12",
+      "query": "想让每个论点都能追溯到原文具体段落，应记录哪些信息？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-12"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-13",
+        "distractor-13-a",
+        "distractor-13-b",
+        "distractor-16-b",
+        "target-15",
+        "distractor-16-a",
+        "distractor-11-b",
+        "target-14",
+        "distractor-12-b",
+        "distractor-11-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-13",
+      "query": "只统计创业成功的公司，没有统计倒闭的公司，会出现哪种偏差？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-13"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-14",
+        "distractor-13-a",
+        "target-13",
+        "distractor-13-b",
+        "distractor-14-a",
+        "distractor-14-b",
+        "distractor-12-b",
+        "distractor-11-a",
+        "target-11",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-14",
+      "query": "看到支持自己意见的资料就相信，对反对材料却忽略，属于什么偏差？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-14"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-15",
+        "distractor-16-a",
+        "distractor-16-b",
+        "distractor-15-b",
+        "target-16",
+        "distractor-15-a",
+        "distractor-07-b",
+        "distractor-03-a",
+        "target-12",
+        "target-08"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-15",
+      "query": "项目已经花的钱无法退回，还要不要继续，应如何理解这笔投入？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-15"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-16",
+        "distractor-08-a",
+        "distractor-16-a",
+        "distractor-15-a",
+        "target-15",
+        "distractor-02-a",
+        "distractor-16-b",
+        "distractor-18-a",
+        "distractor-07-b",
+        "distractor-18-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-16",
+      "query": "把时间用于这个主题就不能用于另一个更好的主题，这种代价叫什么？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-16"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-17",
+        "distractor-17-a",
+        "distractor-17-b",
+        "distractor-18-b",
+        "distractor-02-a",
+        "target-02",
+        "target-18",
+        "distractor-02-b",
+        "distractor-03-a",
+        "target-01"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-17",
+      "query": "提前决定到了上午九点就打开书复习，把情境和行动绑定，是哪种计划？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-17"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-18",
+        "distractor-18-a",
+        "distractor-18-b",
+        "distractor-03-a",
+        "target-02",
+        "distractor-08-a",
+        "distractor-02-a",
+        "target-03",
+        "distractor-08-b",
+        "target-08"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-18",
+      "query": "工作二十五分钟休息五分钟，用计时器循环安排，这是什么方法？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-18"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-01-b",
+        "distractor-19-b",
+        "target-10",
+        "target-06",
+        "distractor-09-a",
+        "target-09",
+        "distractor-08-a",
+        "distractor-10-b"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-19",
+      "query": "想知道代码什么时候被改过，并把几个人的改动合到一起，需要什么工具？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-19"
+      ]
+    },
+    {
+      "fts": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "group": "holdout_v3",
+      "guarded_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "guarded_top10": [
+        "target-20",
+        "distractor-01-b",
+        "distractor-20-a",
+        "distractor-20-b",
+        "target-09",
+        "distractor-04-b",
+        "distractor-09-b",
+        "distractor-19-b",
+        "distractor-10-a",
+        "distractor-18-a"
+      ],
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "id": "holdout-v3-20",
+      "query": "采访录音想变成可定位到说话时间的文字，应使用什么功能？",
+      "raw_rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "relevant_ids": [
+        "target-20"
+      ]
+    }
+  ],
+  "strict_mrr_improvements": 60,
+  "ties": 20
+}

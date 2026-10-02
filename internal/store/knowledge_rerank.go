@@ -36,7 +36,7 @@ type KnowledgeRerankInput struct {
 
 func rerankHash(v any) string { b, _ := json.Marshal(v); return fmt.Sprintf("%x", sha256.Sum256(b)) }
 
-func (s *Store) prepareRerank(ctx context.Context, req KnowledgeRetrieveQuery, cfg provider.RerankConfig) (KnowledgeRerankInput, KnowledgeRetrieveResult, error) {
+func (s *Store) prepareRerank(ctx context.Context, req KnowledgeRetrieveQuery, cfg provider.RerankConfig, evaluation bool) (KnowledgeRerankInput, KnowledgeRetrieveResult, error) {
 	in := KnowledgeRerankInput{Version: "knowledge-rerank-v1", Config: cfg}
 	req.Rerank = nil
 	req.Search.Page, req.Search.PerPage = 1, 30
@@ -44,7 +44,7 @@ func (s *Store) prepareRerank(ctx context.Context, req KnowledgeRetrieveQuery, c
 	if req.Purpose != RetrieveLocal && req.Purpose != "" || req.Search.IncludeDrafts || req.Search.IncludeHistory || strings.TrimSpace(req.Search.Text) == "" || cfg.ID == "" {
 		return in, KnowledgeRetrieveResult{}, ErrInvalidEditorialState
 	}
-	result, err := s.retrieveKnowledge(ctx, req, false)
+	result, err := s.retrieveKnowledge(ctx, req, evaluation)
 	if err != nil {
 		return in, result, err
 	}
@@ -65,7 +65,7 @@ func (s *Store) prepareRerank(ctx context.Context, req KnowledgeRetrieveQuery, c
 		}
 		in.Candidates = append(in.Candidates, RerankCandidate{Key: hit.Key, Revision: rev, Hash: rerankHash(body)})
 	}
-	in.Fingerprint = rerankHash([]any{in.Version, cfg, in.Request, in.Candidates, result.Method})
+	in.Fingerprint = rerankHash([]any{in.Version, cfg, in.Request, in.Candidates, result.Method, KnowledgeFusionVersion, knowledgeRerankPolicyVersion})
 	return in, result, nil
 }
 
@@ -99,7 +99,7 @@ func rerankDocuments(ctx context.Context, tx *sql.Tx, in KnowledgeRerankInput) (
 // All attempts for one frozen candidate set share one job, including unknown
 // remote results. Refreshing the page cannot replay a possibly charged call.
 func (s *Store) ReserveKnowledgeRerank(ctx context.Context, req KnowledgeRetrieveQuery, cfg provider.RerankConfig) (*models.ProcessingJob, bool, error) {
-	in, _, err := s.prepareRerank(ctx, req, cfg)
+	in, _, err := s.prepareRerank(ctx, req, cfg, false)
 	if err != nil {
 		return nil, false, err
 	}
@@ -267,7 +267,7 @@ func (s *Store) retrieveReranked(ctx context.Context, req KnowledgeRetrieveQuery
 	if err != nil {
 		return out, err
 	}
-	in, base, err := s.prepareRerank(ctx, req, cfg)
+	in, base, err := s.prepareRerank(ctx, req, cfg, evaluation)
 	if err == nil && len(base.Hits) > 0 {
 		var raw string
 		err = s.DB.QueryRowContext(ctx, `SELECT scores_json FROM knowledge_rerank_cache WHERE fingerprint=?`, in.Fingerprint).Scan(&raw)
@@ -287,7 +287,7 @@ func (s *Store) retrieveReranked(ctx context.Context, req KnowledgeRetrieveQuery
 					byKey[h.Key] = scores[i]
 				}
 				prefix := out.Hits[:len(scores)]
-				sort.SliceStable(prefix, func(i, j int) bool { return byKey[prefix[i].Key] > byKey[prefix[j].Key] })
+				applyKnowledgeRerankScores(prefix, byKey, req.Semantic)
 				out.RerankApplied = true
 			}
 		}
@@ -350,4 +350,57 @@ func (s *Store) ResumeKnowledgeRerank(ctx context.Context, id string, expected i
 		return ErrConflict
 	}
 	return tx.Commit()
+}
+
+const knowledgeRerankPolicyVersion = "rerank-top10-lexical-disagreement-guard-v3"
+
+// applyKnowledgeRerankScores preserves lexical order and the initial top-ten
+// candidate set for semantic searches. Extreme disagreement keeps the base
+// leader, limiting how much one noisy model can change the base order;
+// scores themselves are never interpreted as probabilities or evidence.
+func applyKnowledgeRerankScores(hits []KnowledgeSearchHit, scores map[string]float64, semantic bool) {
+	if !semantic {
+		sort.SliceStable(hits, func(i, j int) bool { return scores[hits[i].Key] > scores[hits[j].Key] })
+		return
+	}
+	original := make(map[string]int, len(hits))
+	for i, h := range hits {
+		original[h.Key] = i
+	}
+	lexical := func(h KnowledgeSearchHit) bool {
+		return h.LexicalProtected || h.MatchKind == "lexical" || h.MatchKind == "both"
+	}
+	candidates := make([]KnowledgeSearchHit, 0, len(hits))
+	for _, h := range hits {
+		if !lexical(h) {
+			candidates = append(candidates, h)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return scores[candidates[i].Key] > scores[candidates[j].Key] })
+	leader := ""
+	if len(candidates) > 0 && original[candidates[0].Key] >= 10 {
+		for _, h := range hits {
+			if !lexical(h) {
+				leader = h.Key
+				break
+			}
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		a, b := lexical(hits[i]), lexical(hits[j])
+		if a != b {
+			return a
+		}
+		if a {
+			return false
+		}
+		ai, bi := original[hits[i].Key], original[hits[j].Key]
+		if (ai < 10) != (bi < 10) {
+			return ai < 10
+		}
+		if hits[i].Key == leader || hits[j].Key == leader {
+			return hits[i].Key == leader
+		}
+		return scores[hits[i].Key] > scores[hits[j].Key]
+	})
 }

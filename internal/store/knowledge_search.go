@@ -25,6 +25,7 @@ type KnowledgeSearchQuery struct {
 
 // KnowledgeSearchHit keeps an identity, ranking reason and source/paragraph position.
 type KnowledgeSearchHit struct {
+	LexicalProtected                                                                                                bool
 	MatchKind                                                                                                       string
 	Key, Kind, ObjectID, SourceType, SourceID, Title, Snippet, SegmentID, SnapshotID, Visibility, CreatedAt, Reason string
 	Revision                                                                                                        int

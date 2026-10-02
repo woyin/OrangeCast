@@ -31,6 +31,12 @@ func (srv *Server) Router() http.Handler {
 		if (strings.HasPrefix(r.URL.Path, "/questions/") && strings.HasSuffix(r.URL.Path, "/study")) || r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" || r.URL.Path == "/api/learning-actions" || r.URL.Path == "/api/listening-reflections" || r.URL.Path == "/api/knowledge-semantic" {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		}
+		if r.URL.Path == "/api/knowledge-rerank" {
+			r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		}
+		if r.URL.Path == "/api/knowledge-search-feedback" {
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		}
 		privateRoutes.ServeHTTP(w, r)
 	}))
 	return mux

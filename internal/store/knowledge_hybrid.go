@@ -17,6 +17,9 @@ import (
 
 const knowledgeSemanticCandidateLimit = 200
 
+// KnowledgeFusionVersion binds quality reports to the actual ranking policy.
+const KnowledgeFusionVersion = "rrf-k60-lexical-prefix-v2"
+
 var errEmbeddingCapacity = errors.New("embedding matrix exceeds capacity")
 
 type embeddingEpoch struct{ Index, Delete int64 }
@@ -454,7 +457,7 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 	if err != nil {
 		return KnowledgeRetrieveResult{}, err
 	}
-	ranked := fuseKnowledgeRanks(lexicalPool.Hits, semantic)
+	ranked := protectKnowledgeLexicalRanks(fuseKnowledgeRanks(lexicalPool.Hits, semantic), lexicalPool.Hits)
 	keys := make([]string, len(ranked))
 	for i, item := range ranked {
 		keys[i] = item.Key
@@ -508,13 +511,14 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 		}
 		hit.MatchKind = item.MatchKind
 		hit.Rank = item.Score
+		hit.LexicalProtected = item.MatchKind != "semantic"
 		switch item.MatchKind {
 		case "both":
-			hit.Reason = "词项与模型向量共同召回；RRF排序不代表事实支持。"
+			hit.Reason = "词项与模型向量共同召回；保留FTS顺序，排序不代表事实支持。"
 		case "semantic":
 			hit.Reason = "模型向量召回；相似度不代表事实支持。"
 		default:
-			hit.Reason = "词项召回；此对象本次没有语义匹配。"
+			hit.Reason = "词项召回并保留FTS顺序；此对象本次没有语义匹配。"
 		}
 		hits = append(hits, hit)
 	}
@@ -528,4 +532,31 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 		out.Hits = hits[start:end]
 	}
 	return out, nil
+}
+
+// Preserve the complete bounded FTS prefix rather than letting vector votes
+// displace exact matches. Semantic-only candidates add recall after that prefix.
+// For the first 100 lexical hits, the same live revision never ranks lower than
+// the FTS baseline. This is a ranking bound, not a correctness assertion.
+func protectKnowledgeLexicalRanks(ranks []fusedKnowledgeRank, lexical []KnowledgeSearchHit) []fusedKnowledgeRank {
+	byKey := make(map[string]fusedKnowledgeRank, len(ranks))
+	for _, r := range ranks {
+		byKey[r.Key] = r
+	}
+	out := make([]fusedKnowledgeRank, 0, len(ranks))
+	seen := map[string]bool{}
+	for _, hit := range lexical {
+		r, ok := byKey[hit.Key]
+		if ok && r.Revision == hit.Revision && !seen[hit.Key] {
+			out = append(out, r)
+			seen[hit.Key] = true
+		}
+	}
+	for _, r := range ranks {
+		if !seen[r.Key] {
+			out = append(out, r)
+			seen[r.Key] = true
+		}
+	}
+	return out
 }

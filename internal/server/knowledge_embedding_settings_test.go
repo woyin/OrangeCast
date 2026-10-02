@@ -233,7 +233,7 @@ func embeddingDeclaredReport(t *testing.T, srv *Server, id string) store.Embeddi
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.EmbeddingQualityReport{Identity: identity, QueryManifestSHA256: strings.Repeat("a", 64), CorpusManifestSHA256: strings.Repeat("b", 64), RelevanceManifestSHA256: strings.Repeat("c", 64), SourceRevision: "test-declaration-not-real-quality", Machine: "test-only", Method: "contract validation fixture", Fusion: "rrf-k60-lexical-semantic-v1", RealMeasurements: true, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000, Queries: 40, Samples: 20, FTSRecall10: .5, HybridRecall10: .6, RewriteFTSRecall10: .4, RewriteHybridRecall10: .6, Cold10kP95MS: 100, Cold50kP95MS: 400, Warm10kP95MS: 50, Warm50kP95MS: 100, PeakRSSBytes: 1024, EstimatedCostKnown: true, ActualCostKnown: true}
+	return store.EmbeddingQualityReport{Identity: identity, QueryManifestSHA256: strings.Repeat("a", 64), CorpusManifestSHA256: strings.Repeat("b", 64), RelevanceManifestSHA256: strings.Repeat("c", 64), SourceRevision: "test-declaration-not-real-quality", Machine: "test-only", Method: "contract validation fixture", Fusion: store.KnowledgeFusionVersion, RealMeasurements: true, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000, Queries: 40, Samples: 20, FTSRecall10: .5, HybridRecall10: .6, RewriteFTSRecall10: .4, RewriteHybridRecall10: .6, Cold10kP95MS: 100, Cold50kP95MS: 400, Warm10kP95MS: 50, Warm50kP95MS: 100, PeakRSSBytes: 1024, EstimatedCostKnown: true, ActualCostKnown: true}
 }
 func TestEmbeddingSettingsReportImportActivationAndSSRKeepScope(t *testing.T) {
 	srv, cookie, cfg, doc, calls := embeddingSettingsFixture(t)

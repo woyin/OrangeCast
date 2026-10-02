@@ -68,3 +68,68 @@ func TestKnowledgeRerankHTTPExplicitPreparation(t *testing.T) {
 		t.Fatal("HTTP performed paid call", calls)
 	}
 }
+
+func TestKnowledgeRerankHTTPRecoveryAndInvalidRequests(t *testing.T) {
+	srv := newTestServer(t)
+	session := claimOwnerAndLogin(t, srv, "rerank-recovery@example.com", "password123")
+	for _, tc := range []struct {
+		path   string
+		values url.Values
+		status int
+	}{
+		{"/api/knowledge-rerank?q=test", url.Values{}, 400},
+		{"/api/knowledge-rerank?q=test", url.Values{"acknowledge": {"1"}}, 409},
+		{"/api/knowledge-rerank", url.Values{"acknowledge": {"1"}, "job_id": {"missing"}, "expected_revision": {"1"}}, 409},
+		{"/api/knowledge-rerank", url.Values{"acknowledge": {"1"}, "extra": {strings.Repeat("x", 9000)}}, 400},
+		{"/api/knowledge-search-feedback", url.Values{"label": {"invalid"}}, 409},
+		{"/api/knowledge-search-feedback", url.Values{"extra": {strings.Repeat("x", 5000)}}, 400},
+	} {
+		rec := writingCoveragePost(t, srv, session, tc.path, tc.values, tc.values.Get("extra") != "")
+		if rec.Code != tc.status {
+			t.Fatal(tc.path, rec.Code, rec.Body.String())
+		}
+	}
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("unexpected paid request") }))
+	defer remote.Close()
+	srv.selector.WithRerank("secret", remote.URL, "rank")
+	if _, err := srv.store.CreatePastedDocument(t.Context(), "主动回忆", "主动回忆资料。"); err != nil {
+		t.Fatal(err)
+	}
+	rec := writingCoveragePost(t, srv, session, "/api/knowledge-rerank?q=主动回忆", url.Values{"acknowledge": {"1"}}, false)
+	if rec.Code != 303 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	id := strings.TrimPrefix(location, "/automation/")
+	req := httptest.NewRequest("GET", location, nil)
+	req.AddCookie(session)
+	rec = httptest.NewRecorder()
+	srv.Router().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatal("detail", rec.Code, rec.Body.String())
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE processing_jobs SET status='failed' WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	rec = writingCoveragePost(t, srv, session, "/api/knowledge-rerank", url.Values{"acknowledge": {"1"}, "job_id": {id}, "expected_revision": {"1"}}, false)
+	if rec.Code != 303 || rec.Header().Get("Location") != location {
+		t.Fatal("resume", rec.Code, rec.Body.String())
+	}
+	if _, err := srv.store.DB.Exec(`UPDATE processing_jobs SET status='failed',remote_call_started=1 WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	rec = writingCoveragePost(t, srv, session, "/api/knowledge-rerank", url.Values{"acknowledge": {"1"}, "job_id": {id}, "expected_revision": {"2"}}, false)
+	if rec.Code != 409 {
+		t.Fatal("unknown result replay", rec.Code)
+	}
+	rec = writingCoveragePost(t, srv, session, "/api/knowledge-rerank?q=no-candidates", url.Values{"acknowledge": {"1"}}, false)
+	if rec.Code != 409 {
+		t.Fatal("empty candidates", rec.Code)
+	}
+	req = httptest.NewRequest("DELETE", "/api/knowledge-search-feedback", nil)
+	rec = httptest.NewRecorder()
+	srv.handleKnowledgeSearchFeedback(rec, req)
+	if rec.Code != 405 {
+		t.Fatal(rec.Code)
+	}
+}

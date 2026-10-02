@@ -81,7 +81,7 @@ func (srv *Server) handleKnowledgeSearchSettings(w http.ResponseWriter, r *http.
 				scope = []byte("[]")
 			}
 			price, _ := srv.store.GetModelPrice(r.Context(), status.Config.Provider, status.Config.Model)
-			templateReport := store.EmbeddingQualityReport{Identity: identity, Fusion: "rrf-k60-lexical-semantic-v1", Queries: 40, Samples: 20, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000}
+			templateReport := store.EmbeddingQualityReport{Identity: identity, Fusion: store.KnowledgeFusionVersion, Queries: 40, Samples: 20, PerformanceDimensions: 2048, Windows10k: 10000, Windows50k: 50000}
 			templateJSON, _ := json.MarshalIndent(templateReport, "", "  ")
 			permissions, e := srv.store.PreviewKnowledgeEmbeddingScope(r.Context(), id, status.Sources)
 			if e != nil {

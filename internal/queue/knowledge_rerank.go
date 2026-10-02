@@ -72,7 +72,10 @@ func (w *Worker) doKnowledgeRerank(ctx context.Context, job *models.ProcessingJo
 		cp = rerankCheckpoint{JobID: job.ID, Fingerprint: hash, Result: result}
 		raw, _ := json.Marshal(cp)
 		if err = w.store.SaveJobCheckpoint(saveCtx, job.ID, string(raw)); err != nil {
-			return err
+			if receiptErr := w.store.RecordRerankReceipt(saveCtx, job.ID, in, result); receiptErr != nil {
+				return errors.New("重排响应与回执未持久化，不能自动重发")
+			}
+			return errors.New("重排响应断点保存失败，已保留实际用量，不能自动重发")
 		}
 	}
 	if err = w.store.RecordRerankReceipt(ctx, job.ID, in, cp.Result); err != nil {

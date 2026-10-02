@@ -158,3 +158,41 @@ func TestEmbeddingRetrievalRolesAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRerankRedirectDoesNotForwardCredentials(t *testing.T) {
+	forwarded := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { forwarded++ }))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+	p, err := NewRerankClient("private-key", origin.URL, "rank")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.Rerank(t.Context(), "query", []string{"document"}); err == nil || forwarded != 0 {
+		t.Fatal("redirect followed", err, forwarded)
+	}
+	if _, err = p.Rerank(nil, "query", []string{"document"}); err == nil {
+		t.Fatal("nil context accepted")
+	}
+}
+
+func TestSelectorIndependentRetrievalProfile(t *testing.T) {
+	sel := NewSelector("", "").WithEmbedding("key", "https://api.jina.ai/v1", "jina-embeddings-v5-text-small", 1024).WithEmbeddingProfile("jina-retrieval-v1")
+	p, err := sel.Embedding()
+	if err != nil || p.Config().Profile != "jina-retrieval-v1" {
+		t.Fatal(p, err)
+	}
+	sel.WithEmbeddingProfile("unsupported")
+	if _, err = sel.Embedding(); err == nil {
+		t.Fatal("invalid vector profile accepted")
+	}
+	for _, name := range []string{"openai", "groq"} {
+		id := sel.TranscriptionConnectionID(name)
+		if len(id) != 64 || id != TranscriptionConnectionFingerprint(name, "") || id != TranscriptionConnectionFingerprint(name, map[string]string{"openai": openaiBaseURL, "groq": groqBaseURL}[name]+"/") {
+			t.Fatal("unstable route identity", name, id)
+		}
+	}
+}

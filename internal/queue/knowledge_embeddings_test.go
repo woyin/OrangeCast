@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/woyin/orangecast/internal/models"
@@ -491,5 +492,65 @@ func TestKnowledgeEmbeddingInvalidVectorPreservesPaidReceipt(t *testing.T) {
 	}
 	if err = w.ProcessOne(t.Context()); err != nil || calls.Load() != 1 {
 		t.Fatal("invalid paid response automatically retried", err, calls.Load())
+	}
+}
+
+func TestKnowledgeEmbeddingCheckpointFailurePreservesUsageWithoutReplay(t *testing.T) {
+	for _, receiptFails := range []bool{false, true} {
+		t.Run(fmt.Sprint(receiptFails), func(t *testing.T) {
+			s, w, job, _, calls := embeddingJobFixture(t, nil)
+			if _, err := s.DB.Exec(`CREATE TRIGGER fail_embedding_checkpoint BEFORE UPDATE OF checkpoint_json ON processing_jobs BEGIN SELECT RAISE(ABORT,'checkpoint unavailable'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if receiptFails {
+				if _, err := s.DB.Exec(`CREATE TRIGGER fail_embedding_receipt BEFORE INSERT ON usage_records BEGIN SELECT RAISE(ABORT,'receipt unavailable'); END`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := w.processJob(t.Context(), job); err == nil {
+				t.Fatal("failed persistence accepted")
+			}
+			usage, err := s.ListRunUsage(t.Context(), job.ID)
+			want := 1
+			if receiptFails {
+				want = 0
+			}
+			if err != nil || len(usage) != want {
+				t.Fatal("lost paid facts", usage, err)
+			}
+			if w.processJob(t.Context(), job) == nil || calls.Load() != 1 {
+				t.Fatal("unknown result automatically billed again", calls.Load())
+			}
+		})
+	}
+}
+
+func TestKnowledgeEmbeddingSchedulerStorageFailureStopsWithoutSending(t *testing.T) {
+	s, w, _, _, calls := embeddingJobFixture(t, nil)
+	if err := s.DB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ScheduleKnowledgeEmbeddings(t.Context()); err == nil {
+		t.Fatal("closed storage accepted")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	w.poll = time.Millisecond
+	w.Run(ctx)
+	if calls.Load() != 0 {
+		t.Fatal("storage failure sent paid request", calls.Load())
+	}
+}
+
+func TestKnowledgeEmbeddingSchedulerReservationFailureStopsWithoutSending(t *testing.T) {
+	s, w, _, _, calls := embeddingJobFixture(t, nil)
+	if _, err := s.DB.Exec(`DROP TABLE processing_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ScheduleKnowledgeEmbeddings(t.Context()); err == nil {
+		t.Fatal("failed reservation accepted")
+	}
+	if calls.Load() != 0 {
+		t.Fatal("reservation failure sent paid request", calls.Load())
 	}
 }
