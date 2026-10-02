@@ -97,3 +97,23 @@ func TestKnowledgeQueryEmbeddingController(t *testing.T) {
 		t.Fatal(err, string(output))
 	}
 }
+
+func TestQuestionStudyFormsPreserveDraftAndPollIdentity(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("Node required for question study behavior verification")
+	}
+	if output, err := exec.Command(node, filepath.Join("testdata", "question-study.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(output))
+	}
+}
+
+func TestQuestionStudyAdoptDraft(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("Node required for adoption verification")
+	}
+	if output, err := exec.Command(node, filepath.Join("testdata", "question-study-adopt.cjs")).CombinedOutput(); err != nil {
+		t.Fatal(err, string(output))
+	}
+}

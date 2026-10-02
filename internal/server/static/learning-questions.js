@@ -17,6 +17,13 @@ window.CWPViews.define(function(view,scope){
   if(draftable){try{const raw=sessionStorage.getItem(key);if(raw){const values=JSON.parse(raw);for(const name of names){const el=field(form,name);if(el&&typeof values[name]==='string'){if(el.tagName==='SELECT'&&!Array.from(el.options).some(o=>o.value===values[name]))continue;el.value=values[name];}}form.querySelector('.question-feedback').textContent='已恢复本问题版本的草稿。';}
    for(let i=0;i<sessionStorage.length;i++){const old=sessionStorage.key(i);if(old!==key&&old.startsWith('cwp-question-draft:'+id+':'+action+':')){const details=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('textarea');summary.textContent='旧问题版本的草稿（可复制，未自动覆盖当前版本）';text.readOnly=true;text.value=sessionStorage.getItem(old);details.append(summary,text);form.append(details);}}
   }catch(_){}scope.on(form,'input',save);scope.on(form,'change',save);}
+  if(action==='note'){
+   const adoptKey='cwp-question-study-adopt:'+id;
+   try{const raw=sessionStorage.getItem(adoptKey);if(raw){const adopted=JSON.parse(raw);if(typeof adopted.content==='string'){
+    if(field(form,'content').value.trim()){form.querySelector('.question-feedback').textContent='有待采用的 AI 问答草稿；现有文字保留。清空正文后重新打开可采用。';}
+    else {field(form,'content').value=adopted.content;field(form,'source').value='';field(form,'references_json').value='[]';field(form,'anchor_json').value=JSON.stringify({no_position:true});save();sessionStorage.removeItem(adoptKey);form.querySelector('.question-feedback').textContent='已采用 AI 问答草稿。请明确选择来源、编辑并确认后保存；跨来源依据保留为正文链接，不冒充单来源引用。';}
+   }}}catch(_){form.querySelector('.question-feedback').textContent='问答草稿读取失败，请复制文字。';}
+  }
   window.CWPForms.bind(form,scope,{feedback:form.querySelector('.question-feedback'),before:save,encoding:'urlencoded',
    confirm:()=>!form.hasAttribute('data-question-delete')||confirm('删除这个学习问题及组织关系？底层来源、笔记和文章会保留。'),
    success:()=>{if(draftable)sessionStorage.removeItem(key);}

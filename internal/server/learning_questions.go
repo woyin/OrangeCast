@@ -91,6 +91,10 @@ func (srv *Server) handleLearningQuestions(w http.ResponseWriter, r *http.Reques
 	}
 }
 func (srv *Server) handleLearningQuestionDetail(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/study") {
+		srv.handleQuestionStudy(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "方法不允许", 405)
 		return

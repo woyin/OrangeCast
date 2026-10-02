@@ -1,0 +1,5 @@
+{{define "title"}}核对问题对话提交{{end}}
+{{define "content"}}
+<h1>提交未完成</h1><p role="alert">{{.Error}}</p><p>输入与请求身份保留。请先核对原会话；原修订号可能需要更新，未知结果不应直接换身份重发。</p><p><a href="{{.Href}}">查看会话与任务</a></p>
+<form method="post" action="{{.Href}}"><input type="hidden" name="_csrf" value="{{.CSRF}}">{{range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<label>保留的输入<textarea name="input" rows="6">{{.Input}}</textarea></label><button>以原身份核对提交</button></form>
+{{end}}

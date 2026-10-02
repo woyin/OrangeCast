@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
 )
@@ -27,7 +28,7 @@ func (srv *Server) Router() http.Handler {
 		if r.URL.Path == "/api/voice-notes/upload" {
 			r.Body = http.MaxBytesReader(w, r.Body, (20<<20)+(64<<10))
 		}
-		if r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" || r.URL.Path == "/api/learning-actions" || r.URL.Path == "/api/listening-reflections" || r.URL.Path == "/api/knowledge-semantic" {
+		if (strings.HasPrefix(r.URL.Path, "/questions/") && strings.HasSuffix(r.URL.Path, "/study")) || r.URL.Path == "/review/daily/action" || r.URL.Path == "/automation/action" || r.URL.Path == "/api/learning-actions" || r.URL.Path == "/api/listening-reflections" || r.URL.Path == "/api/knowledge-semantic" {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		}
 		privateRoutes.ServeHTTP(w, r)

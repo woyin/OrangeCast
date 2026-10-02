@@ -1,10 +1,9 @@
 {{define "title"}}冻结依据 · {{.Snapshot.Title}}{{end}}
 {{define "content"}}
-<h1>{{.Snapshot.Title}}</h1><p class="meta">冻结来源 v{{.Snapshot.ContentVersion}} · {{.Snapshot.CreatedAt}}</p>
+<section id="evidence-view"><h1>{{.Snapshot.Title}}</h1><p class="meta">冻结来源 v{{.Snapshot.ContentVersion}} · {{.Snapshot.CreatedAt}}</p>
 {{if .AudioURL}}<audio id="frozen-audio" src="{{.AudioURL}}" controls preload="metadata"></audio><p class="meta">回听使用与快照相符的证据音频。</p>{{else if .Audio}}<p class="status-bar pending">当时的音频当前不可回听（{{.Audio.Status}}）。下方仍为当时的转录，未切换为新版。</p>{{end}}
 {{range .Segments}}<article id="{{.ID}}" class="panel" data-start="{{.Start}}"><button class="frozen-seek" data-time="{{.Start}}" type="button">{{formatTime .Start}}</button><p>{{.Text}}</p></article>{{end}}
 {{range .DocumentSegments}}<article id="position-{{.Position}}" class="panel"><p class="meta">段落 {{.Position}}</p><p>{{.Text}}</p></article>{{end}}
-<script>
-(function(){var audio=document.getElementById('frozen-audio'),q=new URLSearchParams(location.search);if(audio){var t=Number(q.get('t'));if(Number.isFinite(t)&&t>=0)audio.addEventListener('loadedmetadata',function(){audio.currentTime=Math.min(t,audio.duration||t);},{once:true});document.querySelectorAll('.frozen-seek').forEach(function(b){b.onclick=function(){audio.currentTime=Number(b.dataset.time);audio.play().catch(function(){});};});}var pos=q.get('position');if(pos){var target=document.getElementById('position-'+pos);if(target)target.scrollIntoView();}})();
-</script>
+
+</section>
 {{end}}

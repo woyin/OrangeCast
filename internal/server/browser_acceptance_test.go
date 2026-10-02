@@ -14,6 +14,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
+	"github.com/woyin/orangecast/internal/store"
 )
 
 const (
@@ -119,6 +120,51 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 		t.Cleanup(embeddingStub.Close)
 		srv.selector.WithEmbedding("test-only-embedding", embeddingStub.URL, "browser-vector", 0)
 	}
+	if os.Getenv("CWP_BROWSER_STAGE") == "p11" {
+		stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var request struct {
+				Model    string                          `json:"model"`
+				Messages []provider.QuestionStudyMessage `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) != 2 {
+				http.Error(w, "invalid", 400)
+				return
+			}
+			var output any
+			if request.Model == "browser-generate" {
+				var scope provider.QuestionStudyScope
+				if err := json.Unmarshal([]byte(request.Messages[1].Content), &scope); err != nil || len(scope.Materials) == 0 {
+					http.Error(w, "invalid scope", 400)
+					return
+				}
+				m := scope.Materials[0]
+				output = provider.QuestionStudyAnswer{Version: provider.QuestionStudyPromptVersion, State: "answered", SourceClaims: []provider.QuestionStudyClaim{{Text: "自建浏览器回答：核对适用条件。", References: []provider.QuestionStudyReference{{MaterialKey: m.Key, Revision: m.Revision, SegmentIDs: []string{m.Segments[0].SegmentID}}}}}}
+			} else {
+				output = provider.QuestionStudyReview{Version: "question-study-review-v1", Verdict: "accept", Reason: "自建浏览器检查通过", Checks: []provider.QuestionStudyClaimCheck{{Key: "source:0", Relevant: true, Supported: true, ConditionsPreserved: true}}}
+			}
+			raw, _ := json.Marshal(output)
+			_ = json.NewEncoder(w).Encode(map[string]any{"model": request.Model, "choices": []map[string]any{{"message": map[string]string{"content": string(raw)}}}, "usage": map[string]int{"prompt_tokens": 31, "completion_tokens": 12}})
+		}))
+		t.Cleanup(stub.Close)
+		srv.cfg.PodModel = "browser-generate"
+		srv.cfg.PodQuestionStudyReviewModel = "browser-review"
+		srv.selector.WithPod("test-only", stub.URL, "browser-generate")
+		question, err := srv.store.CreateLearningQuestion(t.Context(), store.LearningQuestion{Body: "如何核对适用条件？"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, body := range []string{"主动回忆需要核对条件。", "不同来源需要比较反例。"} {
+			doc, err := srv.store.CreatePastedDocument(t.Context(), fmt.Sprintf("跨来源测试 %d", i+1), body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			question, err = srv.store.ChangeLearningQuestion(t.Context(), question.ID, question.Revision, store.LearningQuestionChange{Action: "link", Link: provider.LearningQuestionLink{Kind: "source", SourceType: "document", SourceID: doc.ID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixture.QuestionID = question.ID
+	}
 	workerCtx, workerCancel := context.WithCancel(t.Context())
 	defer workerCancel()
 	if os.Getenv("CWP_BROWSER_STAGE") != "p8" {
@@ -177,6 +223,7 @@ func TestBrowserAcceptanceHarness(t *testing.T) {
 }
 
 type browserAcceptanceFixture struct {
+	QuestionID       string `json:"question_id,omitempty"`
 	URL              string `json:"url"`
 	DataDir          string `json:"data_dir"`
 	Email            string `json:"email"`

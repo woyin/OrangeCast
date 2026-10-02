@@ -2,7 +2,7 @@
 {{define "content"}}
 {{if .Question}}
 <div class="page-head"><h1>{{.Question.Body}}</h1><a class="btn" href="/questions">全部学习问题</a></div>
-<p>{{.Question.Goal}}</p><p class="meta">{{questionStatus .Question.Status}} · 问题 v{{.Question.Revision}}{{with .Question.TargetDate}} · 目标日期 {{.}}{{end}}</p>
+<p><a class="btn" href="/questions/{{.Question.ID}}/study">围绕问题对话</a></p><p>{{.Question.Goal}}</p><p class="meta">{{questionStatus .Question.Status}} · 问题 v{{.Question.Revision}}{{with .Question.TargetDate}} · 目标日期 {{.}}{{end}}</p>
 <p>已确认关系 {{.ConfirmedCount}} · 待确认 {{.SuggestedCount}} · 可供模型检索的材料 {{.EligibleCount}} · 有通过版的文章 {{.PassedCount}} · 待审或生成中的文章 {{.PendingCount}}</p>
 {{if .Insufficient}}<p class="status-bar pending">当前范围少于两项合格材料。请关联相关来源、重点或笔记，并检查来源权限与证据是否有效。关联关系不会授权外发。</p>{{else}}<p class="meta">检索资格不代表足以支持文章；发现阶段仍可能报告缺口。</p>{{end}}
 <section class="panel"><h2>目标与状态</h2>
