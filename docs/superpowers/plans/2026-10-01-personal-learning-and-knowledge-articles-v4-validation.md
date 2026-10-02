@@ -159,3 +159,30 @@ FTS测量：Apple M4 / darwin arm64，固定10,000/50,000条合成索引，20次
 - 来源依赖包含所用材料及已接受历史的完整传递依赖；12 轮、每轮 8 个材料来源，最多 96 个来源依赖。该依赖不是外发材料范围，外发仍限 8 来源 / 20 项 / 40KiB 及最近 6 轮 / 16KiB 历史。依赖元数据不进入供应商消息。只出现在历史中的来源被 purge，也清空新任务的冻结正文与断点。
 - 内部冻结审计快照上限 512KiB，以容纳最多 200 个 confirmed 关系的有界元数据；该审计上限不提高消息、Owner 输入或 HTTP 提交上限。
 - 使用自建语料、本机 HTTP 协议 stub 与临时库；不作为真实供应商事实质量或 Owner 人工验收证据。检查后可见采用、页面关闭旅程和完整恢复按 C05/C06/C09 继续。
+
+
+## 2026-10-02：C05 独立检查与发布
+
+- 实现提交 `9857287`：生成阶段与独立检查任务同事务接续；检查冻结原回答、材料、模型、准确消息估计和当前价格，独立 checkpoint/receipt。只有 accept 才原子发布 accepted_json 与会话修订；reject/insufficient 保留私有事实，不进历史。
+- 当前验证：`go test ./internal/queue ./internal/store -run TestQuestionStudy -race -count=1` queue 11.846s/store 16.946s；新增付费检查后停止测试另跑 `go test ./internal/queue -run TestQuestionStudyCommit -race -count=1` 9.556s，通过。
+- 覆盖通过/拒绝/不足、检查已知断点记账故障恢复（无可用连接、0 新调用）、调用前停止/撤权、付费检查返回后停止（记录费用、不发布）。沿用现有未知响应明确新 attempt 协议，检查阶段独立估价与预算。
+- 真实模型、人工评分仍待验；该记录仅表示工程技术验证。
+
+
+## 2026-10-02：C06–C07 页面与草稿采用
+
+- 实现提交 `9f40932`：只读会话/状态投影，受鉴权和 CSRF 保护的开始/提问/恢复命令，64KiB 请求上限；确认并选择已关联可外发材料，未通过结果不展示。无 JS 支持提交及历史，失败页保留输入和请求身份。
+- 实际脚本通过草稿身份、状态轮询、卸载隔离、401 清理、旧笔记草稿保留，以及采用不会发保存请求/构造引用的行为测试。Owner 必须选择合法笔记来源，编辑后明确保存；跨来源文本及冻结链接可继续复制复用。
+- 当前相关 race：`go test ./internal/queue ./internal/store ./internal/server -run 'TestQuestionStudy|TestQuestionForm|TestLearningPages|TestLearningQuestionsHTTP|TestCommonFormActions' -race -count=1` queue 9.484s/store 13.089s/server 6.875s，通过。该正则中的 TestLearningPages 没有实际命中，冻结依据既有测试另行纳入全套 go test，不能将该名称计为新增验证。
+- 独立 p11 scratch HTTP harness / 本地 POD 桩、自建两个文档来源：浏览器创建会话→提问→两阶段接受→刷新历史；下一问草稿在状态轮询及刷新后保持；实际采用按钮把带 AI 标记及冻结依据的文字送入笔记编辑器，来源空、未自动保存。
+- 浏览器发现导航白名单未覆盖 /study，现已扩展；冻结依据页移除内联脚本、按 view 生命周期挂载。实际 12 秒自建 WAV 播放中导航到问答及冻结文档：sameDocument=true、sameAudio=true、paused=false、time 1.005617→1.158795；冻结 position-1 存在，未替换来源版本。三个 scratch harness 均已停止（181.973s、322.974s、204.292s），本次浏览器会话已关闭。
+- 本地桩验证不代表真实模型回答质量；真实模型/人工/实体手机状态仍待验。
+
+
+## 2026-10-02：迁移前来源约束与本轮技术检查
+
+- `5fe3cc7` 修复旧 StudyChat 复用其他来源会话的缺口：检查会话真实来源；不匹配返回 409，零 Provider dispatch、零消息追加。旧故障测试改为注入真实消息写入故障，保留新的来源校验。当前 `go test ./internal/server -run 'TestStudyChat|TestQuestionStudy' -race -count=1` 10.332s 通过。C08 的持久生成/检查、用量和客户端任务轮询仍未完成，不计入技术完成卡。
+- `c3d7179` 增加仅检查阶段预算阻断测试：已生成响应仍私有，检查无价格且设置预算时零新调用；补齐第四轮公开检索/问答接口契约注释。当前 `go test ./internal/queue -run TestQuestionStudyCommit -race -count=1` 7.349s 通过。
+- 本轮全套 `go test ./...` 通过（queue 41.522s/server 13.841s/store 19.303s）；随后 `go test ./... -race -timeout 30m` 全部通过（queue 143.510s/server 120.077s/store 356.645s）。`go vet ./...`、`go build ./...`、`bash scripts/lint.sh` 和 `git diff --check` 当前通过。
+- 全套 race 编译后又增加仅测试层的超大请求及选中项复制行为验证，分别通过当前问答 race 和实际 Node 测试；没有改变已全套验证的生产行为。
+- 本记录是 26/73 的实施检查点，剩余 47 张任务仍未完成；覆盖率门禁、完整新学习旅程、最终恢复/手机验收需在后续实现后完成，不以本次全套测试代替 V03 最终交付。

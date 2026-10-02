@@ -75,3 +75,21 @@ func TestQuestionStudyHTTPReadOnlyAdmissionAndPrivacy(t *testing.T) {
 		t.Fatal(jobs, err)
 	}
 }
+
+func TestQuestionStudyHTTPRejectsOversizedCommandsWithoutCreatingSession(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "study-bounds@example.com", "password123")
+	q, err := srv.store.CreateLearningQuestion(t.Context(), store.LearningQuestion{Body: "有界提交"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/questions/" + q.ID + "/study"
+	rec := postForm(t, srv, cookie, path, url.Values{"action": {"start"}, "request_key": {uuid.NewString()}, "input": {strings.Repeat("a", 70<<10)}}.Encode())
+	if rec.Code < 400 {
+		t.Fatal("oversized command accepted", rec.Code)
+	}
+	sessions, err := srv.store.ListQuestionStudySessions(t.Context(), q.ID)
+	if err != nil || len(sessions) != 0 {
+		t.Fatal("oversized command mutated state", sessions, err)
+	}
+}
