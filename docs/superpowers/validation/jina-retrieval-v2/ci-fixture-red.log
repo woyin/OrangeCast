@@ -1,0 +1,5 @@
+--- FAIL: TestStudyTwoStageReplyMixedMaterialOrder (0.00s)
+    question_study_review_test.go:210: valid understanding before source panicked: runtime error: index out of range [0] with length 0
+FAIL
+FAIL	github.com/woyin/orangecast/internal/queue	0.462s
+FAIL

@@ -42,7 +42,11 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 	if err != nil || !parent.IsDir() {
 		t.Fatal("report output directory must already exist")
 	}
-	raw, err := os.ReadFile("testdata/jina-retrieval-fixture.json")
+	fixturePath := os.Getenv("CWP_JINA_EVAL_FIXTURE")
+	if fixturePath == "" {
+		fixturePath = "testdata/jina-retrieval-fixture.json"
+	}
+	raw, err := os.ReadFile(fixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +67,7 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 		bytes += len(item.Text)
 	}
 	for _, q := range fixture.Queries {
-		if q.Query == "" || len(q.Relevant) != 1 || !ids[q.Relevant[0]] || (q.Group != "original" && q.Group != "rewrite") {
+		if q.Query == "" || len(q.Relevant) != 1 || !ids[q.Relevant[0]] || (q.Group != "original" && q.Group != "rewrite" && q.Group != "holdout") {
 			t.Fatal("invalid labels")
 		}
 		bytes += len(q.Query)
@@ -77,6 +81,10 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 	}
 	if os.Getenv("LEARNING_EMBEDDING_BASE_URL") != "https://api.jina.ai/v1" || client.Config().Model != "jina-embeddings-v5-text-small" {
 		t.Fatal("evaluation requires fixed tested Jina route")
+	}
+	client, err = client.WithProfile(os.Getenv("CWP_JINA_EVAL_PROFILE"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	s, err := Open(filepath.Join(t.TempDir(), "evaluation.db"))
 	if err != nil {
@@ -152,7 +160,7 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 		if e = json.Unmarshal([]byte(execution.InputSnapshotJSON), &input); e != nil {
 			t.Fatal(e)
 		}
-		result, e := client.Embed(t.Context(), []string{q.Query})
+		result, e := client.EmbedQuery(t.Context(), []string{q.Query})
 		calls++
 		if e != nil {
 			t.Fatal(e)
@@ -196,6 +204,14 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 		}
 		return m
 	}
+	var reranker *provider.RerankClient
+	if os.Getenv("CWP_JINA_EVAL_RERANK") == "1" {
+		reranker, err = provider.NewRerankClient(os.Getenv("LEARNING_EMBEDDING_API_KEY"), "https://api.jina.ai/v1", "jina-reranker-v3.5")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rerankCalls, rerankTokens := 0, 0
 	results := []map[string]any{}
 	groups := map[string]map[string]map[string]float64{}
 	counts := map[string]int{}
@@ -239,6 +255,52 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 		for k, v := range h {
 			groups[q.Group]["hybrid"][k] += v
 		}
+		if reranker != nil {
+			candidateReq := req
+			candidateReq.Search.PerPage = 30
+			pool, e := s.EvaluateKnowledgeRetrieval(t.Context(), candidateReq)
+			if e != nil {
+				t.Fatal(e)
+			}
+			frozen := KnowledgeRerankInput{Version: "knowledge-rerank-v1", Config: reranker.Config(), Request: req}
+			tx, e := s.DB.BeginTx(t.Context(), nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, hit := range pool.Hits {
+				var body string
+				var revision int
+				e = tx.QueryRowContext(t.Context(), `SELECT revision,title||char(10)||char(10)||body FROM knowledge_search_docs WHERE key=?`, hit.Key).Scan(&revision, &body)
+				if e != nil {
+					t.Fatal(e)
+				}
+				frozen.Candidates = append(frozen.Candidates, RerankCandidate{Key: hit.Key, Revision: revision, Hash: rerankHash(body)})
+			}
+			docs, e := rerankDocuments(t.Context(), tx, frozen)
+			tx.Rollback()
+			if e != nil {
+				t.Fatal(e)
+			}
+			ranked, e := reranker.Rerank(t.Context(), q.Query, docs)
+			rerankCalls++
+			if e != nil || !ranked.UsageKnown {
+				t.Fatal(ranked, e)
+			}
+			rerankTokens += ranked.InputTokens
+			scores := map[string]float64{}
+			for i, hit := range pool.Hits {
+				scores[hit.Key] = ranked.Scores[i]
+			}
+			sort.SliceStable(pool.Hits, func(i, j int) bool { return scores[pool.Hits[i].Key] > scores[pool.Hits[j].Key] })
+			m := metrics(pool.Hits[:min(10, len(pool.Hits))], q.Relevant[0])
+			if groups[q.Group]["rerank"] == nil {
+				groups[q.Group]["rerank"] = map[string]float64{}
+			}
+			for k, v := range m {
+				groups[q.Group]["rerank"][k] += v
+			}
+			results[len(results)-1]["rerank"] = m
+		}
 		counts[q.Group]++
 	}
 	if err = s.DB.QueryRow(`SELECT total_changes()`).Scan(&after); err != nil || before != after {
@@ -276,7 +338,7 @@ func TestKnowledgeSemanticJinaLive(t *testing.T) {
 	}
 	p95 := func(v []float64) float64 { sort.Float64s(v); return v[(len(v)*95+99)/100-1] }
 	hash := sha256.Sum256(raw)
-	report := map[string]any{"schema": 1, "model": cfg.Model, "dimensions": cfg.Dimensions, "fixture_sha256": hex.EncodeToString(hash[:]), "corpus_objects": 60, "indexed_windows": windows, "queries": 40, "remote_calls": calls, "supplier_input_tokens": tokens, "cash_cost": nil, "real_model_embeddings": true, "personal_corpus": false, "human_attested_relevance": false, "quality_gate_passed": false, "identity_stable": true, "measurement_identity": identity, "retrieval_read_only": true, "cache_miss_fallback": true, "ordinary_quality_gate_enforced": true, "source_revocation_invalidates": true, "cold_p95_ms": p95(coldTimes), "warm_p95_ms": p95(warmTimes), "groups": groups, "results": results}
+	report := map[string]any{"schema": 1, "profile": cfg.Profile, "model": cfg.Model, "dimensions": cfg.Dimensions, "fixture_sha256": hex.EncodeToString(hash[:]), "corpus_objects": 60, "indexed_windows": windows, "queries": 40, "remote_calls": calls, "rerank_calls": rerankCalls, "rerank_input_tokens": rerankTokens, "supplier_input_tokens": tokens, "cash_cost": nil, "real_model_embeddings": true, "personal_corpus": false, "human_attested_relevance": false, "quality_gate_passed": false, "identity_stable": true, "measurement_identity": identity, "retrieval_read_only": true, "cache_miss_fallback": true, "ordinary_quality_gate_enforced": true, "source_revocation_invalidates": true, "cold_p95_ms": p95(coldTimes), "warm_p95_ms": p95(warmTimes), "groups": groups, "results": results}
 	output, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -328,6 +390,46 @@ func TestKnowledgeJinaEvaluationFixture(t *testing.T) {
 	for _, n := range labels {
 		if n != 2 {
 			t.Fatal("each target must have one original and one rewrite")
+		}
+	}
+}
+
+func TestKnowledgeJinaHoldoutFrozenLabels(t *testing.T) {
+	raw, err := os.ReadFile("testdata/jina-retrieval-holdout.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f jinaEvalFixture
+	if json.Unmarshal(raw, &f) != nil || len(f.Corpus) != 60 || len(f.Queries) != 40 {
+		t.Fatal("holdout size")
+	}
+	seen := map[string]bool{}
+	labels := map[string]bool{}
+	holdout := 0
+	for _, q := range f.Queries {
+		if q.Query == "" || seen[q.Query] || len(q.Relevant) != 1 {
+			t.Fatal("invalid label")
+		}
+		seen[q.Query] = true
+		if q.Group == "holdout" {
+			holdout++
+			labels[q.Relevant[0]] = true
+		}
+	}
+	if holdout != 20 || len(labels) != 20 {
+		t.Fatal("unbalanced holdout")
+	}
+	original, err := os.ReadFile("testdata/jina-retrieval-fixture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old jinaEvalFixture
+	json.Unmarshal(original, &old)
+	for _, q := range old.Queries {
+		for _, n := range f.Queries {
+			if n.Group == "holdout" && n.Query == q.Query {
+				t.Fatal("reused query")
+			}
 		}
 	}
 }

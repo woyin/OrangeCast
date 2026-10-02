@@ -15,8 +15,10 @@ import (
 // Selector 按 Provider 名称构造 provider bundle。
 // key 和 baseURL 可在运行时从 SQLite settings 覆盖（ADR-0009 扩展）。
 type Selector struct {
+	rerankKey, rerankURL, rerankModel          string
 	embeddingKey, embeddingURL, embeddingModel string
 	embeddingDimensions                        int
+	embeddingProfile                           string
 	groqAPIKey                                 string
 	groqBaseURL                                string
 	openaiAPIKey                               string
@@ -236,5 +238,26 @@ func (sel *Selector) WithEmbedding(key, baseURL, model string, dimensions int) *
 
 // Embedding returns an explicitly configured client; no other provider is a fallback.
 func (sel *Selector) Embedding() (*EmbeddingClient, error) {
-	return NewEmbeddingClient(sel.embeddingKey, sel.embeddingURL, sel.embeddingModel, sel.embeddingDimensions)
+	client, err := NewEmbeddingClient(sel.embeddingKey, sel.embeddingURL, sel.embeddingModel, sel.embeddingDimensions)
+	if err != nil {
+		return nil, err
+	}
+	return client.WithProfile(sel.embeddingProfile)
+}
+
+// WithEmbeddingProfile sets the explicitly chosen retrieval vector space.
+func (sel *Selector) WithEmbeddingProfile(profile string) *Selector {
+	sel.embeddingProfile = profile
+	return sel
+}
+
+// WithRerank sets an independent, explicit paid reranking route.
+func (sel *Selector) WithRerank(key, base, model string) *Selector {
+	sel.rerankKey, sel.rerankURL, sel.rerankModel = key, base, model
+	return sel
+}
+
+// Reranker constructs the configured reranking client without remote I/O.
+func (sel *Selector) Reranker() (*RerankClient, error) {
+	return NewRerankClient(sel.rerankKey, sel.rerankURL, sel.rerankModel)
 }

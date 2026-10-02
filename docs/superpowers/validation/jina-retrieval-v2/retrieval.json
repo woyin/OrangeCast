@@ -1,0 +1,1311 @@
+{
+  "cache_miss_fallback": true,
+  "cash_cost": null,
+  "cold_p95_ms": 4.622,
+  "corpus_objects": 60,
+  "dimensions": 1024,
+  "fixture_sha256": "9d2b3dd8541f29b57c8fe7602932c95cc307e6c1ab8b42273e573803d39d3e42",
+  "groups": {
+    "holdout": {
+      "hybrid": {
+        "mrr_at_10": 0.8283333333333334,
+        "recall_at_1": 0.75,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    "rewrite": {
+      "hybrid": {
+        "mrr_at_10": 0.9083333333333334,
+        "recall_at_1": 0.85,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "rerank": {
+        "mrr_at_10": 0.9550000000000001,
+        "recall_at_1": 0.95,
+        "recall_at_10": 1,
+        "recall_at_5": 0.95
+      }
+    }
+  },
+  "human_attested_relevance": false,
+  "identity_stable": true,
+  "indexed_windows": 61,
+  "measurement_identity": "5575eb47182d62c49cbb4682e984b64b9042bbe56cf02a4b06f08702fcb0a0d0",
+  "model": "jina-embeddings-v5-text-small",
+  "ordinary_quality_gate_enforced": true,
+  "personal_corpus": false,
+  "profile": "jina-retrieval-v1",
+  "quality_gate_passed": false,
+  "queries": 40,
+  "real_model_embeddings": true,
+  "remote_calls": 44,
+  "rerank_calls": 40,
+  "rerank_input_tokens": 49112,
+  "results": [
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-01",
+        "distractor-04-b",
+        "distractor-01-a"
+      ],
+      "id": "rewrite-01",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "读完合上书自测能帮助记忆吗",
+      "relevant_ids": [
+        "target-01"
+      ],
+      "rerank": {
+        "mrr_at_10": 0.1,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 0
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-02",
+        "distractor-01-a",
+        "distractor-03-a"
+      ],
+      "id": "rewrite-02",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "复习为什么要隔几天再做",
+      "relevant_ids": [
+        "target-02"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-03-b",
+        "distractor-03-a",
+        "target-03"
+      ],
+      "id": "rewrite-03",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "做题时轮换不同题型有什么用",
+      "relevant_ids": [
+        "target-03"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-04",
+        "distractor-04-b",
+        "distractor-01-a"
+      ],
+      "id": "rewrite-04",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "给新手讲明白能检验自己是否懂了",
+      "relevant_ids": [
+        "target-04"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-05",
+        "distractor-05-a",
+        "target-04"
+      ],
+      "id": "rewrite-05",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "把新概念和旧经验联系起来",
+      "relevant_ids": [
+        "target-05"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-06-a",
+        "target-04",
+        "target-06"
+      ],
+      "id": "rewrite-06",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "同时用文字和示意图来学",
+      "relevant_ids": [
+        "target-06"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-07",
+        "distractor-08-a",
+        "distractor-07-b"
+      ],
+      "id": "rewrite-07",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "信息太多脑子处理不过来怎么办",
+      "relevant_ids": [
+        "target-07"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-08",
+        "distractor-08-a",
+        "distractor-08-b"
+      ],
+      "id": "rewrite-08",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "换任务后脑子还想着上一件事",
+      "relevant_ids": [
+        "target-08"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-09-a",
+        "target-09",
+        "target-01"
+      ],
+      "id": "rewrite-09",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "先查资料再让模型回答是什么方法",
+      "relevant_ids": [
+        "target-09"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-10",
+        "distractor-10-a",
+        "distractor-10-b"
+      ],
+      "id": "rewrite-10",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "网页里藏着让助手改规则的命令",
+      "relevant_ids": [
+        "target-10"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-11",
+        "distractor-11-a",
+        "distractor-12-b"
+      ],
+      "id": "rewrite-11",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "模型说得很肯定却编了不存在的引用",
+      "relevant_ids": [
+        "target-11"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-12",
+        "distractor-12-b",
+        "distractor-11-a"
+      ],
+      "id": "rewrite-12",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "这句话到底来自哪一段原文",
+      "relevant_ids": [
+        "target-12"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-13",
+        "distractor-12-b",
+        "distractor-03-a"
+      ],
+      "id": "rewrite-13",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "只看成功案例会漏掉什么",
+      "relevant_ids": [
+        "target-13"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-14",
+        "distractor-14-a",
+        "target-13"
+      ],
+      "id": "rewrite-14",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "为什么只愿意看支持自己观点的证据",
+      "relevant_ids": [
+        "target-14"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-15",
+        "distractor-16-a",
+        "target-16"
+      ],
+      "id": "rewrite-15",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "因为已经花了很多钱就不肯放弃",
+      "relevant_ids": [
+        "target-15"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-16",
+        "target-15",
+        "distractor-13-a"
+      ],
+      "id": "rewrite-16",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "选了这件事就不能做另一件事的代价",
+      "relevant_ids": [
+        "target-16"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-17",
+        "distractor-17-a",
+        "distractor-17-b"
+      ],
+      "id": "rewrite-17",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "到了指定场景就做预定动作",
+      "relevant_ids": [
+        "target-17"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-18",
+        "distractor-18-b",
+        "distractor-18-a"
+      ],
+      "id": "rewrite-18",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "计时专注一会再短暂休息",
+      "relevant_ids": [
+        "target-18"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-19-b"
+      ],
+      "id": "rewrite-19",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "保存修改历史以便回退和合并",
+      "relevant_ids": [
+        "target-19"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "rewrite",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-20",
+        "distractor-20-a",
+        "distractor-20-b"
+      ],
+      "id": "rewrite-20",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "把播客录音变成可搜索的文字",
+      "relevant_ids": [
+        "target-20"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 0.2,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-03",
+        "distractor-03-a",
+        "distractor-02-a"
+      ],
+      "id": "holdout-01",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "不翻课本先写答案然后查漏补缺，属于哪种练习？",
+      "relevant_ids": [
+        "target-01"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-02",
+        "distractor-02-a",
+        "distractor-18-a"
+      ],
+      "id": "holdout-02",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "复习日程不是都放在同一天，而是越隔越久，是什么方法？",
+      "relevant_ids": [
+        "target-02"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 0.5,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-03-b",
+        "target-03",
+        "distractor-03-a"
+      ],
+      "id": "holdout-03",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "一组题里同时放几种解法，让我先判断选哪种，这是怎样训练？",
+      "relevant_ids": [
+        "target-03"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-04",
+        "distractor-03-a",
+        "target-02"
+      ],
+      "id": "holdout-04",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "我讲给完全没基础的人听，卡住就重新查资料，这是什么学习方式？",
+      "relevant_ids": [
+        "target-04"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-05",
+        "distractor-05-a",
+        "target-04"
+      ],
+      "id": "holdout-05",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "把刚学到的内容和过去经验连接并解释原因，有什么方法？",
+      "relevant_ids": [
+        "target-05"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-06",
+        "distractor-06-a",
+        "target-04"
+      ],
+      "id": "holdout-06",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "用解释文字配上表达同一意思的图，怎样帮助学习？",
+      "relevant_ids": [
+        "target-06"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-04-b",
+        "distractor-06-a",
+        "target-07"
+      ],
+      "id": "holdout-07",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "删掉讲义的花哨背景再逐步讲解，是为了减轻什么？",
+      "relevant_ids": [
+        "target-07"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-08",
+        "distractor-17-b",
+        "distractor-18-b"
+      ],
+      "id": "holdout-08",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "开始下一件事后还总想着没做完的上一件事，是什么现象？",
+      "relevant_ids": [
+        "target-08"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-09",
+        "distractor-12-b",
+        "target-01"
+      ],
+      "id": "holdout-09",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "回答之前先查自己的资料库并挑出有关段落，叫什么？",
+      "relevant_ids": [
+        "target-09"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-10",
+        "distractor-10-a",
+        "distractor-10-b"
+      ],
+      "id": "holdout-10",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "资料里让助手放弃系统规则的隐藏命令，是什么攻击？",
+      "relevant_ids": [
+        "target-10"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 0.3333333333333333,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-12-b",
+        "target-12",
+        "target-11"
+      ],
+      "id": "holdout-11",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "助手给出查不到的出处和捏造的数据，这属于什么问题？",
+      "relevant_ids": [
+        "target-11"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-12",
+        "distractor-01-b",
+        "distractor-12-b"
+      ],
+      "id": "holdout-12",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "怎样记下结论对应原始材料中的位置方便核对？",
+      "relevant_ids": [
+        "target-12"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-13",
+        "distractor-13-a",
+        "distractor-13-b"
+      ],
+      "id": "holdout-13",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "研究赢家却没有计算退出的人，会产生什么统计偏差？",
+      "relevant_ids": [
+        "target-13"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-14",
+        "distractor-14-a",
+        "target-13"
+      ],
+      "id": "holdout-14",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "我总是相信赞同自己的证据，对反证却特别挑剔，是什么偏差？",
+      "relevant_ids": [
+        "target-14"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-15",
+        "distractor-16-a",
+        "distractor-16-b"
+      ],
+      "id": "holdout-15",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "钱已经花掉也拿不回来了，继续之前应如何看待这笔投入？",
+      "relevant_ids": [
+        "target-15"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-16",
+        "distractor-13-a",
+        "distractor-16-b"
+      ],
+      "id": "holdout-16",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "选了现在这条路就不能选的最好另一条路，其价值叫什么？",
+      "relevant_ids": [
+        "target-16"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 0.2,
+        "recall_at_1": 0,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "distractor-02-a",
+        "target-02",
+        "distractor-18-b"
+      ],
+      "id": "holdout-17",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "如果晚饭结束我就复习十分钟，这种预设行动计划是什么？",
+      "relevant_ids": [
+        "target-17"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-18",
+        "distractor-18-a",
+        "distractor-18-b"
+      ],
+      "id": "holdout-18",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "用计时器安排一段集中工作再短暂休息，是什么方法？",
+      "relevant_ids": [
+        "target-18"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-19",
+        "distractor-19-a",
+        "distractor-19-b"
+      ],
+      "id": "holdout-19",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "多人修改同一文件，要对比差异并找回旧状态，需要什么？",
+      "relevant_ids": [
+        "target-19"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    },
+    {
+      "group": "holdout",
+      "hybrid": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      },
+      "hybrid_top3": [
+        "target-20",
+        "distractor-20-a",
+        "distractor-20-b"
+      ],
+      "id": "holdout-20",
+      "lexical": {
+        "mrr_at_10": 0,
+        "recall_at_1": 0,
+        "recall_at_10": 0,
+        "recall_at_5": 0
+      },
+      "query": "把访谈声音变成带时间位置的文字，是什么功能？",
+      "relevant_ids": [
+        "target-20"
+      ],
+      "rerank": {
+        "mrr_at_10": 1,
+        "recall_at_1": 1,
+        "recall_at_10": 1,
+        "recall_at_5": 1
+      }
+    }
+  ],
+  "retrieval_read_only": true,
+  "schema": 1,
+  "source_revocation_invalidates": true,
+  "supplier_input_tokens": 2104,
+  "warm_p95_ms": 3.095
+}

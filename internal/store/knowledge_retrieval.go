@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/woyin/orangecast/internal/provider"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ const (
 
 // KnowledgeRetrieveQuery 区分检索用途、查询范围及显式向量身份。
 type KnowledgeRetrieveQuery struct {
+	Rerank            *provider.RerankConfig
 	Search            KnowledgeSearchQuery
 	Purpose           RetrievalPurpose
 	Semantic          bool
@@ -26,10 +28,12 @@ type KnowledgeRetrieveQuery struct {
 
 // KnowledgeRetrieveResult 返回有界结果与融合、降级的解释。
 type KnowledgeRetrieveResult struct {
-	LexicalTotal   int
-	IndexedWindows int
-	CandidateLimit int
-	Coverage       string
+	RerankApplied     bool
+	RerankDegradation string
+	LexicalTotal      int
+	IndexedWindows    int
+	CandidateLimit    int
+	Coverage          string
 	KnowledgeSearchResult
 	Method        string
 	Degradation   string
@@ -52,6 +56,9 @@ func (s *Store) EvaluateKnowledgeRetrieval(ctx context.Context, req KnowledgeRet
 }
 
 func (s *Store) retrieveKnowledge(ctx context.Context, req KnowledgeRetrieveQuery, evaluation bool) (KnowledgeRetrieveResult, error) {
+	if req.Rerank != nil {
+		return s.retrieveReranked(ctx, req, evaluation)
+	}
 	q := req.Search
 	if req.Purpose == "" {
 		req.Purpose = RetrieveLocal

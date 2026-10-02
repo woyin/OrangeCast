@@ -489,7 +489,13 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	} else {
 		semanticID = ""
 	}
-	result, err := srv.store.Retrieve(r.Context(), store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal, Semantic: r.URL.Query().Get("semantic") == "1", EmbeddingConfigID: semanticID})
+	req := store.KnowledgeRetrieveQuery{Search: q, Purpose: store.RetrieveLocal, Semantic: r.URL.Query().Get("semantic") == "1", EmbeddingConfigID: semanticID}
+	reranker, rerankErr := srv.selector.Reranker()
+	if rerankErr == nil && r.URL.Query().Get("rerank") == "1" {
+		cfg := reranker.Config()
+		req.Rerank = &cfg
+	}
+	result, err := srv.store.Retrieve(r.Context(), req)
 	if err != nil {
 		code := 500
 		if errors.Is(err, store.ErrInvalidEditorialState) {
@@ -512,6 +518,12 @@ func (srv *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{"Sources": sources.Items, "SourcePage": sourceNavigation, "SourceQuery": r.URL.Query().Get("source_query"), "SourceMissing": sources.SelectedUnavailable, "SelectedSource": q.SourceType + ":" + q.SourceID, "Podcasts": podcasts, "Query": q.Text, "Filter": q, "Results": views, "Total": result.Total, "Page": result.Page, "PerPage": result.PerPage, "Previous": knowledgePageURL(r, result.Page-1), "Next": knowledgePageURL(r, result.Page+1), "HasPrevious": result.Page > 1, "HasNext": result.Page*result.PerPage < result.Total}
 	data["CSRF"] = auth.CSRFValue(r)
 	data["Retrieval"] = result
+	data["RerankAvailable"] = rerankErr == nil
+	data["FeedbackAction"] = "/api/knowledge-search-feedback?" + r.URL.RawQuery
+	args := r.URL.Query()
+	args.Set("rerank", "1")
+	data["RerankURL"] = "/search?" + args.Encode()
+	data["RerankAction"] = "/api/knowledge-rerank?" + r.URL.RawQuery
 	if semanticConfig != nil {
 		data["SemanticConfig"] = semanticConfig
 		status, e := srv.store.KnowledgeEmbeddingStatus(r.Context(), semanticConfig.ID)

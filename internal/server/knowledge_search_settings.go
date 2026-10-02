@@ -32,7 +32,7 @@ func (srv *Server) handleKnowledgeSearchSettings(w http.ResponseWriter, r *http.
 	if err == nil {
 		route := client.Config()
 		data["Connection"] = route
-		rows, e := srv.store.DB.QueryContext(r.Context(), `SELECT id FROM knowledge_embedding_configs WHERE connection_id=? AND model=? AND (?=0 OR dimensions=?) ORDER BY updated_at DESC LIMIT 8`, route.ConnectionID, route.Model, route.Dimensions, route.Dimensions)
+		rows, e := srv.store.DB.QueryContext(r.Context(), `SELECT id FROM knowledge_embedding_configs WHERE connection_id=? AND model=? AND profile=? AND (?=0 OR dimensions=?) ORDER BY updated_at DESC LIMIT 8`, route.ConnectionID, route.Model, route.Profile, route.Dimensions, route.Dimensions)
 		if e != nil {
 			http.Error(w, "读取搜索配置失败", 500)
 			return

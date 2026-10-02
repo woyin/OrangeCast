@@ -175,7 +175,7 @@ func (s *Store) UpdateKnowledgeEmbeddingSettings(ctx context.Context, cmd Embedd
 // Epochs also invalidate a report on material, source-policy or vector repairs without reading bodies.
 func embeddingQualityIdentity(ctx context.Context, q reviewReader, id string) (string, error) {
 	var cfg KnowledgeEmbeddingConfig
-	err := q.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,window_capacity FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&cfg.ID, &cfg.ConnectionID, &cfg.Provider, &cfg.Model, &cfg.Dimensions, &cfg.Unit, &cfg.Enabled, &cfg.Revision, &cfg.WindowCapacity)
+	err := q.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,window_capacity,profile FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&cfg.ID, &cfg.ConnectionID, &cfg.Provider, &cfg.Model, &cfg.Dimensions, &cfg.Unit, &cfg.Enabled, &cfg.Revision, &cfg.WindowCapacity, &cfg.Profile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

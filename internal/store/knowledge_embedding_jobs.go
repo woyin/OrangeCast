@@ -232,7 +232,7 @@ func validateEmbeddingWindows(ctx context.Context, tx *sql.Tx, in KnowledgeEmbed
 		if !matches {
 			return ErrConflict
 		}
-		current, err := embeddingWindows(d.key, d.revision, d.title, d.body, revision)
+		current, err := embeddingWindowsProfile(d.key, d.revision, d.title, d.body, revision, in.Config.Profile)
 		if err != nil || window.WindowNo < 0 || window.WindowNo >= len(current) || current[window.WindowNo].ContentHash != window.ContentHash || current[window.WindowNo].Input != window.Input {
 			return ErrConflict
 		}
@@ -296,7 +296,7 @@ func (s *Store) CommitKnowledgeEmbeddingResponse(ctx context.Context, id string,
 	if err = checkRunControl(ctx, tx, id); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO knowledge_embedding_configs(id,connection_id,provider,model,dimensions,unit)VALUES(?,?,?,?,?,?) ON CONFLICT(id)DO NOTHING`, measured.ID, measured.ConnectionID, measured.Provider, measured.Model, measured.Dimensions, measured.Unit); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO knowledge_embedding_configs(id,connection_id,provider,model,dimensions,unit,profile)VALUES(?,?,?,?,?,?,?) ON CONFLICT(id)DO NOTHING`, measured.ID, measured.ConnectionID, measured.Provider, measured.Model, measured.Dimensions, measured.Unit, measured.Profile); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(map[string]any{"config_id": measured.ID, "dimensions": measured.Dimensions, "indexing_enabled": false})
@@ -331,7 +331,7 @@ func (s *Store) RecordEmbeddingReceipt(ctx context.Context, origin string, in Kn
 // EnabledKnowledgeEmbeddingConfigs only enumerates matching, Owner-enabled
 // connections. A different endpoint/model cannot pick up an old automatic scope.
 func (s *Store) EnabledKnowledgeEmbeddingConfigs(ctx context.Context, route provider.EmbeddingConfig) ([]*KnowledgeEmbeddingConfig, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity FROM knowledge_embedding_configs WHERE enabled=1 AND connection_id=? AND model=? AND (?=0 OR dimensions=?) AND NOT EXISTS(SELECT 1 FROM run_controls c WHERE c.kind='lane' AND c.target='index' AND c.paused=1) ORDER BY updated_at,id LIMIT 8`, route.ConnectionID, route.Model, route.Dimensions, route.Dimensions)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity,profile FROM knowledge_embedding_configs WHERE enabled=1 AND connection_id=? AND model=? AND profile=? AND (?=0 OR dimensions=?) AND NOT EXISTS(SELECT 1 FROM run_controls c WHERE c.kind='lane' AND c.target='index' AND c.paused=1) ORDER BY updated_at,id LIMIT 8`, route.ConnectionID, route.Model, route.Profile, route.Dimensions, route.Dimensions)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (s *Store) EnabledKnowledgeEmbeddingConfigs(ctx context.Context, route prov
 	var out []*KnowledgeEmbeddingConfig
 	for rows.Next() {
 		c := &KnowledgeEmbeddingConfig{}
-		if err = rows.Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity); err != nil {
+		if err = rows.Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity, &c.Profile); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

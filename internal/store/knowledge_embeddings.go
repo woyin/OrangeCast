@@ -62,18 +62,22 @@ func (s *Store) RegisterKnowledgeEmbeddingConfig(ctx context.Context, cfg provid
 			return ErrInvalidEditorialState
 		}
 	}
-	expected := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", cfg.ConnectionID, cfg.Model, cfg.Dimensions))))
+	measured, e := cfg.WithDimensions(cfg.Dimensions)
+	if e != nil || (cfg.Profile != "" && (cfg.Profile != "jina-retrieval-v1" || !strings.HasPrefix(cfg.Model, "jina-embeddings-v5-text-"))) {
+		return ErrInvalidEditorialState
+	}
+	expected := measured.ID
 	if cfg.ID != expected || cfg.Provider != "embedding-"+cfg.ConnectionID[:16] || cfg.Dimensions < 1 || cfg.Dimensions > provider.EmbeddingMaxDimensions || cfg.Unit != "input_tokens" || strings.TrimSpace(cfg.Model) == "" || len(cfg.Model) > 200 {
 		return ErrInvalidEditorialState
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO knowledge_embedding_configs(id,connection_id,provider,model,dimensions,unit)VALUES(?,?,?,?,?,?) ON CONFLICT(id)DO NOTHING`, cfg.ID, cfg.ConnectionID, cfg.Provider, cfg.Model, cfg.Dimensions, cfg.Unit)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO knowledge_embedding_configs(id,connection_id,provider,model,dimensions,unit,profile)VALUES(?,?,?,?,?,?,?) ON CONFLICT(id)DO NOTHING`, cfg.ID, cfg.ConnectionID, cfg.Provider, cfg.Model, cfg.Dimensions, cfg.Unit, cfg.Profile)
 	return err
 }
 
 // GetKnowledgeEmbeddingConfig 读取已保存配置，不触发预检或供应商调用。
 func (s *Store) GetKnowledgeEmbeddingConfig(ctx context.Context, id string) (*KnowledgeEmbeddingConfig, error) {
 	c := &KnowledgeEmbeddingConfig{}
-	err := s.DB.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity)
+	err := s.DB.QueryRowContext(ctx, `SELECT id,connection_id,provider,model,dimensions,unit,enabled,revision,semantic_enabled,window_capacity,profile FROM knowledge_embedding_configs WHERE id=?`, id).Scan(&c.ID, &c.ConnectionID, &c.Provider, &c.Model, &c.Dimensions, &c.Unit, &c.Enabled, &c.Revision, &c.SemanticEnabled, &c.WindowCapacity, &c.Profile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -163,6 +167,14 @@ func embeddingSQLArgs(cfg *KnowledgeEmbeddingConfig) []any {
 func embeddingWindows(key string, revision int, title, body string, scopeRevision int) ([]EmbeddingWindow, error) {
 	// Never slice an Owner expression or a source paragraph to fit a model cap.
 	// All chunks retain the underlying stable document/segment identity.
+	return embeddingWindowsProfile(key, revision, title, body, scopeRevision, "")
+}
+
+func embeddingWindowsProfile(key string, revision int, title, body string, scopeRevision int, profile string) ([]EmbeddingWindow, error) {
+	target := provider.EmbeddingMaxInputBytes
+	if profile == "jina-retrieval-v1" {
+		target = 1536
+	}
 	prefix := strings.TrimSpace(title) + "\n\n"
 	if len(prefix) >= provider.EmbeddingMaxInputBytes {
 		return nil, ErrInvalidEditorialState
@@ -176,9 +188,14 @@ func embeddingWindows(key string, revision int, title, body string, scopeRevisio
 		if len(prefix)+len(paragraph) > provider.EmbeddingMaxInputBytes {
 			return nil, ErrInvalidEditorialState
 		}
-		if current != "" && len(prefix)+len(current)+2+len(paragraph) > provider.EmbeddingMaxInputBytes {
+		if current != "" && len(prefix)+len(current)+2+len(paragraph) > target {
 			chunks = append(chunks, prefix+current)
+			parts := strings.Split(current, "\n\n")
+			last := parts[len(parts)-1]
 			current = ""
+			if profile != "" && len(last) <= 512 && len(prefix)+len(last)+2+len(paragraph) <= target {
+				current = last
+			}
 		}
 		if current != "" {
 			current += "\n\n"
@@ -277,7 +294,7 @@ func (s *Store) PrepareKnowledgeEmbeddingBatch(ctx context.Context, id string) (
 	}
 	var out []EmbeddingWindow
 	for _, doc := range docs {
-		windows, err := embeddingWindows(doc.key, doc.revision, doc.title, doc.body, cfg.Revision)
+		windows, err := embeddingWindowsProfile(doc.key, doc.revision, doc.title, doc.body, cfg.Revision, cfg.Profile)
 		if err != nil {
 			if _, err = s.DB.ExecContext(ctx, `UPDATE knowledge_embedding_events SET reason='window_too_large' WHERE config_id=? AND doc_key=?`, id, doc.key); err != nil {
 				return nil, err
@@ -398,7 +415,7 @@ func (s *Store) adoptKnowledgeEmbeddings(ctx context.Context, id string, windows
 		if !matches {
 			continue
 		}
-		current, err := embeddingWindows(doc.key, doc.revision, doc.title, doc.body, revision)
+		current, err := embeddingWindowsProfile(doc.key, doc.revision, doc.title, doc.body, revision, cfg.Profile)
 		if err != nil || window.WindowNo < 0 || window.WindowNo >= len(current) || current[window.WindowNo].ContentHash != window.ContentHash || current[window.WindowNo].Input != window.Input || window.Revision != doc.revision {
 			continue
 		}

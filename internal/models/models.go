@@ -58,6 +58,8 @@ const (
 	JobQuestionStudy JobType = "question_study"
 	// JobKnowledgeEmbedding prepares a versioned content or query embedding.
 	JobKnowledgeEmbedding JobType = "knowledge_embedding"
+	// JobKnowledgeRerank prepares cached candidate scores after explicit consent.
+	JobKnowledgeRerank JobType = "knowledge_rerank"
 	// JobLearningExport assembles a local learning bundle without a model.
 	JobLearningExport JobType = "learning_export"
 )

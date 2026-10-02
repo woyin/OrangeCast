@@ -278,3 +278,5 @@ git diff --check
 **当前边界**：不做多用户/SaaS、不自动发布微信公众号、不允许无 Source 的联网事实直接进入文章。除 Podcast/Upload/Document 之外的素材来源是下一阶段扩展方向。
 
 详细产品目标见 [`docs/product-goal.md`](docs/product-goal.md)，部署指南见 [`docs/production-deployment.md`](docs/production-deployment.md)。
+
+学习检索支持 Jina v5 独立查询/材料检索角色、显式候选重排及相关性反馈。新角色需要重新明确准备索引；重排可能改善或降低个别结果，默认不自动付费。配置示例见 `.env.example`，对照结果、费用与启用方式见 [检索优化实测](docs/superpowers/validation/jina-retrieval-v2/README.md)。

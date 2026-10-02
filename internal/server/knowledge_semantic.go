@@ -55,7 +55,7 @@ func (srv *Server) currentKnowledgeEmbeddingConfig(ctx context.Context, id strin
 	if err != nil {
 		return nil, err
 	}
-	if cfg.ConnectionID != route.ConnectionID || cfg.Model != route.Model || (route.Dimensions != 0 && route.Dimensions != cfg.Dimensions) {
+	if cfg.Profile != route.Profile || cfg.ConnectionID != route.ConnectionID || cfg.Model != route.Model || (route.Dimensions != 0 && route.Dimensions != cfg.Dimensions) {
 		return nil, store.ErrConflict
 	}
 	return cfg, nil

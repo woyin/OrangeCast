@@ -69,7 +69,7 @@ func (w *Worker) doKnowledgeEmbedding(ctx context.Context, job *models.Processin
 			return err
 		}
 		original := p.Config()
-		if original.ConnectionID != in.Config.ConnectionID || original.Model != in.Config.Model || (original.Dimensions != 0 && original.Dimensions != in.Config.Dimensions) {
+		if original.Profile != in.Config.Profile || original.ConnectionID != in.Config.ConnectionID || original.Model != in.Config.Model || (original.Dimensions != 0 && original.Dimensions != in.Config.Dimensions) {
 			return fmt.Errorf("独立embedding连接或维度已变化，不能替换冻结端点")
 		}
 		if in.Config.Dimensions != 0 {
@@ -84,7 +84,12 @@ func (w *Worker) doKnowledgeEmbedding(ctx context.Context, job *models.Processin
 		if err = w.store.MarkKnowledgeEmbeddingCallStarted(ctx, job.ID, in); err != nil {
 			return err
 		}
-		result, err := p.Embed(ctx, in.Inputs())
+		var result *provider.EmbeddingResult
+		if in.Kind == "query" {
+			result, err = p.EmbedQuery(ctx, in.Inputs())
+		} else {
+			result, err = p.Embed(ctx, in.Inputs())
+		}
 		if err != nil {
 			var responseErr *provider.EmbeddingResponseError
 			if errors.As(err, &responseErr) {

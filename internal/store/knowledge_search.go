@@ -122,7 +122,8 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 	if q.PerPage < 1 || q.PerPage > maxPage {
 		q.PerPage = 20
 	}
-	match := knowledgeMatchQuery(q.Text)
+	lexicalText := knowledgeNaturalQuery(q.Text)
+	match := knowledgeMatchQuery(lexicalText)
 	if q.Recall {
 		match = knowledgeRecallQuery(q.Text)
 	}
@@ -142,7 +143,7 @@ func (s *Store) knowledgePlan(ctx context.Context, q KnowledgeSearchQuery) (know
 		rank = "bm25(knowledge_search_fts,3.0,5.0,1.0)"
 		where = append(where, "knowledge_search_fts MATCH ?")
 		args = append(args, match)
-		clause, extra := knowledgePhraseFilter(q.Text)
+		clause, extra := knowledgePhraseFilter(lexicalText)
 		if clause != "" && !q.Recall {
 			where = append(where, clause)
 			args = append(args, extra...)
@@ -444,4 +445,22 @@ func knowledgeRecallQuery(text string) string {
 		terms = append(terms, `"`+strings.ReplaceAll(token, `"`, `""`)+`"`)
 	}
 	return strings.Join(terms, " OR ")
+}
+
+// knowledgeNaturalQuery removes only boundary question phrases. Interior words,
+// aliases and all source/version filters retain their original meaning.
+func knowledgeNaturalQuery(text string) string {
+	original := strings.TrimSpace(text)
+	core := strings.TrimRight(original, "？?！!。")
+	for _, head := range []string{"请问", "为什么要", "如何使用", "怎样使用", "如何", "怎么", "怎样"} {
+		core = strings.TrimPrefix(core, head)
+	}
+	for _, tail := range []string{"有什么作用", "有什么用", "是什么意思", "是什么", "怎么做", "吗", "呢"} {
+		core = strings.TrimSuffix(core, tail)
+	}
+	core = strings.TrimSpace(core)
+	if len([]rune(core)) < 2 {
+		return original
+	}
+	return core
 }

@@ -1,0 +1,10 @@
+=== RUN   TestKnowledgeSemanticJinaLive
+    knowledge_jina_live_test.go:179: prepared 10/40 queries
+    knowledge_jina_live_test.go:179: prepared 20/40 queries
+    knowledge_jina_live_test.go:179: prepared 30/40 queries
+    knowledge_jina_live_test.go:179: prepared 40/40 queries
+    knowledge_jina_live_test.go:287: <nil> invalid rerank result index or score
+--- FAIL: TestKnowledgeSemanticJinaLive (13.52s)
+FAIL
+FAIL	github.com/woyin/orangecast/internal/store	13.872s
+FAIL

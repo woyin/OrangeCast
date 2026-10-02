@@ -18,50 +18,54 @@ import (
 
 // Config 应用配置，从环境变量读取。
 type Config struct {
-	EmbeddingBaseURL            string
-	EmbeddingAPIKey             string
-	EmbeddingModel              string
-	EmbeddingDimensions         int
-	VoiceDir                    string
-	VoiceASRProvider            string
-	VoiceASRModel               string
-	VoiceASRBaseURL             string
-	VoiceASRAPIKey              string
-	Port                        string
-	DBPath                      string
-	SessionSecret               string
-	TempDir                     string // 临时文件目录（下载/转码中间产物）
-	GroqAPIKey                  string
-	OpenAIAPIKey                string
-	PodBaseURL                  string // 自动知识文章的独立 OpenAI 兼容文本连接。
-	PodAPIKey                   string
-	PodReviewModel              string
-	PodModel                    string
-	PodDiscoveryModel           string
-	PodSelectionModel           string
-	PodWriteModel               string
-	PodQuestionStudyModel       string
-	PodQuestionStudyReviewModel string
-	PodLearningReviewModel      string
-	PublicURL                   string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
-	TrustedProxies              []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
-	DataDir                     string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
-	EvidenceDir                 string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
-	BackupDir                   string   // 备份输出目录（DATA_DIR/backups）
-	NarrationDir                string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
-	KokoroBinary                string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
-	KokoroVoice                 string   // Kokoro 默认音色（默认 af_heart）
-	KokoroModel                 string   // Kokoro 模型文件路径（可选，某些发行版需要）
-	KokoroLanguage              string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
-	KokoroTimeoutSeconds        int      // 单次合成超时秒数（D03，默认 120）
+	RerankBaseURL, RerankAPIKey, RerankModel string
+	EmbeddingBaseURL                         string
+	EmbeddingAPIKey                          string
+	EmbeddingModel                           string
+	EmbeddingDimensions                      int
+	EmbeddingProfile                         string
+	VoiceDir                                 string
+	VoiceASRProvider                         string
+	VoiceASRModel                            string
+	VoiceASRBaseURL                          string
+	VoiceASRAPIKey                           string
+	Port                                     string
+	DBPath                                   string
+	SessionSecret                            string
+	TempDir                                  string // 临时文件目录（下载/转码中间产物）
+	GroqAPIKey                               string
+	OpenAIAPIKey                             string
+	PodBaseURL                               string // 自动知识文章的独立 OpenAI 兼容文本连接。
+	PodAPIKey                                string
+	PodReviewModel                           string
+	PodModel                                 string
+	PodDiscoveryModel                        string
+	PodSelectionModel                        string
+	PodWriteModel                            string
+	PodQuestionStudyModel                    string
+	PodQuestionStudyReviewModel              string
+	PodLearningReviewModel                   string
+	PublicURL                                string   // 站点公开 URL（Secure Cookie 判定 + 绝对链接）
+	TrustedProxies                           []string // 受信任反向代理 CIDR（仅这些来源的转发头被信任）
+	DataDir                                  string   // 统一数据目录（ADR-0010）：DB + evidence + tmp + backups
+	EvidenceDir                              string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
+	BackupDir                                string   // 备份输出目录（DATA_DIR/backups）
+	NarrationDir                             string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	KokoroBinary                             string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	KokoroVoice                              string   // Kokoro 默认音色（默认 af_heart）
+	KokoroModel                              string   // Kokoro 模型文件路径（可选，某些发行版需要）
+	KokoroLanguage                           string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
+	KokoroTimeoutSeconds                     int      // 单次合成超时秒数（D03，默认 120）
 }
 
 // Load 从环境变量加载配置。缺失关键项返回错误（生产不静默回退）。
 func Load() (*Config, error) {
 	c := &Config{
+		RerankBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("LEARNING_RERANK_BASE_URL")), "/"), RerankAPIKey: strings.TrimSpace(os.Getenv("LEARNING_RERANK_API_KEY")), RerankModel: strings.TrimSpace(os.Getenv("LEARNING_RERANK_MODEL")),
 		EmbeddingBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_BASE_URL")), "/"),
 		EmbeddingAPIKey:             strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_API_KEY")),
 		EmbeddingModel:              strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_MODEL")),
+		EmbeddingProfile:            strings.TrimSpace(os.Getenv("LEARNING_EMBEDDING_PROFILE")),
 		VoiceASRProvider:            strings.TrimSpace(os.Getenv("VOICE_ASR_PROVIDER")),
 		VoiceASRModel:               strings.TrimSpace(os.Getenv("VOICE_ASR_MODEL")),
 		VoiceASRBaseURL:             strings.TrimRight(strings.TrimSpace(os.Getenv("VOICE_ASR_BASE_URL")), "/"),
@@ -113,6 +117,9 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("LEARNING_EMBEDDING_DIMENSIONS 必须为1至2048的整数")
 		}
 		c.EmbeddingDimensions = n
+	}
+	if err := c.ValidateRerank(); err != nil {
+		return nil, err
 	}
 	if err := c.ValidateEmbedding(); err != nil {
 		return nil, err
@@ -210,7 +217,7 @@ func (c *Config) ValidateEmbedding() error {
 			count++
 		}
 	}
-	if count == 0 && c.EmbeddingDimensions == 0 {
+	if count == 0 && c.EmbeddingDimensions == 0 && c.EmbeddingProfile == "" {
 		return nil
 	}
 	if count != 3 {
@@ -222,6 +229,9 @@ func (c *Config) ValidateEmbedding() error {
 	}
 	if strings.ContainsAny(c.EmbeddingAPIKey+c.EmbeddingModel, "\r\n") || len(c.EmbeddingModel) > 200 || c.EmbeddingDimensions < 0 || c.EmbeddingDimensions > 2048 {
 		return fmt.Errorf("LEARNING_EMBEDDING 配置无效")
+	}
+	if c.EmbeddingProfile != "" && (c.EmbeddingProfile != "jina-retrieval-v1" || u.Scheme != "https" || u.Hostname() != "api.jina.ai" || !strings.HasPrefix(c.EmbeddingModel, "jina-embeddings-v5-text-")) {
+		return fmt.Errorf("LEARNING_EMBEDDING_PROFILE 与连接/模型不兼容")
 	}
 	return nil
 }
@@ -240,4 +250,16 @@ func (c *Config) QuestionStudyModels() (generation, review string) {
 		review = c.PodModel
 	}
 	return
+}
+
+// ValidateRerank rejects incomplete independent routes without exposing secrets.
+func (c *Config) ValidateRerank() error {
+	if c.RerankBaseURL == "" && c.RerankAPIKey == "" && c.RerankModel == "" {
+		return nil
+	}
+	u, e := url.Parse(c.RerankBaseURL)
+	if c.RerankAPIKey == "" || c.RerankModel == "" || len(c.RerankModel) > 200 || e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(c.RerankAPIKey+c.RerankModel, "\r\n") {
+		return fmt.Errorf("LEARNING_RERANK_BASE_URL/API_KEY/MODEL 必须是完整有效配置")
+	}
+	return nil
 }

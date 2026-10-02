@@ -150,6 +150,18 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 		in.Stage = embeddingIn.Kind
 		in.Request.Estimate = embeddingIn.Estimate
 	}
+	recovery := runHref(store.RunRecord{ID: id, Lane: lane, SourceID: job.SourceID})
+	var rerankIn store.KnowledgeRerankInput
+	if job.JobType == models.JobKnowledgeRerank && json.Unmarshal([]byte(ex.InputSnapshotJSON), &rerankIn) == nil && rerankIn.Version == "knowledge-rerank-v1" {
+		in.Stage = "candidate_rerank"
+		in.Request.Estimate = rerankIn.Estimate
+		q := rerankIn.Request.Search
+		values := url.Values{"q": {q.Text}, "kind": {q.Kind}, "source_type": {q.SourceType}, "source_id": {q.SourceID}, "podcast_id": {q.PodcastID}, "theme": {q.Theme}, "from": {q.From}, "until": {q.Until}, "rerank": {"1"}, "embedding_config": {rerankIn.Request.EmbeddingConfigID}}
+		if rerankIn.Request.Semantic {
+			values.Set("semantic", "1")
+		}
+		recovery = "/search?" + values.Encode()
+	}
 	var studyIn store.QuestionStudyJobInput
 	if job.JobType == models.JobQuestionStudy && json.Unmarshal([]byte(ex.InputSnapshotJSON), &studyIn) == nil && studyIn.Version == store.QuestionStudyTaskVersion {
 		in.Stage = studyIn.Stage
@@ -173,7 +185,7 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 		material.SourceID = strings.Join(ids, ", ")
 		materials = append(materials, material)
 	}
-	v := store.RunRecord{ID: id, Lane: lane, SourceID: job.SourceID, Status: string(job.Status), Stopped: stop}
+
 	blockReason := ""
 	if e := srv.store.CheckRunControl(r.Context(), id); e != nil {
 		blockReason = e.Error()
@@ -251,7 +263,7 @@ func (srv *Server) handleAutomationDetail(w http.ResponseWriter, r *http.Request
 			usage = originalUsage
 		}
 	}
-	srv.tmpl.Render(w, "automation_detail.html", map[string]any{"CSRF": auth.CSRFValue(r), "Job": job, "Execution": ex, "Error": runPublicError(automationError(job.LastError)), "Direction": c, "Revision": rev, "Priority": priority, "Stopped": stop, "Lane": lane, "Stage": in.Stage, "Recorded": recorded, "Request": in.Request, "Materials": materials, "Duration": in.DurationSeconds, "Recovery": runHref(v), "Actions": actions, "ActionsNext": actionsNext, "NextActionsOffset": actionsOffset + 50, "Usage": usage, "BlockReason": runPublicError(blockReason), "Reservation": reservation, "AudioPriceKnown": in.PriceKnown, "AudioEstimate": in.DurationSeconds / 60 * in.CentsPerMinute, "PaidOrigin": paidOrigin})
+	srv.tmpl.Render(w, "automation_detail.html", map[string]any{"CSRF": auth.CSRFValue(r), "Job": job, "Execution": ex, "Error": runPublicError(automationError(job.LastError)), "Direction": c, "Revision": rev, "Priority": priority, "Stopped": stop, "Lane": lane, "Stage": in.Stage, "Recorded": recorded, "Request": in.Request, "Materials": materials, "Duration": in.DurationSeconds, "Recovery": recovery, "Actions": actions, "ActionsNext": actionsNext, "NextActionsOffset": actionsOffset + 50, "Usage": usage, "BlockReason": runPublicError(blockReason), "Reservation": reservation, "AudioPriceKnown": in.PriceKnown, "AudioEstimate": in.DurationSeconds / 60 * in.CentsPerMinute, "PaidOrigin": paidOrigin})
 }
 
 func (srv *Server) handleAutomationAction(w http.ResponseWriter, r *http.Request) {

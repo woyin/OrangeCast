@@ -37,6 +37,7 @@ type EmbeddingConfig struct {
 	Model        string `json:"model"`
 	Dimensions   int    `json:"dimensions"`
 	Unit         string `json:"unit"`
+	Profile      string `json:"profile,omitempty"`
 }
 
 // EmbeddingResult 保留向量、模型身份和实际输入用量。
@@ -82,6 +83,7 @@ type EmbeddingClient struct {
 	key, baseURL, model string
 	dimensions          int
 	requestDimensions   int
+	profile             string
 	client              *http.Client
 }
 
@@ -101,8 +103,29 @@ func NewEmbeddingClient(key, baseURL, model string, dimensions int) (*EmbeddingC
 // Config 返回无凭据的冻结配置身份。
 func (p *EmbeddingClient) Config() EmbeddingConfig {
 	connection := fmt.Sprintf("%x", sha256.Sum256([]byte("embedding\x00"+p.baseURL)))
-	id := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", connection, p.model, p.dimensions))))
-	return EmbeddingConfig{ID: id, ConnectionID: connection, Provider: "embedding-" + connection[:16], Model: p.model, Dimensions: p.dimensions, Unit: "input_tokens"}
+	id := embeddingConfigID(connection, p.model, p.dimensions, p.profile)
+	return EmbeddingConfig{ID: id, ConnectionID: connection, Provider: "embedding-" + connection[:16], Model: p.model, Dimensions: p.dimensions, Unit: "input_tokens", Profile: p.profile}
+}
+
+func embeddingConfigID(connection, model string, dimensions int, profile string) string {
+	value := fmt.Sprintf("%s\x00%s\x00%d", connection, model, dimensions)
+	if profile != "" {
+		value += "\x00" + profile
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(value)))
+}
+
+// WithProfile selects a versioned, task-specific vector space without I/O.
+func (p *EmbeddingClient) WithProfile(profile string) (*EmbeddingClient, error) {
+	if profile != "" {
+		endpoint, _ := url.Parse(p.baseURL)
+		if profile != "jina-retrieval-v1" || endpoint.Scheme != "https" || endpoint.Hostname() != "api.jina.ai" || !strings.HasPrefix(p.model, "jina-embeddings-v5-text-") {
+			return nil, errors.New("unsupported embedding retrieval profile")
+		}
+	}
+	copy := *p
+	copy.profile = profile
+	return &copy, nil
 }
 
 // WithDimensions constructs a client for a measured, fixed dimension. When the
@@ -113,7 +136,7 @@ func (c EmbeddingConfig) WithDimensions(n int) (EmbeddingConfig, error) {
 		return c, errors.New("embedding dimension outside capacity")
 	}
 	c.Dimensions = n
-	c.ID = fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", c.ConnectionID, c.Model, n))))
+	c.ID = embeddingConfigID(c.ConnectionID, c.Model, n, c.Profile)
 	return c, nil
 }
 
@@ -152,6 +175,15 @@ func (e *EmbeddingResponseError) Unwrap() error { return e.Cause }
 
 // Embed 执行单次有界请求并校验返回的模型与向量。
 func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *EmbeddingResult, err error) {
+	return p.embed(ctx, inputs, false)
+}
+
+// EmbedQuery applies the query role in the same configured vector space.
+func (p *EmbeddingClient) EmbedQuery(ctx context.Context, inputs []string) (*EmbeddingResult, error) {
+	return p.embed(ctx, inputs, true)
+}
+
+func (p *EmbeddingClient) embed(ctx context.Context, inputs []string, query bool) (out *EmbeddingResult, err error) {
 	var receipt *EmbeddingResult
 	defer func() {
 		if err != nil && receipt != nil {
@@ -166,7 +198,14 @@ func (p *EmbeddingClient) Embed(ctx context.Context, inputs []string) (out *Embe
 		Input      []string `json:"input"`
 		Encoding   string   `json:"encoding_format"`
 		Dimensions int      `json:"dimensions,omitempty"`
-	}{p.model, inputs, "float", p.requestDimensions}
+		Task       string   `json:"task,omitempty"`
+	}{Model: p.model, Input: inputs, Encoding: "float", Dimensions: p.requestDimensions}
+	if p.profile != "" {
+		body.Task = "retrieval.passage"
+		if query {
+			body.Task = "retrieval.query"
+		}
+	}
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", bytes.NewReader(payload))
 	if err != nil {

@@ -1,0 +1,15 @@
+{
+  "full_go_test_coverage_gate": "passed",
+  "go_vet": "passed",
+  "go_build": "passed",
+  "lint": "passed",
+  "targeted_race": "passed",
+  "full_race": "not_run_locally_this_round",
+  "ci_fixture_regression": "red_then_green",
+  "ci_original_permission_scenarios_race_runs": 3,
+  "actual_dotenv_provider_validation": "passed",
+  "personal_corpus_evaluation": false,
+  "human_attested_relevance": false,
+  "quality_gate_passed": false,
+  "cash_cost": null
+}

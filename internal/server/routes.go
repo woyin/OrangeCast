@@ -142,6 +142,8 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/review/action", srv.handleLearningReviewAction)
 	mux.HandleFunc("/notes", srv.handleNotes)
 	mux.HandleFunc("/search", srv.handleSearch)
+	mux.HandleFunc("/api/knowledge-rerank", srv.handleKnowledgeRerank)
+	mux.HandleFunc("/api/knowledge-search-feedback", srv.handleKnowledgeSearchFeedback)
 	mux.HandleFunc("/search/settings", srv.handleKnowledgeSearchSettings)
 	mux.HandleFunc("/api/knowledge-search-settings", srv.handleKnowledgeSearchSettings)
 	mux.HandleFunc("/keypoints", srv.handleKeyPoints)
