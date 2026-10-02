@@ -1,0 +1,6 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/woyin/orangecast/internal/store
+cpu: Apple M4
+BenchmarkKnowledgeHybridMaximumDimensions/50000/cold-10    	      20	 622091727 ns/op	       690.6 p95-ms	       531.9 sampled-heap-MiB	842722220 B/op	  459181 allocs/op
+PASS

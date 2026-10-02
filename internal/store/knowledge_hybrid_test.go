@@ -314,7 +314,8 @@ func TestKnowledgeHybridRetrieveCapacityDegradesBeforeMatrixLoad(t *testing.T) {
 func TestKnowledgeHybridRetrieveCandidateAndCancellationBounds(t *testing.T) {
 	matrix := &knowledgeEmbeddingMatrix{Objects: 205}
 	for i := 0; i < 205; i++ {
-		matrix.Entries = append(matrix.Entries, embeddingMatrixEntry{Key: fmt.Sprintf("object:%03d", i), Revision: 1, Vector: []float32{1, 0}})
+		matrix.Documents = append(matrix.Documents, semanticDocumentRank{Key: fmt.Sprintf("object:%03d", i), Revision: 1})
+		matrix.Entries = append(matrix.Entries, embeddingMatrixEntry{Key: fmt.Sprintf("object:%03d", i), Revision: 1, Document: i, Vector: []float32{1, 0}})
 	}
 	ranks, err := semanticRanks(t.Context(), matrix, []float32{1, 0})
 	if err != nil || len(ranks) != knowledgeSemanticCandidateLimit || ranks[0].Key != "object:000" {

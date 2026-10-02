@@ -30,7 +30,7 @@
 
 设置页提供质量报告 JSON 模板。报告需 Owner 实际测量确认，至少 40 条查询、20 个冷样本，并记录 2048 维、1 万/5 万规模的查询/素材/相关性 hash、运行代码与机器、冷热 p95、峰值内存和已知费用。准入要求 Recall 不低于 FTS、改写查询收益至少 0.1、冷 p95 分别不高于 150/500 毫秒；报告导入不调用模型，也不自动开启，仍须另行激活。源码、机器、范围、配置、索引 epoch、价格或理解选择变化都会使旧准入失效，不能用热缓存替代冷启动结果。
 
-评测准备单条查询可在设置页明确提交（`/api/knowledge-semantic` 的 `evaluation_query`），这是可能付费的持久任务，冻结版本与预算，但不激活普通搜索。只读 `/api/knowledge-search-settings?config_id=...` 返回当前报告、失效原因及 `effective_semantic_enabled`；另加 `action=evaluate&q=...` 比较既有向量的 FTS/hybrid，GET 不生成向量、不付费。普通 `query` 仍须通过完整门禁。当前没有批量真实语义评测 CLI，不能据合成向量 benchmark 宣称真实 Recall 收益。0089 的 doc_key 索引后，同机 2048 维、20 样本冷 p95 为 175.1/837.7 毫秒，仍超过 150/500 门槛；实际语义保持关闭。完整原始证据见[语义性能记录](superpowers/validation/v4/semantic-performance.md)。
+评测准备单条查询可在设置页明确提交（`/api/knowledge-semantic` 的 `evaluation_query`），这是可能付费的持久任务，冻结版本与预算，但不激活普通搜索。只读 `/api/knowledge-search-settings?config_id=...` 返回当前报告、失效原因及 `effective_semantic_enabled`；另加 `action=evaluate&q=...` 比较既有向量的 FTS/hybrid，GET 不生成向量、不付费。普通 `query` 仍须通过完整门禁。当前没有批量真实语义评测 CLI，不能据合成向量 benchmark 宣称真实 Recall 收益。后续检索优化同机 2048 维、20 样本冷 p95 为 124.8/690.6 毫秒，10k通过150ms、50k仍超过500ms门槛；实际语义保持关闭。最新[对照结果](superpowers/validation/semantic-optimization/README.md)保留全部样本与内存代价。完整原始证据见[语义性能记录](superpowers/validation/v4/semantic-performance.md)。
 
 ## 问答、写作与费用
 

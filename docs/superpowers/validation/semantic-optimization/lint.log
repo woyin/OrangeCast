@@ -1,0 +1,6 @@
+bash scripts/lint.sh
+==> 未找到 revive，先安装 @latest...
+==> 运行 revive（exported：导出符号必须有以符号名开头的注释）...
+
+
+注释门禁通过。

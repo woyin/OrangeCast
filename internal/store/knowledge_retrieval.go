@@ -73,13 +73,13 @@ func (s *Store) retrieveKnowledge(ctx context.Context, req KnowledgeRetrieveQuer
 	default:
 		return KnowledgeRetrieveResult{}, ErrInvalidEditorialState
 	}
+	if req.Semantic {
+		return s.retrieveHybrid(ctx, req, q, evaluation)
+	}
 	lexical, err := s.SearchKnowledge(ctx, q)
 	if err != nil {
 		return KnowledgeRetrieveResult{}, err
 	}
 	out := KnowledgeRetrieveResult{KnowledgeSearchResult: lexical, Method: "fts", LexicalCount: len(lexical.Hits), LexicalTotal: lexical.Total}
-	if req.Semantic {
-		return s.retrieveHybrid(ctx, req, q, lexical, evaluation)
-	}
 	return out, nil
 }

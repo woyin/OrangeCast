@@ -271,24 +271,68 @@ func (s *Store) searchKnowledgeKeys(ctx context.Context, q KnowledgeSearchQuery,
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var hit KnowledgeSearchHit
-		var body string
-		if err := rows.Scan(&hit.Key, &hit.Kind, &hit.ObjectID, &hit.Revision, &hit.SourceType, &hit.SourceID, &hit.Title, &body, &hit.Position, &hit.SegmentID, &hit.SnapshotID, &hit.Visibility, &hit.CreatedAt, &hit.Rank); err != nil {
+		hit, err := scanKnowledgeSearchHit(rows, q)
+		if err != nil {
 			return result, err
-		}
-		hit.Snippet = knowledgeSnippet(body, q.Text, 280)
-		hit.MatchKind = "lexical"
-		hit.Reason = "本地全文/中文双字词匹配"
-		if q.Recall {
-			hit.Reason = "本地宽召回：词项重合"
-		}
-		if strings.TrimSpace(q.Text) == "" && q.Theme == "" {
-			hit.Reason = "按更新时间列出"
 		}
 		result.Hits = append(result.Hits, hit)
 	}
 	return result, rows.Err()
 }
+
+func scanKnowledgeSearchHit(rows *sql.Rows, q KnowledgeSearchQuery, extra ...any) (KnowledgeSearchHit, error) {
+	var hit KnowledgeSearchHit
+	var body string
+	targets := []any{&hit.Key, &hit.Kind, &hit.ObjectID, &hit.Revision, &hit.SourceType, &hit.SourceID, &hit.Title, &body, &hit.Position, &hit.SegmentID, &hit.SnapshotID, &hit.Visibility, &hit.CreatedAt, &hit.Rank}
+	targets = append(targets, extra...)
+	if err := rows.Scan(targets...); err != nil {
+		return KnowledgeSearchHit{}, err
+	}
+	hit.Snippet = knowledgeSnippet(body, q.Text, 280)
+	hit.MatchKind = "lexical"
+	hit.Reason = "本地全文/中文双字词匹配"
+	if q.Recall {
+		hit.Reason = "本地宽召回：词项重合"
+	}
+	if strings.TrimSpace(q.Text) == "" && q.Theme == "" {
+		hit.Reason = "按更新时间列出"
+	}
+	return hit, nil
+}
+
+// searchKnowledgeLexicalPool shares the FTS match scan between counting and
+// ranking. Only identities/scores are materialized; bodies are fetched for the
+// first 100 hits. Scope, archive and provider predicates remain in the match scan.
+func (s *Store) searchKnowledgeLexicalPool(ctx context.Context, q KnowledgeSearchQuery) (KnowledgeSearchResult, error) {
+	q.Page, q.PerPage, q.MetadataOnly = 1, 100, true
+	plan, err := s.knowledgePlan(ctx, q)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	q = plan.Query
+	result := KnowledgeSearchResult{Page: q.Page, PerPage: q.PerPage}
+	if plan.Empty {
+		return result, nil
+	}
+	query := `WITH matched AS MATERIALIZED (SELECT d.rowid AS doc_rowid,d.key,d.updated_at,` + plan.Rank + ` AS score` + plan.From + `),
+	selected AS MATERIALIZED (SELECT * FROM matched ORDER BY score,updated_at DESC,key LIMIT 100)
+	SELECT d.key,d.kind,d.object_id,d.revision,d.source_type,d.source_id,d.title,substr(d.body,1,280),d.position,d.segment_id,d.snapshot_id,d.visibility,d.created_at,selected.score,(SELECT COUNT(*) FROM matched)
+	FROM selected JOIN knowledge_search_docs d ON d.rowid=selected.doc_rowid ORDER BY selected.score,d.updated_at DESC,d.key`
+	rows, err := s.DB.QueryContext(ctx, query, plan.Args...)
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		hit, err := scanKnowledgeSearchHit(rows, q, &result.Total)
+		if err != nil {
+			return result, err
+		}
+		result.Hits = append(result.Hits, hit)
+	}
+	return result, rows.Err()
+}
+
 func knowledgeSnippet(body, query string, limit int) string {
 	rs := []rune(body)
 	if len(rs) <= limit {

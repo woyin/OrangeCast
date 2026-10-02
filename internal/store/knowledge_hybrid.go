@@ -1,12 +1,14 @@
 package store
 
 import (
+	"container/heap"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -19,12 +21,14 @@ type embeddingEpoch struct{ Index, Delete int64 }
 type embeddingMatrixEntry struct {
 	Key              string
 	Revision, Window int
+	Document         int
 	Vector           []float32
 }
 type knowledgeEmbeddingMatrix struct {
-	CacheKey string
-	Entries  []embeddingMatrixEntry
-	Objects  int
+	CacheKey  string
+	Entries   []embeddingMatrixEntry
+	Objects   int
+	Documents []semanticDocumentRank
 }
 type semanticDocumentRank struct {
 	Key      string
@@ -95,7 +99,7 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 	// Decode each row once, avoiding a retained second full 400MiB blob corpus.
 	// No unsafe aliasing: the SQL driver's reusable buffer never enters the cache.
 	matrix := &knowledgeEmbeddingMatrix{CacheKey: key, Entries: make([]embeddingMatrixEntry, 0, globalWindows)}
-	objects := make(map[string]bool, globalWindows)
+	objects := make(map[string]int, globalWindows)
 	var vectorArena []float32
 	for rows.Next() {
 		if len(matrix.Entries)%256 == 0 && ctx.Err() != nil {
@@ -130,8 +134,14 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 			rows.Close()
 			return nil, err
 		}
+		document, exists := objects[item.Key]
+		if !exists {
+			document = len(matrix.Documents)
+			objects[item.Key] = document
+			matrix.Documents = append(matrix.Documents, semanticDocumentRank{Key: item.Key, Revision: item.Revision})
+		}
+		item.Document = document
 		matrix.Entries = append(matrix.Entries, item)
-		objects[item.Key] = true
 		if len(matrix.Entries) > KnowledgeEmbeddingCapacity {
 			rows.Close()
 			return nil, errEmbeddingCapacity
@@ -159,37 +169,67 @@ func (s *Store) embeddingMatrixFor(ctx context.Context, cfg *KnowledgeEmbeddingC
 // semanticRanks computes outside any DB transaction. All vectors are normalized;
 // score orders candidates and is never presented as evidence confidence.
 func semanticRanks(ctx context.Context, matrix *knowledgeEmbeddingMatrix, query []float32) ([]semanticDocumentRank, error) {
-	best := make(map[string]semanticDocumentRank, matrix.Objects)
+	best := make([]float64, len(matrix.Documents))
+	for i := range best {
+		best[i] = math.Inf(-1)
+	}
 	for i, entry := range matrix.Entries {
 		if i%256 == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if len(entry.Vector) != len(query) {
+		if len(entry.Vector) != len(query) || entry.Document < 0 || entry.Document >= len(best) {
 			return nil, ErrInvalidEditorialState
 		}
 		var dot float64
 		for j, v := range entry.Vector {
 			dot += float64(v) * float64(query[j])
 		}
-		old, exists := best[entry.Key]
-		if !exists || dot > old.Score {
-			best[entry.Key] = semanticDocumentRank{Key: entry.Key, Revision: entry.Revision, Score: dot}
+		if dot > best[entry.Document] {
+			best[entry.Document] = dot
 		}
 	}
-	ranks := make([]semanticDocumentRank, 0, len(best))
-	for _, item := range best {
-		ranks = append(ranks, item)
-	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].Key < ranks[j].Key
+	// Document slots are assigned once when loading the immutable matrix. Each
+	// query needs only one score per document and a bounded exact top-200 heap,
+	// rather than allocating a string map and sorting the full corpus again.
+	ranks := make(semanticRankHeap, 0, knowledgeSemanticCandidateLimit)
+	for i, document := range matrix.Documents {
+		if i%256 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		return ranks[i].Score > ranks[j].Score
-	})
-	if len(ranks) > knowledgeSemanticCandidateLimit {
-		ranks = ranks[:knowledgeSemanticCandidateLimit]
+		document.Score = best[i]
+		if len(ranks) < knowledgeSemanticCandidateLimit {
+			heap.Push(&ranks, document)
+		} else if semanticRankBetter(document, ranks[0]) {
+			ranks[0] = document
+			heap.Fix(&ranks, 0)
+		}
 	}
-	return ranks, nil
+	ordered := make([]semanticDocumentRank, len(ranks))
+	for i := len(ordered) - 1; i >= 0; i-- {
+		ordered[i] = heap.Pop(&ranks).(semanticDocumentRank)
+	}
+	return ordered, nil
+}
+
+func semanticRankBetter(a, b semanticDocumentRank) bool {
+	if a.Score == b.Score {
+		return a.Key < b.Key
+	}
+	return a.Score > b.Score
+}
+
+// The root is the worst retained hit, including the stable key tie-break.
+type semanticRankHeap []semanticDocumentRank
+
+func (h semanticRankHeap) Len() int           { return len(h) }
+func (h semanticRankHeap) Less(i, j int) bool { return semanticRankBetter(h[j], h[i]) }
+func (h semanticRankHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *semanticRankHeap) Push(x any)        { *h = append(*h, x.(semanticDocumentRank)) }
+func (h *semanticRankHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
 }
 
 func fuseKnowledgeRanks(lexical []KnowledgeSearchHit, semantic []semanticDocumentRank) []fusedKnowledgeRank {
@@ -242,66 +282,71 @@ func semanticDegradation(err error) string {
 	}
 }
 
-func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, q KnowledgeSearchQuery, lexical KnowledgeSearchResult, evaluation bool) (KnowledgeRetrieveResult, error) {
-	fallback := func(reason string, fresh bool) (KnowledgeRetrieveResult, error) {
-		if fresh {
-			var err error
-			lexical, err = s.SearchKnowledge(ctx, q)
-			if err != nil {
-				return KnowledgeRetrieveResult{}, err
-			}
+func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, q KnowledgeSearchQuery, evaluation bool) (KnowledgeRetrieveResult, error) {
+	// Validate/normalize pagination before either adapter runs. A successful hybrid
+	// needs only its 100-hit lexical pool; loading the requested FTS page first
+	// would repeat both the full match count and ranking scan.
+	plan, err := s.knowledgePlan(ctx, q)
+	if err != nil {
+		return KnowledgeRetrieveResult{}, err
+	}
+	q = plan.Query
+	fallback := func(reason string) (KnowledgeRetrieveResult, error) {
+		lexical, err := s.SearchKnowledge(ctx, q)
+		if err != nil {
+			return KnowledgeRetrieveResult{}, err
 		}
 		return KnowledgeRetrieveResult{KnowledgeSearchResult: lexical, Method: "fts", LexicalCount: len(lexical.Hits), LexicalTotal: lexical.Total, Degradation: reason}, nil
 	}
 	if req.EmbeddingConfigID == "" {
-		return fallback("语义索引尚未配置或开启，本次使用FTS。", false)
+		return fallback("语义索引尚未配置或开启，本次使用FTS。")
 	}
 	cfg, err := s.GetKnowledgeEmbeddingConfig(ctx, req.EmbeddingConfigID)
 	if err != nil {
-		return fallback(semanticDegradation(err), false)
+		return fallback(semanticDegradation(err))
 	}
 	if !cfg.Enabled {
-		return fallback("语义索引已关闭，本次使用FTS。", false)
+		return fallback("语义索引已关闭，本次使用FTS。")
 	}
 	if !evaluation {
 		if !cfg.SemanticEnabled {
-			return fallback("语义检索未通过准入并开启，本次使用FTS。", false)
+			return fallback("语义检索未通过准入并开启，本次使用FTS。")
 		}
 		_, reason, e := s.KnowledgeEmbeddingQualityGate(ctx, cfg.ID)
 		if e != nil {
-			return fallback(semanticDegradation(e), false)
+			return fallback(semanticDegradation(e))
 		}
 		if reason != "" {
-			return fallback(reason, false)
+			return fallback(reason)
 		}
 	}
 	epoch, err := s.embeddingEpoch(ctx)
 	if err != nil {
-		return fallback(semanticDegradation(err), false)
+		return fallback(semanticDegradation(err))
 	}
 	vector, err := s.KnowledgeQueryEmbedding(ctx, cfg.ID, q.Text)
 	if err != nil {
-		return fallback(semanticDegradation(err), false)
+		return fallback(semanticDegradation(err))
 	}
 	matrix, err := s.embeddingMatrixFor(ctx, cfg, q, epoch)
 	if err != nil {
-		return fallback(semanticDegradation(err), errors.Is(err, ErrConflict))
+		return fallback(semanticDegradation(err))
 	}
 	if len(matrix.Entries) == 0 {
-		return fallback("当前筛选范围尚无可用的授权向量，本次使用FTS。", false)
+		return fallback("当前筛选范围尚无可用的授权向量，本次使用FTS。")
 	}
 	semantic, err := semanticRanks(ctx, matrix, vector)
 	if err != nil {
 		if ctx.Err() != nil {
 			return KnowledgeRetrieveResult{}, ctx.Err()
 		}
-		return fallback(semanticDegradation(err), false)
+		return fallback(semanticDegradation(err))
 	}
 	lexicalQuery := q
 	lexicalQuery.Page = 1
 	lexicalQuery.PerPage = 100
 	lexicalQuery.MetadataOnly = true
-	lexicalPool, err := s.SearchKnowledge(ctx, lexicalQuery)
+	lexicalPool, err := s.searchKnowledgeLexicalPool(ctx, lexicalQuery)
 	if err != nil {
 		return KnowledgeRetrieveResult{}, err
 	}
@@ -333,22 +378,22 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 	}
 	current, err := s.embeddingEpoch(ctx)
 	if err != nil {
-		return fallback(semanticDegradation(err), false)
+		return fallback(semanticDegradation(err))
 	}
 	if current != epoch {
-		return fallback(semanticDegradation(ErrConflict), true)
+		return fallback(semanticDegradation(ErrConflict))
 	}
 	if !evaluation {
 		refreshed, e := s.GetKnowledgeEmbeddingConfig(ctx, cfg.ID)
 		if e != nil {
-			return fallback(semanticDegradation(e), true)
+			return fallback(semanticDegradation(e))
 		}
 		_, reason, e := s.KnowledgeEmbeddingQualityGate(ctx, cfg.ID)
 		if e != nil {
-			return fallback(semanticDegradation(e), true)
+			return fallback(semanticDegradation(e))
 		}
 		if !refreshed.SemanticEnabled || reason != "" {
-			return fallback("检索期间准入或开关已失效，本次使用FTS。", true)
+			return fallback("检索期间准入或开关已失效，本次使用FTS。")
 		}
 	}
 	hits := make([]KnowledgeSearchHit, 0, len(ranked))
@@ -369,7 +414,7 @@ func (s *Store) retrieveHybrid(ctx context.Context, req KnowledgeRetrieveQuery, 
 		}
 		hits = append(hits, hit)
 	}
-	out := KnowledgeRetrieveResult{KnowledgeSearchResult: KnowledgeSearchResult{Total: len(hits), Page: lexical.Page, PerPage: lexical.PerPage}, Method: "rrf", LexicalCount: len(lexicalPool.Hits), LexicalTotal: lexical.Total, SemanticCount: len(semantic), IndexedCount: matrix.Objects, IndexedWindows: len(matrix.Entries), CandidateLimit: knowledgeSemanticCandidateLimit, Coverage: "仅比较Owner选定、当前授权且版本有效的索引；不代表已覆盖整个知识库。"}
+	out := KnowledgeRetrieveResult{KnowledgeSearchResult: KnowledgeSearchResult{Total: len(hits), Page: q.Page, PerPage: q.PerPage}, Method: "rrf", LexicalCount: len(lexicalPool.Hits), LexicalTotal: lexicalPool.Total, SemanticCount: len(semantic), IndexedCount: matrix.Objects, IndexedWindows: len(matrix.Entries), CandidateLimit: knowledgeSemanticCandidateLimit, Coverage: "仅比较Owner选定、当前授权且版本有效的索引；不代表已覆盖整个知识库。"}
 	start := (out.Page - 1) * out.PerPage
 	if start < len(hits) {
 		end := start + out.PerPage
