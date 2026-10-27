@@ -55,7 +55,7 @@ func runServe() {
 	selector.WithNarration(provider.NewKokoroProvider(cfg.KokoroBinary, cfg.KokoroVoice, cfg.KokoroModel).
 		WithLanguage(cfg.KokoroLanguage).
 		WithSynthTimeout(time.Duration(cfg.KokoroTimeoutSeconds) * time.Second))
-	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir, cfg.NarrationDir).WithVoice(cfg.VoiceDir, cfg.VoiceASRProvider, cfg.VoiceASRModel, cfg.VoiceASRBaseURL, cfg.VoiceASRAPIKey)
+	worker := queue.NewWorker(s, selector, cfg.TempDir, cfg.EvidenceDir, cfg.NarrationDir).WithClipDir(cfg.ClipDir).WithVoice(cfg.VoiceDir, cfg.VoiceASRProvider, cfg.VoiceASRModel, cfg.VoiceASRBaseURL, cfg.VoiceASRAPIKey)
 	refresher := rss.NewRefresher(s)
 	refresher.Start()
 	defer refresher.Stop()

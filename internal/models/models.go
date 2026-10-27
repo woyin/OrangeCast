@@ -62,6 +62,10 @@ const (
 	JobKnowledgeRerank JobType = "knowledge_rerank"
 	// JobLearningExport assembles a local learning bundle without a model.
 	JobLearningExport JobType = "learning_export"
+	// JobPracticeReview 练习问题生成（K02）：从冻结转录版本生成 ReviewQuestion。
+	JobPracticeReview JobType = "practice_review"
+	// JobTranslate 对齐译文生成（Translation）：按 Segment 对齐翻译冻结转录版本。
+	JobTranslate JobType = "translate"
 )
 
 // JobStatus 任务状态机：queued → running → succeeded | failed
@@ -569,6 +573,55 @@ const (
 	// KeyPointDismissed is intentionally excluded from content production.
 	KeyPointDismissed KeyPointProductionStatus = "dismissed"
 )
+
+// ReviewQuestion 来源中的一个可自我检验问题（K02 学习实践）。
+// 问题挂 Citation（引用真实 Segment，可核验），提示挂 Reference（AI 生成、非原文）。
+type ReviewQuestion struct {
+	ID                string
+	SourceType        SourceType
+	SourceID          string
+	SourceTitle       string
+	TranscriptVersion int
+	Prompt            string
+	AnswerHint        string
+	Citations         []string
+	TimeStart         float64
+	TimeEnd           float64
+	Provider          string
+	Model             string
+	JobID             string
+	CreatedAt         string
+}
+
+// HighlightClip 高光片段在源音频中的真实音频区间（程序计算，AI 不自估）。
+// 音频按源音频 sha256 命名并缓存：同一区间的第二次请求不再调用 ffmpeg。
+type HighlightClip struct {
+	ID          string
+	AudioSHA256 string
+	Start       float64
+	End         float64
+	Format      string
+	RelPath     string
+	Bytes       int64
+	Status      string
+	CreatedAt   string
+}
+
+// SegmentTranslation 一段原文的对齐译文（Translation，CitedDerivative）。
+// 它不覆盖原语言 Transcript，按转录版本与目标语言独立存在；直接引语必须以
+// “译文”身份使用，不能冒充原话。
+type SegmentTranslation struct {
+	SourceType        SourceType
+	SourceID          string
+	TranscriptVersion int
+	TargetLanguage    string
+	SegmentID         string
+	Text              string
+	Provider          string
+	Model             string
+	JobID             string
+	CreatedAt         string
+}
 
 // UsageReceipt 一次远端模型调用的记账身份（B03）。
 // ReceiptID 唯一：同一调用的重复写入不重复累计；CostKnown=false 表示价格未知

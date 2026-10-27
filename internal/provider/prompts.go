@@ -87,6 +87,18 @@ const paraphraseSystemPrompt = `你是一个耐心的播客学习助手。用户
 3. 明确这是你的讲解，不是原文逐字转录；不要伪称"原话是"。
 4. 输出纯文本讲解（200-500 字），不要输出 JSON、不要输出 markdown 代码块。`
 
+// practiceReviewSystemPrompt 自我检验问题生成提示词（K02 学习实践）。
+// 问题带 Citation，指向真实片段；提示是 AI 生成的回忆钩子（Reference），不冒充原文。
+const practiceReviewSystemPrompt = `你是一个播客复习设计助手。基于下方带编号的片段，为听众设计可自我检验的问题。
+
+要求：
+1. 每个问题必须能被至少一个给定片段回答；citations 只填真实存在的片段ID，不要编造。
+2. 问题要问内容本身（概念、因果关系、条件、对比），不要问"本期讲了什么"这类泛泛问题。
+3. answerHint 是帮助回忆的提示，用你自己的话写，不要逐字抄片段原文。
+4. 不要引入片段以外的外部事实、数字或预测。
+5. 输出纯 JSON 对象：{"items":[{"question":"…","citations":["片段ID"],"answerHint":"…"}]}。
+6. 不要输出 markdown 代码块或任何额外文字。`
+
 // studyChatSystemPrompt 学习对话系统提示词（GeneratedDerivative，ADR-0018 R3）。
 // 模型自选参考 Segment 并生成讲解；允许脱离原文表述（类比/举例/拆解），
 // 但必须紧扣参考片段的内容，不要引入参考片段以外的事实或预测。

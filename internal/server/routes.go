@@ -141,7 +141,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/documents/keypoints", srv.handleDocumentKeyPoint)
 	mux.HandleFunc("/documents/version", srv.handleDocumentVersion)
 	mux.HandleFunc("/documents/", srv.handleDocumentDetail)
-	mux.HandleFunc("/sources/", srv.handleSourceDetail) // /sources/{type}/{id}[/dj|/download|/versions]
+	mux.HandleFunc("/sources/", srv.handleSourceDetail) // /sources/{type}/{id}[/dj|/download|/versions|/translation|/mindmap]
 	mux.HandleFunc("/review/daily", srv.handleDailyReview)
 	mux.HandleFunc("/review/daily/action", srv.handleDailyReviewAction)
 	mux.HandleFunc("/review", srv.handleLearningReview)
@@ -184,6 +184,13 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/process-batch", srv.handleProcessBatch)
 	mux.HandleFunc("/api/audio/", srv.handleAudio)
 	mux.HandleFunc("/api/narration/", srv.handleNarration)                 // Narration 解说音轨（ADR-0019）
+	mux.HandleFunc("/api/clip/", srv.handleHighlightClip)                  // 高光真实音频区间（程序切出，按 sha256 缓存）
+	mux.HandleFunc("/practice", srv.handlePracticeQuestions)               // 练习问题（自我检验，跨来源）
+	mux.HandleFunc("/api/translation/", srv.handleTranslationAPI)          // 对齐译文（CitedDerivative，程序解析时间）
+	mux.HandleFunc("/api/mindmap/", srv.handleMindMapAPI)                  // 结构导图数据（章节/要点，只读）
+	mux.HandleFunc("/mindmap/", srv.handleMindMapPage)                     // 结构导图页面
+	mux.HandleFunc("/practice/action", srv.handlePracticeAction)           // 生成/记录自评
+	mux.HandleFunc("/podcasts/opml", srv.handleOPMLImport)                 // OPML 批量导入订阅
 	mux.HandleFunc("/api/listening-progress", srv.handleListeningProgress) // 听播进度（D07）
 	mux.HandleFunc("/api/listening-session", srv.handleListeningSession)
 	mux.HandleFunc("/api/listening-queue", srv.handleListeningQueue)

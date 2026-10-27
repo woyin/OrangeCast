@@ -1,0 +1,55 @@
+{{define "title"}}结构导图 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>结构导图</h1><a class="btn btn-secondary" href="/sources/{{.SourceType}}/{{.SourceID}}">返回来源</a></div>
+<p class="hint">节点来自已通过门禁的知识卡片：章节为骨架、要点为分支，时间范围由程序按 Citation 解析。导图<strong>不新增</strong>原文以外的内容。</p>
+<ul id="mindmap" class="keypoints" data-endpoint="/api/mindmap/{{.SourceType}}/{{.SourceID}}"></ul>
+<p id="mindmap-feedback" class="meta" aria-live="polite"></p>
+<script>
+(function () {
+  const list = document.getElementById('mindmap');
+  if (!list) return;
+  const feedback = document.getElementById('mindmap-feedback');
+  const link = (type, id, sec) => '/sources/' + encodeURIComponent(type) + '/' + encodeURIComponent(id) + '?t=' + sec.toFixed(3);
+  fetch(list.dataset.endpoint, { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(data => {
+      const root = data.root;
+      list.innerHTML = '';
+      const rootItem = document.createElement('li');
+      rootItem.innerHTML = '<strong></strong>';
+      rootItem.querySelector('strong').textContent = root.label || '(无标题)';
+      const children = document.createElement('ul');
+      (root.children || []).forEach(node => {
+        const li = document.createElement('li');
+        const head = document.createElement('a');
+        head.href = link(data.source_type, data.source_id, node.start || 0);
+        head.textContent = node.label;
+        li.appendChild(head);
+        if (node.detail) {
+          const p = document.createElement('p');
+          p.className = 'meta';
+          p.textContent = node.detail;
+          li.appendChild(p);
+        }
+        if (node.children && node.children.length) {
+          const sub = document.createElement('ul');
+          node.children.forEach(child => {
+            const cli = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = link(data.source_type, data.source_id, child.start || 0);
+            a.textContent = child.label;
+            cli.appendChild(a);
+            sub.appendChild(cli);
+          });
+          li.appendChild(sub);
+        }
+        children.appendChild(li);
+      });
+      rootItem.appendChild(children);
+      list.appendChild(rootItem);
+      if (feedback) feedback.textContent = '共 ' + (root.children || []).length + ' 个章节节点。';
+    })
+    .catch(err => { if (feedback) feedback.textContent = '导图加载失败：' + err.message; });
+})();
+</script>
+{{end}}

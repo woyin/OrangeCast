@@ -51,6 +51,7 @@ type Config struct {
 	EvidenceDir                              string   // 持久 EvidenceAudio 目录（DATA_DIR/evidence）
 	BackupDir                                string   // 备份输出目录（DATA_DIR/backups）
 	NarrationDir                             string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
+	ClipDir                                  string   // 高光片段音频目录（DATA_DIR/clips，按源音频 sha256 缓存）
 	KokoroBinary                             string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
 	KokoroVoice                              string   // Kokoro 默认音色（默认 af_heart）
 	KokoroModel                              string   // Kokoro 模型文件路径（可选，某些发行版需要）
@@ -95,6 +96,7 @@ func Load() (*Config, error) {
 	c.VoiceDir = filepath.Join(c.DataDir, "voice-notes")
 	c.BackupDir = filepath.Join(c.DataDir, "backups")
 	c.NarrationDir = envOrDefault("NARRATION_DIR", filepath.Join(c.DataDir, "narrations"))
+	c.ClipDir = envOrDefault("CLIP_DIR", filepath.Join(c.DataDir, "clips"))
 	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
 	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
 	c.KokoroModel = os.Getenv("KOKORO_MODEL")
@@ -162,7 +164,7 @@ func (c *Config) PublicSchemeIsHTTPS() bool {
 
 // EnsureDirs 创建 DataDir/EvidenceDir/TempDir/BackupDir。
 func (c *Config) EnsureDirs() error {
-	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir, c.VoiceDir} {
+	for _, d := range []string{c.DataDir, c.EvidenceDir, c.TempDir, c.BackupDir, c.NarrationDir, c.VoiceDir, c.ClipDir} {
 		if d == "" {
 			continue
 		}

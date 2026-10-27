@@ -37,6 +37,14 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		srv.handleDJ(w, r)
 		return
 	}
+	if len(rest) >= 1 && rest[0] == "translation" {
+		srv.handleSourceTranslation(w, r)
+		return
+	}
+	if len(rest) >= 1 && rest[0] == "mindmap" {
+		srv.handleMindMapPage(w, r)
+		return
+	}
 	if len(rest) >= 2 && rest[0] == "versions" && rest[1] == "revert" {
 		srv.handleRevertVersion(w, r)
 		return
@@ -111,11 +119,58 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if stages, err := srv.store.SourceStageStatuses(r.Context(), sourceType, sourceID); err == nil {
 		data["Stages"] = stages
 	}
+	// 练习问题（自我检验）：来源的现场产物，问题带 Citation、提示标为非原文。
+	if questions, err := srv.store.ListReviewQuestions(r.Context(), sourceType, sourceID); err == nil {
+		views := make([]map[string]any, 0, len(questions))
+		for _, q := range questions {
+			views = append(views, srv.practiceQuestionView(r, q))
+		}
+		data["PracticeQuestions"] = views
+	}
+	// 高光片段：区间由 Citation 解析，下载走 /api/clip（按源音频 sha256 缓存）。
+	if highlights, err := srv.highlightClipViews(r, sourceType, sourceID); err == nil {
+		data["Highlights"] = highlights
+	}
 	// G07：本源的精读修订列表（生成/继续精读入口，持久身份不猜"最近一篇"）。
 	if digests, err := srv.store.ListEpisodeDigestsForSource(r.Context(), sourceType, sourceID); err == nil {
 		data["SourceDigests"] = digests
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
+}
+
+// highlightClipViews 把当前高光版本解析为可播放/可下载的片段视图。
+// 没有可解析区间的高光不出现在下载列表里，避免给出无法核验的片段。
+func (srv *Server) highlightClipViews(r *http.Request, sourceType models.SourceType, sourceID string) ([]map[string]any, error) {
+	version, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindHighlight)
+	if err != nil {
+		return nil, err
+	}
+	transcript, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindTranscript)
+	if err != nil {
+		return nil, err
+	}
+	var set provider.HighlightSet
+	if err := json.Unmarshal([]byte(version.Payload), &set); err != nil {
+		return nil, err
+	}
+	var payload provider.TranscriptPayload
+	if err := json.Unmarshal([]byte(transcript.Payload), &payload); err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(set.Highlights))
+	for _, h := range set.Highlights {
+		start, end, ok := provider.ResolveCitationSpan(h.Citations, payload.Segments)
+		if !ok || end <= start {
+			continue
+		}
+		out = append(out, map[string]any{
+			"ID": h.ID, "Gist": h.Gist, "Start": start, "End": end,
+			"SourceType": sourceType, "SourceID": sourceID,
+			"ClipURL": "/api/clip/" + string(sourceType) + "/" + sourceID + "/" + h.ID,
+			"WavURL":  "/api/clip/" + string(sourceType) + "/" + sourceID + "/" + h.ID + "?format=wav",
+		})
+	}
+	return out, nil
 }
 
 func (srv *Server) sourceAudioURL(ctx context.Context, sourceType models.SourceType, sourceID string) (string, error) {

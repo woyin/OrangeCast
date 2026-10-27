@@ -476,6 +476,42 @@ func (o *OpenAIProvider) Paraphrase(question string, referenceSegments []Segment
 	return &ParaphraseResult{Text: strings.TrimSpace(r.OutputText), ReferenceSegmentIDs: refs}, nil
 }
 
+// ReviewQuestions 生成可自我检验的问题与提示（K02 学习实践）。
+// 与 Groq 对偶：问题挂 Citation，提示挂 Reference，身份不混淆。
+func (o *OpenAIProvider) ReviewQuestions(segments []Segment, limit int) (*PracticeSet, error) {
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("生成练习问题至少需要一个片段")
+	}
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	payload := map[string]any{
+		"model":        o.effectiveAnalysisModel(),
+		"instructions": practiceReviewSystemPrompt,
+		"input":        fmt.Sprintf("请设计最多 %d 个自我检验问题：\n\n%s", limit, sb.String()),
+		"text":         map[string]any{"format": map[string]any{"type": "json_object"}},
+	}
+	data, err := o.chatComplete(context.Background(), payload, "练习问题")
+	if err != nil {
+		return nil, err
+	}
+	var r struct {
+		OutputText string `json:"output_text"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("解析 openai 练习问题响应: %w", err)
+	}
+	set := &PracticeSet{}
+	if err := parseJSONLoose(r.OutputText, set); err != nil {
+		return nil, fmt.Errorf("解析练习问题 JSON: %w", err)
+	}
+	return set, nil
+}
+
 // StudyChatAnswer 学习对话一轮（GeneratedDerivative，ADR-0018 R3）。
 // 与 Groq 对偶：把对话历史折叠进用户消息文本，保持窗口策略一致。
 func (o *OpenAIProvider) StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error) {

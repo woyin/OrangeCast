@@ -45,6 +45,7 @@ type Worker struct {
 	tempDir       string
 	evidenceDir   string
 	narrationDir  string
+	clipDir       string
 	voiceDir      string
 	voiceSelector *provider.Selector
 	client        *http.Client
@@ -58,6 +59,15 @@ type Worker struct {
 	taskConfigFor func(*models.ProcessingJob) (provider.TaskConfig, error)
 	// localExport applies the export result with its own transactional control recheck.
 	localExport func(context.Context, *models.ProcessingJob) error
+}
+
+// WithClipDir sets where derived highlight clips live (default DATA_DIR/clips).
+// Clips are rebuildable from EvidenceAudio, so they are never part of backups.
+func (w *Worker) WithClipDir(dir string) *Worker {
+	if dir != "" {
+		w.clipDir = dir
+	}
+	return w
 }
 
 // WithLearningExporter installs the local bundle assembler; it cannot enable model calls.
@@ -74,7 +84,8 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 	client := safehttp.NewClient(10, maxAudioSize, 15*time.Minute)
 	w := &Worker{
 		store: s, selector: sel, tempDir: tempDir, evidenceDir: evidenceDir, narrationDir: narrationDir,
-		client: client, poll: pollInterval,
+		clipDir: filepath.Join(evidenceDir, "..", "clips"),
+		client:  client, poll: pollInterval,
 	}
 	w.taskConfigFor = func(job *models.ProcessingJob) (provider.TaskConfig, error) {
 		// R04：优先读取入队时冻结的任务配置；空（旧任务）走当前设置兼容路径，
@@ -120,6 +131,12 @@ func NewWorker(s *store.Store, sel *provider.Selector, tempDir, evidenceDir, nar
 		case models.JobStyleReview:
 			// 独立风格审校（R20）使用 StyleEditor 角色配置。
 			tc = provider.TaskConfig{Provider: ptrStr(st.StyleEditorProvider), Model: ptrStr(st.StyleEditorModel)}
+		case models.JobPracticeReview:
+			// 练习问题生成（K02）是判定型文本任务，复用分析角色配置。
+			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
+		case models.JobTranslate:
+			// 对齐翻译（Translation）同样属文本分析任务，复用分析角色配置。
+			tc = provider.TaskConfig{Provider: ptrStr(st.AnalysisProvider), Model: ptrStr(st.AnalysisModel)}
 		default:
 			tc = provider.TaskConfig{Provider: "groq"}
 		}
@@ -318,6 +335,8 @@ func (w *Worker) processClaimed(ctx context.Context, job *models.ProcessingJob) 
 var sendPolicyJobTypes = map[models.JobType]bool{
 	models.JobTranscribe: true, models.JobAnalyze: true, models.JobDigest: true,
 	models.JobHighlight: true, models.JobKeypointQuality: true, models.JobDigestRewrite: true,
+	models.JobPracticeReview:    true,
+	models.JobTranslate:         true,
 	models.JobIdeationDiagnosis: true,
 }
 
@@ -369,6 +388,10 @@ func budgetEstimateUnits(operation string) (int, int) {
 		return 100_000, 30_000
 	case "digest_rewrite":
 		return 30_000, 6_000
+	case "practice_review":
+		return 60_000, 8_000
+	case "translate":
+		return 80_000, 20_000
 	default:
 		return 0, 0
 	}
@@ -377,7 +400,7 @@ func budgetEstimateUnits(operation string) (int, int) {
 // holdJobBudget 调用前预算预占（B04）。非付费任务类型直接放行。
 func (w *Worker) holdJobBudget(ctx context.Context, job *models.ProcessingJob) error {
 	switch job.JobType {
-	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision, models.JobKnowledgeArticle, models.JobWeeklyReview:
+	case models.JobTranscribe, models.JobAnalyze, models.JobDigest, models.JobHighlight, models.JobKeypointQuality, models.JobDigestRewrite, models.JobIdeationDiagnosis, models.JobClaimReview, models.JobStyleReview, models.JobCuratorBrief, models.JobClaimWriting, models.JobClaimRevision, models.JobKnowledgeArticle, models.JobWeeklyReview, models.JobPracticeReview, models.JobTranslate:
 	default:
 		return nil
 	}
@@ -637,6 +660,10 @@ func (w *Worker) processJob(ctx context.Context, job *models.ProcessingJob) erro
 		return w.doClaimWritingJob(ctx, job, bundle)
 	case models.JobClaimRevision:
 		return w.doClaimRevisionJob(ctx, job, bundle)
+	case models.JobPracticeReview:
+		return w.doPracticeReviewJob(ctx, job, bundle)
+	case models.JobTranslate:
+		return w.doTranslateJob(ctx, job, bundle)
 	default:
 		return fmt.Errorf("未知 job_type: %s", job.JobType)
 	}
@@ -977,6 +1004,22 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 				return fmt.Errorf("purge 删除文件 %s: %w", path, err)
 			}
 		}
+		// 1b) 删除该源音频派生的高光片段缓存（ADR-0032）：按音频 sha256 定位，
+		// 片段可由原音重建，因此先删文件再删缓存行；片段目录独立于 evidence。
+		if audio != nil && audio.SHA256 != "" {
+			paths, err := w.store.DeleteHighlightClipsForSource(ctx, audio.SHA256)
+			if err != nil {
+				return fmt.Errorf("purge 读取片段缓存: %w", err)
+			}
+			for _, rel := range paths {
+				if !filepath.IsLocal(rel) {
+					return fmt.Errorf("purge 片段路径不在片段目录内")
+				}
+				if err := os.Remove(filepath.Join(w.clipDir, rel)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("purge 删除片段 %s: %w", rel, err)
+				}
+			}
+		}
 		// 2) 删除 KeyPoint 索引 + 标注/收藏/集合成员（ADR-0017）
 		if err := w.store.InvalidateAndDeleteKeyPointsForSource(ctx, p.SourceType, p.SourceID); err != nil {
 			return fmt.Errorf("purge 原子撤销文章证据并删除 KeyPoint（%s/%s）: %w", p.SourceType, p.SourceID, err)
@@ -999,6 +1042,12 @@ func (w *Worker) ResumePurges(ctx context.Context) error {
 		// 使 PersonalKnowledgeBase 中指向该 Source 的 Citation 与 Reference 一并失效。
 		if err := w.store.DeleteParaphrasesForSource(ctx, p.SourceType, p.SourceID); err != nil {
 			return err
+		}
+		if err := w.store.DeleteReviewQuestionsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return fmt.Errorf("删除练习问题: %w", err)
+		}
+		if err := w.store.DeleteSegmentTranslationsForSource(ctx, p.SourceType, p.SourceID); err != nil {
+			return fmt.Errorf("删除对齐译文: %w", err)
 		}
 		if err := w.store.DeleteStudySessionsForSource(ctx, p.SourceType, p.SourceID); err != nil {
 			return err

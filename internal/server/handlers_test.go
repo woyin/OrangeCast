@@ -36,10 +36,10 @@ func newTestServer(t *testing.T) *Server {
 		SessionSecret: "test-secret-abcdef", TempDir: dir,
 		GroqAPIKey: "fake-groq-key", OpenAIAPIKey: "fake-openai-key",
 		PublicURL: "http://localhost",
-		DataDir:   dir, EvidenceDir: dir + "/evidence", BackupDir: dir + "/backups",
+		DataDir:   dir, EvidenceDir: dir + "/evidence", BackupDir: dir + "/backups", ClipDir: dir + "/clips",
 	}
 	selector := provider.NewSelector(cfg.GroqAPIKey, cfg.OpenAIAPIKey)
-	worker := queue.NewWorker(s, selector, cfg.TempDir, dir+"/evidence", dir+"/narrations")
+	worker := queue.NewWorker(s, selector, cfg.TempDir, dir+"/evidence", dir+"/narrations").WithClipDir(dir + "/clips")
 	refresher := rss.NewRefresher(s)
 	srv, err := New(cfg, s, worker, refresher, selector)
 	if err != nil {

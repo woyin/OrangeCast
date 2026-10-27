@@ -1,0 +1,51 @@
+{{define "title"}}练习问题 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>练习问题</h1></div>
+
+<p class="hint">先自己想，再展开提示与原文位置。问题来自真实转录片段；提示是 AI 生成的回忆线索，<strong>不是原文</strong>。</p>
+
+{{if .Generated}}<p class="status-bar">已提交 {{.Generated}} 个来源生成问题{{if .Skipped}}，{{.Skipped}} 个跳过（无转录、重复或已在队列中）{{end}}。</p>{{end}}
+
+<section class="panel">
+  <h2>生成练习问题</h2>
+  <p class="meta">生成会调用模型并计入任务与成本；同一来源的同一转录版本只生成一次，需要重做时勾选“强制重新生成”。</p>
+  <form method="post" action="/practice/action" class="subform">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <input type="hidden" name="action" value="generate">
+    <label>来源 <select name="source_id">
+      <option value="">全部有转录的来源</option>
+      {{range .Sources}}<option value="{{.Type}}:{{.ID}}">{{.Title}}（{{.Type}}）</option>{{end}}
+    </select></label>
+    <label><input type="checkbox" name="all" value="1"> 为全部来源生成</label>
+    <label><input type="checkbox" name="refresh" value="regenerate"> 强制重新生成</label>
+    <button class="btn" type="submit">生成</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>可以自测的问题</h2>
+  {{range .Questions}}
+  <article class="workflow-item" data-question-id="{{.ID}}">
+    <div class="workflow-item-body">
+      <div class="item-kicker">{{.SourceTitle}} · {{formatTime .TimeStart}}–{{formatTime .TimeEnd}}</div>
+      <h3>{{.Prompt}}</h3>
+      <p class="meta"><a href="{{sourceHref .SourceType .SourceID .TimeStart}}">回到原文这一段</a>{{if .Model}} · {{.Model}}{{end}}</p>
+      <details>
+        <summary>先自己回答，再展开提示</summary>
+        {{if .AnswerHint}}<p><strong>AI 提示（非原文）：</strong>{{.AnswerHint}}</p>{{else}}<p class="meta">本次生成没有提供提示。</p>{{end}}
+      </details>
+      <details>
+        <summary>核对依据片段</summary>
+        <p class="meta">来源：{{.SourceTitle}}</p>
+        <p class="meta">引用片段：{{join .Citations "、"}}</p>
+        <p><a class="btn btn-secondary" href="{{sourceHref .SourceType .SourceID .TimeStart}}">播放这一段原音</a></p>
+      </details>
+    </div>
+  </article>
+  {{else}}
+  <p class="empty">还没有练习问题。选择来源生成一次即可。</p>
+  {{end}}
+</section>
+
+<p class="meta">需要记录掌握程度时，用<a href="/review">回顾</a>或<a href="/review/daily">每日回顾</a>；它们记录你自己的判断，不改变这些问题。</p>
+{{end}}

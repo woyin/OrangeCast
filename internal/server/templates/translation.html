@@ -1,0 +1,52 @@
+{{define "title"}}对齐译文 · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>对齐译文</h1><a class="btn btn-secondary" href="/sources/{{.SourceType}}/{{.SourceID}}">返回来源</a></div>
+
+<p class="hint">译文逐段对齐原文，属<strong>带证衍生</strong>：可以用它理解内容，但引用时必须以“译文”身份说明，不能当作原话。</p>
+
+{{if .Submitted}}<p class="status-bar">已提交翻译任务，完成后回到本页查看。</p>{{end}}
+
+<section class="panel">
+  <h2>生成译文</h2>
+  <p class="meta">翻译是付费任务，计入任务与成本；同一转录版本与目标语言只生成一次，需要重做时勾选“强制重新生成”。</p>
+  <form method="post" action="/sources/{{.SourceType}}/{{.SourceID}}/translation" class="subform">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>目标语言
+      <select name="target_language">
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+      </select>
+    </label>
+    <label><input type="checkbox" name="refresh" value="regenerate"> 强制重新生成</label>
+    <button class="btn" type="submit">开始翻译</button>
+  </form>
+</section>
+
+{{if .Languages}}
+<section class="panel">
+  <h2>已有译文</h2>
+  <p>{{range .Languages}}<a href="?lang={{.}}" class="tag">{{.}}</a> {{end}}</p>
+</section>
+{{end}}
+
+{{if .Language}}
+<section class="panel">
+  <h2>{{.Language}} · 版本 v{{.TranscriptVersion}}</h2>
+  <p class="meta">共 {{.Total}} 段，已翻译 {{.Translated}} 段{{if .Missing}}，未翻译 {{.Missing}} 段（缺失片段保留原文）{{end}}。</p>
+  <div class="transcript">
+  {{range .Rows}}
+    <div class="list-item">
+      <div style="flex:1">
+        <p class="meta">{{formatTime .Start}} · 第 {{.Index}} 段</p>
+        <p>{{.Original}}</p>
+        {{if .TranslatedOK}}<p><strong>译文：</strong>{{.Translated}}</p>{{else}}<p class="meta">尚未翻译</p>{{end}}
+      </div>
+    </div>
+  {{end}}
+  </div>
+</section>
+{{else}}
+<p class="empty">选择一门语言开始翻译，或从上方已有译文进入。</p>
+{{end}}
+{{end}}

@@ -304,6 +304,32 @@ type ProviderBundle struct {
 	DigestWriter     DigestWriterProvider
 	DigestSearch     SourceSearchProvider
 	DigestRewriter   DigestRewriteProvider
+	PracticeReview   PracticeReviewProvider
+	Translation      TranslationProvider
+}
+
+// PracticeItem 来源中的一个可自我检验问题（K02 学习实践：ReviewQuestion）。
+// SourceClaim 属于来源事实层（带 Citation，可核验）；AnswerHint 是 AI 重新组织的
+// 提示（GeneratedDerivative，挂 Reference，非原文）。二者不得互换。
+type PracticeItem struct {
+	Question   string   `json:"question"`
+	Citations  []string `json:"citations"`
+	AnswerHint string   `json:"answerHint"`
+}
+
+// PracticeSet 一次生成的练习问题集合（ReviewQuestion 的生成形态）。
+type PracticeSet struct {
+	Items []PracticeItem `json:"items"`
+	// Model/Usage 运行期字段（不进入持久化 payload）：实际模型与调用计量。
+	Model string    `json:"-"`
+	Usage TaskUsage `json:"-"`
+}
+
+// PracticeReviewProvider 从冻结的转录片段生成可自我检验的问题与提示（K02）。
+// 问题必须基于真实片段（Citation 由程序解析），提示是 AI 生成、非原文（Reference）。
+type PracticeReviewProvider interface {
+	ReviewQuestions(segments []Segment, limit int) (*PracticeSet, error)
+	Name() string
 }
 
 // Highlight AI 判断的"最值得听"的连续音频区间（ADR-0016）。

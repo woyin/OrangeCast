@@ -1,0 +1,24 @@
+{{define "title"}}导入 OPML · CloudWisePod{{end}}
+{{define "content"}}
+<div class="page-head"><h1>导入 OPML 订阅清单</h1><a class="btn btn-secondary" href="/podcasts">返回播客</a></div>
+
+<p class="hint">从其他播客客户端导出的 OPML 可以直接导入。导入只完成发现：已被订阅的地址跳过，失败项逐条列出；新订阅保持“仅发现”，是否自动处理仍由你逐条开启。</p>
+
+{{with .Error}}<p class="error">{{.}}</p>{{end}}
+
+{{with .Result}}
+<section class="panel">
+  <h2>导入结果</h2>
+  <p>文件中共 {{$.Total}} 个订阅：成功 {{.Imported}} 个，已存在跳过 {{.Skipped}} 个，失败 {{len .Failed}} 个。</p>
+  {{if .Failed}}<ul>{{range .Failed}}<li class="error">{{.}}</li>{{end}}</ul>{{end}}
+</section>
+{{end}}
+
+<section class="panel">
+  <form method="post" action="/podcasts/opml" enctype="multipart/form-data" class="subform">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>OPML 文件 <input type="file" name="opml" accept=".opml,.xml,text/xml,application/xml" required></label>
+    <button class="btn" type="submit">开始导入</button>
+  </form>
+</section>
+{{end}}

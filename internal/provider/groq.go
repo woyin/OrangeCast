@@ -544,6 +544,34 @@ func (g *GroqProvider) Paraphrase(question string, referenceSegments []Segment) 
 	return &ParaphraseResult{Text: strings.TrimSpace(content), ReferenceSegmentIDs: refs}, nil
 }
 
+// ReviewQuestions 生成可自我检验的问题与提示（K02 学习实践）。
+// 与 Paraphrase/StudyChat 同源：问题挂 Citation（来源事实），提示挂 Reference（AI 生成）。
+func (g *GroqProvider) ReviewQuestions(segments []Segment, limit int) (*PracticeSet, error) {
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("生成练习问题至少需要一个片段")
+	}
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	var sb strings.Builder
+	for _, seg := range segments {
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", seg.ID, seg.Text))
+	}
+	content, _, model, usage, err := g.completeContextWithUsage(context.Background(), []map[string]string{
+		{"role": "system", "content": practiceReviewSystemPrompt},
+		{"role": "user", "content": fmt.Sprintf("请设计最多 %d 个自我检验问题：\n\n%s", limit, sb.String())},
+	}, "object")
+	if err != nil {
+		return nil, err
+	}
+	set := &PracticeSet{}
+	if err := parseJSONLoose(content, set); err != nil {
+		return nil, fmt.Errorf("解析练习问题失败（原始输出: %s）: %w", truncate(content, 200), err)
+	}
+	set.Model, set.Usage = model, usage
+	return set, nil
+}
+
 // StudyChatAnswer 学习对话一轮（GeneratedDerivative，ADR-0018 R3）。
 // 模型自选参考 Segment 并生成讲解；硬约束一（无 Reference 不生成）由此函数的调用方依据返回结果执行。
 func (g *GroqProvider) StudyChatAnswer(question string, history []StudyChatMessage, candidates []Segment) (*StudyChatResult, error) {
