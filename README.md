@@ -15,9 +15,14 @@
 - **AI 转录**：Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳
 - **知识卡片**：不可变 ArtifactVersion；摘要/要点/章节/金句全部携带真实 Citation；金句逐字校验
 - **高光片段（AI DJ）**：AI 自动选出最值得听的高光区间，播放清单页面（AI 解说音轨 Narration + 原音区间交替播放；Narration 由自托管 Kokoro TTS 合成，默认零成本）
+- **片段音频下载**：每个高光按程序计算的真实区间从 EvidenceAudio 切出 MP3/WAV，按源音频 SHA256 缓存，可单独播放与保存（/api/clip/…）
+- **练习问题**：从真实转录片段生成可自我检验的问题（挂 Citation），提示标为 AI 生成、非原文；先自己回答再展开
+- **对齐译文**：按 Segment 对齐翻译转录稿，属 CitedDerivative，不覆盖原语言；未译片段保留原文并标注
+- **结构导图**：以知识卡片的章节为骨架、要点为分支，节点时间由 Citation 解析，不新增原文以外内容
 
 ### 知识管理
 
+- **订阅迁移**：导入其他播客客户端导出的 OPML 清单，已存在的跳过、失败逐条报告；导入不开启自动处理
 - **全局素材 Inbox**：所有 Source 的 KeyPoint 聚合在一处，支持筛选、批量状态、全文与本地向量混合搜索
 - **标注 / 收藏 / 集合**：对任意 Citation 加个人标注、收藏、归入跨 Source 主题集合
 - **知识图谱**：KeyPoint 粒度的力导向可视化——同一集合的要点成簇，文本相似度建议跨 Episode 关联
@@ -146,6 +151,7 @@ docker compose up -d
 | `PUBLIC_URL` | 否 | 公网 URL；决定 Secure Cookie 与 Citation 链接 | http://localhost:8080 |
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
+| `CLIP_DIR` | 否 | 高光片段音频目录（按源音频 SHA256 缓存，可用 ffmpeg 重建） | `$DATA_DIR/clips` |
 | `KOKORO_BINARY` | 否 | 解说 TTS 可执行文件（推荐 `scripts/kokoro` 包装，见 [生产部署「解说音轨」](docs/production-deployment.md)） | `kokoro`（PATH 查找） |
 | `KOKORO_VOICE` | 否 | Narration 默认音色（中文 `zf_xiaobei`/`zm_yunyang`；英文 `af_heart`） | `af_heart` |
 | `KOKORO_MODEL` / `KOKORO_MODEL_DIR` | 否 | 权重：完整 onnx 路径 / 目录（取其中 `kokoro-v1.0.onnx` + `voices-v1.0.bin`） | 空 |

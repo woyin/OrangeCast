@@ -271,6 +271,21 @@ _避免使用：EditorialFeedback、VanityMetrics、Analytics；它来自读者�
 
 ## 个人听学
 
+**ReviewQuestion（练习问题）**：来源中的一个可自我检验问题，问题本身锚定一段真实 Segment（Citation，时间范围由程序解析），并可附带一段 AI 写的回忆提示（Reference，标注为非原文）。它服务于"读完/听完之后先自己回答"，不记录掌握程度；掌握程度仍由 ReviewAnswer 与 ReviewSchedule 表达。
+_避免使用_：Quiz、Flashcard、Question；前者偏题型实现，Flashcard 暗示背面即标准答案，Question 与 LearningQuestion 混淆。
+
+**HighlightClip（高光片段音频）**：把一个 Highlight 的 Citation 区间从 EvidenceAudio 中切出的真实音频文件，起止由程序计算，按源音频 sha256 与区间缓存。它是原音的局部副本，不是新的事实层，也不是 AI 生成音频（后者是 Narration）。
+_避免使用_：Clip、Snip、AudioSummary；Clip/Snip 偏产品名，AudioSummary 会与 Narration 的解说混淆。
+
+**Translation（对齐译文）**：把冻结的转录或文档按 Segment 逐段翻译到目标语言，与原文并列保存而不覆盖原文；它属 CitedDerivative，引用时必须说明是译文，不能当作原话。
+_避免使用_：Localization、Subtitle；前者是界面本地化，后者只描述呈现形态。
+
+**StructureMap（结构导图）**：把已通过门禁的章节与要点组织成树状视图，节点时间来自 Citation 解析。它是同一批内容产物的只读投影，不新增原文以外的内容。
+_避免使用_：MindMapAI、Outline；前者暗示 AI 另生成结构，后者是写作提纲。
+
+**OPMLImport（订阅清单导入）**：把其他播客客户端导出的 OPML 清单中的订阅地址批量纳入本实例的发现范围。导入只建立订阅与单集候选，不开启自动处理，也不改变任何订阅的处理策略与处理深度。
+_避免使用_：Sync、Migration、Subscription；它表达一次性的清单搬运，不是持续同步，也不等于订阅关系本身。
+
 **ListeningQueue（收听队列）**：Owner明确排列的稍后收听条目，分别指向来源的原音或某份DJ清单。队列顺序和连播偏好独立于来源内容；移除条目不删除来源。
 
 **ListeningSession（播放会话）**：当前实际播放的来源、模式和音轨身份，以及该次收听的位置、循环和睡眠设置。浏览另一来源不会改变正在播放的会话，也不会把它的时间归到浏览中的来源。
