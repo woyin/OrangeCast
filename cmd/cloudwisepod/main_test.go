@@ -81,6 +81,19 @@ func TestParseRestoreArgs(t *testing.T) {
 	if err != nil || src != "in.tar.gz" || !force {
 		t.Errorf("带 --force 应解析为 force=true，实际 %q, %v, %v", src, force, err)
 	}
+	// README 与部署文档的写法：标志写在路径之后也必须生效（flag 包默认会在
+	// 遇到位置参数后停止解析，因此这里覆盖顺序归一化）。
+	src, force, err = parseRestoreArgs([]string{"in.tar.gz", "--force"})
+	if err != nil || src != "in.tar.gz" || !force {
+		t.Errorf("路径后的 --force 应同样生效，实际 %q, %v, %v", src, force, err)
+	}
+	src, force, err = parseRestoreArgs([]string{"in.tar.gz", "-force"})
+	if err != nil || src != "in.tar.gz" || !force {
+		t.Errorf("单横线 -force 也应生效，实际 %q, %v, %v", src, force, err)
+	}
+	if _, _, err := parseRestoreArgs([]string{"--force"}); err == nil {
+		t.Error("只有标志没有备份包应报错")
+	}
 	if _, _, err := parseRestoreArgs(nil); err == nil {
 		t.Error("无参数应报错")
 	}

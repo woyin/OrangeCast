@@ -957,11 +957,13 @@ func TestRestore_MkdirTempFails(t *testing.T) {
 	gz.Close()
 	f.Close()
 
-	// 将 TMPDIR 指向文件占用的路径 → MkdirTemp 失败
-	blocker := filepath.Join(t.TempDir(), "blockfile")
-	os.WriteFile(blocker, []byte("x"), 0o644)
-	t.Setenv("TMPDIR", blocker)
-	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
+	// 目标目录不可写 → 解包临时目录（位于目标卷内）创建失败
+	target := t.TempDir()
+	if err := os.Chmod(target, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(target, 0o700) })
+	if _, err := Restore(context.Background(), backupFile, target, false); err == nil {
 		t.Fatal("临时目录创建失败应报错")
 	}
 }
@@ -1042,9 +1044,9 @@ func TestRestore_CorruptTarNextError(t *testing.T) {
 	}
 }
 
-// TestRestore_EvidenceMkdirAllFails 验证证据解包时目录创建失败返回错误。
-// 覆盖 Restore 中证据解包 os.MkdirAll 失败分支（证据路径父目录被文件占用）。
-func TestRestore_EvidenceMkdirAllFails(t *testing.T) {
+// TestRestore_NoTempDirLeftBehind 解包临时目录现在建在目标卷内：正常恢复必须成功，
+// 且不得留下 .restore-* 目录（否则下一次恢复会把它当成用户数据）。
+func TestRestore_NoTempDirLeftBehind(t *testing.T) {
 	// 构造含证据的合法备份包
 	dir := t.TempDir()
 	backupFile := filepath.Join(dir, "b.tar.gz")
@@ -1065,12 +1067,18 @@ func TestRestore_EvidenceMkdirAllFails(t *testing.T) {
 	gz.Close()
 	f.Close()
 
-	// 用 TMPDIR 指向文件占用路径使解包临时目录不可写
-	blocker := filepath.Join(t.TempDir(), "block")
-	os.WriteFile(blocker, []byte("x"), 0o644)
-	t.Setenv("TMPDIR", blocker)
-	if _, err := Restore(context.Background(), backupFile, t.TempDir(), false); err == nil {
-		t.Fatal("解包临时目录不可写应报错")
+	target := t.TempDir()
+	if _, err := Restore(context.Background(), backupFile, target, false); err != nil {
+		t.Fatalf("合法备份应恢复成功: %v", err)
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".restore-") {
+			t.Errorf("恢复后不应残留临时目录: %s", entry.Name())
+		}
 	}
 }
 

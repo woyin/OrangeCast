@@ -153,11 +153,24 @@ func restoreCore(cfg *config.Config, src string, force bool) (*backup.Manifest, 
 }
 
 // parseRestoreArgs 解析 restore 子命令参数，返回备份包路径与 force 标识。
+// flag 包遇到第一个非标志参数就停止解析，而 README 与部署文档写的是
+// "restore <包> --force"；这里先把 --force/-force 前移，让两种顺序等价。
 func parseRestoreArgs(args []string) (src string, force bool, err error) {
+	normalized := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--force" || arg == "-force" {
+			force = true
+			continue
+		}
+		normalized = append(normalized, arg)
+	}
+	if force {
+		normalized = append([]string{"--force"}, normalized...)
+	}
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&force, "force", false, "目标目录已有数据时显式覆盖")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalized); err != nil {
 		return "", false, err
 	}
 	if fs.NArg() < 1 {

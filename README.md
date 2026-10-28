@@ -109,6 +109,8 @@ go run ./cmd/cloudwisepod
 
 ### Docker 部署（VPS 推荐）
 
+完整部署手册（镜像/Compose/裸二进制、升级、备份恢复、排障）见 [`docs/deploy/README.md`](docs/deploy/README.md)。
+
 ```bash
 docker pull ghcr.io/woyin/orangecast:latest
 docker run -d --name orangecast --restart unless-stopped \

@@ -1,6 +1,7 @@
 # CloudWisePod 生产部署
 
 > 与 `docs/deployment.md`（历史 Cloudflare 文档，不再使用）不同，本文是当前 Go 版本的生产部署说明。
+> 可直接照做的部署流程（镜像/Compose/裸二进制、升级、备份恢复、排障）见 [`deploy/README.md`](deploy/README.md)。
 
 ## 数据目录（ADR-0010）
 

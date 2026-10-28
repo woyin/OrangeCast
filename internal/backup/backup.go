@@ -415,7 +415,9 @@ func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) 
 	if err := os.MkdirAll(targetDataDir, 0o755); err != nil {
 		return manifest, err
 	}
-	tmp, err := os.MkdirTemp("", "cwp-restore-*")
+	// 解包目录必须与目标在同一文件系统：installArchive 用 os.Rename 原子安装，
+	// 跨设备（容器内 /tmp 与数据卷分属不同挂载）会报 invalid cross-device link。
+	tmp, err := restoreTempDir(targetDataDir)
 	if err != nil {
 		return manifest, err
 	}
@@ -432,6 +434,12 @@ func Restore(ctx context.Context, backupPath, targetDataDir string, force bool) 
 		return manifest, err
 	}
 	return manifest, nil
+}
+
+// restoreTempDir 在目标数据目录内创建解包临时目录。放在目标卷上既避免跨设备
+// rename，也避免把整包证据复制到另一个设备。调用方负责清理（含失败路径）。
+func restoreTempDir(targetDataDir string) (string, error) {
+	return os.MkdirTemp(targetDataDir, ".restore-*")
 }
 
 func copyFromTar(tr *tar.Reader, dest string) error {
