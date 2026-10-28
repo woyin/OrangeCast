@@ -198,6 +198,9 @@ func TestMindMapPage_RendersContainer(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "mm-page@example.com", "password123")
 	sourceID := seedPracticeSource(t, srv, "mm-c")
+	if err := seedCardVersion(t, srv, sourceID, `{"title":"卡","summary":{"text":"s","citations":["seg-0001"]},"keyPoints":[],"chapters":[],"quotes":[],"tags":[],"suggestedQuestions":[]}`); err != nil {
+		t.Fatal(err)
+	}
 	rec := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+sourceID+"/mindmap")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("状态码 %d", rec.Code)

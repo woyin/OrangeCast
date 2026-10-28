@@ -99,6 +99,11 @@ func (srv *Server) handleMindMapPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// 没有知识卡片就没有可展示的骨架：不渲染空白页，避免误以为来源存在。
+	if _, err := srv.store.GetCurrentVersion(r.Context(), sourceType, sourceID, store.KindKnowledgeCard); err != nil {
+		http.Error(w, "该来源尚无知识卡片，无法生成结构导图", http.StatusNotFound)
+		return
+	}
 	srv.tmpl.Render(w, "mindmap.html", map[string]any{
 		"SourceType": string(sourceType), "SourceID": sourceID, "CSRF": auth.CSRFValue(r),
 	})
