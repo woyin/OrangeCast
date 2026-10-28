@@ -52,3 +52,6 @@ internal/server/*_hl-a_1.wav
 
 # pi-subagents 运行时产物（mission/handoff/worktree-diff）
 /.pi-subagents/
+
+# pi 本机运行时状态（MCP 缓存、mesh 状态；属于本机，不入库）
+/.pi/
