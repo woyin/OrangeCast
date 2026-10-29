@@ -11,7 +11,7 @@
 
 <p class="hint">AI 选取的本集高光片段。点「自动播放全集」按 <strong>AI 解说 → 原音区间</strong> 顺序连播；每段可单独试听。</p>
 
-<div style="margin: 1rem 0;">
+<div>
   <button type="button" data-queue-add="dj">加入稍后听</button>
   <button id="dj-autoplay" class="btn" type="button">▶▶ 自动播放全集</button>
   <button id="dj-pause" class="btn btn-secondary" type="button" disabled>⏸ 暂停</button>
@@ -31,8 +31,8 @@
   <button id="dj-full" class="btn btn-secondary" type="button">▶ 继续听原节目</button>
   <button id="dj-pin" class="btn btn-secondary" type="button" disabled title="收藏当前播放的原音区间">⭐ 收藏这段</button>
   <button id="dj-note" class="btn btn-secondary" type="button" disabled title="记录个人理解（自动锚定当前片段，Reference 身份）">✍ 记下我的理解</button>
-  <span id="dj-action-feedback" class="meta" aria-live="polite" style="margin-left:0.5rem"></span>
-  <span id="dj-status" style="margin-left:0.5rem;color:var(--muted)"></span>
+  <span id="dj-action-feedback" class="meta" aria-live="polite"></span>
+  <span id="dj-status" class="meta"></span>
 </div>
 <form id="dj-note-form" hidden><label>我的理解（参考原音，AI解说不作为原文）<textarea id="dj-note-content" rows="4" required></textarea></label><button type="submit">保存个人理解</button><button type="button" id="dj-note-cancel">收起</button></form>
 {{if not .NoteSnapshotID}}<p class="meta">旧清单未保存来源快照，无法确认笔记依据版本。请生成新的DJ清单或回原节目记笔记。</p>{{end}}

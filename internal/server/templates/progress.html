@@ -7,7 +7,7 @@
 {{with .Active}}
 <div class="status-bar processing">
   <span class="spinner"></span>
-  <div style="flex:1">
+  <div class="grow">
     <strong>正在处理：</strong><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a>
     <span class="meta">（{{.Stage}} · {{if eq (printf "%s" .Job.JobType) "episode_digest"}}单集精读生成{{else if eq (printf "%s" .Job.JobType) "transcribe"}}音频转录{{else if eq (printf "%s" .Job.JobType) "analyze"}}知识卡片生成{{else}}{{.Job.JobType}}{{end}}）</span>
   </div>
@@ -22,7 +22,7 @@
 <div id="queued-list">
 {{range .Queued}}
 <div class="list-item">
-  <div class="ep-info" style="flex:1">
+  <div class="ep-info grow">
     <h3><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a></h3>
     <p class="meta">{{.Stage}} · {{if eq (printf "%s" .Job.JobType) "episode_digest"}}单集精读生成{{else if eq (printf "%s" .Job.JobType) "transcribe"}}音频转录{{else if eq (printf "%s" .Job.JobType) "analyze"}}知识卡片生成{{else}}{{.Job.JobType}}{{end}}</p>
   </div>
@@ -35,11 +35,11 @@
 </div>
 
 {{if .Recent}}
-<h2 style="margin-top:1.5rem">最近完成</h2>
+<h2>最近完成</h2>
 <div id="recent-list">
 {{range .Recent}}
 <div class="list-item">
-  <div class="ep-info" style="flex:1">
+  <div class="ep-info grow">
     <h3><a href="/sources/{{.Job.SourceType}}/{{.Job.SourceID}}">{{.Title}}</a></h3>
     <p class="meta">{{if eq (printf "%s" .Job.Status) "succeeded"}}✅ 成功{{else}}❌ 失败{{end}} · {{if eq (printf "%s" .Job.JobType) "episode_digest"}}单集精读生成{{else if eq (printf "%s" .Job.JobType) "transcribe"}}音频转录{{else if eq (printf "%s" .Job.JobType) "analyze"}}知识卡片生成{{else}}{{.Job.JobType}}{{end}} · <time data-utc="{{.Job.UpdatedAt}}">{{.Job.UpdatedAt}}</time></p>
   </div>

@@ -89,7 +89,7 @@
 
 
   {{with .Stages}}
-  <section class="panel stage-panel" style="margin:0.75rem 0"
+  <section class="panel stage-panel"
            data-source-progress data-source-type="{{$.SourceType}}" data-source-id="{{$.SourceID}}" data-status="{{$.Status}}">
     <h2>处理进度</h2>
     <p class="stage-live" id="source-live-status" aria-live="polite" data-state="{{if eq $.Status "failed"}}failed{{else if eq $.Status "processed"}}done{{else}}running{{end}}">{{$.ProgressHint}}</p>
@@ -116,32 +116,32 @@
   </section>
   {{end}}
   {{if eq .Status "processed"}}
-  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download">下载 Markdown（仅证据）</a>
-  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/download?with_generated=1" title="在证据之外，额外纳入 AI 复述讲解与学习对话（明确标注为非原文）">下载 Markdown（含 AI 讲解）</a>
-  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/versions">版本历史</a>
-  <a class="btn btn-secondary" href="/sources/{{.SourceType}}/{{.SourceID}}/translation?lang=zh">对齐译文</a>
-  <a class="btn btn-secondary" href="/sources/{{.SourceType}}/{{.SourceID}}/mindmap">结构导图</a>
-  <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/dj">AI DJ</a>
-  <form action="/practice/action" method="POST" style="display:inline">
-    <input type="hidden" name="_csrf" value="{{.CSRF}}">
-    <input type="hidden" name="action" value="generate">
-    <input type="hidden" name="source_type" value="{{.SourceType}}">
-    <input type="hidden" name="source_id" value="{{.SourceID}}">
-    <button class="btn btn-secondary" type="submit">生成练习问题</button>
-  </form>
-  <a class="btn btn-secondary" href="/practice?source_type={{.SourceType}}&source_id={{.SourceID}}">查看练习问题</a>
-  <form action="/api/digest" method="POST" style="display:inline">
-    <input type="hidden" name="_csrf" value="{{.CSRF}}">
-    <input type="hidden" name="source_type" value="{{.SourceType}}">
-    <input type="hidden" name="source_id" value="{{.SourceID}}">
-    <button class="btn" type="submit">生成精读文</button>
-  </form>
-  <form action="/api/purge" method="POST" style="display:inline" data-confirm="确认彻底删除该条内容及其全部证据与处理历史？此操作不可撤销。">
-    <input type="hidden" name="_csrf" value="{{.CSRF}}">
-    <input type="hidden" name="source_type" value="{{.SourceType}}">
-    <input type="hidden" name="source_id" value="{{.SourceID}}">
-    <button class="btn btn-danger" type="submit" style="color:#fff;background:#b91c1c;">彻底删除</button>
-  </form>
+  <div class="action-bar">
+    <a class="btn" href="/sources/{{.SourceType}}/{{.SourceID}}/dj">AI DJ</a>
+    <form action="/api/digest" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}">
+      <button class="btn btn-secondary" type="submit">生成精读文</button>
+    </form>
+    <form action="/practice/action" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="action" value="generate"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}">
+      <button class="btn btn-secondary" type="submit">生成练习问题</button>
+    </form>
+    <details class="action-more">
+      <summary class="btn btn-secondary">更多操作</summary>
+      <div class="action-menu">
+        <a href="/sources/{{.SourceType}}/{{.SourceID}}/download">下载 Markdown（仅证据）</a>
+        <a href="/sources/{{.SourceType}}/{{.SourceID}}/download?with_generated=1" title="在证据之外，额外纳入 AI 复述讲解与学习对话（明确标注为非原文）">下载 Markdown（含 AI 讲解）</a>
+        <a href="/sources/{{.SourceType}}/{{.SourceID}}/versions">版本历史</a>
+        <a href="/sources/{{.SourceType}}/{{.SourceID}}/translation?lang=zh">对齐译文</a>
+        <a href="/sources/{{.SourceType}}/{{.SourceID}}/mindmap">结构导图</a>
+        <a href="/practice?source_type={{.SourceType}}&source_id={{.SourceID}}">查看练习问题</a>
+        <form action="/api/purge" method="POST" data-confirm="确认彻底删除该条内容及其全部证据与处理历史？此操作不可撤销。">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}">
+          <button class="btn-danger" type="submit">彻底删除</button>
+        </form>
+      </div>
+    </details>
+  </div>
   {{end}}
 </div>
 
@@ -161,7 +161,7 @@
 
     <!-- Paraphrase 复述讲解（GeneratedDerivative，ADR-0018）：AI 用别的话重讲，挂 Reference，非原文 -->
     <section id="paraphrase-panel" hidden>
-      <h2>复述讲解 <small style="color:var(--muted);font-weight:normal">AI 讲解·非原文</small></h2>
+      <h2>复述讲解<small class="h-sub"> AI 讲解·非原文</small></h2>
       <form id="paraphrase-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
         <input type="hidden" name="segment_ids" id="paraphrase-segment-ids">
@@ -170,7 +170,7 @@
         <button type="button" id="paraphrase-close">取消</button>
       </form>
       <div id="paraphrase-output"></div>
-      <p class="hint" style="color:var(--muted);font-size:0.85rem">这是 AI 重新组织的讲解，参考自上方片段，但<strong>不是逐字原文</strong>，不可当作原话核验。</p>
+      <p class="hint">这是 AI 重新组织的讲解，参考自上方片段，但<strong>不是逐字原文</strong>，不可当作原话核验。</p>
     </section>
   <!-- 右：知识卡片（C 层联动：章节/金句双向跳转） -->
   <aside class="card-panel">
@@ -211,7 +211,7 @@
     <!-- 高光片段（真实原音区间）：区间由 Citation 解析，音频由程序从证据音频切出。 -->
     {{with .Highlights}}
     <section>
-      <h2>高光片段 <small style="color:var(--muted);font-weight:normal">真实原音区间</small></h2>
+      <h2>高光片段<small class="h-sub"> 真实原音区间</small></h2>
       <ul class="keypoints">
       {{range .}}
         <li data-highlight-id="{{.ID}}">
@@ -225,14 +225,14 @@
         </li>
       {{end}}
       </ul>
-      <p class="hint" style="color:var(--muted);font-size:0.85rem">片段由程序按引用片段的时间范围从证据音频中切出，不是 AI 生成的音频，也不是解说音轨。</p>
+      <p class="hint">片段由程序按引用片段的时间范围从证据音频中切出，不是 AI 生成的音频，也不是解说音轨。</p>
     </section>
     {{end}}
 
     <!-- 练习问题（自我检验）：问题挂 Citation，提示标为非原文。 -->
     {{with .PracticeQuestions}}
     <section>
-      <h2>练习问题 <small style="color:var(--muted);font-weight:normal">自我检验</small></h2>
+      <h2>练习问题<small class="h-sub"> 自我检验</small></h2>
       <ol class="keypoints">
       {{range .}}
         <li>
@@ -249,7 +249,7 @@
 
     <!-- EvidenceQA（证据问答，ADR-0018）：CitedDerivative，必须引用原文、证据不足拒答 -->
     <section>
-      <h2>证据问答 <small style="color:var(--muted);font-weight:normal">EvidenceQA · 查证原文</small></h2>
+      <h2>证据问答<small class="h-sub"> EvidenceQA · 查证原文</small></h2>
       <form id="evidence-qa-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
         <input type="text" name="question" placeholder="问原文：有没有说…在哪里…" required>
@@ -260,8 +260,8 @@
 
     <!-- StudyChat 学习对话（GeneratedDerivative，ADR-0018 R3）：AI 用别的话讲解，挂 Reference，非原文 -->
     <section>
-      <h2>学习对话 <small style="color:var(--muted);font-weight:normal">StudyChat · AI 讲解·非原文</small></h2>
-      <p class="hint" style="color:var(--muted);font-size:0.85rem">围绕本期内容自由提问，AI 用别的话讲解。回答明确标注<strong>非逐字原文</strong>，仅供参考。超出本集范围或脱离原文时将拒答。</p>
+      <h2>学习对话<small class="h-sub"> StudyChat · AI 讲解·非原文</small></h2>
+      <p class="hint">围绕本期内容自由提问，AI 用别的话讲解。回答明确标注<strong>非逐字原文</strong>，仅供参考。超出本集范围或脱离原文时将拒答。</p>
       <div id="study-chat-thread"></div>
       <form id="study-chat-form">
         <input type="hidden" name="_csrf" value="{{.CSRF}}">
@@ -274,7 +274,7 @@
   </aside>
 </div>
 <details class="panel"><summary>高级：处理历史、素材策略与权利</summary>{{with .MaterialUsage}}
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>被采用为素材</h2>
   {{range .}}
   <div class="list-item"><a href="{{.Link}}">{{.Title}}</a> <span class="meta">{{.Detail}}</span></div>
@@ -282,23 +282,23 @@
 </section>
 {{end}}
 {{with .SourceDigests}}
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>精读文</h2>
   {{range .}}
-  <div class="list-item"><div style="flex:1">
+  <div class="list-item"><div class="grow">
     <strong><a href="/digest/{{.ID}}">{{.Title}}</a></strong>
     <span class="meta">修订 v{{.Version}}{{if .Reason}} · {{.Reason}}{{end}} · {{.CreatedAt}}</span>
   </div></div>
   {{end}}
 </section>
 {{end}}
-{{with .SourcePolicy}}<section class="panel" style="margin:1rem 0"><h2>素材与模型边界</h2><form method="post" action="/api/source-policy"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="{{$.SourceType}}"><input type="hidden" name="source_id" value="{{$.SourceID}}"><p class="meta">Owner 纳入的 Source 默认可用于学习与创作；此处只配置模型数据边界和归档状态。</p><label>模型数据策略 <select name="model_data_policy"><option value="external_allowed" {{if eq .ModelDataPolicy "external_allowed"}}selected{{end}}>允许外部模型</option><option value="approved_providers_only" {{if eq .ModelDataPolicy "approved_providers_only"}}selected{{end}}>仅批准 Provider</option><option value="local_only" {{if eq .ModelDataPolicy "local_only"}}selected{{end}}>仅本地</option></select></label><label>批准的 Provider（逗号分隔）<input name="approved_providers" value="{{join .ApprovedProviders ","}}" placeholder="groq,openai"></label><label><input type="checkbox" name="archived" value="1" {{if .Archived}}checked{{end}}>归档并停止后续生产</label><button class="btn btn-secondary" type="submit">保存素材策略</button></form></section>{{end}}
+{{with .SourcePolicy}}<section class="panel"><h2>素材与模型边界</h2><form method="post" action="/api/source-policy"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="source_type" value="{{$.SourceType}}"><input type="hidden" name="source_id" value="{{$.SourceID}}"><p class="meta">Owner 纳入的 Source 默认可用于学习与创作；此处只配置模型数据边界和归档状态。</p><label>模型数据策略 <select name="model_data_policy"><option value="external_allowed" {{if eq .ModelDataPolicy "external_allowed"}}selected{{end}}>允许外部模型</option><option value="approved_providers_only" {{if eq .ModelDataPolicy "approved_providers_only"}}selected{{end}}>仅批准 Provider</option><option value="local_only" {{if eq .ModelDataPolicy "local_only"}}selected{{end}}>仅本地</option></select></label><label>批准的 Provider（逗号分隔）<input name="approved_providers" value="{{join .ApprovedProviders ","}}" placeholder="groq,openai"></label><label><input type="checkbox" name="archived" value="1" {{if .Archived}}checked{{end}}>归档并停止后续生产</label><button class="btn btn-secondary" type="submit">保存素材策略</button></form></section>{{end}}
 
 
 
-<section class="panel" style="margin:1rem 0"><h2>MaterialCandidate</h2><p class="meta">学习候选先由 Owner 决定，再提升为 Owner-confirmed KeyPoint；未接受的文本不会进入发现。</p>{{range .MaterialCandidates}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}}</div><p>{{.Content}}</p><p class="meta">Citation：{{.CitationsJSON}}</p>{{if .RejectionReason}}<p class="error">{{.RejectionReason}}</p>{{end}}</div>{{if eq .Status "pending"}}<div class="item-actions"><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受</button></form><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="rejected"><input name="reason" placeholder="拒绝原因"><button class="btn btn-secondary" type="submit">拒绝</button></form></div>{{else if eq .Status "accepted"}}<form class="item-actions" method="post" action="/api/material-candidates/promote"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><button class="btn" type="submit">提升为 KeyPoint</button></form>{{end}}</article>{{end}}<form method="post" action="/api/material-candidates" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>候选内容 <textarea name="content" rows="2" required></textarea></label><label>Citation ID JSON <input name="citations_json" required placeholder='["seg-1"]'></label><button class="btn btn-secondary" type="submit">记录学习候选</button></form></section>
+<section class="panel"><h2>MaterialCandidate</h2><p class="meta">学习候选先由 Owner 决定，再提升为 Owner-confirmed KeyPoint；未接受的文本不会进入发现。</p>{{range .MaterialCandidates}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}}</div><p>{{.Content}}</p><p class="meta">Citation：{{.CitationsJSON}}</p>{{if .RejectionReason}}<p class="error">{{.RejectionReason}}</p>{{end}}</div>{{if eq .Status "pending"}}<div class="item-actions"><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="accepted"><button class="btn" type="submit">接受</button></form><form method="post" action="/api/material-candidates/decision"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><input type="hidden" name="status" value="rejected"><input name="reason" placeholder="拒绝原因"><button class="btn btn-secondary" type="submit">拒绝</button></form></div>{{else if eq .Status "accepted"}}<form class="item-actions" method="post" action="/api/material-candidates/promote"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="candidate_id" value="{{.ID}}"><button class="btn" type="submit">提升为 KeyPoint</button></form>{{end}}</article>{{end}}<form method="post" action="/api/material-candidates" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>候选内容 <textarea name="content" rows="2" required></textarea></label><label>Citation ID JSON <input name="citations_json" required placeholder='["seg-1"]'></label><button class="btn btn-secondary" type="submit">记录学习候选</button></form></section>
 
-<section class="panel" style="margin:1rem 0"><h2>RightsConstraint</h2><p class="meta">这些约束限制对外复制具体表达或媒体资产，不撤销 Owner 的内部学习使用。</p>{{range .RightsConstraints}}<p><strong>{{.ConstraintKind}}</strong>：{{.Details}} {{if .Active}}<span class="meta">生效中</span>{{end}}</p>{{end}}<form method="post" action="/api/rights-constraints" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>约束类型 <input name="constraint_kind" required placeholder="expression_reuse"></label><label>说明 <input name="details" required></label><label><input type="checkbox" name="active" checked> 生效</label><button class="btn btn-secondary" type="submit">保存约束</button></form></section>
+<section class="panel"><h2>RightsConstraint</h2><p class="meta">这些约束限制对外复制具体表达或媒体资产，不撤销 Owner 的内部学习使用。</p>{{range .RightsConstraints}}<p><strong>{{.ConstraintKind}}</strong>：{{.Details}} {{if .Active}}<span class="meta">生效中</span>{{end}}</p>{{end}}<form method="post" action="/api/rights-constraints" class="subform"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="source_type" value="{{.SourceType}}"><input type="hidden" name="source_id" value="{{.SourceID}}"><label>约束类型 <input name="constraint_kind" required placeholder="expression_reuse"></label><label>说明 <input name="details" required></label><label><input type="checkbox" name="active" checked> 生效</label><button class="btn btn-secondary" type="submit">保存约束</button></form></section>
 
 </details>
 {{end}}

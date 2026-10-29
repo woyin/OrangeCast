@@ -37,7 +37,7 @@
   <div class="transcript">
   {{range .Rows}}
     <div class="list-item">
-      <div style="flex:1">
+      <div class="grow">
         <p class="meta">{{formatTime .Start}} · 第 {{.Index}} 段</p>
         <p>{{.Original}}</p>
         {{if .TranslatedOK}}<p><strong>译文：</strong>{{.Translated}}</p>{{else}}<p class="meta">尚未翻译</p>{{end}}

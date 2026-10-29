@@ -1,64 +1,6 @@
 {{define "title"}}创作工作空间 · CloudWisePod{{end}}
 {{define "content"}}
 <div class="page-head"><div><h1>创作工作空间</h1><p class="meta">从来源忠实的学习素材到 Owner 确认的作品，每一步都有明确决策点。</p></div><a class="btn btn-secondary" href="/themes{{with .Profile}}?profile={{.ID}}{{end}}">管理 Theme</a></div>
-<div class="status-bar pending">迁移期：旧 ArticleProposal / ArticleBrief 工作流仍保留为兼容投影；新的 AutomaticDiscovery 只在 Owner 明确授权后，根据已审学习成果生成 ProposalBatch。</div>
-
-{{with .Profile}}
-<section class="panel">
-  <h2>AutomaticDiscovery</h2>
-  <p class="meta">仅使用当前画像中已通过学习质量闸门、未陈旧且未被排除的跨 Episode 新素材。系统不会由 GET 或提案池变化触发付费调用。</p>
-  {{with $.DiscoverySettings}}
-  <form method="post" action="/workbench/discovery-settings" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> 允许自动发现</label><label>Provider <input name="provider" value="{{.Provider}}" required></label><label>模型 <input name="model" value="{{.Model}}" required></label><label>每天最多批次 <input type="number" name="daily_limit" min="1" value="{{.DailyLimit}}" required></label><label>学习后防抖（分钟） <input type="number" name="debounce_minutes" min="0" value="{{.DebounceMinutes}}" required></label><label>单批预算（分，可留空） <input type="number" name="batch_budget_cents" min="0" value="{{.BatchBudgetCents}}"></label><button class="btn" type="submit">保存自动发现设置</button></form>
-  {{else}}
-  <form method="post" action="/workbench/discovery-settings" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label><input type="checkbox" name="enabled"> 允许自动发现</label><label>Provider <input name="provider" placeholder="groq 或 openai" required></label><label>模型 <input name="model" required></label><label>每天最多批次 <input type="number" name="daily_limit" min="1" value="1" required></label><label>学习后防抖（分钟） <input type="number" name="debounce_minutes" min="0" value="30" required></label><label>单批预算（分，可留空） <input type="number" name="batch_budget_cents" min="0"></label><button class="btn" type="submit">保存自动发现设置</button></form>
-  {{end}}
-</section>
-
-<section class="panel"><h2>ProposalBatch</h2>{{range $.ProposalBatches}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}} · <time data-utc="{{.CreatedAt}}">{{.CreatedAt}}</time></div><p>{{if .ShortageReason}}{{.ShortageReason}}{{else}}等待 Owner 审阅批次中的创作方向{{end}}</p>{{if .FailureReason}}<p class="error">{{.FailureReason}}</p>{{end}}{{if .CostCents}}<p class="meta">费用：{{.CostCents}} 分</p>{{end}}</div></article>{{else}}<p class="empty">尚无自动发现批次。开启后需满足至少 6 条、来自 2 个 Episode 的新已审学习成果，并等待防抖结束。</p>{{end}}</section>
-
-<section class="panel"><h2>新的创作方向</h2><p class="meta">模型只能提出 ProposedClaim；只有 Owner 接受或改写后，才成为 OwnerClaim。</p>{{range $.CreationProposals}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}} · {{.CreationForm}}</div><h3>{{.WorkingTitle}}</h3><p><strong>ProposedClaim：</strong>{{.ProposedClaim}}</p>{{if .OwnerClaim}}<p><strong>OwnerClaim：</strong>{{.OwnerClaim}}</p>{{end}}<p>{{.Rationale}}</p>{{if .HistoryRelationship}}<p class="meta">历史提醒：{{.HistoryRelationship}}</p>{{end}}</div>{{if eq .Status "proposed"}}<form class="item-actions" method="post" action="/workbench/creation-proposals/accept"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_proposal_id" value="{{.ID}}"><label>我的主张 <textarea name="owner_claim" rows="2">{{.ProposedClaim}}</textarea></label><button class="btn" type="submit">接受为 OwnerClaim</button></form>{{end}}</article>{{else}}<p class="empty">自动发现或定向构思形成的方向会在这里等待 Owner 决策。</p>{{end}}</section>
-
-<section class="panel"><h2>CreationBrief</h2><p class="meta">Curator 方案可编辑；保存生成新不可变 revision。确认只授权精确当前 revision。</p>
-{{range $.CreationBriefs}}
-<article class="workflow-item">
-  <div class="workflow-item-body">
-    <div class="item-kicker">{{.Status}} · revision v{{.CurrentVersion}} · confirmed v{{.ConfirmedVersion}}</div>
-    <form method="post" action="/workbench/creation-briefs/edit" class="subform">
-      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
-      <label>OwnerClaim <textarea name="owner_claim" rows="2" required>{{.OwnerClaim}}</textarea></label>
-      <label>提纲 <textarea name="outline" rows="4" required>{{.Outline}}</textarea></label>
-      <label>选用材料 IDs（JSON 数组） <textarea name="selected_material_ids" rows="2" required>{{.SelectedMaterialIDsJSON}}</textarea></label>
-      <label>放弃材料 IDs（JSON 数组） <textarea name="rejected_material_ids" rows="2">{{.RejectedMaterialIDsJSON}}</textarea></label>
-      <label>风格 <input name="style" value="{{.Style}}"></label>
-      <label>目标篇幅 <input name="target_length" type="number" min="1" value="{{.TargetLength}}"></label>
-      <label>主张类型 <input name="claim_type" value="{{.ClaimType}}"></label>
-      <label>未决问题（JSON 数组） <textarea name="unresolved_questions_json" rows="2">{{.UnresolvedQuestionsJSON}}</textarea></label>
-      <label>备注 <textarea name="notes" rows="2">{{.Notes}}</textarea></label>
-      <button class="btn btn-secondary" type="submit">保存新修订</button>
-    </form>
-    {{if eq .Status "draft"}}
-    <form method="post" action="/workbench/creation-briefs/confirm" class="item-actions">
-      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
-      <button class="btn" type="submit">确认精确版本授权</button>
-    </form>
-    {{else if and (eq .Status "confirmed") (eq .CurrentVersion .ConfirmedVersion)}}
-    {{$writerDraftID := index $.CreationBriefDrafts .ID}}
-    {{if $writerDraftID}}<a class="btn btn-secondary" href="/workbench/drafts/{{$writerDraftID}}">打开文章</a>{{else}}<form method="post" action="/workbench/creation-briefs/write" class="item-actions">
-      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
-      <button class="btn" type="submit">生成文章初稿</button>
-    </form>{{end}}
-    {{end}}
-  </div>
-</article>
-{{else}}<p class="empty">Owner 接受有足够素材的方向后，CreationBrief 草案会出现在这里。</p>{{end}}
-</section>
-
-<section class="panel"><h2>DirectedIdeation</h2><p class="meta">这是 Owner 发起的探索合同。它记录意图与约束，不会自行联网研究或生成作品。</p><form method="post" action="/workbench/ideation" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>构思意图 <textarea name="intent" rows="2" required placeholder="例如：比较两种学习方法的适用边界"></textarea></label><label>约束 JSON（可留空）<input name="constraints_json" value="{}"></label><button class="btn btn-secondary" type="submit">开始定向构思</button></form>{{range $.IdeationSessions}}<p><strong>{{.Intent}}</strong> <span class="meta">{{.Status}}</span></p>{{end}}</section>
-
-<section class="panel"><h2>ResearchNeed</h2><p class="meta">阻断型缺口未解决时，CreationBrief 不能确认。ResearchPlan 只授权未来研究；结果必须先作为 Source 回到学习流程。</p>{{range $.CreationProposals}}{{if eq .Status "accepted"}}<details class="manual-form"><summary>为「{{.WorkingTitle}}」添加研究缺口</summary><form method="post" action="/workbench/research-needs" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_proposal_id" value="{{.ID}}"><label>级别 <select name="severity"><option value="blocking">阻断型</option><option value="enhancement">增强型</option></select></label><label>问题 <input name="question" required></label><button class="btn btn-secondary" type="submit">记录研究缺口</button></form></details>{{end}}{{end}}{{range $.ResearchNeeds}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Severity}} · {{.Status}}</div><h3>{{.Question}}</h3></div>{{if eq .Status "open"}}<form class="item-actions" method="post" action="/workbench/research-needs/resolve"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="research_need_id" value="{{.ID}}"><label>来源类型 <select name="source_type"><option value="episode">episode</option><option value="upload">upload</option><option value="document">document</option></select></label><label>已导入的 Source ID <input name="resolution_source_id" required></label><label>来源版本 <input name="resolution_version" type="number" min="1" required></label><label>具体依据（Segment/段落 ID）<input name="resolution_detail" required></label><button class="btn btn-secondary" type="submit">标记为已通过学习解决</button></form>{{end}}</article>{{end}}</section>
-
-<section class="panel"><h2>CreationHistory</h2><p class="meta">导入已发布或未发布作品，供后续方向做主张级重复提醒；导入本身不会自动拒绝任何方向。</p>{{range $.CreationHistory}}<article><strong>{{.Title}}</strong><span class="meta"> · {{.Status}} · {{.CreationForm}}</span><p>{{.CoreClaim}}</p>{{if .ArticleRevisionID}}<p class="meta"><a href="/workbench/drafts/{{.ArticleDraftID}}#revision-{{.ArticleRevisionID}}">查看确切修订 v{{.ArticleVersion}}</a></p>{{else if .ExternalURL}}<p class="meta"><a href="{{.ExternalURL}}">外部来源</a></p>{{end}}</article>{{end}}<details class="manual-form"><summary>导入历史作品</summary><form method="post" action="/workbench/creation-history" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>状态 <select name="status"><option value="published">已发布</option><option value="unpublished">未发布</option></select></label><label>作品形态 <input name="creation_form" value="article"></label><label>标题 <input name="title" required></label><label>核心主张 <textarea name="core_claim" rows="2"></textarea></label><label>受众 <input name="audience"></label><label>内容或摘要 <textarea name="content" rows="3"></textarea></label><label>外部链接 <input name="source_url"></label><button class="btn btn-secondary" type="submit">导入历史</button></form></details></section>
-{{end}}
 
 <div class="profile-switcher">
   {{range .Profiles}}<a class="profile-chip {{if $.Profile}}{{if eq .ID $.Profile.ID}}active{{end}}{{end}}" href="/workbench?profile={{.ID}}"><strong>{{.Name}}</strong><span>{{if .TargetAudience}}{{.TargetAudience}}{{else}}未设置目标读者{{end}}</span></a>{{end}}
@@ -122,6 +64,67 @@
     <div class="panel"><h2>编辑画像</h2><p><strong>来源署名：</strong>{{.SourceAttribution}}</p><p><strong>目标读者：</strong>{{if .TargetAudience}}{{.TargetAudience}}{{else}}未设置{{end}}</p><p><strong>语气：</strong>{{if .Voice}}{{.Voice}}{{else}}未设置{{end}}</p><p class="meta">画像编辑入口将在下一版本补齐；当前创建后由设置流程管理。</p></div>
   </section>
   <section class="panel"><h2>模型价格表</h2><p class="meta">按 Provider 的计费单位填写每百万输入/输出单位的价格。未设置预算时，未登记价格不阻塞流程。</p>{{range $.ModelPrices}}<p><strong>{{.Provider}} / {{.Model}}</strong>：输入 {{.InputCentsPerMillion}}，输出 {{.OutputCentsPerMillion}} 分/百万单位</p>{{end}}<form method="post" action="/workbench/model-prices" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><label>Provider <input name="provider" required placeholder="openai"></label><label>模型 <input name="model" required placeholder="gpt-5-mini"></label><label>输入价格 <input type="number" min="0" name="input_cents_per_million" required></label><label>输出价格 <input type="number" min="0" name="output_cents_per_million" required></label><button class="btn" type="submit">保存价格</button></form></section>
+</details>
+{{end}}
+
+{{with .Profile}}
+<details class="panel workbench-advanced"><summary>自动发现、提案批次、研究与创作历史</summary>
+<div class="status-bar pending">迁移期：旧 ArticleProposal / ArticleBrief 工作流仍保留为兼容投影；新的 AutomaticDiscovery 只在 Owner 明确授权后，根据已审学习成果生成 ProposalBatch。</div>
+
+<section class="panel">
+  <h2>AutomaticDiscovery</h2>
+  <p class="meta">仅使用当前画像中已通过学习质量闸门、未陈旧且未被排除的跨 Episode 新素材。系统不会由 GET 或提案池变化触发付费调用。</p>
+  {{with $.DiscoverySettings}}
+  <form method="post" action="/workbench/discovery-settings" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> 允许自动发现</label><label>Provider <input name="provider" value="{{.Provider}}" required></label><label>模型 <input name="model" value="{{.Model}}" required></label><label>每天最多批次 <input type="number" name="daily_limit" min="1" value="{{.DailyLimit}}" required></label><label>学习后防抖（分钟） <input type="number" name="debounce_minutes" min="0" value="{{.DebounceMinutes}}" required></label><label>单批预算（分，可留空） <input type="number" name="batch_budget_cents" min="0" value="{{.BatchBudgetCents}}"></label><button class="btn" type="submit">保存自动发现设置</button></form>
+  {{else}}
+  <form method="post" action="/workbench/discovery-settings" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label><input type="checkbox" name="enabled"> 允许自动发现</label><label>Provider <input name="provider" placeholder="groq 或 openai" required></label><label>模型 <input name="model" required></label><label>每天最多批次 <input type="number" name="daily_limit" min="1" value="1" required></label><label>学习后防抖（分钟） <input type="number" name="debounce_minutes" min="0" value="30" required></label><label>单批预算（分，可留空） <input type="number" name="batch_budget_cents" min="0"></label><button class="btn" type="submit">保存自动发现设置</button></form>
+  {{end}}
+</section>
+
+<section class="panel"><h2>ProposalBatch</h2>{{range $.ProposalBatches}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}} · <time data-utc="{{.CreatedAt}}">{{.CreatedAt}}</time></div><p>{{if .ShortageReason}}{{.ShortageReason}}{{else}}等待 Owner 审阅批次中的创作方向{{end}}</p>{{if .FailureReason}}<p class="error">{{.FailureReason}}</p>{{end}}{{if .CostCents}}<p class="meta">费用：{{.CostCents}} 分</p>{{end}}</div></article>{{else}}<p class="empty">尚无自动发现批次。开启后需满足至少 6 条、来自 2 个 Episode 的新已审学习成果，并等待防抖结束。</p>{{end}}</section>
+
+<section class="panel"><h2>新的创作方向</h2><p class="meta">模型只能提出 ProposedClaim；只有 Owner 接受或改写后，才成为 OwnerClaim。</p>{{range $.CreationProposals}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Status}} · {{.CreationForm}}</div><h3>{{.WorkingTitle}}</h3><p><strong>ProposedClaim：</strong>{{.ProposedClaim}}</p>{{if .OwnerClaim}}<p><strong>OwnerClaim：</strong>{{.OwnerClaim}}</p>{{end}}<p>{{.Rationale}}</p>{{if .HistoryRelationship}}<p class="meta">历史提醒：{{.HistoryRelationship}}</p>{{end}}</div>{{if eq .Status "proposed"}}<form class="item-actions" method="post" action="/workbench/creation-proposals/accept"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_proposal_id" value="{{.ID}}"><label>我的主张 <textarea name="owner_claim" rows="2">{{.ProposedClaim}}</textarea></label><button class="btn" type="submit">接受为 OwnerClaim</button></form>{{end}}</article>{{else}}<p class="empty">自动发现或定向构思形成的方向会在这里等待 Owner 决策。</p>{{end}}</section>
+
+<section class="panel"><h2>CreationBrief</h2><p class="meta">Curator 方案可编辑；保存生成新不可变 revision。确认只授权精确当前 revision。</p>
+{{range $.CreationBriefs}}
+<article class="workflow-item">
+  <div class="workflow-item-body">
+    <div class="item-kicker">{{.Status}} · revision v{{.CurrentVersion}} · confirmed v{{.ConfirmedVersion}}</div>
+    <form method="post" action="/workbench/creation-briefs/edit" class="subform">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <label>OwnerClaim <textarea name="owner_claim" rows="2" required>{{.OwnerClaim}}</textarea></label>
+      <label>提纲 <textarea name="outline" rows="4" required>{{.Outline}}</textarea></label>
+      <label>选用材料 IDs（JSON 数组） <textarea name="selected_material_ids" rows="2" required>{{.SelectedMaterialIDsJSON}}</textarea></label>
+      <label>放弃材料 IDs（JSON 数组） <textarea name="rejected_material_ids" rows="2">{{.RejectedMaterialIDsJSON}}</textarea></label>
+      <label>风格 <input name="style" value="{{.Style}}"></label>
+      <label>目标篇幅 <input name="target_length" type="number" min="1" value="{{.TargetLength}}"></label>
+      <label>主张类型 <input name="claim_type" value="{{.ClaimType}}"></label>
+      <label>未决问题（JSON 数组） <textarea name="unresolved_questions_json" rows="2">{{.UnresolvedQuestionsJSON}}</textarea></label>
+      <label>备注 <textarea name="notes" rows="2">{{.Notes}}</textarea></label>
+      <button class="btn btn-secondary" type="submit">保存新修订</button>
+    </form>
+    {{if eq .Status "draft"}}
+    <form method="post" action="/workbench/creation-briefs/confirm" class="item-actions">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <button class="btn" type="submit">确认精确版本授权</button>
+    </form>
+    {{else if and (eq .Status "confirmed") (eq .CurrentVersion .ConfirmedVersion)}}
+    {{$writerDraftID := index $.CreationBriefDrafts .ID}}
+    {{if $writerDraftID}}<a class="btn btn-secondary" href="/workbench/drafts/{{$writerDraftID}}">打开文章</a>{{else}}<form method="post" action="/workbench/creation-briefs/write" class="item-actions">
+      <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_brief_id" value="{{.ID}}"><input type="hidden" name="expected_version" value="{{.CurrentVersion}}">
+      <button class="btn" type="submit">生成文章初稿</button>
+    </form>{{end}}
+    {{end}}
+  </div>
+</article>
+{{else}}<p class="empty">Owner 接受有足够素材的方向后，CreationBrief 草案会出现在这里。</p>{{end}}
+</section>
+
+<section class="panel"><h2>DirectedIdeation</h2><p class="meta">这是 Owner 发起的探索合同。它记录意图与约束，不会自行联网研究或生成作品。</p><form method="post" action="/workbench/ideation" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>构思意图 <textarea name="intent" rows="2" required placeholder="例如：比较两种学习方法的适用边界"></textarea></label><label>约束 JSON（可留空）<input name="constraints_json" value="{}"></label><button class="btn btn-secondary" type="submit">开始定向构思</button></form>{{range $.IdeationSessions}}<p><strong>{{.Intent}}</strong> <span class="meta">{{.Status}}</span></p>{{end}}</section>
+
+<section class="panel"><h2>ResearchNeed</h2><p class="meta">阻断型缺口未解决时，CreationBrief 不能确认。ResearchPlan 只授权未来研究；结果必须先作为 Source 回到学习流程。</p>{{range $.CreationProposals}}{{if eq .Status "accepted"}}<details class="manual-form"><summary>为「{{.WorkingTitle}}」添加研究缺口</summary><form method="post" action="/workbench/research-needs" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="creation_proposal_id" value="{{.ID}}"><label>级别 <select name="severity"><option value="blocking">阻断型</option><option value="enhancement">增强型</option></select></label><label>问题 <input name="question" required></label><button class="btn btn-secondary" type="submit">记录研究缺口</button></form></details>{{end}}{{end}}{{range $.ResearchNeeds}}<article class="workflow-item"><div class="workflow-item-body"><div class="item-kicker">{{.Severity}} · {{.Status}}</div><h3>{{.Question}}</h3></div>{{if eq .Status "open"}}<form class="item-actions" method="post" action="/workbench/research-needs/resolve"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="research_need_id" value="{{.ID}}"><label>来源类型 <select name="source_type"><option value="episode">episode</option><option value="upload">upload</option><option value="document">document</option></select></label><label>已导入的 Source ID <input name="resolution_source_id" required></label><label>来源版本 <input name="resolution_version" type="number" min="1" required></label><label>具体依据（Segment/段落 ID）<input name="resolution_detail" required></label><button class="btn btn-secondary" type="submit">标记为已通过学习解决</button></form>{{end}}</article>{{end}}</section>
+
+<section class="panel"><h2>CreationHistory</h2><p class="meta">导入已发布或未发布作品，供后续方向做主张级重复提醒；导入本身不会自动拒绝任何方向。</p>{{range $.CreationHistory}}<article><strong>{{.Title}}</strong><span class="meta"> · {{.Status}} · {{.CreationForm}}</span><p>{{.CoreClaim}}</p>{{if .ArticleRevisionID}}<p class="meta"><a href="/workbench/drafts/{{.ArticleDraftID}}#revision-{{.ArticleRevisionID}}">查看确切修订 v{{.ArticleVersion}}</a></p>{{else if .ExternalURL}}<p class="meta"><a href="{{.ExternalURL}}">外部来源</a></p>{{end}}</article>{{end}}<details class="manual-form"><summary>导入历史作品</summary><form method="post" action="/workbench/creation-history" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="profile_id" value="{{$.Profile.ID}}"><label>状态 <select name="status"><option value="published">已发布</option><option value="unpublished">未发布</option></select></label><label>作品形态 <input name="creation_form" value="article"></label><label>标题 <input name="title" required></label><label>核心主张 <textarea name="core_claim" rows="2"></textarea></label><label>受众 <input name="audience"></label><label>内容或摘要 <textarea name="content" rows="3"></textarea></label><label>外部链接 <input name="source_url"></label><button class="btn btn-secondary" type="submit">导入历史</button></form></details></section>
 </details>
 {{end}}
 

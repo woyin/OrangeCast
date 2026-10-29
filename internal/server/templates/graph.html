@@ -3,12 +3,12 @@
 <h1>知识图谱</h1>
 <p class="hint">每个节点是一个关键要点。<strong>实线</strong>=同一集合（Owner 组织）；<strong>虚线</strong>=文本相似度建议（可考虑归入同一集合）。点击节点跳转出处。</p>
 
-<div id="legend" style="margin-bottom:0.5rem;display:flex;gap:1rem;font-size:0.85rem;color:var(--muted)">
-  <span><span style="display:inline-block;width:16px;height:2px;background:#4f46e5;vertical-align:middle"></span> 同一集合</span>
-  <span><span style="display:inline-block;width:16px;height:2px;background:#999;border-top:1px dashed #999;vertical-align:middle"></span> 相似度建议</span>
+<div id="legend" class="graph-legend">
+  <span><span class="legend-line legend-solid"></span> 同一集合</span>
+  <span><span class="legend-line legend-dashed"></span> 相似度建议</span>
 </div>
 
-<svg id="graph-svg" style="width:100%;height:72vh;border:1px solid var(--border);border-radius:8px;background:#fff"></svg>
+<svg id="graph-svg"></svg>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>

@@ -7,20 +7,20 @@
     {{if .Digest.Degraded}} · <span class="error">联网补充不可用（降级生成）</span>{{end}}
   </p>
   {{with .Readiness}}
-  <p class="meta" style="margin-top:0.5rem"><strong>{{if .Deliverable}}✅ {{else}}⚠️ {{end}}{{.Summary}}</strong></p>
+  <p class="meta"><strong>{{if .Deliverable}}✅ {{else}}⚠️ {{end}}{{.Summary}}</strong></p>
   {{end}}
-  <div style="margin-top:0.75rem">
+  <div>
     <a class="btn" href="/digest/{{.Digest.ID}}/markdown">下载 Markdown</a>
     <button class="btn btn-secondary" id="copy-md-btn" type="button">复制 Markdown</button>
     <span id="copy-md-feedback" class="meta" aria-live="polite"></span>
     <a class="btn btn-secondary" href="/digests">返回列表</a>
     <a class="btn btn-secondary" href="/sources/{{.Digest.SourceType}}/{{.Digest.SourceID}}">返回来源与笔记</a>
-    <form method="post" action="/digest/{{.Digest.ID}}/record-history" style="display:inline">
+    <form method="post" action="/digest/{{.Digest.ID}}/record-history" class="inline-form">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       <input type="hidden" name="status" value="published">
       <button class="btn btn-secondary" type="submit">登记为已发布历史</button>
     </form>
-    <form method="post" action="/digest/{{.Digest.ID}}/record-history" style="display:inline">
+    <form method="post" action="/digest/{{.Digest.ID}}/record-history" class="inline-form">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       <input type="hidden" name="status" value="unpublished">
       <button class="btn btn-secondary" type="submit">保存为未发布作品</button>
@@ -83,20 +83,20 @@
       <p class="meta">检索词：{{.Query}} · 状态：{{.Status}}</p>
     </div>
     {{if eq .Status "pending"}}
-    <form method="post" action="/digest/search-source/status" style="display:inline">
+    <form method="post" action="/digest/search-source/status" class="inline-form">
       <input type="hidden" name="_csrf" value="{{$.CSRF}}">
       <input type="hidden" name="source_row_id" value="{{.ID}}">
       <input type="hidden" name="status" value="confirmed">
       <button class="btn" type="submit">确认保留</button>
     </form>
-    <form method="post" action="/digest/search-source/status" style="display:inline">
+    <form method="post" action="/digest/search-source/status" class="inline-form">
       <input type="hidden" name="_csrf" value="{{$.CSRF}}">
       <input type="hidden" name="source_row_id" value="{{.ID}}">
       <input type="hidden" name="status" value="rejected">
       <button class="btn btn-secondary" type="submit">剔除</button>
     </form>
     {{else if eq .Status "confirmed"}}
-    <form method="post" action="/digest/search-source/status" style="display:inline">
+    <form method="post" action="/digest/search-source/status" class="inline-form">
       <input type="hidden" name="_csrf" value="{{$.CSRF}}">
       <input type="hidden" name="source_row_id" value="{{.ID}}">
       <input type="hidden" name="status" value="rejected">

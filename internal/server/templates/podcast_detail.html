@@ -58,8 +58,8 @@
 
 {{range .Episodes}}
 <div class="list-item episode-row" id="row-{{.ID}}">
-  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" style="margin-right:8px;flex-shrink:0" aria-label="选择单集">
-  <div class="ep-info" style="flex:1">
+  <input type="checkbox" name="source_id" value="{{.ID}}" class="batch-check" aria-label="选择单集">
+  <div class="ep-info grow">
     <h3>{{.Title}}</h3>
     <p class="meta">{{if .PublishedAt}}{{.PublishedAt}}{{end}} · 状态：<span class="status-text" data-source-id="{{.ID}}" data-status="{{.ProcessingStatus}}">{{.ProcessingStatus}}</span></p>
   </div>
