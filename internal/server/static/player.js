@@ -15,6 +15,36 @@ window.CWPViews.define(function(view,scope) {
   const seekBar = view.querySelector('#' + 'seek-bar');
   const currentTimeEl = view.querySelector('#' + 'current-time');
   const durationEl = view.querySelector('#' + 'duration');
+  const stateEl = view.querySelector('#player-state');
+  const volumeEl = view.querySelector('#player-volume');
+  const bufferedEl = view.querySelector('#player-buffered');
+
+  // 音量属于本机偏好：播放会话跨页面存在，音量也跟随 localStorage，而不是每次回到 100%。
+  const volumeKey = 'cwp-player-volume';
+  function applyVolume(value) {
+    const v = Math.min(1, Math.max(0, Number(value)));
+    if (!Number.isFinite(v)) return;
+    audio.volume = v;
+    if (volumeEl) volumeEl.value = String(v);
+    try { localStorage.setItem(volumeKey, String(v)); } catch (_) {}
+  }
+  let storedVolume = 1;
+  try { storedVolume = Number(localStorage.getItem(volumeKey)); } catch (_) {}
+  applyVolume(Number.isFinite(storedVolume) ? storedVolume : 1);
+  if (volumeEl) on(volumeEl, 'input', () => applyVolume(volumeEl.value));
+
+  // 缓冲进度：在进度条下方画一条更浅的轨道，长音频加载时用户能看出已缓存到哪里。
+  function paintBuffered() {
+    if (!bufferedEl) return;
+    const total = audio.duration;
+    let ratio = 0;
+    if (Number.isFinite(total) && total > 0 && audio.buffered && audio.buffered.length) {
+      ratio = audio.buffered.end(audio.buffered.length - 1) / total;
+    }
+    bufferedEl.style.width = Math.round(Math.min(1, Math.max(0, ratio)) * 100) + '%';
+  }
+  ['progress', 'loadedmetadata', 'durationchange', 'timeupdate'].forEach(event => on(audio, event, paintBuffered));
+  paintBuffered();
 
   const segs = Array.from(view.querySelectorAll('.transcript .seg'));
   const chapters = Array.from(view.querySelectorAll('.chapter'));
@@ -45,11 +75,13 @@ window.CWPViews.define(function(view,scope) {
   let activeIdx = -1;
   scope.cleanup(window.CWPListening.subscribe(state=>{
    const owns=window.CWPListening.same(state.spec,spec);
-   if(playBtn)playBtn.textContent=owns&&!state.paused?'⏸':'▶';
+   if(playBtn){const playing=owns&&!state.paused;playBtn.dataset.state=playing?'playing':'paused';playBtn.setAttribute('aria-label',playing?'暂停':'播放');}
+   if(stateEl)stateEl.textContent=!owns?'未开始':(state.paused?'已暂停':'播放中');
    if(feedback)feedback.textContent=owns?state.notice:(state.spec?'正在听 '+state.spec.title+'，点播放切换到本节目。':'点击播放开始');
    if(currentTimeEl)currentTimeEl.textContent=fmt(owns?state.time:0);
    if(durationEl)durationEl.textContent=fmt(owns?state.duration:0);
    if(seekBar){seekBar.max=owns&&Number.isFinite(state.duration)?state.duration:100;seekBar.value=owns?state.time:0;}
+   if(!owns&&bufferedEl)bufferedEl.style.width='0%';
    if(rate&&owns)rate.value=String(audio.playbackRate);
    const resume=view.querySelector('#playback-resume');if(resume){resume.hidden=!owns||!state.resume;resume.textContent='从 '+fmt(state.resume?.saved.item_offset_seconds)+' 继续';}
    if(owns)highlightCurrentSeg();

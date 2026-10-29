@@ -4,7 +4,7 @@
 [`docs/production-deployment.md`](../production-deployment.md)；产品目标与边界见
 [`docs/product-goal.md`](../product-goal.md)。
 
-当前发布版本：**v0.2.2**（镜像 `ghcr.io/woyin/orangecast:0.2.2`）。
+当前发布版本：**v0.2.3**（镜像 `ghcr.io/woyin/orangecast:0.2.3`）。
 
 > v0.2.1 及更早的镜像在容器内执行 `restore` 会报 `invalid cross-device link`（解包临时目录
 > 与数据卷不在同一设备）。恢复路径请使用 **v0.2.2 或更新版本**。
@@ -25,7 +25,7 @@
 ## 2. 方式 A：官方镜像（推荐）
 
 ```bash
-docker pull ghcr.io/woyin/orangecast:0.2.2
+docker pull ghcr.io/woyin/orangecast:0.2.3
 
 docker run -d --name cloudwisepod --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
@@ -34,7 +34,7 @@ docker run -d --name cloudwisepod --restart unless-stopped \
   -e PUBLIC_URL="https://cwp.example.com" \
   -e TRUSTED_PROXIES="127.0.0.1/32" \
   -v cloudwisepod-data:/app/data \
-  ghcr.io/woyin/orangecast:0.2.2
+  ghcr.io/woyin/orangecast:0.2.3
 ```
 
 要点：
@@ -43,7 +43,7 @@ docker run -d --name cloudwisepod --restart unless-stopped \
 - 端口只绑 `127.0.0.1`，由反向代理对外；若要直接暴露，改成 `-p 8080:8080` 并接受无 TLS 的风险。
 - 容器内固定 `DATA_DIR=/app/data`，卷名可自取；**不要**让两个容器同时挂同一个卷。
 
-标签含义：`:0.2.2`（精确版本，推荐）、`:0.2`（同小版本最新补丁）、`:latest`（最新发布）。
+标签含义：`:0.2.3`（精确版本，推荐）、`:0.2`（同小版本最新补丁）、`:latest`（最新发布）。
 
 ## 3. 方式 B：Compose 从源码构建
 
@@ -142,7 +142,7 @@ docker exec cloudwisepod sh -c 'command -v ffmpeg && ffmpeg -version | head -1'
 
 ```bash
 # 先备份（见第 9 节），再升级
-docker pull ghcr.io/woyin/orangecast:0.2.2
+docker pull ghcr.io/woyin/orangecast:0.2.3
 docker rm -f cloudwisepod
 docker run -d ...（与首次相同的参数，挂同一个卷）
 ```
@@ -163,7 +163,7 @@ docker exec cloudwisepod /app/cloudwisepod backup /app/data/backups/cwp-$(date +
 docker stop cloudwisepod
 docker run --rm -v cloudwisepod-data:/app/data \
   -e SESSION_SECRET=restore-only-not-used \
-  ghcr.io/woyin/orangecast:0.2.2 \
+  ghcr.io/woyin/orangecast:0.2.3 \
   restore /app/data/backups/cwp-20261028-120000.tar.gz --force
 docker start cloudwisepod
 ```
@@ -206,6 +206,7 @@ docker start cloudwisepod
 - 真实进程冒烟：认领 → 登录 → `/practice`、`/podcasts/opml`、`/dashboard`、`/settings` 均 200。
 - 旧实例升级：用上一版本二进制建库（迁移 92），新二进制启动后升到 94，Owner 与数据保留。
 - 片段切出：真实 ffmpeg 生成音频，切出时长等于引用区间，并验证缓存命中。
-- 容器内完整恢复回路（v0.2.2）：拉起 → `backup` → 停机 → `restore … --force` → 重启 → `/login` 200，且不残留 `.restore-*` 目录。
+- 容器内完整恢复回路（v0.2.2 起）：拉起 → `backup` → 停机 → `restore … --force` → 重启 → `/login` 200，且不残留 `.restore-*` 目录。
+- 界面（v0.2.3）：顶部导航改为分组菜单，单集页为完整播放器（音量/缓冲/状态）且处理进度自动轮询并显示下一步。
 
 未验证、需真实条件：真实模型下的译文与练习问题质量、真实公网 RSS 的 OPML 导入、手机端体验。

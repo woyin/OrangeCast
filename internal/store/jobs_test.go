@@ -724,3 +724,20 @@ func TestClaimNextJob_NoRowsAffected(t *testing.T) {
 		t.Fatalf("UPDATE 影响 0 行时应返回 nil，实际 %+v", claimed)
 	}
 }
+
+// TestSourceTitle_ShortUnknownID 未知且短于 8 字符的 ID 不得越界 panic；
+// 未知来源返回可辨认的占位标题，空 ID 返回空串。
+func TestSourceTitle_ShortUnknownID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedUser(t, s, "sourcetitle@example.com")
+	if got := s.SourceTitle(ctx, models.SourceEpisode, "short"); got != "short…" {
+		t.Errorf("短 ID 应返回带省略号的占位，实际 %q", got)
+	}
+	if got := s.SourceTitle(ctx, models.SourceUpload, "unknown-but-long-id"); got != "unknown-…" {
+		t.Errorf("长 ID 应截断 8 字符，实际 %q", got)
+	}
+	if got := s.SourceTitle(ctx, models.SourceEpisode, ""); got != "" {
+		t.Errorf("空 ID 应返回空串，实际 %q", got)
+	}
+}

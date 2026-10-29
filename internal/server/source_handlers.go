@@ -119,6 +119,8 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	if stages, err := srv.store.SourceStageStatuses(r.Context(), sourceType, sourceID); err == nil {
 		data["Stages"] = stages
 	}
+	// 进度面板的初始“下一步”文案；之后由 /api/source-progress 轮询更新。
+	data["ProgressHint"] = nextStepHint(status, nil)
 	// 练习问题（自我检验）：来源的现场产物，问题带 Citation、提示标为非原文。
 	if questions, err := srv.store.ListReviewQuestions(r.Context(), sourceType, sourceID); err == nil {
 		views := make([]map[string]any, 0, len(questions))

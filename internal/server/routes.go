@@ -172,6 +172,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/study-chat/status", srv.handleLegacyStudyStatus)
 	mux.HandleFunc("/api/study-chat/retry", srv.handleLegacyStudyRetry)
 	mux.HandleFunc("/api/process", srv.handleProcess)
+	mux.HandleFunc("/api/source-progress", srv.handleSourceProgressAPI) // 单集处理进度轮询（只读）
 	mux.HandleFunc("/api/source-policy", srv.handleSourcePolicy)
 	mux.HandleFunc("/evidence/", srv.handleFrozenEvidence)
 	mux.HandleFunc("/notes/", srv.handleNoteHistory)

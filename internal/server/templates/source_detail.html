@@ -32,47 +32,87 @@
   <h1>{{.Title}}</h1>
   <p class="summary">{{.Summary}}</p>
 {{if .AudioURL}}
-<!-- 播放器：联动的基础（第 5 题 A 层：播放进度） -->
-<div class="player-bar">
+<!-- 播放器（自定义控件）：进度、倍速、音量、睡眠、跟随转录与续听。原生 audio 仅作解码与兜底。 -->
+<div class="player-bar player-card">
   <audio id="source-audio" data-source-type="{{.SourceType}}" data-source-id="{{.SourceID}}" data-audio-sha="{{.AudioSHA256}}" data-csrf="{{.CSRF}}" data-snapshot="{{.NoteSnapshotID}}" data-version="{{.NoteSnapshotVersion}}" src="{{.AudioURL}}" preload="metadata" controls></audio>
-  <div class="player-controls">
-    <button type="button" data-queue-add="original">加入稍后听</button>
-    <button id="play-btn" type="button" aria-label="播放或暂停">▶</button>
+
+  <div class="player-head">
+    <div class="player-heading">
+      <strong>{{.Title}}</strong>
+      <span class="player-state" id="player-state" aria-live="polite">未开始</span>
+    </div>
+    <button type="button" class="player-chip" data-queue-add="original">加入稍后听</button>
+  </div>
+
+  <div class="player-timeline">
     <span id="current-time" class="time">0:00</span>
-    <input aria-label="播放位置" id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
+    <div class="player-track">
+      <div class="player-buffer" id="player-buffered" aria-hidden="true"></div>
+      <input aria-label="播放位置" id="seek-bar" type="range" min="0" max="100" value="0" step="0.1">
+    </div>
     <span id="duration" class="time">0:00</span>
-    <button id="playback-back" type="button" aria-label="后退15秒">−15秒</button>
-    <button id="playback-forward" type="button" aria-label="前进15秒">+15秒</button>
-    <label>倍速 <select id="playback-rate"><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select></label>
-    <label>睡眠 <select id="playback-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label>
-    <button id="playback-resume" type="button" hidden>继续听</button>
-    <label><input id="playback-follow" type="checkbox" checked>跟随播放</label>
-    <span id="playback-feedback" aria-live="polite"></span>
+  </div>
+
+  <div class="player-main">
+    <div class="player-transport">
+      <button id="playback-back" class="player-skip" type="button" aria-label="后退15秒" title="后退 15 秒">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6V3L4 8l7 5v-3c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H3c0 5 4 9 9 9s9-4 9-9-4-9-9-9z"/></svg>
+        <span>15</span>
+      </button>
+      <button id="play-btn" class="player-play" type="button" aria-label="播放" data-state="paused">
+        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      </button>
+      <button id="playback-forward" class="player-skip" type="button" aria-label="前进15秒" title="前进 15 秒">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 6V3l7 5-7 5v-3c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6h2c0 5-4 9-9 9s-9-4-9-9 4-9 9-9z"/></svg>
+        <span>15</span>
+      </button>
+    </div>
+
+    <div class="player-options">
+      <label class="player-field">倍速
+        <select id="playback-rate"><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select>
+      </label>
+      <label class="player-field">睡眠
+        <select id="playback-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select>
+      </label>
+      <label class="player-field player-volume">音量
+        <input id="player-volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="音量">
+      </label>
+      <label class="player-check"><input id="playback-follow" type="checkbox" checked>跟随播放</label>
+      <button id="playback-resume" class="player-chip" type="button" hidden>继续听</button>
+      <span id="playback-feedback" class="player-hint" aria-live="polite"></span>
+    </div>
   </div>
 </div>
 {{end}}
 
 
   {{with .Stages}}
-  <section class="panel" style="margin:0.75rem 0">
+  <section class="panel stage-panel" style="margin:0.75rem 0"
+           data-source-progress data-source-type="{{$.SourceType}}" data-source-id="{{$.SourceID}}" data-status="{{$.Status}}">
     <h2>处理进度</h2>
+    <p class="stage-live" id="source-live-status" aria-live="polite" data-state="{{if eq $.Status "failed"}}failed{{else if eq $.Status "processed"}}done{{else}}running{{end}}">{{$.ProgressHint}}</p>
+    <ul class="stage-list">
     {{range .}}
-    <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
-      <div style="flex:1">
-        <strong>{{.StageLabel}}</strong>
-        <span class="meta">{{.Status}}{{with .Detail}} · {{.}}{{end}}</span>
-      </div>
-      {{if or (eq .Status "failed") (eq .Status "partial")}}
-      <form method="post" action="/api/retry-stage" style="display:inline">
-        <input type="hidden" name="_csrf" value="{{$.CSRF}}">
-        <input type="hidden" name="source_type" value="{{$.SourceType}}">
-        <input type="hidden" name="source_id" value="{{$.SourceID}}">
-        <input type="hidden" name="stage" value="{{.Stage}}">
-        <button class="btn btn-secondary" type="submit">{{if eq .Status "partial"}}重试补齐{{else}}重试此阶段{{end}}</button>
-      </form>
-      {{end}}
-    </div>
+      <li class="stage-row" data-stage="{{.Stage}}" data-status="{{.Status}}">
+        <div class="stage-row-head">
+          <strong>{{.StageLabel}}</strong>
+          <span class="stage-badge {{.Status}}" data-stage-status>{{stageStatusLabel .Status}}</span>
+        </div>
+        <p class="meta" data-stage-detail>{{.Detail}}</p>
+        {{if or (eq .Status "failed") (eq .Status "partial")}}
+        <form method="post" action="/api/retry-stage" class="stage-retry">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="source_type" value="{{$.SourceType}}">
+          <input type="hidden" name="source_id" value="{{$.SourceID}}">
+          <input type="hidden" name="stage" value="{{.Stage}}">
+          <button class="btn btn-secondary" type="submit">{{if eq .Status "partial"}}重试补齐{{else}}重试此阶段{{end}}</button>
+        </form>
+        {{end}}
+      </li>
     {{end}}
+    </ul>
   </section>
   {{end}}
   {{if eq .Status "processed"}}

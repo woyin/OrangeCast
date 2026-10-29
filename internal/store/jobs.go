@@ -431,6 +431,12 @@ func (s *Store) SourceTitle(ctx context.Context, sourceType models.SourceType, s
 			return up.OriginalFilename
 		}
 	}
+	if sourceID == "" {
+		return ""
+	}
+	if len(sourceID) <= 8 {
+		return sourceID + "…"
+	}
 	return sourceID[:8] + "…"
 }
 
