@@ -1,4 +1,4 @@
-{{define "title"}}任务与成本 · CloudWisePod{{end}}
+{{define "title"}}任务与成本 · OrangeCast{{end}}
 {{define "content"}}<div id="automation-view"><h1>任务与成本</h1><p>个人学习的发现、生成、更新、回顾生成与语音转录。这里只读取已有事实，打开和刷新不启动AI。</p><p>学习调用已知费用小计（含节目转录） {{printf "%.2f" .Cost.KnownCost}} 美元分；未知费用任务或旧调用身份 {{.Cost.UnknownTasks}} 个。未知部分未计入小计，不能视为完整账单。</p>
 <p>自动发现：{{if .ArticleSettings.Enabled}}已启用{{else}}关闭{{end}}；文章更新：{{if .UpdateSettings.Enabled}}已启用{{else}}关闭{{end}}；每周生成：{{if .ReviewSettings.Enabled}}已启用{{else}}关闭{{end}}。<a href="/knowledge-articles">发现设置</a> · <a href="/knowledge-updates">更新设置</a> · <a href="/review">回顾设置</a>。语音转录只由明确操作启动。</p>
 <p>已启动的调度器约每5分钟检查；准确下一次检查时间未记录，不能推定任务即将开跑。开关、材料、预算、来源策略、暂停、在途和未知结果仍可能阻断。</p>

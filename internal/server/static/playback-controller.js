@@ -77,7 +77,7 @@
     function online() { if (!loaded) load().then(save); else save(); }
     root.addEventListener('pagehide', save); root.addEventListener('online', online);
     if (root.navigator && 'mediaSession' in root.navigator) {
-      if(root.MediaMetadata){try{root.navigator.mediaSession.metadata=new root.MediaMetadata({title:options.title||'CloudWisePod',artist:options.mode==='dj'?'DJ 精听':options.mode==='excerpt'?'区间补听':'原音收听',album:'CloudWisePod'});}catch(_){}}
+      if(root.MediaMetadata){try{root.navigator.mediaSession.metadata=new root.MediaMetadata({title:options.title||'OrangeCast',artist:options.mode==='dj'?'DJ 精听':options.mode==='excerpt'?'区间补听':'原音收听',album:'OrangeCast'});}catch(_){}}
       var handlers = { play:play, pause:pause, seekbackward:function (d) { skip(-(d.seekOffset || 15)); }, seekforward:function (d) { skip(d.seekOffset || 15); }, seekto:function (d) { seek(d.seekTime); } };
       if (a.next) handlers.nexttrack = a.next; if (a.prev) handlers.previoustrack = a.prev;
       mediaActions = Object.keys(handlers);

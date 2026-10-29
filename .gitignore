@@ -7,7 +7,7 @@ deployment-config.md
 .dev.vars
 
 # Go 构建产物
-/cloudwisepod
+/orangecast
 /bin/
 data/
 *.db

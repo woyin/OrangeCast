@@ -1,4 +1,4 @@
-{{define "title"}}创作工作空间 · CloudWisePod{{end}}
+{{define "title"}}创作工作空间 · OrangeCast{{end}}
 {{define "content"}}
 <div class="page-head"><div><h1>创作工作空间</h1><p class="meta">从来源忠实的学习素材到 Owner 确认的作品，每一步都有明确决策点。</p></div><a class="btn btn-secondary" href="/themes{{with .Profile}}?profile={{.ID}}{{end}}">管理 Theme</a></div>
 
@@ -60,7 +60,7 @@
 
 <details class="workbench-settings"><summary>素材授权、编辑画像和高级设置</summary>
   <section class="settings-grid">
-    <div class="panel"><h2>素材使用</h2><p class="meta">Owner 纳入 CloudWisePod 的 Source 默认可用于学习与创作；不再为每个画像重复授权。特殊 Source 的模型数据流向限制仍然生效。</p></div>
+    <div class="panel"><h2>素材使用</h2><p class="meta">Owner 纳入 OrangeCast 的 Source 默认可用于学习与创作；不再为每个画像重复授权。特殊 Source 的模型数据流向限制仍然生效。</p></div>
     <div class="panel"><h2>编辑画像</h2><p><strong>来源署名：</strong>{{.SourceAttribution}}</p><p><strong>目标读者：</strong>{{if .TargetAudience}}{{.TargetAudience}}{{else}}未设置{{end}}</p><p><strong>语气：</strong>{{if .Voice}}{{.Voice}}{{else}}未设置{{end}}</p><p class="meta">画像编辑入口将在下一版本补齐；当前创建后由设置流程管理。</p></div>
   </section>
   <section class="panel"><h2>模型价格表</h2><p class="meta">按 Provider 的计费单位填写每百万输入/输出单位的价格。未设置预算时，未登记价格不阻塞流程。</p>{{range $.ModelPrices}}<p><strong>{{.Provider}} / {{.Model}}</strong>：输入 {{.InputCentsPerMillion}}，输出 {{.OutputCentsPerMillion}} 分/百万单位</p>{{end}}<form method="post" action="/workbench/model-prices" class="subform"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><label>Provider <input name="provider" required placeholder="openai"></label><label>模型 <input name="model" required placeholder="gpt-5-mini"></label><label>输入价格 <input type="number" min="0" name="input_cents_per_million" required></label><label>输出价格 <input type="number" min="0" name="output_cents_per_million" required></label><button class="btn" type="submit">保存价格</button></form></section>

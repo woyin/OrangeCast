@@ -1,4 +1,4 @@
--- CloudWisePod schema (SQLite, 白纸重启)
+-- OrangeCast schema (SQLite, 白纸重启)
 -- 存储策略：元数据 + 内容全在 SQLite。transcript 分 plain_text（搜索/展示）+ segments_json（播放器联动）。
 
 CREATE TABLE IF NOT EXISTS users (

@@ -1,4 +1,4 @@
-# CloudWisePod 产品目标
+# OrangeCast 产品目标
 
 状态：已确认（2026-08-18 学习与创作闭环，见 ADR-0022）
 日期：2026-08-01 / 修订：2026-08-18
@@ -9,11 +9,11 @@
 
 ## 一句话目标
 
-CloudWisePod 是单 Owner、自托管的学习与创作工作空间：它把 Podcast、Document 等 Source 转化为来源忠实、可追溯和可复用的学习成果，帮助 Owner 理解内容、形成自己的判断，并通过自动发现或定向构思发展出值得表达的创作方向。
+OrangeCast 是单 Owner、自托管的学习与创作工作空间：它把 Podcast、Document 等 Source 转化为来源忠实、可追溯和可复用的学习成果，帮助 Owner 理解内容、形成自己的判断，并通过自动发现或定向构思发展出值得表达的创作方向。
 
 ## 核心承诺
 
-来源是学习与思考的起点，不是绝对权威。CloudWisePod 严格区分：
+来源是学习与思考的起点，不是绝对权威。OrangeCast 严格区分：
 
 - **SourceClaim**：来源表达过什么；
 - **OwnerClaim**：Owner 愿意承担什么判断；
@@ -278,13 +278,13 @@ HardDuplicate 综合比较：
 - 作品承诺；
 - 历史作品内容。
 
-CreationHistory 收录 CloudWisePod 内外部的 PublishedWork 与 UnpublishedWork。完整正文可以参与高置信度硬排除；只有摘要或标题时只做低置信度提醒。FollowUp 必须关联具体历史作品并说明新素材、反方视角、不同受众或更深分支带来的增量价值。
+CreationHistory 收录 OrangeCast 内外部的 PublishedWork 与 UnpublishedWork。完整正文可以参与高置信度硬排除；只有摘要或标题时只做低置信度提醒。FollowUp 必须关联具体历史作品并说明新素材、反方视角、不同受众或更深分支带来的增量价值。
 
 拒绝 CreationProposal 时使用轻量结构化 EditorialFeedback：HardDuplicate、WeakClaim、PoorFit、InsufficientMaterial、WrongAngle、NotNow 或 Other。不同原因影响后续去重和再发现，但不得静默修改 EditorialProfile。
 
 ## 素材、权利与模型数据
 
-Owner 纳入 CloudWisePod 的所有 Source 默认可以参与学习与创作。不再维护 EditorialProfile 级 SourceScope 或 Source 级 ContentUsePolicy。
+Owner 纳入 OrangeCast 的所有 Source 默认可以参与学习与创作。不再维护 EditorialProfile 级 SourceScope 或 Source 级 ContentUsePolicy。
 
 保留两个不同边界：
 
@@ -340,7 +340,7 @@ Owner 纳入 CloudWisePod 的所有 Source 默认可以参与学习与创作。�
 8. 系统自动生成 CreationBriefDraft；Owner 审阅 Claim、材料、冲突、ResearchNeed、结构和权利风险后确认。
 9. Writer 生成 Article 修订，ClaimReview 与 StyleReview 完成；Owner 修改后产生不可变新修订并重新审校。
 10. 通过门禁的修订生成 Minimal、Standard 或 Detailed 来源密度的 PublicationPackage，由 Owner 手工发布。
-11. 导入一篇 CloudWisePod 外部历史作品，验证 HardDuplicate 与 FollowUp。
+11. 导入一篇 OrangeCast 外部历史作品，验证 HardDuplicate 与 FollowUp。
 12. 备份并在全新实例恢复学习成果、发现批次、构思会话、主张、Brief、修订、审校与创作历史。
 
 ## 明确不做

@@ -28,7 +28,7 @@
 4. 编辑并接受一个 ProposedClaim，检查其转化为 OwnerClaim 和 CreationBriefDraft。
 5. 添加及解决一个 blocking ResearchNeed，确认其在解决前阻止 Brief 确认。
 6. 在兼容 Article 工作流中完成 Writer、ClaimReview / EvidenceReview、Owner 修订和 PublicationPackage。
-7. 执行 `cloudwisepod backup <archive>`，恢复到全新 DATA_DIR；验证学习、批次、主张、Brief、作品修订和导出仍可浏览。
+7. 执行 `orangecast backup <archive>`，恢复到全新 DATA_DIR；验证学习、批次、主张、Brief、作品修订和导出仍可浏览。
 8. 对实际发布目标执行一次富文本粘贴/导出验证；系统不得自动发布。
 
 ## 已知边界

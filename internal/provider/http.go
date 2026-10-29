@@ -74,7 +74,7 @@ func doWithRetry(ctx context.Context, req *http.Request) (*http.Response, error)
 		}
 		resp, err := retryAttemptRequest(ctx, req, attempt)
 		if retryableResponse(resp, err) {
-			resp.Header.Set("X-CloudWisePod-Retry-Count", strconv.Itoa(attempt))
+			resp.Header.Set("X-OrangeCast-Retry-Count", strconv.Itoa(attempt))
 			return resp, nil // 成功或非可重试错误
 		}
 		if resp != nil {
@@ -163,7 +163,7 @@ func postJSONWithMeta(ctx context.Context, url, apiKey string, payload any) ([]b
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
+	retries, _ := strconv.Atoi(resp.Header.Get("X-OrangeCast-Retry-Count"))
 	return data, resp.StatusCode, retries, err
 }
 

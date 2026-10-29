@@ -1,4 +1,4 @@
-{{define "title"}}索引范围预览 · CloudWisePod{{end}}
+{{define "title"}}索引范围预览 · OrangeCast{{end}}
 {{define "content"}}
 <h1>索引范围预览</h1><p>这里只核对当前权限，没有保存范围、重建索引或调用模型。保存时会再次核对版本与权限。</p>
 {{range .Preview}}<p>{{.SourceType}} · {{.SourceID}} · {{.Policy}}：{{.Reason}}</p>{{else}}<p>没有选择来源。</p>{{end}}

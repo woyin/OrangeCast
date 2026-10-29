@@ -1,4 +1,4 @@
-# CloudWisePod
+# OrangeCast
 
 > 单 Owner、自托管的播客学习与知识文章工作空间。
 
@@ -75,7 +75,7 @@
 
 - **可恢复任务队列**：SQLite 持久化，租约 + 心跳，进程重启自动恢复
 - **处理进度**：全局进度页，5 秒自动轮询，显示正在处理 + 排队中 + 最近完成
-- **备份/恢复**：`cloudwisepod backup|restore` 一致性备份包（manifest + SHA256），可在全新实例恢复；`scripts/export.sh` / `scripts/remote-setup.sh` 一键跨机器迁移
+- **备份/恢复**：`orangecast backup|restore` 一致性备份包（manifest + SHA256），可在全新实例恢复；`scripts/export.sh` / `scripts/remote-setup.sh` 一键跨机器迁移
 - **公网安全**：CSRF、登录限流、可信代理 + Secure Cookie、SSRF 防护（逐跳重定向校验 + 私网拦截）
 
 ---
@@ -100,7 +100,7 @@ cp .env.example .env
 
 # 2. 启动
 set -a; source .env; set +a
-go run ./cmd/cloudwisepod
+go run ./cmd/orangecast
 
 # 3. 访问 http://localhost:8080/register 认领唯一 Owner
 ```
@@ -163,8 +163,8 @@ docker compose up -d
 解说引擎未安装时 Narration 自动跳过、不影响原音；预检与短句试听：
 
 ```sh
-cloudwisepod tts-check                    # 仅预检
-cloudwisepod tts-check --output /tmp/a.wav # 预检 + 真实合成试听
+orangecast tts-check                    # 仅预检
+orangecast tts-check --output /tmp/a.wav # 预检 + 真实合成试听
 ```
 
 ---
@@ -173,13 +173,13 @@ cloudwisepod tts-check --output /tmp/a.wav # 预检 + 真实合成试听
 
 ```bash
 # 备份（一致性快照 + 证据音频 + 明确保留的私人录音 + manifest）
-./cloudwisepod backup /path/backup.tar.gz
+./orangecast backup /path/backup.tar.gz
 
 # 恢复到全新目录
-DATA_DIR=/new/instance ./cloudwisepod restore /path/backup.tar.gz
+DATA_DIR=/new/instance ./orangecast restore /path/backup.tar.gz
 
 # 目标已有数据时显式覆盖
-DATA_DIR=/new/instance ./cloudwisepod restore /path/backup.tar.gz --force
+DATA_DIR=/new/instance ./orangecast restore /path/backup.tar.gz --force
 ```
 
 新备份为 v2，包含已保存笔记且明确保留的私人录音，恢复仍兼容旧 v1。恢复校验数据库及音频的长度、SHA256和清单路径，私有录音保持0600权限。临时未保存录音不进入长期备份；恢复后文字与历史锚点仍在，缺失音频明确提示。Narration音轨仍不进入备份。
@@ -204,7 +204,7 @@ git clone git@github.com:woyin/OrangeCast.git && cd OrangeCast
 ## 架构
 
 ```
-cmd/cloudwisepod/        入口（serve / backup / restore）
+cmd/orangecast/        入口（serve / backup / restore）
 internal/
   config/                环境变量 + DATA_DIR 布局
   store/                 SQLite + FTS5 + 迁移系统 + 全部仓储
@@ -268,7 +268,7 @@ CONTEXT.md              领域词汇表
 # 全量验证
 go test ./...
 go vet ./...
-go build ./cmd/cloudwisepod
+go build ./cmd/orangecast
 git diff --check
 ```
 
@@ -278,7 +278,7 @@ git diff --check
 
 ## 产品边界
 
-**CloudWisePod 是证据优先的内容生产工作台**——PrimarySource 不可改写，AI 衍生内容分层并保留来源关系：
+**OrangeCast 是证据优先的内容生产工作台**——PrimarySource 不可改写，AI 衍生内容分层并保留来源关系：
 - **CitedDerivative（带证衍生）**：忠实于原文，挂 Citation 可逐字核验（摘要/要点/章节/金句）。
 - **GeneratedDerivative（生成衍生）**：AI 重新组织/讲解，明确标注非原文，挂 Reference 仅表示参考（Gist/Paraphrase/StudyChat/Narration）。
 平台帮 Owner 一眼区分两类，而不是替 Owner 判断。

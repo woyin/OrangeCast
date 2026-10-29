@@ -1,4 +1,4 @@
-// Command cloudwisepod 是 CloudWisePod 的单一可执行入口。
+// Command orangecast 是 OrangeCast 的单一可执行入口。
 //
 // 子命令：
 //   - serve（默认）：启动 HTTP 服务 + worker + RSS 刷新器，初始化数据库并优雅关闭。
@@ -62,12 +62,12 @@ func parseCommand(args []string) (cmd string, rest []string) {
 	}
 }
 
-// runBackup cloudwisepod backup <dest.tar.gz>
+// runBackup orangecast backup <dest.tar.gz>
 // 生成一致性备份包（数据库快照 + EvidenceAudio + manifest），不含密钥。
 func runBackup(args []string) {
 	dest, err := parseBackupArgs(args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "用法：cloudwisepod backup <dest.tar.gz>")
+		fmt.Fprintln(os.Stderr, "用法：orangecast backup <dest.tar.gz>")
 		os.Exit(2)
 	}
 	cfg, err := config.Load()
@@ -123,12 +123,12 @@ func ensureArchiveExt(dest string) string {
 	return dest
 }
 
-// runRestore cloudwisepod restore <backup.tar.gz> [--force]
+// runRestore orangecast restore <backup.tar.gz> [--force]
 // 恢复到 DATA_DIR（默认要求目标为空，--force 显式覆盖）。
 func runRestore(args []string) {
 	src, force, err := parseRestoreArgs(args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "用法：cloudwisepod restore <backup.tar.gz> [--force]")
+		fmt.Fprintln(os.Stderr, "用法：orangecast restore <backup.tar.gz> [--force]")
 		os.Exit(2)
 	}
 	cfg, err := config.Load()
@@ -189,13 +189,13 @@ type ttsCheckOptions struct {
 // defaultTTSSampleText 短句试听默认样本（D03）：专名、数字、停顿、中英混合。
 const defaultTTSSampleText = "2026年9月，张伟在北京用 Kokoro 引擎听《硅谷钢铁侠》——这是第一段 AI 解说试听。"
 
-// runTTSCheck cloudwisepod tts-check [--text <文本>] [--voice <音色>] [--output <wav>]
+// runTTSCheck orangecast tts-check [--text <文本>] [--voice <音色>] [--output <wav>]
 // 解说引擎预检（引擎可用性、语言/音色一致性）；给出 --output 时用真实引擎
 // 合成一段短句试听。预检不落文件、不调用付费服务。
 func runTTSCheck(args []string) {
 	opts, err := parseTTSCheckArgs(args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "用法：cloudwisepod tts-check [--text <文本>] [--voice <音色>] [--output <wav>]")
+		fmt.Fprintln(os.Stderr, "用法：orangecast tts-check [--text <文本>] [--voice <音色>] [--output <wav>]")
 		os.Exit(2)
 	}
 	cfg, err := config.Load()

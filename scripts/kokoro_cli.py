@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Kokoro TTS CLI 包装（D03）：把 kokoro-onnx 运行时暴露为
 #   kokoro --text <text> --voice <voice> --output <wav> [--model <onnx>] [--lang <code>] [--speed <x>]
-# 风格的命令行，供 CloudWisePod 的 KokoroProvider（os/exec）直接调用。
+# 风格的命令行，供 OrangeCast 的 KokoroProvider（os/exec）直接调用。
 #
 # 已在 kokoro-onnx 1.x + kokoro-v1.0.onnx + voices-v1.0.bin 上验证：
 #   - 英文 af_heart（en-us）与中文 zf_xiaobei/zm_yunyang（cmn）均可合成 24kHz wav；

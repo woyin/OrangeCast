@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
 done
 
 DATA_DIR="${DATA_DIR:-./data}"
-BIN="./cloudwisepod"
+BIN="./orangecast"
 DB_FILE="$DATA_DIR/cloudwisepod.db"
 SECRET_FILE="$DATA_DIR/.session-secret"
 
@@ -57,7 +57,7 @@ if ! command -v go >/dev/null 2>&1; then
   exit 1
 fi
 echo "==> 编译 $BIN"
-go build -o "$BIN" ./cmd/cloudwisepod
+go build -o "$BIN" ./cmd/orangecast
 
 mkdir -p "$DATA_DIR"
 

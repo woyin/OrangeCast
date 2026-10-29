@@ -27,7 +27,7 @@
 ```bash
 docker pull ghcr.io/woyin/orangecast:0.2.3
 
-docker run -d --name cloudwisepod --restart unless-stopped \
+docker run -d --name orangecast --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -e SESSION_SECRET="$(openssl rand -hex 32)" \
   -e GROQ_API_KEY="你的 Groq key" \
@@ -61,12 +61,12 @@ docker compose logs -f --tail=50
 
 ```bash
 # 依赖：Go 1.25+、ffmpeg + ffprobe（Makefile 没有 build 目标，直接编译）
-go build -o cloudwisepod ./cmd/cloudwisepod
+go build -o orangecast ./cmd/orangecast
 
 export SESSION_SECRET="$(openssl rand -hex 32)"
 export GROQ_API_KEY="你的 Groq key"
 export PUBLIC_URL="https://cwp.example.com"
-./cloudwisepod            # 默认子命令 serve
+./orangecast            # 默认子命令 serve
 ```
 
 跨机器迁移用 `scripts/remote-setup.sh`：编译 → 生成或复用 `DATA_DIR/.session-secret` → 可选恢复备份
@@ -126,7 +126,7 @@ DATA_DIR/
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login   # 期望 200
 
 # 2) 镜像内 ffmpeg 可用（片段导出与转码依赖它）
-docker exec cloudwisepod sh -c 'command -v ffmpeg && ffmpeg -version | head -1'
+docker exec orangecast sh -c 'command -v ffmpeg && ffmpeg -version | head -1'
 ```
 
 逐项确认：
@@ -136,14 +136,14 @@ docker exec cloudwisepod sh -c 'command -v ffmpeg && ffmpeg -version | head -1'
 - [ ] `/settings` 填入 Provider key 并保存；`/automation`（任务与成本）能看到预算与用量。
 - [ ] 添加播客并处理一集：转录 → 知识卡片 → 搜索命中 → 播放器可跳到时间点。
 - [ ] 单集页有“对齐译文 / 结构导图 / 生成练习问题 / 高光片段”四个入口；片段下载返回音频文件。
-- [ ] `docker restart cloudwisepod` 后任务自动恢复，登录状态与数据仍在。
+- [ ] `docker restart orangecast` 后任务自动恢复，登录状态与数据仍在。
 
 ## 8. 升级
 
 ```bash
 # 先备份（见第 9 节），再升级
 docker pull ghcr.io/woyin/orangecast:0.2.3
-docker rm -f cloudwisepod
+docker rm -f orangecast
 docker run -d ...（与首次相同的参数，挂同一个卷）
 ```
 
@@ -157,15 +157,15 @@ docker run -d ...（与首次相同的参数，挂同一个卷）
 ```bash
 # 备份（写入数据卷，随后复制到异地）
 # 不要在实例刚启动、迁移仍在进行时备份；先确认 /login 返回 200 并稳定几秒。
-docker exec cloudwisepod /app/cloudwisepod backup /app/data/backups/cwp-$(date +%Y%m%d-%H%M%S).tar.gz
+docker exec orangecast /app/orangecast backup /app/data/backups/cwp-$(date +%Y%m%d-%H%M%S).tar.gz
 
 # 恢复：必须停掉正在运行的实例（SQLite 不能被两个进程同时写）
-docker stop cloudwisepod
+docker stop orangecast
 docker run --rm -v cloudwisepod-data:/app/data \
   -e SESSION_SECRET=restore-only-not-used \
   ghcr.io/woyin/orangecast:0.2.3 \
   restore /app/data/backups/cwp-20261028-120000.tar.gz --force
-docker start cloudwisepod
+docker start orangecast
 ```
 
 说明：镜像的 entrypoint 就是二进制，`restore` 直接跟在镜像名后即可；恢复也走配置校验，

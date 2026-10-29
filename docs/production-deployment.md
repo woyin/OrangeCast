@@ -1,4 +1,4 @@
-# CloudWisePod 生产部署
+# OrangeCast 生产部署
 
 > 与 `docs/deployment.md`（历史 Cloudflare 文档，不再使用）不同，本文是当前 Go 版本的生产部署说明。
 > 可直接照做的部署流程（镜像/Compose/裸二进制、升级、备份恢复、排障）见 [`deploy/README.md`](deploy/README.md)。
@@ -70,8 +70,8 @@ KOKORO_VOICE=zf_xiaobei           # 中文女声；英文可用 af_heart
 KOKORO_LANGUAGE=zh
 
 # 预检（不落文件）+ 短句试听（经生产 Adapter 全链路合成）
-cloudwisepod tts-check
-cloudwisepod tts-check --output /tmp/audition.wav && ffprobe /tmp/audition.wav
+orangecast tts-check
+orangecast tts-check --output /tmp/audition.wav && ffprobe /tmp/audition.wav
 ```
 
 人耳试听：`/tmp/audition.wav` 即默认样本（专名、数字、停顿、中英混合，含"AI 解说："前缀）。
@@ -80,7 +80,7 @@ Kokoro v1.1-zh 权重或官方 misaki[zh] 路线（接口不变，只换权重�
 
 ## 反向代理
 
-TLS 由 Caddy 或 Nginx 终止（ADR-0013：CloudWisePod 不管理证书）。
+TLS 由 Caddy 或 Nginx 终止（ADR-0013：OrangeCast 不管理证书）。
 
 - Caddy：见 [`docs/deploy/Caddyfile.example`](deploy/Caddyfile.example)
 - Nginx：见 [`docs/deploy/nginx.example`](deploy/nginx.example)
@@ -110,13 +110,13 @@ docker compose up -d
 
 ```bash
 # 备份（一致性 SQLite 快照 + EvidenceAudio + 明确保留的私有录音 + manifest）
-./cloudwisepod backup /backup/cwp-2026-08-01.tar.gz
+./orangecast backup /backup/cwp-2026-08-01.tar.gz
 
 # 恢复到全新目录（默认目标必须为空）
-DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz
+DATA_DIR=/new/instance ./orangecast restore /backup/cwp-2026-08-01.tar.gz
 
 # 目标已有数据时显式覆盖
-DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz --force
+DATA_DIR=/new/instance ./orangecast restore /backup/cwp-2026-08-01.tar.gz --force
 ```
 
 当前备份格式为v2，增加已保存且明确保留的私有录音，继续恢复v1。清单校验路径、长度及SHA256；恢复录音文件为0600。临时草稿录音不进入备份，草稿文字仍随数据库保存；缺失录音不制造可播放状态。校验失败不会污染目标目录。
@@ -139,11 +139,11 @@ DATA_DIR=/new/instance ./cloudwisepod restore /backup/cwp-2026-08-01.tar.gz --fo
 仓库 Compose 从源码构建，但其 `environment` 当前只传入会话、Groq、OpenAI、公网和代理基础项。仅在宿主 `.env` 填入 `POD_*`、`VOICE_ASR_*` 或 `LEARNING_EMBEDDING_*` 不会自动把这些项送入容器。使用私有 Compose override 显式传入所需变量，或运行容器时用 `--env-file`；不要把密钥写入仓库或镜像。
 
 ```sh
-docker build -t cloudwisepod:local .
-docker run -d --name cloudwisepod --restart unless-stopped \
+docker build -t orangecast:local .
+docker run -d --name orangecast --restart unless-stopped \
   --env-file .env -e DATA_DIR=/app/data \
   -p 127.0.0.1:8080:8080 -v "$(pwd)/data:/app/data" \
-  cloudwisepod:local
+  orangecast:local
 ```
 
 检查反向代理实际来源，设置对应 `TRUSTED_PROXIES`，不要信任全部公网。`PUBLIC_URL` 必须是实际 HTTPS URL，影响 Secure Cookie 和来源链接。参考 [Caddy](deploy/Caddyfile.example) 或 [Nginx](deploy/nginx.example) 配置，TLS 在代理终止。代理地址、证书和防火墙须按实际环境配置，不把示例域名当成已部署地址。
@@ -155,8 +155,8 @@ docker run -d --name cloudwisepod --restart unless-stopped \
 
 
 ```sh
-./cloudwisepod backup /private/path/cwp-v2.tar.gz
-DATA_DIR=/new/instance ./cloudwisepod restore /private/path/cwp-v2.tar.gz
+./orangecast backup /private/path/cwp-v2.tar.gz
+DATA_DIR=/new/instance ./orangecast restore /private/path/cwp-v2.tar.gz
 ```
 
 使用空目标目录；已有数据仅在明确接受覆盖时加 `--force`。先在隔离目录恢复，核对 manifest、文件校验、登录、来源和任务记录再切换服务。v2 兼容旧 v1，备份包括明确保留的私人录音；未保存录音、Narration、临时导出与浏览器离线副本不能据此恢复。

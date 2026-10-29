@@ -15,12 +15,12 @@ EOF
 
 DEST_DIR="${1:-$HOME/backups/cloudwisepod}"
 DATA_DIR="${DATA_DIR:-./data}"
-BIN="./cloudwisepod"
+BIN="./orangecast"
 
 # 编译产物不存在则现编（导出走同一二进制，保证与数据 schema 一致）
 if [ ! -x "$BIN" ]; then
   echo "==> 未找到 ${BIN}，先编译..."
-  go build -o "$BIN" ./cmd/cloudwisepod
+  go build -o "$BIN" ./cmd/orangecast
 fi
 
 if [ ! -f "$DATA_DIR/cloudwisepod.db" ]; then

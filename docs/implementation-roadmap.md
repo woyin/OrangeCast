@@ -1,4 +1,4 @@
-# CloudWisePod 实施路线
+# OrangeCast 实施路线
 
 基线：Go、SQLite、单 Owner、自托管；现有学习能力和 ADR-0021 文章生产链路均已落地
 目标：实现 [`product-goal.md`](product-goal.md) 与 [ADR-0022](adr/0022-learning-creation-workspaces.md) 定义的学习与创作闭环
@@ -92,7 +92,7 @@
 
 ## Phase 4：CreationHistory 与重复判断
 
-目标：排除 Owner 已经实质表达过的内容，而不是只比较 CloudWisePod 内标题。
+目标：排除 Owner 已经实质表达过的内容，而不是只比较 OrangeCast 内标题。
 
 - 引入 CreationHistory、PublishedWork 与 UnpublishedWork。
 - 支持正文粘贴、Markdown、URL 快照，以及标题+核心主张+摘要的降级导入。
@@ -198,7 +198,7 @@
 ```bash
 go test ./...
 go vet ./...
-go build ./cmd/cloudwisepod
+go build ./cmd/orangecast
 make cover-gate
 make lint
 git diff --check

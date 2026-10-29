@@ -177,7 +177,7 @@ func plainSourceList(sources []string) string {
 }
 
 func coverSVG(title, subtitle string) string {
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="383" viewBox="0 0 900 383"><rect width="900" height="383" fill="#111827"/><rect x="48" y="48" width="8" height="287" rx="4" fill="#f59e0b"/><text x="88" y="150" fill="white" font-family="sans-serif" font-size="42" font-weight="700">%s</text><text x="88" y="215" fill="#d1d5db" font-family="sans-serif" font-size="22">%s</text><text x="88" y="315" fill="#9ca3af" font-family="sans-serif" font-size="18">CloudWisePod · Evidence-grounded</text></svg>`, html.EscapeString(truncateRunes(title, 22)), html.EscapeString(truncateRunes(subtitle, 36)))
+	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="383" viewBox="0 0 900 383"><rect width="900" height="383" fill="#111827"/><rect x="48" y="48" width="8" height="287" rx="4" fill="#f59e0b"/><text x="88" y="150" fill="white" font-family="sans-serif" font-size="42" font-weight="700">%s</text><text x="88" y="215" fill="#d1d5db" font-family="sans-serif" font-size="22">%s</text><text x="88" y="315" fill="#9ca3af" font-family="sans-serif" font-size="18">OrangeCast · Evidence-grounded</text></svg>`, html.EscapeString(truncateRunes(title, 22)), html.EscapeString(truncateRunes(subtitle, 36)))
 }
 
 func (srv *Server) publicationSources(r *http.Request, revisionID, profileID string) ([]string, error) {

@@ -7,7 +7,7 @@ data/
 .claude/
 .agents/
 .pi-subagents/
-cloudwisepod
+orangecast
 *.db
 *.db.bak-*
 docs/

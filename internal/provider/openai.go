@@ -136,7 +136,7 @@ func (o *OpenAIProvider) chatCompleteWithMeta(ctx context.Context, payload map[s
 	if resp.StatusCode != 200 {
 		return nil, 0, fmt.Errorf("openai %s 失败 HTTP %d: %s", label, resp.StatusCode, string(data))
 	}
-	retries, _ := strconv.Atoi(resp.Header.Get("X-CloudWisePod-Retry-Count"))
+	retries, _ := strconv.Atoi(resp.Header.Get("X-OrangeCast-Retry-Count"))
 	var chat struct {
 		Model   string `json:"model"`
 		Choices []struct {

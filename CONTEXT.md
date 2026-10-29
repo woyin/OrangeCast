@@ -1,14 +1,14 @@
-# CloudWisePod 领域词汇表
+# OrangeCast 领域词汇表
 
 **KnowledgeArticle（自动知识文章）**：基于已有学习重点与笔记，自动发现方向并形成的来源整理与 AI 综合文章。自动生成不意味着 Owner 已承担文中判断；来源表达、个人笔记与 AI 综合保持可辨身份。
 _避免使用_：已确认个人主张、自动发布作品。
 
-CloudWisePod 将 Owner 主动选择或授权摄取的内容来源转化为可长期核验的证据，并以这些证据为原料支持个人知识沉淀与内容生产。本文件只定义领域语言；实现与取舍见 `docs/adr/`。
+OrangeCast 将 Owner 主动选择或授权摄取的内容来源转化为可长期核验的证据，并以这些证据为原料支持个人知识沉淀与内容生产。本文件只定义领域语言；实现与取舍见 `docs/adr/`。
 
 ## 信息分层
 
 **PrimarySource（原始来源）**：
-CloudWisePod 中受保护的事实层，是所有衍生内容可核验性的最终锚点。音频 Source 的 PrimarySource 由 EvidenceAudio 与其 Transcript 共同构成；文档 Source 的 PrimarySource 是 EvidenceDocument。AI 不得改写或重新组织这一层的内容；Transcript 虽由 AI 产生，但其社会契约是对音频的忠实文字镜像，因此归入原始来源层。
+OrangeCast 中受保护的事实层，是所有衍生内容可核验性的最终锚点。音频 Source 的 PrimarySource 由 EvidenceAudio 与其 Transcript 共同构成；文档 Source 的 PrimarySource 是 EvidenceDocument。AI 不得改写或重新组织这一层的内容；Transcript 虽由 AI 产生，但其社会契约是对音频的忠实文字镜像，因此归入原始来源层。
 _避免使用：Original、GroundTruth、RawData；它们要么偏实现，要么暗示未处理的原始文件_
 
 **Derivative（衍生内容）**：
@@ -26,7 +26,7 @@ _避免使用：Explanation、Commentary、Insight；它们是生成衍生的具
 ## 内容进入
 
 **Owner（所有者）**：
-唯一使用并拥有一个 CloudWisePod 实例内全部内容的人。一个实例只能被认领一次，不存在后续注册、成员关系或租户隔离。
+唯一使用并拥有一个 OrangeCast 实例内全部内容的人。一个实例只能被认领一次，不存在后续注册、成员关系或租户隔离。
 _避免使用：User、Member、Tenant、Account_
 
 **Candidate（候选内容）**：
@@ -101,7 +101,7 @@ _避免使用：KnowledgeNote、Summary_
 _避免使用：Summary、Highlight、Insight、Takeaway；它们要么粒度或用途不同，要么无法表达可核验的观点单元_
 
 **EvidenceArchive（证据库）**：
-CloudWisePod 持久保存的 Source、EvidenceAudio、EvidenceDocument、Transcript、Citation、KnowledgeCard 及处理历史集合。它负责核验依据，不是 Owner 编辑最终知识的地方。
+OrangeCast 持久保存的 Source、EvidenceAudio、EvidenceDocument、Transcript、Citation、KnowledgeCard 及处理历史集合。它负责核验依据，不是 Owner 编辑最终知识的地方。
 _避免使用：KnowledgeBase_
 
 **EvidenceQA（证据问答）**：
@@ -127,17 +127,17 @@ _避免使用：Validator、Filter、Moderator；它们要么偏实现，要么�
 Owner 判断值得保留后沉淀到 PersonalKnowledgeBase 的最终产物。它必须可复用，并能跳回对应的 PrimarySource。升级后 KnowledgeNote 可同时包含 CitedDerivative 与 GeneratedDerivative 两类内容，二者必须按类别结构化标注，随内容一起下沉：
 - CitedDerivative 块标注为原文依据，带 Citation 跳转，跳回可逐字核验。
 - GeneratedDerivative 块标注为 AI 讲解、非原文，带 Reference 跳转，跳回仅表示参考、不可核验。
-两种块视觉可区分，且 Reference 跳转不得伪装成 Citation 跳转。具体形态：CitedDerivative 块用 Obsidian callout 标注为原文依据（如 > [!quote] 原文），带 Citation 跳转链接（锚点文字“引用”，URL 用 ?t=）；GeneratedDerivative 块用自定义 callout 类型标注（> [!ai-generated] AI 讲解·非原文），带 Reference 跳转链接（锚点文字“参考”，URL 用 ?ref=，与 Citation 的 ?t= 区分），且 callout 首行带文字前缀兜底，保证非 Obsidian 渲染器也能识别类别。Gist 正名后从 Chapter Citation 渲染中独立出来，作为 GeneratedDerivative callout 块置于对应 Chapter 区块之后，保持“区间真实在前、讲解自由在后”的视觉顺序。此标注是把 CloudWisePod 内部的 Cited/Generated 分级延伸到 PersonalKnowledgeBase 的最后一公里，避免几个月后 Owner 在外部知识库把 AI 讲解误当成原话。
+两种块视觉可区分，且 Reference 跳转不得伪装成 Citation 跳转。具体形态：CitedDerivative 块用 Obsidian callout 标注为原文依据（如 > [!quote] 原文），带 Citation 跳转链接（锚点文字“引用”，URL 用 ?t=）；GeneratedDerivative 块用自定义 callout 类型标注（> [!ai-generated] AI 讲解·非原文），带 Reference 跳转链接（锚点文字“参考”，URL 用 ?ref=，与 Citation 的 ?t= 区分），且 callout 首行带文字前缀兜底，保证非 Obsidian 渲染器也能识别类别。Gist 正名后从 Chapter Citation 渲染中独立出来，作为 GeneratedDerivative callout 块置于对应 Chapter 区块之后，保持“区间真实在前、讲解自由在后”的视觉顺序。此标注是把 OrangeCast 内部的 Cited/Generated 分级延伸到 PersonalKnowledgeBase 的最后一公里，避免几个月后 Owner 在外部知识库把 AI 讲解误当成原话。
 _避免使用：Export、Markdown、KnowledgeCard；它们分别是动作、格式和中间产物_
 
 **PersonalKnowledgeBase（个人知识库）**：
-Owner 在 CloudWisePod 之外维护、编辑和组织 KnowledgeNote 的权威位置。CloudWisePod 只向它单向沉淀内容。
-_避免使用：EvidenceArchive、CloudWisePod_
+Owner 在 OrangeCast 之外维护、编辑和组织 KnowledgeNote 的权威位置。OrangeCast 只向它单向沉淀内容。
+_避免使用：EvidenceArchive、OrangeCast_
 
 ## 处理
 
 **ProcessingJob（处理任务）**：
-Owner 要求系统将一个 Source 转化为可核验证据的持久意图。ProcessingJob 不会因 CloudWisePod 暂停或重启而消失。
+Owner 要求系统将一个 Source 转化为可核验证据的持久意图。ProcessingJob 不会因 OrangeCast 暂停或重启而消失。
 _避免使用：Goroutine、BackgroundTask、QueueMessage；它们是实现机制_
 
 **ArtifactVersion（产物版本）**：
@@ -183,7 +183,7 @@ Owner 在某个 Citation 上附加的个人文字注解。它不是 AI 生成的
 _避免使用：Note、Comment、Remark_
 
 **Pin（收藏）**：
-Owner 标记某个 Citation"值得记住"的轻量动作。Pin 是 CloudWisePod 内的标记，不等于 KnowledgeNote——后者是沉淀到 PersonalKnowledgeBase 的最终 Markdown。
+Owner 标记某个 Citation"值得记住"的轻量动作。Pin 是 OrangeCast 内的标记，不等于 KnowledgeNote——后者是沉淀到 PersonalKnowledgeBase 的最终 Markdown。
 _避免使用：Bookmark、Favorite、Star_
 
 **Collection（集合）**：
@@ -238,7 +238,7 @@ Owner 对 ArticleProposal、ArticleBrief 或 ArticleRevision 作出的显式编�
 _避免使用：ImplicitPreference、TrainingData、Analytics；它是 Owner 可见且可解释的编辑决策，不是暗中推断的偏好_
 
 **ArticleProposal（文章提案）**：
-CloudWisePod 针对一个 EditorialProfile、从跨 Source 的 KeyPoint 中主动发现的候选写作方向，包含主题、核心论点、目标读者、写作价值与候选素材。提案分为 Fresh（近期来源）、Evergreen（历史素材重组）、Follow-up（已发布文章的更新或延展）与 DeepRead（Owner 明确选择单个 Episode 的单集深读）四种模式，并须与历史提案和 PublishedArticle 做重复检查。跨 Episode Scout 仍要求每条候选至少覆盖两个不同 Episode；DeepRead 是显式例外，只允许使用被 Owner 选择的单个 Episode，不能通过默认模式隐式放宽跨集规则。每次 Scout 头脑风暴返回 5 条候选，提案池低于 5 条时在提案离开池后自动补货（GET 页面不产生付费副作用）。ArticleProposal 只有经 Owner 选择或调整后，才能进入完整文章生成；每个 EditorialProfile 可以配置各模式的生成节奏。
+OrangeCast 针对一个 EditorialProfile、从跨 Source 的 KeyPoint 中主动发现的候选写作方向，包含主题、核心论点、目标读者、写作价值与候选素材。提案分为 Fresh（近期来源）、Evergreen（历史素材重组）、Follow-up（已发布文章的更新或延展）与 DeepRead（Owner 明确选择单个 Episode 的单集深读）四种模式，并须与历史提案和 PublishedArticle 做重复检查。跨 Episode Scout 仍要求每条候选至少覆盖两个不同 Episode；DeepRead 是显式例外，只允许使用被 Owner 选择的单个 Episode，不能通过默认模式隐式放宽跨集规则。每次 Scout 头脑风暴返回 5 条候选，提案池低于 5 条时在提案离开池后自动补货（GET 页面不产生付费副作用）。ArticleProposal 只有经 Owner 选择或调整后，才能进入完整文章生成；每个 EditorialProfile 可以配置各模式的生成节奏。
 _避免使用：ArticleBrief、ArticleDraft、Topic；前两者已经进入选材或成稿阶段，后者没有表达提案所需的论点、读者与素材_
 
 **ArticleBrief（文章简报）**：
@@ -246,7 +246,7 @@ Owner 批准 ArticleProposal 后形成的可审核写作契约，明确核心论
 _避免使用：Outline、Prompt；前者没有覆盖选材决策，后者是实现手段而非领域对象_
 
 **ArticleDraft（文章草稿）**：
-Owner 确认 ArticleBrief 后创建的持续编辑对象，承载模型初稿、审校修订、Owner 手工修改与局部 AI 改写形成的 ArticleRevision 历史。模型初稿必须经过独立的证据审校与风格审校并完成修订，才能成为可交付版本。首版中每个实质性主张都必须可追溯到一个或多个 KeyPoint，并最终回到 Source、Citation 与 PrimarySource；AI 可以重组和综合观点，但不得以模型自身知识偷偷补充事实。ArticleDraft 不等于已经发布的文章，CloudWisePod 不得绕过 Owner 审核直接发布。未来可以引入播客以外的素材来源，但必须显式区分来源类型并保留各自的证据链。
+Owner 确认 ArticleBrief 后创建的持续编辑对象，承载模型初稿、审校修订、Owner 手工修改与局部 AI 改写形成的 ArticleRevision 历史。模型初稿必须经过独立的证据审校与风格审校并完成修订，才能成为可交付版本。首版中每个实质性主张都必须可追溯到一个或多个 KeyPoint，并最终回到 Source、Citation 与 PrimarySource；AI 可以重组和综合观点，但不得以模型自身知识偷偷补充事实。ArticleDraft 不等于已经发布的文章，OrangeCast 不得绕过 Owner 审核直接发布。未来可以引入播客以外的素材来源，但必须显式区分来源类型并保留各自的证据链。
 _避免使用：KnowledgeNote、PublishedArticle；它们分别属于个人知识沉淀与已发布内容_
 
 **ArticleRevision（文章修订版）**：

@@ -194,7 +194,7 @@ func TestMainDispatchesBackupAndRestore(t *testing.T) {
 	t.Cleanup(func() { os.Args = oldArgs })
 
 	dest := filepath.Join(cfg.BackupDir, "dispatch-backup")
-	os.Args = []string{"cloudwisepod", "backup", dest}
+	os.Args = []string{"orangecast", "backup", dest}
 	main()
 	archive := dest + ".tar.gz"
 	if _, err := os.Stat(archive); err != nil {
@@ -203,7 +203,7 @@ func TestMainDispatchesBackupAndRestore(t *testing.T) {
 
 	restoreDir := t.TempDir()
 	t.Setenv("DATA_DIR", restoreDir)
-	os.Args = []string{"cloudwisepod", "restore", archive}
+	os.Args = []string{"orangecast", "restore", archive}
 	main()
 	if _, err := os.Stat(filepath.Join(restoreDir, "cloudwisepod.db")); err != nil {
 		t.Fatalf("restore 命令应恢复数据库: %v", err)
@@ -228,7 +228,7 @@ func TestMainServeStartsAndStops(t *testing.T) {
 
 	oldArgs := os.Args
 	t.Cleanup(func() { os.Args = oldArgs })
-	os.Args = []string{"cloudwisepod", "serve"}
+	os.Args = []string{"orangecast", "serve"}
 
 	done := make(chan struct{})
 	go func() {
@@ -332,7 +332,7 @@ func TestRunBackup_ConfigErrorExits(t *testing.T) {
 		}
 		return
 	}
-	os.Args = []string{"cloudwisepod", "backup", "out.tar.gz"}
+	os.Args = []string{"orangecast", "backup", "out.tar.gz"}
 	runBackup([]string{"out.tar.gz"})
 }
 
@@ -548,7 +548,7 @@ func TestMainUnknownCommandExits(t *testing.T) {
 		return
 	}
 	oldArgs := os.Args
-	os.Args = []string{"cloudwisepod", "totally-bogus-command"}
+	os.Args = []string{"orangecast", "totally-bogus-command"}
 	defer func() { os.Args = oldArgs }()
 	main()
 }
@@ -671,7 +671,7 @@ func TestRunTTSCheck_EngineUnavailableExits(t *testing.T) {
 		}
 		return
 	}
-	os.Args = []string{"cloudwisepod", "tts-check"}
+	os.Args = []string{"orangecast", "tts-check"}
 	runTTSCheck([]string{})
 }
 

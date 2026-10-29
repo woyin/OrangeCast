@@ -1,4 +1,4 @@
-{{define "title"}}注意力队列 · CloudWisePod{{end}}
+{{define "title"}}注意力队列 · OrangeCast{{end}}
 {{define "content"}}
 <div class="page-head"><div><h1>注意力队列</h1><p class="meta">学习与创作各自显示下一步；失败、陈旧和阻断不会被静默隐藏。</p></div><a class="btn btn-secondary" href="/workbench{{if .ProfileID}}?profile={{.ProfileID}}{{end}}">旧工作台</a></div>
 <div class="profile-switcher">{{range .Profiles}}<a class="profile-chip {{if eq $.ProfileID .ID}}active{{end}}" href="/attention?profile={{.ID}}"><strong>{{.Name}}</strong><span>切换画像</span></a>{{end}}</div>

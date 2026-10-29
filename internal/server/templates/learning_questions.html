@@ -1,4 +1,4 @@
-{{define "title"}}学习问题 · CloudWisePod{{end}}
+{{define "title"}}学习问题 · OrangeCast{{end}}
 {{define "content"}}
 <h1>学习问题</h1><p>记录想回答的问题和个人目标，整理相关材料。是否已经解决由你决定。</p>
 <form method="get" action="/questions"><label>搜索问题或目标 <input name="q" value="{{.Query.Get "q"}}" maxlength="200"></label><label>状态 <select name="status"><option value="">全部</option><option value="active" {{if eq (.Query.Get "status") "active"}}selected{{end}}>进行中</option><option value="paused" {{if eq (.Query.Get "status") "paused"}}selected{{end}}>暂停</option><option value="resolved" {{if eq (.Query.Get "status") "resolved"}}selected{{end}}>已解决</option><option value="archived" {{if eq (.Query.Get "status") "archived"}}selected{{end}}>归档</option></select></label><button>搜索</button></form>

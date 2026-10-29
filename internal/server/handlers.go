@@ -1,4 +1,4 @@
-// Package server 实现 CloudWisePod 的 HTTP 层：路由、handler、模板渲染与 REST API。
+// Package server 实现 OrangeCast 的 HTTP 层：路由、handler、模板渲染与 REST API。
 // handler 按职责拆分到多个文件：
 //   - auth_handlers.go    认领/登录/登出/Dashboard
 //   - podcasts.go         Podcast 订阅与 Upload 管理
@@ -55,7 +55,7 @@ func sanitizeFilename(s string) string {
 	}
 	out := strings.TrimSpace(b.String())
 	if out == "" {
-		return "cloudwisepod-note"
+		return "orangecast-note"
 	}
 	return out
 }

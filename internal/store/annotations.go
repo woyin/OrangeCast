@@ -90,7 +90,7 @@ func (s *Store) DeleteAnnotation(ctx context.Context, sourceType models.SourceTy
 // ---- Pin ----
 
 // Pin 用户标记某个 Citation“值得记住”的轻量动作（ADR-0017）。
-// Pin 是 CloudWisePod 内标记，不等于沉淀到知识库的 KnowledgeNote。
+// Pin 是 OrangeCast 内标记，不等于沉淀到知识库的 KnowledgeNote。
 type Pin struct {
 	SourceType   models.SourceType
 	SourceID     string

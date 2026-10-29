@@ -20,8 +20,8 @@ func TestSanitizeFilename(t *testing.T) {
 	cases := map[string]string{
 		"通胀与经济 2026.mp3":        "通胀与经济 2026.mp3",
 		"a/b\\c:d*e?f\"g<h>i|j": "a-b-c-d-e-f-g-h-i-j",
-		"   ":                   "cloudwisepod-note",
-		"":                      "cloudwisepod-note",
+		"   ":                   "orangecast-note",
+		"":                      "orangecast-note",
 		"Hello_World-1.2":       "Hello_World-1.2",
 	}
 	for in, want := range cases {

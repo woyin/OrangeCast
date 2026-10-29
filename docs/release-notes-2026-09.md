@@ -25,7 +25,7 @@
   持久写作任务、Claim 审校、ClaimMap 继承、发布导出与精确修订历史。
 - **日常界面（U01/U02）**：首页学习/创作双行动区并列、双工作区交叉导航。
 - **恢复验证（V01）**：覆盖全部新关系的备份→恢复全量验证。
-- **TTS 预检（D03）**：`cloudwisepod tts-check` 预检 + 真实引擎短句试听。
+- **TTS 预检（D03）**：`orangecast tts-check` 预检 + 真实引擎短句试听。
 
 ## 任务组与提交对照
 
@@ -64,7 +64,7 @@
 0041_ideation_rounds → 0042_diagnosis_rounds → 0043_creation_article_links →
 0044_claim_maps
 
-首轮新增为 0026–0044；备份/恢复（`cloudwisepod backup|restore`）经 V01 全量验证
+首轮新增为 0026–0044；备份/恢复（`orangecast backup|restore`）经 V01 全量验证
 （快照、进度、修订、质量判定、构思轮次、选择、ClaimMap、创作历史、预算预留逐表核对）。
 
 ## 验收证据

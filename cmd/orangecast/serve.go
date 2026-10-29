@@ -88,7 +88,7 @@ func runServe() {
 
 	// 优雅关闭
 	go func() {
-		log.Printf("CloudWisePod 启动于 :%s", cfg.Port)
+		log.Printf("OrangeCast 启动于 :%s", cfg.Port)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服务器错误: %v", err)
 		}

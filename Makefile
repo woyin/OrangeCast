@@ -2,8 +2,8 @@
 
 # 本地运行：加载 .env 后启动（二进制缺失时先构建）
 serve:
-	@test -x ./cloudwisepod || go build -o cloudwisepod ./cmd/cloudwisepod
-	@set -a; . ./.env; set +a; exec ./cloudwisepod
+	@test -x ./orangecast || go build -o orangecast ./cmd/orangecast
+	@set -a; . ./.env; set +a; exec ./orangecast
 
 # 测试：跑全部 Go 单测（含 race 检测）。
 # timeout 30m：queue/store 等长包在 -race 下合法耗时 ~10 分钟（90 测试 ×

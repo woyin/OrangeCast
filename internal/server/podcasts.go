@@ -1,4 +1,4 @@
-// Package server 实现 CloudWisePod 的 HTTP 层：路由、handler、模板渲染与 REST API。
+// Package server 实现 OrangeCast 的 HTTP 层：路由、handler、模板渲染与 REST API。
 // 按职责拆分到多个文件（本文件：Podcast 订阅与 Upload 管理）。
 package server
 

@@ -1,4 +1,4 @@
-# CloudWisePod Handoff 手册
+# OrangeCast Handoff 手册
 
 更新日期：2026-08-01  
 适用对象：接手项目的开发者或 Coding Agent  
@@ -14,24 +14,24 @@
 
 ## 30 秒摘要
 
-CloudWisePod 已完成 Roadmap Phase 0–7（2026-08-01）：单 Owner、自托管、Evidence-first 的播客证据库。Go + SQLite + SSR 单二进制，具备 RSS、上传、Groq 转录、不可变 ArtifactVersion、真实 Citation 的知识卡片、持久 EvidenceAudio、可恢复 SQLite 任务队列、分段级全文搜索、确定性 Markdown 下载、备份/恢复 CLI、CSRF/限流/SSRF 公网安全基线。
+OrangeCast 已完成 Roadmap Phase 0–7（2026-08-01）：单 Owner、自托管、Evidence-first 的播客证据库。Go + SQLite + SSR 单二进制，具备 RSS、上传、Groq 转录、不可变 ArtifactVersion、真实 Citation 的知识卡片、持久 EvidenceAudio、可恢复 SQLite 任务队列、分段级全文搜索、确定性 Markdown 下载、备份/恢复 CLI、CSRF/限流/SSRF 公网安全基线。
 
 2026-09 首轮原子计划（53 项）已交付 50 项：来源快照/任务意图/预算预留、关键点质量与 Owner 笔记、单集精读（冻结材料/修订链/独立改写）、DJ 编排与媒体状态机播放/进度/笔记、跨集构思→写作 v2→Claim 审校→发布历史、首页双工作区、备份全量验证、真实 Kokoro TTS（`tts-check` 预检/试听）。逐任务记录见 `docs/implementation-log/`，发布说明见 `docs/release-notes-2026-09.md`。
 
-自动化验证全部通过（`go test ./... -race` / `go vet ./...` / `go build ./cmd/cloudwisepod` / `git diff --check`；store 包 race 约 12.6 分钟，CI 已放宽 `-timeout 25m`）。发布前仍需（外部条件，代码不阻塞）：K05 真实 Provider 评分、U03 移动端人工核对、V02 真实双旅程、D03 人耳试听确认。
+自动化验证全部通过（`go test ./... -race` / `go vet ./...` / `go build ./cmd/orangecast` / `git diff --check`；store 包 race 约 12.6 分钟，CI 已放宽 `-timeout 25m`）。发布前仍需（外部条件，代码不阻塞）：K05 真实 Provider 评分、U03 移动端人工核对、V02 真实双旅程、D03 人耳试听确认。
 
 ## 仓库基线
 
 - 审计时分支：`main`
 - 审计时提交：`743ab96`
 - 发布镜像：`ghcr.io/woyin/orangecast`
-- 产品名称：CloudWisePod
-- Go 入口：`cmd/cloudwisepod/main.go`
+- 产品名称：OrangeCast
+- Go 入口：`cmd/orangecast/main.go`
 - 现行 schema：`internal/store/schema.sql`
 - HTTP 路由：`internal/server/server.go`
 - 处理 worker：`internal/queue/worker.go`
 
-Go module 与发布镜像均对齐到实际仓库 `woyin/orangecast`（Phase 0 已完成）：模块路径 `github.com/woyin/orangecast`、镜像 `ghcr.io/woyin/orangecast`。产品对外名称仍为 CloudWisePod；仓库/镜像保留 `orangecast` 命名，若未来要统一为 `cloudwisepod` 需在 GitHub 重命名仓库（会改变 GHCR 镜像地址）。
+Go module 与发布镜像均对齐到实际仓库 `woyin/orangecast`（Phase 0 已完成）：模块路径 `github.com/woyin/orangecast`、镜像 `ghcr.io/woyin/orangecast`。产品名称、仓库、镜像与可执行文件现统一为 `orangecast`（原名 CloudWisePod）。为兼容既有部署，数据库文件名 `cloudwisepod.db`、备份清单格式 `cloudwisepod-backup` 与 Docker 数据卷 `cloudwisepod-data` 保持不变。
 
 ## 当前实现与目标差距
 
@@ -48,7 +48,7 @@ Go module 与发布镜像均对齐到实际仓库 `woyin/orangecast`（Phase 0 �
 | Search | 分段级 FTS，命中返回实际 Segment + 时间；`?t=`/`#seg-` 深链跳转 |
 | Markdown | 确定性 Obsidian Markdown（frontmatter + Citation 链接），单 Source 下载 |
 | Purge | 两阶段可恢复删除（intent → 文件 → DB 事务），重启可续 |
-| Backup | `cloudwisepod backup|restore`：manifest + DB/证据 SHA256 + tar.gz，全新目录 E2E 恢复测试 |
+| Backup | `orangecast backup|restore`：manifest + DB/证据 SHA256 + tar.gz，全新目录 E2E 恢复测试 |
 | Web 安全 | CSRF、登录限流、可信代理 + `PUBLIC_URL` Secure Cookie、RSS/音频共享 SSRF 防护客户端 |
 
 ## 最容易踩错的地方
@@ -118,7 +118,7 @@ Roadmap Phase 0–7 已全部完成并验证。接手新工作前：
 
 1. 阅读本手册、产品目标、词汇表和 Roadmap。
 2. 运行 `git status --short`，保留任何未知的现有改动。
-3. 运行 Go 基线验证（`go test ./...`、`go vet ./...`、`go build ./cmd/cloudwisepod`、`git diff --check`）。
+3. 运行 Go 基线验证（`go test ./...`、`go vet ./...`、`go build ./cmd/orangecast`、`git diff --check`）。
 
 ### 下一步候选（发布前）
 
@@ -148,7 +148,7 @@ cp .env.example .env
 set -a
 source .env
 set +a
-go run ./cmd/cloudwisepod
+go run ./cmd/orangecast
 ```
 
 首次访问 `http://localhost:8080/register` 认领唯一 Owner；认领后注册永久关闭，可安全用于公网初始化。
@@ -160,7 +160,7 @@ go run ./cmd/cloudwisepod
 ```bash
 go test ./...
 go vet ./...
-go build ./cmd/cloudwisepod
+go build ./cmd/orangecast
 git diff --check
 ```
 
