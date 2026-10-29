@@ -60,6 +60,9 @@ func (srv *Server) registerPublicRoutes(mux *http.ServeMux) {
 
 func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+	})
 	mux.HandleFunc("/dashboard", srv.handleDashboard)
 	mux.HandleFunc("/api/learning-actions", srv.handleLearningActions)
 	mux.HandleFunc("/api/knowledge-semantic", srv.handleKnowledgeSemantic)

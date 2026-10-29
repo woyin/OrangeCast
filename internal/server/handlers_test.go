@@ -136,6 +136,21 @@ func TestUnauth_RedirectsToLogin(t *testing.T) {
 	}
 }
 
+func TestAuth_RootRedirectsToDashboard(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "test@example.com", "password123")
+	rec := doWithCookie(srv, cookie, http.MethodGet, "/")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("登录后访问 / 应 303，实际 %d", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "/dashboard" {
+		t.Errorf("应重定向到 /dashboard，实际 %s", got)
+	}
+	if rec := doWithCookie(srv, cookie, http.MethodGet, "/no-such-page"); rec.Code != http.StatusNotFound {
+		t.Errorf("未知路径应保持 404，实际 %d", rec.Code)
+	}
+}
+
 func TestAuth_ClaimThenAccessDashboard(t *testing.T) {
 	srv := newTestServer(t)
 	cookie := claimOwnerAndLogin(t, srv, "test@example.com", "password123")
