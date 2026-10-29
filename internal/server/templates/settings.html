@@ -1,111 +1,124 @@
 {{define "title"}}设置 · CloudWisePod{{end}}
 {{define "content"}}
-<h1>设置</h1>
-
-<h2>Provider 配置</h2>
-<p class="hint">API key 和 base URL 存储在本地 SQLite。留空则使用 .env 环境变量的值。</p>
-<form method="post" action="/settings">
-  <input type="hidden" name="_csrf" value="{{.CSRF}}">
-  <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
-    <thead>
-      <tr style="border-bottom:1px solid var(--border)">
-        <th style="text-align:left;padding:0.5rem">Provider</th>
-        <th style="text-align:left;padding:0.5rem">API Key</th>
-        <th style="text-align:left;padding:0.5rem">Base URL</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem;font-weight:bold">Groq</td>
-        <td style="padding:0.5rem"><input type="password" name="groq_api_key" value="{{.GroqAPIKey}}" placeholder="gsk_..." style="width:100%"></td>
-        <td style="padding:0.5rem"><input type="text" name="groq_base_url" value="{{.GroqBaseURL}}" placeholder="https://api.groq.com/openai/v1" style="width:100%"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem;font-weight:bold">OpenAI</td>
-        <td style="padding:0.5rem"><input type="password" name="openai_api_key" value="{{.OpenAIAPIKey}}" placeholder="sk-..." style="width:100%"></td>
-        <td style="padding:0.5rem"><input type="text" name="openai_base_url" value="{{.OpenAIBaseURL}}" placeholder="https://api.openai.com/v1" style="width:100%"></td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h2>任务模型配置</h2>
-  <p class="hint">为每个任务选择 Provider 和 Model。编辑角色留空时会继承“分析（知识卡片）”配置；可单独选择更强的付费模型。</p>
-  {{if not .HasOpenAI}}<p class="hint" style="color:#dc2626">⚠️ 未配置 OpenAI API key，选择 OpenAI 的任务会失败。</p>{{end}}
-  <table style="width:100%;border-collapse:collapse;margin-bottom:1rem">
-    <thead>
-      <tr style="border-bottom:1px solid var(--border)">
-        <th style="text-align:left;padding:0.5rem">任务</th>
-        <th style="text-align:left;padding:0.5rem">Provider</th>
-        <th style="text-align:left;padding:0.5rem">Model（留空用默认）</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">转录</td>
-        <td style="padding:0.5rem"><select name="transcription_provider"><option value="groq" {{if eq .TranscriptionProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .TranscriptionProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="transcription_model" value="{{.TranscriptionModel}}" placeholder="whisper-large-v3"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">分析（知识卡片）</td>
-        <td style="padding:0.5rem"><select name="analysis_provider"><option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="openai/gpt-oss-120b"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">高光（AI DJ）</td>
-        <td style="padding:0.5rem"><select name="highlight_provider"><option value="groq" {{if eq .HighlightProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .HighlightProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="highlight_model" value="{{.HighlightModel}}" placeholder="同分析模型"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">问答（Q&A）</td>
-        <td style="padding:0.5rem"><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="openai/gpt-oss-120b"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">Writer（文章写作）</td>
-        <td style="padding:0.5rem"><select name="writer_provider"><option value="" {{if eq .WriterProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .WriterProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .WriterProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="writer_model" value="{{.WriterModel}}" placeholder="留空继承分析模型"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">Scout（跨集选题）</td>
-        <td style="padding:0.5rem"><select name="scout_provider"><option value="" {{if eq .ScoutProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .ScoutProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .ScoutProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="scout_model" value="{{.ScoutModel}}" placeholder="留空继承分析模型"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">Evidence Reviewer（证据审校）</td>
-        <td style="padding:0.5rem"><select name="evidence_reviewer_provider"><option value="" {{if eq .EvidenceReviewerProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .EvidenceReviewerProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .EvidenceReviewerProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="evidence_reviewer_model" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">Curator（Brief 策展）</td>
-        <td style="padding:0.5rem"><select name="curator_provider"><option value="" {{if eq .CuratorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .CuratorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .CuratorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="curator_model" value="{{.CuratorModel}}" placeholder="留空继承分析模型"></td>
-      </tr>
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:0.5rem">Style Editor（风格审校）</td>
-        <td style="padding:0.5rem"><select name="style_editor_provider"><option value="" {{if eq .StyleEditorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .StyleEditorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .StyleEditorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td style="padding:0.5rem"><input type="text" name="style_editor_model" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
-      </tr>
-    </tbody>
-  </table>
-  <h3>全局预算与自动处理限额</h3>
-  <p class="meta">这是调用前的预算检查与估算：当月已知费用 + 在途预估达到预算上限时，新的付费任务会被拒绝并显示原因。估算基于按预估用量折算的价格，实际远端费用可能高于预估；未登记价格的付费自动任务会被视为配置缺口而阻止。费用未知时不显示为免费。</p>
-  <label>全局月度预算（分，留空表示不启用）<input type="number" min="0" name="monthly_budget_cents" value="{{with .MonthlyBudgetCents}}{{.}}{{end}}"></label>
-  <label>自动处理任务单日上限（个，留空表示不限制）<input type="number" min="0" name="auto_daily_job_limit" value="{{with .AutoDailyJobLimit}}{{.}}{{end}}"></label>
-  <p class="meta">当月已计费用（含无画像精读文与学习任务）：{{.MonthlyUsageCents}} 分。</p>
-  {{with .BudgetReservations}}{{if .}}
-  <table><thead><tr><th>任务</th><th>阶段</th><th>预估（分）</th><th>状态</th></tr></thead><tbody>
-  {{range .}}<tr><td>{{.JobID}}</td><td>{{.Operation}}</td><td>{{.EstimatedCostCents}}</td><td>{{.Status}}</td></tr>{{end}}
-  </tbody></table>{{end}}{{end}}
-  <h3>编辑角色故障切换</h3>
-  <p class="meta">仅在首选调用失败时使用；备用 Provider 仍会重新执行预算和 ModelDataPolicy 检查。留空表示不故障切换。</p>
-  {{with .Fallbacks}}
-  {{$r := index . "writer"}}<label>Writer 备用 Provider <input name="writer_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Writer 备用模型 <input name="writer_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
-  {{$r := index . "scout"}}<label>Scout 备用 Provider <input name="scout_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Scout 备用模型 <input name="scout_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
-  {{$r := index . "curator"}}<label>Curator 备用 Provider <input name="curator_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>Curator 备用模型 <input name="curator_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
-  {{$r := index . "evidence_reviewer"}}<label>EvidenceReviewer 备用 Provider <input name="evidence_reviewer_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>EvidenceReviewer 备用模型 <input name="evidence_reviewer_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
-  {{$r := index . "style_editor"}}<label>StyleEditor 备用 Provider <input name="style_editor_fallback_provider" value="{{with $r}}{{.Provider}}{{end}}"></label><label>StyleEditor 备用模型 <input name="style_editor_fallback_model" value="{{with $r}}{{.Model}}{{end}}"></label>
-  {{end}}
-  <button type="submit">保存</button>
-</form>
+<div class="page-head"><h1>设置</h1></div>
 {{if .Saved}}<p class="success">已保存。新设置对后续任务立即生效。</p>{{end}}
+
+<form class="settings-form" method="post" action="/settings">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+
+  <section class="panel settings-section">
+    <h2>Provider 配置</h2>
+    <p class="hint">API key 和 base URL 存储在本地 SQLite。留空则使用 .env 环境变量的值。</p>
+    <table class="data-table">
+      <thead><tr><th>Provider</th><th>API Key</th><th>Base URL</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Groq</strong></td>
+          <td><input type="password" name="groq_api_key" value="{{.GroqAPIKey}}" placeholder="gsk_..."></td>
+          <td><input type="text" name="groq_base_url" value="{{.GroqBaseURL}}" placeholder="https://api.groq.com/openai/v1"></td>
+        </tr>
+        <tr>
+          <td><strong>OpenAI</strong></td>
+          <td><input type="password" name="openai_api_key" value="{{.OpenAIAPIKey}}" placeholder="sk-..."></td>
+          <td><input type="text" name="openai_base_url" value="{{.OpenAIBaseURL}}" placeholder="https://api.openai.com/v1"></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel settings-section">
+    <h2>任务模型</h2>
+    <p class="hint">为每个任务选择 Provider 和 Model，Model 留空使用默认值。</p>
+    {{if not .HasOpenAI}}<p class="warn-note">未配置 OpenAI API key，选择 OpenAI 的任务会失败。</p>{{end}}
+    <table class="data-table">
+      <thead><tr><th>任务</th><th>Provider</th><th>Model</th></tr></thead>
+      <tbody>
+      <tr>
+        <td>转录</td>
+        <td><select name="transcription_provider"><option value="groq" {{if eq .TranscriptionProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .TranscriptionProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="transcription_model" value="{{.TranscriptionModel}}" placeholder="whisper-large-v3"></td>
+      </tr>
+      <tr>
+        <td>分析（知识卡片）</td>
+        <td><select name="analysis_provider"><option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="openai/gpt-oss-120b"></td>
+      </tr>
+      <tr>
+        <td>高光（AI DJ）</td>
+        <td><select name="highlight_provider"><option value="groq" {{if eq .HighlightProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .HighlightProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="highlight_model" value="{{.HighlightModel}}" placeholder="同分析模型"></td>
+      </tr>
+      <tr>
+        <td>问答（Q&A）</td>
+        <td><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="openai/gpt-oss-120b"></td>
+      </tr>
+      </tbody>
+    </table>
+    <details class="manual-form">
+      <summary>编辑角色模型（默认继承“分析”，可单独选择更强的付费模型）</summary>
+      <table class="data-table">
+        <thead><tr><th>角色</th><th>Provider</th><th>Model</th></tr></thead>
+        <tbody>
+      <tr>
+        <td>Writer（文章写作）</td>
+        <td><select name="writer_provider"><option value="" {{if eq .WriterProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .WriterProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .WriterProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="writer_model" value="{{.WriterModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr>
+        <td>Scout（跨集选题）</td>
+        <td><select name="scout_provider"><option value="" {{if eq .ScoutProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .ScoutProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .ScoutProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="scout_model" value="{{.ScoutModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr>
+        <td>Evidence Reviewer（证据审校）</td>
+        <td><select name="evidence_reviewer_provider"><option value="" {{if eq .EvidenceReviewerProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .EvidenceReviewerProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .EvidenceReviewerProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="evidence_reviewer_model" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr>
+        <td>Curator（Brief 策展）</td>
+        <td><select name="curator_provider"><option value="" {{if eq .CuratorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .CuratorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .CuratorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="curator_model" value="{{.CuratorModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+      <tr>
+        <td>Style Editor（风格审校）</td>
+        <td><select name="style_editor_provider"><option value="" {{if eq .StyleEditorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .StyleEditorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .StyleEditorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
+        <td><input type="text" name="style_editor_model" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
+      </tr>
+        </tbody>
+      </table>
+    </details>
+  </section>
+
+  <section class="panel settings-section">
+    <h2>预算与自动处理</h2>
+    <p class="hint">这是调用前的预算检查与估算：当月已知费用 + 在途预估达到预算上限时，新的付费任务会被拒绝并显示原因。估算基于按预估用量折算的价格，实际远端费用可能高于预估；未登记价格的付费自动任务会被视为配置缺口而阻止。费用未知时不显示为免费。</p>
+    <div class="field-grid">
+      <label>全局月度预算（分，留空表示不启用）<input type="number" min="0" name="monthly_budget_cents" value="{{with .MonthlyBudgetCents}}{{.}}{{end}}"></label>
+      <label>自动处理任务单日上限（个，留空表示不限制）<input type="number" min="0" name="auto_daily_job_limit" value="{{with .AutoDailyJobLimit}}{{.}}{{end}}"></label>
+    </div>
+    <p class="meta">当月已计费用（含无画像精读文与学习任务）：<strong>{{.MonthlyUsageCents}}</strong> 分。</p>
+    {{with .BudgetReservations}}{{if .}}
+    <table class="data-table"><thead><tr><th>任务</th><th>阶段</th><th>预估（分）</th><th>状态</th></tr></thead><tbody>
+    {{range .}}<tr><td>{{.JobID}}</td><td>{{.Operation}}</td><td>{{.EstimatedCostCents}}</td><td>{{.Status}}</td></tr>{{end}}
+    </tbody></table>{{end}}{{end}}
+  </section>
+
+  <details class="panel settings-section">
+    <summary>高级：编辑角色故障切换</summary>
+    <p class="hint">仅在首选调用失败时使用；备用 Provider 仍会重新执行预算和 ModelDataPolicy 检查。留空表示不故障切换。</p>
+    <div class="fallback-grid">
+      <span class="col-head">角色</span><span class="col-head">备用 Provider</span><span class="col-head">备用模型</span>
+  {{with .Fallbacks}}
+  {{$r := index . "writer"}}<strong>Writer</strong><input name="writer_fallback_provider" aria-label="Writer 备用 Provider" value="{{with $r}}{{.Provider}}{{end}}"><input name="writer_fallback_model" aria-label="Writer 备用模型" value="{{with $r}}{{.Model}}{{end}}">
+  {{$r := index . "scout"}}<strong>Scout</strong><input name="scout_fallback_provider" aria-label="Scout 备用 Provider" value="{{with $r}}{{.Provider}}{{end}}"><input name="scout_fallback_model" aria-label="Scout 备用模型" value="{{with $r}}{{.Model}}{{end}}">
+  {{$r := index . "evidence_reviewer"}}<strong>EvidenceReviewer</strong><input name="evidence_reviewer_fallback_provider" aria-label="EvidenceReviewer 备用 Provider" value="{{with $r}}{{.Provider}}{{end}}"><input name="evidence_reviewer_fallback_model" aria-label="EvidenceReviewer 备用模型" value="{{with $r}}{{.Model}}{{end}}">
+  {{$r := index . "curator"}}<strong>Curator</strong><input name="curator_fallback_provider" aria-label="Curator 备用 Provider" value="{{with $r}}{{.Provider}}{{end}}"><input name="curator_fallback_model" aria-label="Curator 备用模型" value="{{with $r}}{{.Model}}{{end}}">
+  {{$r := index . "style_editor"}}<strong>StyleEditor</strong><input name="style_editor_fallback_provider" aria-label="StyleEditor 备用 Provider" value="{{with $r}}{{.Provider}}{{end}}"><input name="style_editor_fallback_model" aria-label="StyleEditor 备用模型" value="{{with $r}}{{.Model}}{{end}}">
+  {{end}}
+    </div>
+  </details>
+
+  <div class="settings-save"><button type="submit">保存设置</button></div>
+</form>
 {{end}}

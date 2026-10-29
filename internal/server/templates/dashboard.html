@@ -1,18 +1,19 @@
 {{define "title"}}CloudWisePod{{end}}
 {{define "content"}}
-<p>欢迎，{{.Email}}。</p>
-<p class="meta">仪表盘</p>
+<header class="home-hero"><p class="eyebrow">仪表盘</p><h1>欢迎，{{.Email}}</h1></header>
 
 <section class="panel" aria-label="下一步"><h2>下一步</h2><div class="cards">{{range .NextActions}}<a class="card" href="{{.Href}}"><strong>{{.Title}}</strong><p class="meta">{{.Reason}}</p></a>{{end}}</div>
 <form data-reflection-prompt="{{if .LearningPreferences.ReflectionPrompt}}true{{else}}false{{end}}" class="learning-home-form" action="/api/learning-actions" method="post"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="expected_revision" value="{{.LearningPreferences.Revision}}"><input type="hidden" name="request_key" value="{{.HomeRequestKey}}">
 <label>当前学习问题<select name="question_id"><option value="">暂不选择</option>{{range .HomeQuestions}}<option value="{{.ID}}" {{if eq $.LearningPreferences.CurrentQuestionID .ID}}selected{{end}}>{{.Body}}</option>{{end}}</select></label><label><input type="checkbox" name="reflection_prompt" {{if .LearningPreferences.ReflectionPrompt}}checked{{end}}>整集自然听完时轻提示整理（默认关闭）</label><button type="submit">保存选择</button><p class="home-feedback" aria-live="polite"></p></form></section>
 
-<section class="panel"><h2>继续听</h2>{{range .Listening}}<p><a href="/sources/{{.SourceType}}/{{.SourceID}}{{if eq .Mode "dj"}}/dj{{end}}">{{.Title}} · {{if eq .Mode "dj"}}DJ{{else}}原音{{end}} · {{formatTime .Position}}</a></p>{{else}}<p>还没有收听记录。<a class="btn" href="/podcasts">选择播客开始听</a></p>{{end}}</section>
-<section class="panel"><h2>最近笔记</h2>{{range .Notes}}<p><a href="{{.Href}}">{{.Hit.Snippet}}</a> <span class="meta">{{.Label}}</span></p>{{else}}<p>收听时记录当前位置或选中的原文。<a href="/podcasts">打开播客</a></p>{{end}}<a href="/notes">全部笔记与重点</a></section>
-<section class="panel"><h2>新生成文章</h2>{{range .ReadyArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{.Title}}</a></p>{{else}}<p>已有重点和笔记后，<a href="/knowledge-articles">发现值得写的问题</a>。</p>{{end}}</section>
-<section class="panel"><h2>待审与失败事项</h2>{{range .PendingArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}文章发现{{end}}</a> · {{knowledgeStatus .Status}} · {{.Reason}}</p>{{else}}<p>暂无待处理文章。</p>{{end}}</section>
+<div class="home-grid">
+<section class="panel"><h2>继续听</h2>{{range .Listening}}<p><a href="/sources/{{.SourceType}}/{{.SourceID}}{{if eq .Mode "dj"}}/dj{{end}}">{{.Title}} · {{if eq .Mode "dj"}}DJ{{else}}原音{{end}} · {{formatTime .Position}}</a></p>{{else}}<p class="empty">还没有收听记录。</p><a class="btn" href="/podcasts">选择播客开始听</a>{{end}}</section>
+<section class="panel"><h2>最近笔记</h2>{{range .Notes}}<p><a href="{{.Href}}">{{.Hit.Snippet}}</a> <span class="meta">{{.Label}}</span></p>{{else}}<p class="empty">收听时记录当前位置或选中的原文。</p>{{end}}<a href="/notes">全部笔记与重点 →</a></section>
 <section class="panel"><h2>每日短回顾</h2><p>今日到期 {{.DueReviews}} 题。{{if .ActiveReview}}有未完成的会话。{{end}}</p><a class="btn" href="/review/daily">{{if .ActiveReview}}继续短会话{{else}}打开到期题目{{end}}</a></section>
-<section class="panel"><h2>本周回顾</h2><p>先尝试用自己的话解释，再查看冻结依据。</p><a class="btn" href="/review">打开学习回顾</a></section>
+<section class="panel"><h2>本周回顾</h2><p>先尝试用自己的话解释，再查看冻结依据。</p><a class="btn btn-secondary" href="/review">打开学习回顾</a></section>
+<section class="panel"><h2>新生成文章</h2>{{range .ReadyArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{.Title}}</a></p>{{else}}<p class="empty">已有重点和笔记后，<a href="/knowledge-articles">发现值得写的问题</a>。</p>{{end}}</section>
+<section class="panel"><h2>待审与失败事项</h2>{{range .PendingArticles}}<p><a href="/knowledge-articles/{{.ID}}">{{if .Title}}{{.Title}}{{else}}文章发现{{end}}</a> · {{knowledgeStatus .Status}} · {{.Reason}}</p>{{else}}<p class="empty">暂无待处理文章。</p>{{end}}</section>
+</div>
 <details class="panel"><summary>高级学习与创作入口</summary><div class="cards">
   <a class="card" href="/knowledge-articles"><h3>生成知识文章</h3><p>从已有重点和笔记自动选题、写作与审校</p></a>
   <a class="card" href="/digests"><h3>单集精读</h3><p>一键生成与管理单源精读文与小红书笔记</p></a>
@@ -24,12 +25,12 @@
 </div>
 
 <!-- U01：学习泳道 -->
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>继续学习</h2>
   {{with .Attention}}
   {{range .Learning}}
-  <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
-    <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
+  <div class="list-item">
+    <div class="grow"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
     {{if .Href}}<a class="btn btn-secondary" href="{{.Href}}">查看</a>{{end}}
   </div>
   {{else}}
@@ -39,12 +40,12 @@
 </section>
 
 <!-- U01：创作泳道 -->
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>继续创作</h2>
   {{with .Attention}}
   {{range .Creation}}
-  <div class="list-item" style="display:flex;align-items:center;gap:0.5rem">
-    <div style="flex:1"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
+  <div class="list-item">
+    <div class="grow"><strong>{{.Title}}</strong> <span class="meta">{{.Detail}}</span></div>
     {{if .Href}}<a class="btn btn-secondary" href="{{.Href}}">查看</a>{{end}}
   </div>
   {{else}}
@@ -55,7 +56,7 @@
 
 <!-- U01：最近精读文 -->
 {{with .RecentDigests}}
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>最近精读文</h2>
   {{range .}}
   <div class="list-item"><a href="/digest/{{.ID}}">{{.Title}}</a> <span class="meta">v{{.Version}}</span></div>
@@ -66,7 +67,7 @@
 
 <!-- U01：创作素材选择 -->
 {{with .Selections}}
-<section class="panel" style="margin:1rem 0">
+<section class="panel">
   <h2>创作素材选择</h2>
   {{range .}}
   <div class="list-item"><a href="/creation/selections">{{if .Title}}{{.Title}}{{else}}未命名选择{{end}}</a> <span class="meta">{{.Status}}</span></div>
