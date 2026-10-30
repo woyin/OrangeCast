@@ -8,19 +8,21 @@
 
   <section class="panel settings-section">
     <h2>Provider 配置</h2>
-    <p class="hint">API key 和 base URL 存储在本地 SQLite。留空则使用 .env 环境变量的值。</p>
+    <p class="hint">API key 和 base URL 存储在本地 SQLite。留空则使用 .env 环境变量的值。填好后点“获取模型列表”，下方即可直接选择模型。</p>
     <table class="data-table">
-      <thead><tr><th>Provider</th><th>API Key</th><th>Base URL</th></tr></thead>
+      <thead><tr><th>Provider</th><th>API Key</th><th>Base URL</th><th></th></tr></thead>
       <tbody>
-        <tr>
+        <tr data-provider-row="groq" data-ready="{{if .HasGroq}}1{{end}}">
           <td><strong>Groq</strong></td>
           <td><input type="password" name="groq_api_key" value="{{.GroqAPIKey}}" placeholder="gsk_..."></td>
           <td><input type="text" name="groq_base_url" value="{{.GroqBaseURL}}" placeholder="https://api.groq.com/openai/v1"></td>
+          <td class="model-fetch"><button type="button" class="secondary" data-fetch-models="groq">获取模型列表</button><span class="meta" data-models-status="groq" aria-live="polite"></span></td>
         </tr>
-        <tr>
+        <tr data-provider-row="openai" data-ready="{{if .HasOpenAI}}1{{end}}">
           <td><strong>OpenAI</strong></td>
           <td><input type="password" name="openai_api_key" value="{{.OpenAIAPIKey}}" placeholder="sk-..."></td>
           <td><input type="text" name="openai_base_url" value="{{.OpenAIBaseURL}}" placeholder="https://api.openai.com/v1"></td>
+          <td class="model-fetch"><button type="button" class="secondary" data-fetch-models="openai">获取模型列表</button><span class="meta" data-models-status="openai" aria-live="polite"></span></td>
         </tr>
       </tbody>
     </table>
@@ -28,7 +30,7 @@
 
   <section class="panel settings-section">
     <h2>任务模型</h2>
-    <p class="hint">为每个任务选择 Provider 和 Model，Model 留空使用默认值。</p>
+    <p class="hint">为每个任务选择 Provider 和 Model。Model 可从列表选择，也可手动输入；留空使用默认值。</p>
     {{if not .HasOpenAI}}<p class="warn-note">未配置 OpenAI API key，选择 OpenAI 的任务会失败。</p>{{end}}
     <table class="data-table">
       <thead><tr><th>任务</th><th>Provider</th><th>Model</th></tr></thead>
@@ -36,22 +38,22 @@
       <tr>
         <td>转录</td>
         <td><select name="transcription_provider"><option value="groq" {{if eq .TranscriptionProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .TranscriptionProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="transcription_model" value="{{.TranscriptionModel}}" placeholder="whisper-large-v3"></td>
+        <td><input type="text" name="transcription_model" data-model-input list="models-groq" autocomplete="off" value="{{.TranscriptionModel}}" placeholder="whisper-large-v3"></td>
       </tr>
       <tr>
         <td>分析（知识卡片）</td>
         <td><select name="analysis_provider"><option value="groq" {{if eq .AnalysisProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .AnalysisProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="analysis_model" value="{{.AnalysisModel}}" placeholder="openai/gpt-oss-120b"></td>
+        <td><input type="text" name="analysis_model" data-model-input list="models-groq" autocomplete="off" value="{{.AnalysisModel}}" placeholder="openai/gpt-oss-120b"></td>
       </tr>
       <tr>
         <td>高光（AI DJ）</td>
         <td><select name="highlight_provider"><option value="groq" {{if eq .HighlightProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .HighlightProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="highlight_model" value="{{.HighlightModel}}" placeholder="同分析模型"></td>
+        <td><input type="text" name="highlight_model" data-model-input list="models-groq" autocomplete="off" value="{{.HighlightModel}}" placeholder="同分析模型"></td>
       </tr>
       <tr>
         <td>问答（Q&A）</td>
         <td><select name="qa_provider"><option value="groq" {{if eq .QAProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .QAProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="qa_model" value="{{.QAModel}}" placeholder="openai/gpt-oss-120b"></td>
+        <td><input type="text" name="qa_model" data-model-input list="models-groq" autocomplete="off" value="{{.QAModel}}" placeholder="openai/gpt-oss-120b"></td>
       </tr>
       </tbody>
     </table>
@@ -63,27 +65,27 @@
       <tr>
         <td>Writer（文章写作）</td>
         <td><select name="writer_provider"><option value="" {{if eq .WriterProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .WriterProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .WriterProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="writer_model" value="{{.WriterModel}}" placeholder="留空继承分析模型"></td>
+        <td><input type="text" name="writer_model" data-model-input list="models-groq" autocomplete="off" value="{{.WriterModel}}" placeholder="留空继承分析模型"></td>
       </tr>
       <tr>
         <td>Scout（跨集选题）</td>
         <td><select name="scout_provider"><option value="" {{if eq .ScoutProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .ScoutProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .ScoutProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="scout_model" value="{{.ScoutModel}}" placeholder="留空继承分析模型"></td>
+        <td><input type="text" name="scout_model" data-model-input list="models-groq" autocomplete="off" value="{{.ScoutModel}}" placeholder="留空继承分析模型"></td>
       </tr>
       <tr>
         <td>Evidence Reviewer（证据审校）</td>
         <td><select name="evidence_reviewer_provider"><option value="" {{if eq .EvidenceReviewerProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .EvidenceReviewerProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .EvidenceReviewerProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="evidence_reviewer_model" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
+        <td><input type="text" name="evidence_reviewer_model" data-model-input list="models-groq" autocomplete="off" value="{{.EvidenceReviewerModel}}" placeholder="留空继承分析模型"></td>
       </tr>
       <tr>
         <td>Curator（Brief 策展）</td>
         <td><select name="curator_provider"><option value="" {{if eq .CuratorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .CuratorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .CuratorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="curator_model" value="{{.CuratorModel}}" placeholder="留空继承分析模型"></td>
+        <td><input type="text" name="curator_model" data-model-input list="models-groq" autocomplete="off" value="{{.CuratorModel}}" placeholder="留空继承分析模型"></td>
       </tr>
       <tr>
         <td>Style Editor（风格审校）</td>
         <td><select name="style_editor_provider"><option value="" {{if eq .StyleEditorProvider ""}}selected{{end}}>继承分析</option><option value="groq" {{if eq .StyleEditorProvider "groq"}}selected{{end}}>Groq</option><option value="openai" {{if eq .StyleEditorProvider "openai"}}selected{{end}}>OpenAI</option></select></td>
-        <td><input type="text" name="style_editor_model" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
+        <td><input type="text" name="style_editor_model" data-model-input list="models-groq" autocomplete="off" value="{{.StyleEditorModel}}" placeholder="留空继承分析模型"></td>
       </tr>
         </tbody>
       </table>
@@ -118,6 +120,8 @@
   {{end}}
     </div>
   </details>
+
+  <datalist id="models-groq"></datalist><datalist id="models-openai"></datalist>
 
   <div class="settings-save"><button type="submit">保存设置</button></div>
 </form>

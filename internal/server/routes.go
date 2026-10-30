@@ -167,6 +167,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/collection", srv.handleCollection)
 	mux.HandleFunc("/api/collection/item", srv.handleCollectionItem)
 	mux.HandleFunc("/settings", srv.handleSettings)
+	mux.HandleFunc("/settings/models", srv.handleSettingsModels)
 	mux.HandleFunc("/api/qa", srv.handleEvidenceQA)                       // 向后兼容别名
 	mux.HandleFunc("/api/evidence-qa", srv.handleEvidenceQA)              // 规范路径（ADR-0018）
 	mux.HandleFunc("/api/paraphrase", srv.handleParaphrase)               // Paraphrase（GeneratedDerivative，ADR-0018 R2）

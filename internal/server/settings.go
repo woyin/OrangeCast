@@ -3,12 +3,14 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/models"
+	"github.com/woyin/orangecast/internal/provider"
 )
 
 func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -96,9 +98,46 @@ func (srv *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"GroqBaseURL":              ptrStr(st.GroqBaseURL),
 		"OpenAIAPIKey":             ptrStr(st.OpenAIAPIKey),
 		"OpenAIBaseURL":            ptrStr(st.OpenAIBaseURL),
+		"HasGroq":                  srv.selector.HasGroq(),
 		"HasOpenAI":                srv.selector.HasOpenAI(),
 		"Saved":                    r.URL.Query().Get("saved") == "1",
 		"CSRF":                     auth.CSRFValue(r),
 		"Fallbacks":                fallbacks,
 	})
+}
+
+// handleSettingsModels 用表单里尚未保存的 key/URL（缺省回退到已生效值）拉取模型列表。
+func (srv *Server) handleSettingsModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var in struct {
+		Provider string `json:"provider"`
+		APIKey   string `json:"api_key"`
+		BaseURL  string `json:"base_url"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if in.Provider != "groq" && in.Provider != "openai" {
+		http.Error(w, "unknown provider", http.StatusBadRequest)
+		return
+	}
+	key, base := srv.selector.Credentials(in.Provider)
+	if k := strings.TrimSpace(in.APIKey); k != "" {
+		key = k
+	}
+	if b := strings.TrimSpace(in.BaseURL); b != "" {
+		base = b
+	}
+	w.Header().Set("Content-Type", "application/json")
+	ids, err := provider.ListModels(r.Context(), in.Provider, base, key)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"models": ids})
 }

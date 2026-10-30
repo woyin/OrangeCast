@@ -531,3 +531,5 @@ select, textarea, input { max-width: 100%; }
   .sidebar, .topbar, .listening-shell { display: none !important; }
   .main { margin: 0; }
 }
+
+.model-fetch .meta { display: block; margin-top: 4px; }
