@@ -1,10 +1,13 @@
 services:
   orangecast:
-    build: .
+    build:
+      context: .
+      # 带 Kokoro 解说引擎；只要默认精简镜像可改为 alpine 阶段（删除 target 行并去掉 /models 挂载）
+      target: kokoro
     container_name: orangecast
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${HOST_PORT:-8080}:8080"
     environment:
       # 必填：会话密钥（生成：openssl rand -hex 32）
       SESSION_SECRET: ${SESSION_SECRET}
@@ -23,3 +26,5 @@ services:
       # 宿主 data 目录直接映射（ADR-0010 便携数据目录）：与 make serve 共用同一实例，
       # 但二者严禁同时运行（SQLite 锁 + EvidenceAudio 写入冲突）
       - ./data:/app/data
+      # Kokoro 模型权重（kokoro-v1.0.onnx + voices-v1.0.bin），只读
+      - ${KOKORO_MODEL_DIR:-${HOME}/.local/share/cloudwisepod/kokoro}:/models:ro
