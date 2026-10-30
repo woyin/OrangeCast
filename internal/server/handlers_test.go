@@ -2870,3 +2870,15 @@ func TestDashboard_AttentionLanesAndDigests(t *testing.T) {
 		t.Log("空数据显示空状态（正常）")
 	}
 }
+
+func TestLogin_ClaimLinkOnlyBeforeClaim(t *testing.T) {
+	srv := newTestServer(t)
+	body := func() string { return doWithCookie(srv, nil, http.MethodGet, "/login").Body.String() }
+	if !strings.Contains(body(), `href="/register"`) {
+		t.Error("未认领时登录页应有认领链接")
+	}
+	claimOwnerAndLogin(t, srv, "test@example.com", "password123")
+	if strings.Contains(body(), `href="/register"`) {
+		t.Error("已认领后登录页不应再显示认领链接（/register 会重定向回 /login）")
+	}
+}

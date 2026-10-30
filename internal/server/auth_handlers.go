@@ -67,9 +67,17 @@ func (srv *Server) isClaimed(ctx context.Context) (bool, error) {
 	}
 	return n > 0, nil
 }
+
+// renderLogin 渲染登录页；仅当实例尚未认领时才显示“认领”入口，
+// 否则 /register 会把已认领实例重定向回 /login，形成循环。
+func (srv *Server) renderLogin(w http.ResponseWriter, r *http.Request, errMsg string) {
+	claimed, _ := srv.isClaimed(r.Context())
+	srv.tmpl.Render(w, "login.html", map[string]any{"Error": errMsg, "CSRF": auth.CSRFValue(r), "Claimable": !claimed})
+}
+
 func (srv *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		srv.tmpl.Render(w, "login.html", map[string]any{"CSRF": auth.CSRFValue(r)})
+		srv.renderLogin(w, r, "")
 		return
 	}
 	// 登录限流（ADR-0013）：按客户端 IP 固定窗口
@@ -81,12 +89,12 @@ func (srv *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	pw := r.FormValue("password")
 	u, err := srv.store.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误", "CSRF": auth.CSRFValue(r)})
+		srv.renderLogin(w, r, "邮箱或密码错误")
 		return
 	}
 	ok, err := auth.VerifyPassword(pw, u.PasswordHash)
 	if err != nil || !ok {
-		srv.tmpl.Render(w, "login.html", map[string]any{"Error": "邮箱或密码错误", "CSRF": auth.CSRFValue(r)})
+		srv.renderLogin(w, r, "邮箱或密码错误")
 		return
 	}
 	if err := auth.SetSessionCookie(w, r, srv.store, u.ID, srv.cfg.PublicSchemeIsHTTPS()); err != nil {

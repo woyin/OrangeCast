@@ -9,6 +9,6 @@
   <label>密码<input type="password" name="password" required></label>
   <button type="submit">登录</button>
 </form>
-<p><a href="/register">还没有实例？认领</a></p>
+{{if .Claimable}}<p><a href="/register">还没有实例？认领</a></p>{{end}}
 </main>
 {{end}}
