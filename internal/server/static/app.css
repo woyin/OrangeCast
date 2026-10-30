@@ -183,10 +183,19 @@ body:has(.auth) .main { margin-left: 0; }
   display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .6rem; padding: .6rem 1.25rem;
   background: var(--surface); border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: 0 -4px 20px rgba(16, 24, 40, .08);
 }
-.listening-shell > a { font-weight: 600; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
-.listening-shell > span { color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+/* .panel 在后面定义，同等优先级会覆盖坞的贴底外边距与内边距，故提高优先级 */
+.listening-shell.panel { margin: 0; padding: .6rem 1.25rem; border-radius: 0; }
+#listening-feedback:empty { display: none; }
+.dock-main { flex: 1 1 100%; display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.dock-center { flex: 1; min-width: 0; display: grid; gap: .2rem; }
+.dock-center > a { font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.dock-queue { display: flex; align-items: center; gap: .4rem; flex: none; }
+.listening-shell .time { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.listening-shell .player-play { width: 44px; height: 44px; padding: 0; }
+.listening-shell .player-skip { padding: .3rem .55rem; }
+.listening-shell .player-chip { padding: .3rem .75rem; background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
 .listening-shell button { padding: .35rem .7rem; font-size: .85rem; }
-.listening-shell button:not(#listening-toggle) { background: var(--surface); color: var(--fg); border-color: var(--border-strong); }
+.listening-shell button:not(.player-play):not(.player-chip):not(.player-skip) { background: var(--surface); color: var(--fg); border-color: var(--border-strong); }
 .listening-shell p, .listening-shell form { flex-basis: 100%; margin: .2rem 0; }
 .listening-shell label { flex-direction: row; align-items: center; gap: .3rem; font-size: .82rem; color: var(--muted); }
 .listening-shell input[type=number] { width: 5.5rem; padding: .3rem .5rem; }
@@ -493,7 +502,10 @@ select, textarea, input { max-width: 100%; }
   body.nav-open .sidebar { transform: none; }
   body.nav-open .nav-scrim { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(0, 0, 0, .4); }
   .main { margin-left: 0; }
-  .listening-shell { left: 0; padding: .5rem .8rem; }
+  .listening-shell.panel { left: 0; padding: .5rem .8rem; }
+  .dock-main { flex-wrap: wrap; gap: .5rem .8rem; }
+  .dock-center { flex-basis: 100%; order: 3; }
+  .dock-queue { margin-left: auto; }
 }
 @media (max-width: 768px) {
   .container { padding: 1.1rem 1rem 2rem; }

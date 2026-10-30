@@ -79,8 +79,18 @@
 </nav>
 <div class="main">
 <aside id="listening-shell" class="panel listening-shell" hidden aria-label="当前收听">
-<a id="listening-title" href="/listening-queue"></a><span id="listening-position"></span>
-<button id="listening-back" type="button">−15秒</button><button id="listening-toggle" type="button">播放</button><button id="listening-forward" type="button">+15秒</button><button id="listening-prev" type="button">上一项</button><button id="listening-next" type="button">下一项</button><button id="listening-stop" class="dock-close" type="button">停止并清空播放会话</button>
+<div class="dock-main">
+<div class="player-transport">
+<button id="listening-back" class="player-skip" type="button" aria-label="后退15秒" title="后退 15 秒"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 6V3L4 8l7 5v-3c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H3c0 5 4 9 9 9s9-4 9-9-4-9-9-9z"/></svg><span>15</span></button>
+<button id="listening-toggle" class="player-play" type="button" aria-label="播放" data-state="paused"><svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+<button id="listening-forward" class="player-skip" type="button" aria-label="前进15秒" title="前进 15 秒"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 6V3l7 5-7 5v-3c-3.3 0-6 2.7-6 6s2.7 6 6 6 6-2.7 6-6h2c0 5-4 9-9 9s-9-4-9-9 4-9 9-9z"/></svg><span>15</span></button>
+</div>
+<div class="dock-center">
+<a id="listening-title" href="/listening-queue"></a>
+<div class="player-timeline"><span id="listening-position" class="time">0:00</span><div class="player-track"><input id="listening-seek" aria-label="播放位置" type="range" min="0" max="0" value="0" step="0.1" disabled></div><span id="listening-duration" class="time">0:00</span></div>
+</div>
+<div class="dock-queue"><button id="listening-prev" class="player-chip" type="button">上一项</button><button id="listening-next" class="player-chip" type="button">下一项</button><button id="listening-stop" class="dock-close" type="button" title="停止并清空播放会话" aria-label="停止并清空播放会话">停止</button></div>
+</div>
 <details class="dock-more"><summary>更多：睡眠定时、区间循环、笔记与录音</summary><div class="dock-more-body">
 <label>睡眠<select id="listening-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label><label>循环起点（秒）<input id="listening-loop-start" type="number" min="0" step="0.1"></label><label>循环终点（秒）<input id="listening-loop-end" type="number" min="0" step="0.1"></label><button id="listening-loop-set" type="button">循环原音区间</button><button id="listening-loop-clear" type="button">关闭循环</button><button id="listening-note" type="button">记录当前播放</button><button id="reflection-start" data-reflection-start type="button">听后整理</button><button id="voice-start" type="button">录音笔记</button>
 </div></details>
