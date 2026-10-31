@@ -24,6 +24,10 @@ services:
       READWISE_TOKEN: ${READWISE_TOKEN:-}
       # 可选：容器内的 Obsidian 导出目录；需同时把 vault 目录挂载到该路径（见下方 volumes 注释）
       OBSIDIAN_EXPORT_DIR: ${OBSIDIAN_EXPORT_DIR:-}
+      # 可选：来源处理完成后的通知（Webhook 收 JSON；Telegram 两项都填才启用）
+      NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       PORT: "8080"
       DATA_DIR: /app/data
     volumes:

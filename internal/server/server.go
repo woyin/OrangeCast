@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/woyin/orangecast/internal/linkimport"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/notesync"
+	"github.com/woyin/orangecast/internal/notify"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/queue"
 	"github.com/woyin/orangecast/internal/rss"
@@ -49,6 +52,7 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 	limiter := auth.NewRateLimiter(20, 5*time.Minute)
 	srv := &Server{cfg: cfg, store: s, worker: worker, refresher: refresher, selector: selector, tmpl: tmpl, loginLimiter: limiter}
 	queue.ConfigureLearningExports(worker, s, filepath.Join(cfg.DataDir, "learning-exports"))
+	configureNotifications(worker, cfg)
 	// 默认 bundle 解析走 selector；测试可注入 srv.bundleFor 提供 fake provider。
 	srv.bundleFor = func(tc provider.TaskConfig) (*provider.ProviderBundle, error) {
 		return selector.BundleForTask(tc)
@@ -59,4 +63,30 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 	srv.importLink = importer.Fetch
 	srv.readwise = &notesync.Readwise{Token: cfg.ReadwiseToken}
 	return srv, nil
+}
+
+// configureNotifications 在配置了 Webhook 或 Telegram 时，让 worker 在来源处理完成后推送通知。
+func configureNotifications(worker *queue.Worker, cfg *config.Config) {
+	if hook := notificationHook(cfg); worker != nil && hook != nil {
+		worker.WithOnProcessed(hook)
+	}
+}
+
+// notificationHook 构造“处理完成”回调；没有任何通知渠道时返回 nil。
+// 推送放在独立 goroutine 里，失败只记日志，绝不拖慢或中断处理流水线。
+func notificationHook(cfg *config.Config) func(context.Context, models.SourceType, string, string, string) {
+	n := &notify.Notifier{WebhookURL: cfg.NotifyWebhookURL, TelegramToken: cfg.TelegramBotToken, TelegramChatID: cfg.TelegramChatID}
+	if !n.Enabled() {
+		return nil
+	}
+	return func(_ context.Context, sourceType models.SourceType, sourceID, title, summary string) {
+		ev := notify.Event{Title: title, Summary: summary, URL: strings.TrimSuffix(cfg.PublicURL, "/") + "/sources/" + string(sourceType) + "/" + sourceID}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := n.Send(ctx, ev); err != nil {
+				log.Printf("处理完成通知失败: %v", err)
+			}
+		}()
+	}
 }

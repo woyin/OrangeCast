@@ -53,6 +53,8 @@ type Config struct {
 	NarrationDir                             string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
 	ClipDir                                  string   // 高光片段音频目录（DATA_DIR/clips，按源音频 sha256 缓存）
 	KokoroBinary                             string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	NotifyWebhookURL                         string   // 处理完成时 POST JSON 的 Webhook（可选）
+	TelegramBotToken, TelegramChatID         string   // 处理完成时发 Telegram 消息（两项都填才启用）
 	ReadwiseToken                            string   // Readwise API token（空则不显示“推送到 Readwise”）
 	ObsidianExportDir                        string   // Obsidian vault 内的导出目录（空则不显示“写入 Obsidian”）
 	YtDlpBinary                              string   // yt-dlp 路径（链接导入 YouTube/小宇宙等，默认 PATH 查找）
@@ -103,6 +105,9 @@ func Load() (*Config, error) {
 	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
 	c.YtDlpBinary = envOrDefault("YTDLP_BINARY", "yt-dlp")
 	c.ReadwiseToken = strings.TrimSpace(os.Getenv("READWISE_TOKEN"))
+	c.NotifyWebhookURL = strings.TrimSpace(os.Getenv("NOTIFY_WEBHOOK_URL"))
+	c.TelegramBotToken = strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
+	c.TelegramChatID = strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID"))
 	c.ObsidianExportDir = strings.TrimSpace(os.Getenv("OBSIDIAN_EXPORT_DIR"))
 	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
 	c.KokoroModel = os.Getenv("KOKORO_MODEL")

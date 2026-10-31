@@ -1696,3 +1696,30 @@ func TestDoTranscribe_EnqueueAnalyzeFails(t *testing.T) {
 		t.Fatal("EnqueueAnalyze 插入被中止时 doTranscribe 应报错")
 	}
 }
+
+// 处理完成后触发回调，且回调拿到卡片标题与摘要；回调不影响流水线结果。
+func TestPipeline_OnProcessedCallback(t *testing.T) {
+	s, w := newTestWorker(t)
+	injectFakeProviders(t, w, nil, nil)
+	ctx := context.Background()
+	var gotType models.SourceType
+	var gotID, gotTitle string
+	calls := 0
+	w.WithOnProcessed(func(_ context.Context, st models.SourceType, id, title, summary string) {
+		calls++
+		gotType, gotID, gotTitle = st, id, title
+	})
+	up, _ := s.CreateUpload(ctx, "a.wav", "audio/wav", 10)
+	seedEvidence(t, s, w, models.SourceUpload, up.ID)
+	if _, err := s.EnqueueJob(ctx, models.SourceUpload, up.ID, models.JobTranscribe); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // 转录 → 分析
+		if err := w.ProcessOne(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 || gotType != models.SourceUpload || gotID != up.ID || gotTitle != "T" {
+		t.Errorf("回调应恰好一次并带标题：calls=%d %s %s %q", calls, gotType, gotID, gotTitle)
+	}
+}

@@ -168,6 +168,8 @@ docker compose up -d
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
 | `CLIP_DIR` | 否 | 高光片段音频目录（按源音频 SHA256 缓存，可用 ffmpeg 重建） | `$DATA_DIR/clips` |
+| `NOTIFY_WEBHOOK_URL` | 否 | 来源处理完成后向该地址 POST JSON：`{event:"source.processed", title, summary, url}` | — |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | 两项都填时，处理完成后发一条 Telegram 消息（标题、摘要、链接） | — |
 | `READWISE_TOKEN` | 否 | Readwise API token；填写后来源页出现“推送高光到 Readwise”（金句与要点，带时间位置与回链） | — |
 | `OBSIDIAN_EXPORT_DIR` | 否 | Obsidian vault 内的导出目录；填写后来源页出现“写入 Obsidian vault”（Docker 需挂载 vault，见 docker-compose.yml） | — |
 | `YTDLP_BINARY` | 否 | 链接导入用的 yt-dlp 路径（YouTube、小宇宙、B 站、SoundCloud；Docker 镜像已内置） | `yt-dlp`（PATH 查找） |

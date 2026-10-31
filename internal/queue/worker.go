@@ -59,6 +59,8 @@ type Worker struct {
 	taskConfigFor func(*models.ProcessingJob) (provider.TaskConfig, error)
 	// localExport applies the export result with its own transactional control recheck.
 	localExport func(context.Context, *models.ProcessingJob) error
+	// onProcessed 在来源完成知识卡片并标记 processed 后调用（通知等旁路）；必须自行保证不阻塞、不 panic。
+	onProcessed func(ctx context.Context, sourceType models.SourceType, sourceID, title, summary string)
 }
 
 // WithClipDir sets where derived highlight clips live (default DATA_DIR/clips).
@@ -73,6 +75,12 @@ func (w *Worker) WithClipDir(dir string) *Worker {
 // WithLearningExporter installs the local bundle assembler; it cannot enable model calls.
 func (w *Worker) WithLearningExporter(assemble func(context.Context, *models.ProcessingJob) error) *Worker {
 	w.localExport = assemble
+	return w
+}
+
+// WithOnProcessed 注册来源处理完成后的回调（推送通知等）。回调失败不得影响流水线。
+func (w *Worker) WithOnProcessed(fn func(ctx context.Context, sourceType models.SourceType, sourceID, title, summary string)) *Worker {
+	w.onProcessed = fn
 	return w
 }
 
@@ -728,6 +736,9 @@ func (w *Worker) doAnalyze(ctx context.Context, job *models.ProcessingJob, bundl
 		return fmt.Errorf("设置当前卡片版本: %w", err)
 	}
 	w.setSourceStatus(ctx, job, models.StatusProcessed)
+	if w.onProcessed != nil {
+		w.onProcessed(ctx, job.SourceType, job.SourceID, validated.Title, validated.Summary.Text)
+	}
 
 	// 更新分段级搜索索引（幂等：先删后插，Roadmap Phase 5）
 	_ = w.store.IndexSearch(ctx, job.SourceType, job.SourceID, validated.Title, validated.Summary.Text, payload.Segments)
