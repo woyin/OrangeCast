@@ -70,6 +70,7 @@
 - **证据问答（EvidenceQA）**：查证型，只使用模型实际引用的 Segment；无可靠引用明确拒答（CitedDerivative，挂 Citation）
 - **复述讲解（Paraphrase）**：在任意片段上触发"重讲"，AI 用别的话重新讲解（GeneratedDerivative，挂 Reference，标为非原文）；同锚点保留最近 3 次
 - **学习对话（StudyChat）**：围绕本期内容多轮自由提问；硬约束一"无 Reference 不生成"+ 硬约束二"ReferenceCheck 主题锚定校验"防止脱稿；按会话（StudySession）保存
+- **同步到笔记工具**：来源页一键把金句和要点推送到 Readwise（金句为逐字原文，要点标注“AI 要点”），或把 Markdown 写入本地 Obsidian vault
 - **Markdown 下载**：确定性 Obsidian Markdown；证据块（CitedDerivative）带 Citation 链接（?t=），AI 讲解块（GeneratedDerivative）带 Reference 链接（?ref=），视觉区分；可一键下载"仅证据"或"含 AI 讲解"
 
 ### 可靠性与安全
@@ -155,6 +156,8 @@ docker compose up -d
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
 | `CLIP_DIR` | 否 | 高光片段音频目录（按源音频 SHA256 缓存，可用 ffmpeg 重建） | `$DATA_DIR/clips` |
+| `READWISE_TOKEN` | 否 | Readwise API token；填写后来源页出现“推送高光到 Readwise”（金句与要点，带时间位置与回链） | — |
+| `OBSIDIAN_EXPORT_DIR` | 否 | Obsidian vault 内的导出目录；填写后来源页出现“写入 Obsidian vault”（Docker 需挂载 vault，见 docker-compose.yml） | — |
 | `YTDLP_BINARY` | 否 | 链接导入用的 yt-dlp 路径（YouTube、小宇宙、B 站、SoundCloud；Docker 镜像已内置） | `yt-dlp`（PATH 查找） |
 | `KOKORO_BINARY` | 否 | 解说 TTS 可执行文件（推荐 `scripts/kokoro` 包装，见 [生产部署「解说音轨」](docs/production-deployment.md)） | `kokoro`（PATH 查找） |
 | `KOKORO_VOICE` | 否 | Narration 默认音色（中文 `zf_xiaobei`/`zm_yunyang`；英文 `af_heart`） | `af_heart` |

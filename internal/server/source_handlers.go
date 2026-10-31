@@ -25,6 +25,10 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if len(rest) >= 2 && rest[0] == "export" {
+		srv.handleSourceExport(w, r)
+		return
+	}
 	if len(rest) >= 1 && rest[0] == "download" {
 		srv.handleDownloadMarkdown(w, r)
 		return
@@ -136,6 +140,12 @@ func (srv *Server) handleSourceDetail(w http.ResponseWriter, r *http.Request) {
 	// G07：本源的精读修订列表（生成/继续精读入口，持久身份不猜"最近一篇"）。
 	if digests, err := srv.store.ListEpisodeDigestsForSource(r.Context(), sourceType, sourceID); err == nil {
 		data["SourceDigests"] = digests
+	}
+	data["ReadwiseEnabled"] = srv.readwise != nil && srv.readwise.Token != ""
+	data["ObsidianEnabled"] = srv.cfg.ObsidianExportDir != ""
+	if msg := r.URL.Query().Get("export_msg"); msg != "" {
+		data["ExportMsg"] = truncateRunes(msg, 200)
+		data["ExportFailed"] = r.URL.Query().Get("export_ok") != "1"
 	}
 	srv.tmpl.Render(w, "source_detail.html", data)
 }

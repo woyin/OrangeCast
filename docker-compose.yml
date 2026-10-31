@@ -20,6 +20,10 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-${BASE_URL:-http://localhost:8080}}
       # 受信任反向代理（如 Caddy 在宿主网络：172.17.0.1/32；按实际调整）
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # 可选：Readwise token（填写后来源页出现“推送高光到 Readwise”）
+      READWISE_TOKEN: ${READWISE_TOKEN:-}
+      # 可选：容器内的 Obsidian 导出目录；需同时把 vault 目录挂载到该路径（见下方 volumes 注释）
+      OBSIDIAN_EXPORT_DIR: ${OBSIDIAN_EXPORT_DIR:-}
       PORT: "8080"
       DATA_DIR: /app/data
     volumes:
@@ -28,3 +32,5 @@ services:
       - ./data:/app/data
       # Kokoro 模型权重（kokoro-v1.0.onnx + voices-v1.0.bin），只读
       - ${KOKORO_MODEL_DIR:-${HOME}/.local/share/cloudwisepod/kokoro}:/models:ro
+      # Obsidian：取消注释并改成你的 vault 路径，再设置 OBSIDIAN_EXPORT_DIR=/obsidian
+      # - ${OBSIDIAN_VAULT_DIR}:/obsidian
