@@ -191,3 +191,39 @@ func (s *Store) GetLearningExcerptProgress(ctx context.Context, sourceType model
 	p.EndSeconds = e.EndSeconds
 	return p, nil
 }
+
+// ExcerptListing 是片段列表的一行：冻结区间加所属来源的标题。
+type ExcerptListing struct {
+	models.LearningExcerpt
+	SourceTitle string
+}
+
+// ListLearningExcerpts 按创建时间倒序列出已保存的片段（Snip）。
+func (s *Store) ListLearningExcerpts(ctx context.Context, limit int) ([]ExcerptListing, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source_type,e.source_id,e.snapshot_id,e.audio_sha256,e.segment_ids_json,e.start_seconds,e.end_seconds,e.created_at,
+ COALESCE(CASE e.source_type WHEN 'episode' THEN ep.title ELSE up.original_filename END,'')
+ FROM learning_excerpts e
+ LEFT JOIN episodes ep ON e.source_type='episode' AND ep.id=e.source_id
+ LEFT JOIN uploads up ON e.source_type='upload' AND up.id=e.source_id
+ ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExcerptListing
+	for rows.Next() {
+		var l ExcerptListing
+		var ids string
+		if err := rows.Scan(&l.ID, &l.SourceType, &l.SourceID, &l.SnapshotID, &l.AudioSHA256, &ids, &l.StartSeconds, &l.EndSeconds, &l.CreatedAt, &l.SourceTitle); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(ids), &l.SegmentIDs); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}

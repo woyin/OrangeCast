@@ -545,3 +545,5 @@ select, textarea, input { max-width: 100%; }
 }
 
 .model-fetch .meta { display: block; margin-top: 4px; }
+
+.snip-text { margin: 0 0 .5rem; padding-left: .8rem; border-left: 3px solid var(--accent-soft-border); line-height: 1.7; }

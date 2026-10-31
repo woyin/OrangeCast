@@ -1,0 +1,13 @@
+{{define "title"}}片段 · OrangeCast{{end}}
+{{define "content"}}
+<div class="page-head"><h1>片段</h1></div>
+<p class="hint">播放时点底部的“Snip”（或按 S 键）保存当前这一句前后的片段。这里显示的是转录原文，可点时间回到原音。</p>
+{{range .Snips}}
+<article class="panel snip">
+  <p class="snip-text">{{if .Text}}{{.Text}}{{else}}（转录文本不可用）{{end}}</p>
+  <p class="meta"><a href="{{.Link}}">{{.Range}}</a> · {{.Title}} · <span data-utc="{{.Created}}">{{.Created}}</span></p>
+</article>
+{{else}}
+<p class="empty">还没有保存的片段。</p>
+{{end}}
+{{end}}

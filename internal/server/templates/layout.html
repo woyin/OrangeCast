@@ -48,6 +48,7 @@
     <details class="nav-menu">
       <summary>整理</summary>
       <div class="nav-menu-panel">
+        <a href="/snips">片段</a>
         <a href="/notes">笔记与重点</a>
         <a href="/keypoints">要点</a>
         <a href="/search">搜索</a>
@@ -89,7 +90,7 @@
 <a id="listening-title" href="/listening-queue"></a>
 <div class="player-timeline"><span id="listening-position" class="time">0:00</span><div class="player-track"><input id="listening-seek" aria-label="播放位置" type="range" min="0" max="0" value="0" step="0.1" disabled></div><span id="listening-duration" class="time">0:00</span></div>
 </div>
-<div class="dock-queue"><button id="listening-prev" class="player-chip" type="button">上一项</button><button id="listening-next" class="player-chip" type="button">下一项</button><button id="listening-stop" class="dock-close" type="button" title="停止并清空播放会话" aria-label="停止并清空播放会话">停止</button></div>
+<div class="dock-queue"><button id="listening-snip" class="player-chip" type="button" title="保存当前这一句前后的片段（快捷键 S）">✂ Snip</button><button id="listening-prev" class="player-chip" type="button">上一项</button><button id="listening-next" class="player-chip" type="button">下一项</button><button id="listening-stop" class="dock-close" type="button" title="停止并清空播放会话" aria-label="停止并清空播放会话">停止</button></div>
 </div>
 <details class="dock-more"><summary>更多：睡眠定时、区间循环、笔记与录音</summary><div class="dock-more-body">
 <label>睡眠<select id="listening-sleep"><option value="0">关闭</option><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></label><label>循环起点（秒）<input id="listening-loop-start" type="number" min="0" step="0.1"></label><label>循环终点（秒）<input id="listening-loop-end" type="number" min="0" step="0.1"></label><button id="listening-loop-set" type="button">循环原音区间</button><button id="listening-loop-clear" type="button">关闭循环</button><button id="listening-note" type="button">记录当前播放</button><button id="reflection-start" data-reflection-start type="button">听后整理</button><button id="voice-start" type="button">录音笔记</button>
@@ -150,6 +151,7 @@
 <script src="/static/offline-packs.js"></script>
 <script src="/static/offline-operations.js"></script>
 <script src="/static/dj-player.js"></script>
+<script src="/static/snip-window.js"></script>
 <script src="/static/listening-session.js"></script>
 <script src="/static/listening-reflections.js"></script>
 <script src="/static/voice-notes.js"></script>

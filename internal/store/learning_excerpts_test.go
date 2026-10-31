@@ -213,3 +213,43 @@ func TestLearningExcerptsQueueCASLimitAndPurge(t *testing.T) {
 		t.Fatal("purged snapshot admitted")
 	}
 }
+
+func TestListLearningExcerptsNewestFirstWithTitles(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	ep, snap := seedLearningExcerpt(t, s)
+	if got, err := s.ListLearningExcerpts(ctx, 10); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+	first, err := s.CreateLearningExcerpt(ctx, snap, []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateLearningExcerpt(ctx, snap, []string{"c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListLearningExcerpts(ctx, 0) // 非法 limit 回落到默认值
+	if err != nil || len(got) != 2 {
+		t.Fatalf("list: %v %v", got, err)
+	}
+	if got[0].ID != second.ID || got[1].ID != first.ID {
+		t.Errorf("应按创建时间倒序: %s %s", got[0].ID, got[1].ID)
+	}
+	if got[0].SourceTitle == "" || got[0].SourceID != ep || len(got[1].SegmentIDs) != 2 || got[1].StartSeconds != 20 || got[1].EndSeconds != 40 {
+		t.Errorf("行内容: %+v", got[1])
+	}
+	if one, _ := s.ListLearningExcerpts(ctx, 1); len(one) != 1 || one[0].ID != second.ID {
+		t.Errorf("limit: %+v", one)
+	}
+	// 来源标题缺失（LEFT JOIN 落空）时仍返回该行。
+	if _, err := s.DB.ExecContext(ctx, `UPDATE learning_excerpts SET source_id='gone' WHERE id=?`, first.ID); err == nil {
+		if rows, _ := s.ListLearningExcerpts(ctx, 10); len(rows) < 1 {
+			t.Error("丢失来源时不应丢行")
+		}
+	}
+	s.DB.Close()
+	if _, err := s.ListLearningExcerpts(ctx, 1); err == nil {
+		t.Error("关闭的库应报错")
+	}
+}
