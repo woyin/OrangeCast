@@ -13,7 +13,7 @@
 - **RSS 订阅 + 批量入队**：订阅播客 feed，30 分钟自动拉取新单集；单集列表页勾选多集一键批量入队
 - **链接导入**：粘贴直接音频地址，或 YouTube、小宇宙、B 站、SoundCloud 链接（yt-dlp 仅对白名单站点开放），下载后走同一条处理流水线
 - **音频上传**：mp3/m4a/wav，每个 Source 持久保存标准化 EvidenceAudio（SHA256 校验）
-- **AI 转录**：Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳
+- **AI 转录**：默认 Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳；也可指向自托管的 Whisper 服务（见下方“本地转录”）
 - **知识卡片**：不可变 ArtifactVersion；摘要/要点/章节/金句全部携带真实 Citation；金句逐字校验
 - **高光片段（AI DJ）**：AI 自动选出最值得听的高光区间，播放清单页面（AI 解说音轨 Narration + 原音区间交替播放；Narration 由自托管 Kokoro TTS 合成，默认零成本）
 - **片段音频下载**：每个高光按程序计算的真实区间从 EvidenceAudio 切出 MP3/WAV，按源音频 SHA256 缓存，可单独播放与保存（/api/clip/…）
@@ -92,6 +92,17 @@
 - Kokoro TTS（可选，仅 Narration 解说音轨需要；未安装时 Narration 自动跳过、不影响其他功能）
 
 直接启动二进制也会读取当前目录 `.env`（已有进程环境变量优先）。`POD_*` 必须三项同时填写；已有月预算时，需要在内容工作台的模型价格表中登记 `pod` Provider 对应模型的价格。
+
+### 本地转录（可选，不依赖云端）
+
+转录走 OpenAI 兼容的 `POST {base}/audio/transcriptions`（`response_format=verbose_json`，需要返回带 `start`/`end`/`text` 的 `segments`）。
+自托管 Whisper 服务只要实现这个接口，就可以替代 Groq：
+
+1. 自行启动一个这样的服务（例如 speaches / faster-whisper-server、whisper.cpp 的 OpenAI 兼容模式）。
+2. 在“设置 → Provider 配置”里把 Groq 的 Base URL 改成该服务地址（如 `http://host.docker.internal:8000/v1`），API Key 留空。
+3. 在“任务模型”里把“转录”的 Model 改成该服务的模型名。
+
+自托管端点不产生远端费用；但任务与成本页仍按 Groq 的规则记账，费用状态显示为“未知”而不是 0。**未验证：** 本项目的测试用模拟服务器覆盖了请求与解析，没有对接过真实的本地 Whisper 服务；不同实现对 `segments` 字段的支持程度不一，换服务后请先处理一集短音频确认。
 
 ### 本地运行
 

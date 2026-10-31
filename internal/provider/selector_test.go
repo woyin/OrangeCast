@@ -232,3 +232,30 @@ func TestSelector_ApplySettingsFrom_OpenAIURL(t *testing.T) {
 		t.Errorf("OpenAI baseURL 应覆盖，实际 %q", oa.baseURL)
 	}
 }
+
+// 自托管的 OpenAI 兼容转录服务不需要 key：只要改了 Base URL，就用占位 key 放行。
+func TestSelector_Bundle_GroqSelfHostedNeedsNoKey(t *testing.T) {
+	sel := NewSelector("", "")
+	sel.ApplySettings("", "http://whisper:8000/v1", "", "")
+	if !sel.HasGroq() {
+		t.Error("改了 Base URL 应视为就绪")
+	}
+	b, err := sel.Bundle("groq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := b.Transcription.(*GroqProvider)
+	if !ok || g.apiKey != localKey || g.base() != "http://whisper:8000/v1" {
+		t.Errorf("transcription: %#v", b.Transcription)
+	}
+	if _, err := sel.BundleForTask(TaskConfig{Provider: "groq"}); err != nil {
+		t.Errorf("BundleForTask: %v", err)
+	}
+	// 真实 key 优先，不被占位值覆盖。
+	sel2 := NewSelector("gsk_real", "")
+	sel2.ApplySettings("", "http://whisper:8000/v1", "", "")
+	b2, _ := sel2.Bundle("groq")
+	if b2.Transcription.(*GroqProvider).apiKey != "gsk_real" {
+		t.Error("有 key 时不应使用占位值")
+	}
+}

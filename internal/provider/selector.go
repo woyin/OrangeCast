@@ -45,8 +45,11 @@ func (sel *Selector) WithNarration(np NarrationProvider) *Selector {
 	return sel
 }
 
-// HasGroq 返回 Groq key 是否就绪。
-func (sel *Selector) HasGroq() bool { return sel.groqAPIKey != "" }
+// localKey 是自托管 OpenAI 兼容端点（faster-whisper-server、whisper.cpp、Ollama 等）不需要 key 时的占位值。
+const localKey = "local"
+
+// HasGroq 返回 Groq 端点是否就绪：有 key，或改了 Base URL 指向自托管端点（无需 key）。
+func (sel *Selector) HasGroq() bool { return sel.groqAPIKey != "" || sel.groqBaseURL != "" }
 
 // HasOpenAI 返回 OpenAI key 是否就绪。
 func (sel *Selector) HasOpenAI() bool { return sel.openaiAPIKey != "" }
@@ -109,10 +112,14 @@ func (sel *Selector) Bundle(activeProvider string) (*ProviderBundle, error) {
 		}
 		return &ProviderBundle{Transcription: oa, Analysis: oa, QA: oa, Writer: oa, Scout: oa, Curator: oa, EvidenceReviewer: oa, ClaimReviewer: oa, StyleEditor: oa, Highlight: oa, Paraphrase: oa, StudyChat: oa, RefChecker: oa, Narration: sel.narration, DigestWriter: oa, DigestSearch: oa, DigestRewriter: oa, PracticeReview: oa, Translation: oa}, nil
 	case "groq", "":
-		if sel.groqAPIKey == "" {
+		key := sel.groqAPIKey
+		if key == "" && sel.groqBaseURL != "" {
+			key = localKey // 自托管端点（本地转录）不要求 key
+		}
+		if key == "" {
 			return nil, fmt.Errorf("active_provider=groq 但 GROQ_API_KEY 未配置")
 		}
-		g := NewGroqProvider(sel.groqAPIKey)
+		g := NewGroqProvider(key)
 		if sel.groqBaseURL != "" {
 			g.baseURL = sel.groqBaseURL
 		}
