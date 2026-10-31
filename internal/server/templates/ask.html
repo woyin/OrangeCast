@@ -1,0 +1,23 @@
+{{define "title"}}问我的库 · OrangeCast{{end}}
+{{define "content"}}
+<div class="page-head"><h1>问我的库</h1></div>
+<p class="hint">在你所有已处理的播客、上传和文档里找依据后回答。只依据检索到的原文片段；找不到可靠依据时会直接说明，不会编造。</p>
+<form method="post" action="/ask">
+  <input type="hidden" name="_csrf" value="{{.CSRF}}">
+  <label>你的问题<textarea name="question" rows="3" maxlength="500" required placeholder="例如：嘉宾们对间隔重复是怎么看的？">{{.Question}}</textarea></label>
+  <button type="submit">提问</button>
+</form>
+{{if .Error}}<p class="warn-note">{{.Error}}</p>{{end}}
+{{if .Answer}}
+<section class="panel">
+  <h2>回答 <span class="meta">AI 生成，依据见下方原文</span></h2>
+  <p class="answer">{{.Answer}}</p>
+  <h3>依据（原文片段）</h3>
+  <ol class="citations">
+  {{range .Citations}}
+    <li><p class="snip-text">{{.Text}}</p><p class="meta"><a href="{{.Link}}">{{.Range}}</a> · {{.Title}}</p></li>
+  {{end}}
+  </ol>
+</section>
+{{end}}
+{{end}}

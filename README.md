@@ -67,6 +67,7 @@
 
 - **分段级全文搜索**：FTS5 命中返回实际 Transcript Segment 与时间范围，直接跳转到 EvidenceAudio 对应位置
 - **播放器联动**：转录稿/章节/金句三层时间戳联动；`?t=` / `#seg-` 深链跳转
+- **问我的库**：跨所有来源提问（`/ask`）。先召回相关原文片段，只让问答模型依据这些片段作答，并附带可跳转的原文依据；来源标记为“仅本地/限定供应商”时不会外发，模型没引用可核验片段时明确拒答
 - **证据问答（EvidenceQA）**：查证型，只使用模型实际引用的 Segment；无可靠引用明确拒答（CitedDerivative，挂 Citation）
 - **复述讲解（Paraphrase）**：在任意片段上触发"重讲"，AI 用别的话重新讲解（GeneratedDerivative，挂 Reference，标为非原文）；同锚点保留最近 3 次
 - **学习对话（StudyChat）**：围绕本期内容多轮自由提问；硬约束一"无 Reference 不生成"+ 硬约束二"ReferenceCheck 主题锚定校验"防止脱稿；按会话（StudySession）保存

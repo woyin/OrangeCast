@@ -80,6 +80,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/questions/", srv.handleLearningQuestionDetail)
 	mux.HandleFunc("/api/learning-excerpts", srv.handleLearningExcerpts)
 	mux.HandleFunc("/snips", srv.handleSnips)
+	mux.HandleFunc("/ask", srv.handleAskLibrary)
 	mux.HandleFunc("/api/offline/", srv.handleOfflineLearning)
 	mux.HandleFunc("/quality-cases", srv.handleArticleQualityCases)
 	mux.HandleFunc("/quality-cases/action", srv.handleArticleQualityAction)
