@@ -124,3 +124,31 @@ func TestSourceExport(t *testing.T) {
 		t.Errorf("空卡片：%q", msg)
 	}
 }
+
+// 转录里带说话人时，转录稿只在说话人变化处显示一次标签。
+func TestSourceDetailShowsSpeakerLabels(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "speaker@example.com", "password123")
+	id := seedExportableEpisode(t, srv)
+	ctx := context.Background()
+	var jobID string // 种子数据已入队过转录任务，重复入队会返回 nil，直接取已有的
+	if err := srv.store.DB.QueryRowContext(ctx, `SELECT id FROM processing_jobs WHERE source_id=? LIMIT 1`, id).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	v2, err := srv.store.CreateArtifactVersion(ctx, models.SourceEpisode, id, store.KindTranscript, "groq", "m", "1", jobID,
+		`{"segments":[{"id":"seg-0001","start":0,"end":5,"text":"第一句","speaker":"主持人"},{"id":"seg-0002","start":5,"end":9,"text":"第二句","speaker":"主持人"},{"id":"seg-0003","start":9,"end":12,"text":"第三句","speaker":"嘉宾"},{"id":"seg-0004","start":12,"end":15,"text":"无标签句"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.store.SetCurrentVersion(ctx, models.SourceEpisode, id, store.KindTranscript, v2)
+	body := doWithCookie(srv, cookie, http.MethodGet, "/sources/episode/"+id).Body.String()
+	if n := strings.Count(body, `<strong class="speaker">主持人</strong>`); n != 1 {
+		t.Errorf("连续同一说话人只标一次，实际 %d 次", n)
+	}
+	if !strings.Contains(body, `<strong class="speaker">嘉宾</strong>`) {
+		t.Error("换人时应出现新标签")
+	}
+	if strings.Count(body, `class="speaker"`) != 2 {
+		t.Error("没有 speaker 的句子不应产生标签")
+	}
+}

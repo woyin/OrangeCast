@@ -154,7 +154,8 @@
   <details class="transcript-panel"><summary>展开转录稿（点击句子可定位）</summary>
     <h2>转录稿</h2>
     <div id="transcript" class="transcript">
-    {{range $i, $seg := .Segments}}
+    {{$speaker := ""}}{{range $i, $seg := .Segments}}
+      {{if and $seg.Speaker (ne $seg.Speaker $speaker)}}<strong class="speaker">{{$seg.Speaker}}</strong>{{end}}{{$speaker = $seg.Speaker}}
       <span class="seg" data-id="{{$seg.ID}}" data-start="{{$seg.Start}}" data-end="{{$seg.End}}" data-idx="{{$i}}">{{$seg.Text}}</span><button type="button" class="note-segment" data-segment-id="{{$seg.ID}}" data-position="{{$seg.Start}}">记笔记</button><button class="seg-paraphrase-btn" title="用别的话重新讲解这段（AI 讲解·非原文）" data-seg-id="{{$seg.ID}}">重讲</button>
     {{else}}
     <p class="empty">暂无转录稿，请先点击「处理」。</p>

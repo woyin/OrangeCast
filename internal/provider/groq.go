@@ -118,6 +118,8 @@ func (g *GroqProvider) TranscribeContext(ctx context.Context, filePath string) (
 			Start float64 `json:"start"`
 			End   float64 `json:"end"`
 			Text  string  `json:"text"`
+			// 部分自托管转录服务（带说话人分离）会在分段里返回 speaker。
+			Speaker string `json:"speaker"`
 		} `json:"segments"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -136,7 +138,7 @@ func (g *GroqProvider) TranscribeContext(ctx context.Context, filePath string) (
 		// 稳定 Segment ID（ADR-0008）：程序分配，模型只引用 ID，不估算时间戳。
 		res.Segments = append(res.Segments, Segment{
 			ID:    fmt.Sprintf("seg-%04d", i+1),
-			Start: s.Start, End: s.End, Text: strings.TrimSpace(s.Text),
+			Start: s.Start, End: s.End, Text: strings.TrimSpace(s.Text), Speaker: strings.TrimSpace(s.Speaker),
 		})
 	}
 	return res, nil

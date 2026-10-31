@@ -9,6 +9,9 @@ type Segment struct {
 	Start float64 `json:"start"` // 秒
 	End   float64 `json:"end"`
 	Text  string  `json:"text"`
+	// Speaker 是转录服务给出的说话人标签（如 "SPEAKER_00"）。只透传服务返回的值，
+	// 不由本程序推断；服务不支持说话人分离时为空，序列化时省略以保持既有载荷与哈希不变。
+	Speaker string `json:"speaker,omitempty"`
 }
 
 // TranscriptResult 转录输出：纯文本 + 分段（调用方负责分配稳定 Segment.ID）。

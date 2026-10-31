@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -679,5 +680,27 @@ func TestAnalyzeWindowNon429FailsFast(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("非 429 不应重试，实际调用 %d 次", calls)
+	}
+}
+
+// 转录服务返回说话人标签时原样透传；没有时保持为空且不进入序列化结果。
+func TestGroq_Transcribe_PassesThroughSpeaker(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"text":"a b","segments":[{"start":0,"end":1,"text":"a","speaker":" SPEAKER_00 "},{"start":1,"end":2,"text":"b"}]}`))
+	}))
+	defer srv.Close()
+	path := filepath.Join(t.TempDir(), "a.mp3")
+	os.WriteFile(path, []byte("x"), 0o644)
+	res, err := NewGroqProvider("key").WithBaseURL(srv.URL).Transcribe(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Segments[0].Speaker != "SPEAKER_00" || res.Segments[1].Speaker != "" {
+		t.Errorf("speaker: %+v", res.Segments)
+	}
+	b0, _ := json.Marshal(res.Segments[0])
+	b1, _ := json.Marshal(res.Segments[1])
+	if !strings.Contains(string(b0), `"speaker":"SPEAKER_00"`) || strings.Contains(string(b1), "speaker") {
+		t.Errorf("序列化: %s %s", b0, b1)
 	}
 }
