@@ -8,6 +8,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/config"
+	"github.com/woyin/orangecast/internal/linkimport"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/queue"
@@ -25,6 +26,7 @@ type Server struct {
 	bundleFor     func(provider.TaskConfig) (*provider.ProviderBundle, error) // 可注入（测试用），默认走 selector
 	fetchFeed     func(string) (*models.Podcast, []models.Episode, error)     // 可注入（测试用），默认走 rss.FetchFeed
 	fetchDocument func(context.Context, string) (string, string, error)
+	importLink    func(context.Context, string) (*linkimport.Result, error) // 可注入（测试用），默认走 linkimport
 	tmpl          *Templates
 	loginLimiter  *auth.RateLimiter
 	discoveryMu   sync.Mutex
@@ -51,5 +53,7 @@ func New(cfg *config.Config, s *store.Store, worker *queue.Worker, refresher *rs
 	}
 	srv.fetchFeed = rss.FetchFeed
 	srv.fetchDocument = fetchWebDocument
+	importer := &linkimport.Importer{YtDlp: cfg.YtDlpBinary, TempDir: filepath.Join(cfg.TempDir, "link-import")}
+	srv.importLink = importer.Fetch
 	return srv, nil
 }

@@ -53,6 +53,7 @@ type Config struct {
 	NarrationDir                             string   // Narration 解说音轨目录（DATA_DIR/narrations，ADR-0019）
 	ClipDir                                  string   // 高光片段音频目录（DATA_DIR/clips，按源音频 sha256 缓存）
 	KokoroBinary                             string   // Kokoro TTS 二进制路径（默认 PATH 查找 kokoro，ADR-0019）
+	YtDlpBinary                              string   // yt-dlp 路径（链接导入 YouTube/小宇宙等，默认 PATH 查找）
 	KokoroVoice                              string   // Kokoro 默认音色（默认 af_heart）
 	KokoroModel                              string   // Kokoro 模型文件路径（可选，某些发行版需要）
 	KokoroLanguage                           string   // 语言（en|zh，D03；中文音色 zf_/zm_ 需 misaki[zh]）
@@ -98,6 +99,7 @@ func Load() (*Config, error) {
 	c.NarrationDir = envOrDefault("NARRATION_DIR", filepath.Join(c.DataDir, "narrations"))
 	c.ClipDir = envOrDefault("CLIP_DIR", filepath.Join(c.DataDir, "clips"))
 	c.KokoroBinary = envOrDefault("KOKORO_BINARY", "kokoro")
+	c.YtDlpBinary = envOrDefault("YTDLP_BINARY", "yt-dlp")
 	c.KokoroVoice = envOrDefault("KOKORO_VOICE", "af_heart")
 	c.KokoroModel = os.Getenv("KOKORO_MODEL")
 	c.KokoroLanguage = envOrDefault("KOKORO_LANGUAGE", "en")

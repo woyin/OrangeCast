@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/woyin/orangecast/internal/auth"
 	"github.com/woyin/orangecast/internal/config"
+	"github.com/woyin/orangecast/internal/linkimport"
 	"github.com/woyin/orangecast/internal/models"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/queue"
@@ -2880,5 +2883,59 @@ func TestLogin_ClaimLinkOnlyBeforeClaim(t *testing.T) {
 	claimOwnerAndLogin(t, srv, "test@example.com", "password123")
 	if strings.Contains(body(), `href="/register"`) {
 		t.Error("已认领后登录页不应再显示认领链接（/register 会重定向回 /login）")
+	}
+}
+
+func TestUploadLink_ImportsAndQueuesUpload(t *testing.T) {
+	srv := newTestServer(t)
+	cookie := claimOwnerAndLogin(t, srv, "test@example.com", "password123")
+	dir := t.TempDir()
+	srv.cfg.TempDir = dir
+	fail := false
+	srv.importLink = func(_ context.Context, raw string) (*linkimport.Result, error) {
+		if fail {
+			return nil, errors.New("不支持的链接")
+		}
+		p := filepath.Join(dir, "imported.mp3")
+		if err := os.WriteFile(p, []byte("audio"), 0o644); err != nil {
+			return nil, err
+		}
+		return &linkimport.Result{Path: p, Title: "Talk", Filename: "Talk.mp3", ContentType: "audio/mpeg", Size: 5}, nil
+	}
+	rec0 := doWithCookie(srv, cookie, http.MethodGet, "/uploads/new")
+	csrf := ""
+	for _, c := range rec0.Result().Cookies() {
+		if c.Name == "cwp_csrf" {
+			csrf = c.Value
+		}
+	}
+	post := func() *httptest.ResponseRecorder {
+		form := url.Values{"url": {"https://example.com/a.mp3"}, "_csrf": {csrf}}
+		req := httptest.NewRequest(http.MethodPost, "/uploads/link", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		req.AddCookie(&http.Cookie{Name: "cwp_csrf", Value: csrf})
+		rec := httptest.NewRecorder()
+		srv.Router().ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post()
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/sources/upload/") {
+		t.Fatalf("成功应 303 到来源页，实际 %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	id := strings.TrimPrefix(rec.Header().Get("Location"), "/sources/upload/")
+	if b, err := os.ReadFile(filepath.Join(dir, "uploads", id)); err != nil || string(b) != "audio" {
+		t.Errorf("音频应落到上传目录: %v %q", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "imported.mp3")); !os.IsNotExist(err) {
+		t.Error("导入的临时文件应被删除")
+	}
+
+	fail = true
+	if rec := post(); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "不支持的链接") {
+		t.Errorf("失败应回显错误，实际 %d", rec.Code)
+	}
+	if rec := doWithCookie(srv, cookie, http.MethodGet, "/uploads/link"); rec.Code != http.StatusSeeOther {
+		t.Errorf("GET 应回到表单，实际 %d", rec.Code)
 	}
 }

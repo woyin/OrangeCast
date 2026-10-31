@@ -7,4 +7,14 @@
   <label>音频文件（mp3/m4a/wav）<input type="file" name="audio" accept="audio/*" required></label>
   <button type="submit">上传并处理</button>
 </form>
+<section class="panel">
+  <h2>或粘贴链接</h2>
+  <p class="hint">支持直接音频地址（.mp3/.m4a/.wav），以及 YouTube、小宇宙、B 站、SoundCloud 链接。下载可能需要几分钟，请耐心等待。</p>
+  {{if .LinkError}}<p class="error">{{.LinkError}}</p>{{end}}
+  <form method="post" action="/uploads/link">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <label>链接<input type="url" name="url" placeholder="https://www.youtube.com/watch?v=…" required></label>
+    <button type="submit">导入并处理</button>
+  </form>
+</section>
 {{end}}

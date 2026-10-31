@@ -137,6 +137,7 @@ func (srv *Server) protectedRoutes() *http.ServeMux {
 	mux.HandleFunc("/podcasts/", srv.handlePodcastDetail)
 	mux.HandleFunc("/uploads", srv.handleUploads)
 	mux.HandleFunc("/uploads/new", srv.handleUploadNew)
+	mux.HandleFunc("/uploads/link", srv.handleUploadLink)
 	mux.HandleFunc("/documents", srv.handleDocuments)
 	mux.HandleFunc("/documents/new", srv.handleDocumentNew)
 	mux.HandleFunc("/documents/import", srv.handleDocumentImport)

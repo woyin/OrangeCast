@@ -11,6 +11,7 @@
 ### 内容处理
 
 - **RSS 订阅 + 批量入队**：订阅播客 feed，30 分钟自动拉取新单集；单集列表页勾选多集一键批量入队
+- **链接导入**：粘贴直接音频地址，或 YouTube、小宇宙、B 站、SoundCloud 链接（yt-dlp 仅对白名单站点开放），下载后走同一条处理流水线
 - **音频上传**：mp3/m4a/wav，每个 Source 持久保存标准化 EvidenceAudio（SHA256 校验）
 - **AI 转录**：Groq `whisper-large-v3`，带稳定 Segment ID 的逐句时间戳
 - **知识卡片**：不可变 ArtifactVersion；摘要/要点/章节/金句全部携带真实 Citation；金句逐字校验
@@ -154,6 +155,7 @@ docker compose up -d
 | `TRUSTED_PROXIES` | 否 | 受信任反向代理 CIDR，逗号分隔 | 空（只信直连） |
 | `NARRATION_DIR` | 否 | Narration 解说音轨目录（独立于 evidence，不进备份） | `$DATA_DIR/narrations` |
 | `CLIP_DIR` | 否 | 高光片段音频目录（按源音频 SHA256 缓存，可用 ffmpeg 重建） | `$DATA_DIR/clips` |
+| `YTDLP_BINARY` | 否 | 链接导入用的 yt-dlp 路径（YouTube、小宇宙、B 站、SoundCloud；Docker 镜像已内置） | `yt-dlp`（PATH 查找） |
 | `KOKORO_BINARY` | 否 | 解说 TTS 可执行文件（推荐 `scripts/kokoro` 包装，见 [生产部署「解说音轨」](docs/production-deployment.md)） | `kokoro`（PATH 查找） |
 | `KOKORO_VOICE` | 否 | Narration 默认音色（中文 `zf_xiaobei`/`zm_yunyang`；英文 `af_heart`） | `af_heart` |
 | `KOKORO_MODEL` / `KOKORO_MODEL_DIR` | 否 | 权重：完整 onnx 路径 / 目录（取其中 `kokoro-v1.0.onnx` + `voices-v1.0.bin`） | 空 |

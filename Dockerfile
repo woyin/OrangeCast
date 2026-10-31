@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/orangecast ./cmd/
 FROM python:3.12-slim-bookworm AS kokoro
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir kokoro-onnx soundfile
+    && pip install --no-cache-dir kokoro-onnx soundfile yt-dlp
 COPY --from=builder /out/orangecast /app/orangecast
 COPY scripts/kokoro scripts/kokoro_cli.py /app/scripts/
 WORKDIR /app
@@ -23,7 +23,7 @@ ENTRYPOINT ["/app/orangecast"]
 
 # 运行阶段：alpine + ca-certificates + ffmpeg（音频转码适配 Groq 上传限制）
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata ffmpeg
+RUN apk add --no-cache ca-certificates tzdata ffmpeg yt-dlp
 COPY --from=builder /out/orangecast /app/orangecast
 WORKDIR /app
 # 单一持久数据目录（ADR-0010）：SQLite + evidence + tmp + backups 全在 /app/data

@@ -4,6 +4,7 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/woyin/orangecast/internal/auth"
@@ -128,6 +129,40 @@ func (srv *Server) handleUploadNew(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/sources/upload/"+up.ID, http.StatusSeeOther)
 }
+
+// handleUploadLink 从链接（直接音频、YouTube、小宇宙等）导入音频，之后与手动上传走同一条流水线。
+func (srv *Server) handleUploadLink(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/uploads/new", http.StatusSeeOther)
+		return
+	}
+	fail := func(msg string) {
+		srv.tmpl.Render(w, "upload_new.html", map[string]any{"LinkError": msg, "CSRF": auth.CSRFValue(r)})
+	}
+	res, err := srv.importLink(r.Context(), r.FormValue("url"))
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	defer os.Remove(res.Path)
+	src, err := os.Open(res.Path)
+	if err != nil {
+		fail("读取导入的音频失败")
+		return
+	}
+	defer src.Close()
+	up, err := srv.store.CreateUpload(r.Context(), res.Filename, res.ContentType, res.Size)
+	if err != nil {
+		fail("保存失败")
+		return
+	}
+	if err := saveUploadFile(srv.cfg.TempDir, up.ID, src); err != nil {
+		fail("存储音频失败")
+		return
+	}
+	http.Redirect(w, r, "/sources/upload/"+up.ID, http.StatusSeeOther)
+}
+
 func isAllowedAudio(name, contentType string) bool {
 	for _, ext := range []string{".mp3", ".m4a", ".wav"} {
 		if strings.HasSuffix(strings.ToLower(name), ext) {
