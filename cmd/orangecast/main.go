@@ -4,6 +4,7 @@
 //   - serve（默认）：启动 HTTP 服务 + worker + RSS 刷新器，初始化数据库并优雅关闭。
 //   - backup <dest.tar.gz>：生成一致性备份包（数据库快照 + EvidenceAudio + manifest）。
 //   - restore <backup.tar.gz> [--force]：从备份包恢复到 DATA_DIR（默认要求空目标，--force 覆盖）。
+//   - mcp：只读 MCP 服务（stdio），让 Claude Desktop 等 AI 客户端检索与读取你的资料库。
 //   - tts-check [--text <文本>] [--voice <音色>] [--output <wav>]：解说引擎预检；
 //     给出 --output 时用真实引擎合成一段短句试听（D03）。
 //
@@ -19,11 +20,14 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/woyin/orangecast/internal/backup"
 	"github.com/woyin/orangecast/internal/config"
+	"github.com/woyin/orangecast/internal/mcpserver"
 	"github.com/woyin/orangecast/internal/provider"
 	"github.com/woyin/orangecast/internal/store"
 )
@@ -37,10 +41,12 @@ func main() {
 		runRestore(rest)
 	case "tts-check":
 		runTTSCheck(rest)
+	case "mcp":
+		runMCP()
 	case "serve", "":
 		runServe()
 	default:
-		fmt.Fprintf(os.Stderr, "未知命令 %q。可用命令：serve（默认）、backup <目标文件>、restore <备份包> [--force]、tts-check [--output <wav>]\n", cmd)
+		fmt.Fprintf(os.Stderr, "未知命令 %q。可用命令：serve（默认）、backup <目标文件>、restore <备份包> [--force]、mcp、tts-check [--output <wav>]\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -257,4 +263,32 @@ func fileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+// runMCP orangecast mcp
+// 以只读方式打开数据库，在 stdin/stdout 上提供 MCP 服务。日志只写 stderr，避免污染协议通道。
+func runMCP() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置错误: %v", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := mcpCore(ctx, cfg, os.Stdin, os.Stdout); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+// mcpCore 打开只读库并服务到输入结束（可测试，不调用 os.Exit）。
+func mcpCore(ctx context.Context, cfg *config.Config, in io.Reader, out io.Writer) error {
+	s, err := store.OpenReadOnly(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	srv := &mcpserver.Server{Name: "orangecast", Version: "1", Tools: mcpserver.LibraryTools(s, cfg.PublicURL)}
+	if err := srv.Serve(ctx, in, out); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }

@@ -334,3 +334,36 @@ func newFreshTestStore(t *testing.T) *Store {
 	t.Cleanup(func() { s.Close() })
 	return s
 }
+
+func TestOpenReadOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ro.db")
+	if _, err := OpenReadOnly(path); err == nil {
+		t.Fatal("库不存在应报错")
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("只读打开不应创建文件")
+	}
+	rw, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw.Close()
+	ro, err := OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	if _, err := ro.DB.Exec(`INSERT INTO settings (id) VALUES (999)`); err == nil {
+		t.Error("只读库的写入必须失败")
+	}
+	var n int
+	if err := ro.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil || n == 0 {
+		t.Errorf("应能读取迁移记录: %d %v", n, err)
+	}
+	// 不是 SQLite 文件：Ping 阶段报错。
+	bad := filepath.Join(t.TempDir(), "bad.db")
+	os.WriteFile(bad, []byte("not a database, long enough to look like garbage........................................"), 0o644)
+	if _, err := OpenReadOnly(bad); err == nil {
+		t.Error("损坏文件应报错")
+	}
+}

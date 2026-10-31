@@ -31,6 +31,24 @@ type Store struct {
 	embeddingMatrixLoad *embeddingMatrixLoad
 }
 
+// OpenReadOnly 以只读方式打开已有数据库：不设 WAL、不做迁移、不做迁移前备份，任何写入都会失败。
+// 供旁路进程（如 MCP 服务）读取正在被主服务使用的库；库不存在时报错而不是新建。
+func OpenReadOnly(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("数据库不存在: %w", err)
+	}
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(5000)", path))
+	if err != nil {
+		return nil, fmt.Errorf("打开数据库: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("打开数据库: %w", err)
+	}
+	return &Store{DB: db}, nil
+}
+
 // Open 打开数据库并执行有序迁移。
 //
 // 迁移由 internal/store/migrate.go 的 Migrate 驱动：

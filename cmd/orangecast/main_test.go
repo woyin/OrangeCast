@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -703,5 +704,91 @@ func TestFileSizeForExportArtifactAndMissingFile(t *testing.T) {
 	}
 	if fileSize(path) != 2 {
 		t.Fatal("wrong exported byte count")
+	}
+}
+
+func TestMCPCore(t *testing.T) {
+	cfg := testCfg(t)
+	cfg.PublicURL = "https://oc.example"
+	var out bytes.Buffer
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n")
+	if err := mcpCore(context.Background(), cfg, in, &out); err != nil {
+		t.Fatalf("mcpCore: %v", err)
+	}
+	for _, tool := range []string{"search_library", "get_source", "list_snips"} {
+		if !strings.Contains(out.String(), tool) {
+			t.Errorf("tools/list 应含 %s: %s", tool, out.String())
+		}
+	}
+	// 库不存在：报错而不是新建空库。
+	missing := *cfg
+	missing.DBPath = filepath.Join(t.TempDir(), "nope.db")
+	if err := mcpCore(context.Background(), &missing, strings.NewReader(""), &out); err == nil {
+		t.Error("数据库不存在应报错")
+	}
+	if _, err := os.Stat(missing.DBPath); err == nil {
+		t.Error("只读打开不应创建数据库文件")
+	}
+	// 取消上下文属于正常退出。
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := mcpCore(ctx, cfg, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`+"\n"), &out); err != nil {
+		t.Errorf("取消应视为正常退出: %v", err)
+	}
+	// 输出写失败：错误向上返回。
+	if err := mcpCore(context.Background(), cfg, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`+"\n"), errWriter{}); err == nil {
+		t.Error("写失败应返回错误")
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
+
+// TestMainDispatchesMCP 验证 mcp 子命令经 main 分发，在 stdin/stdout 上提供服务并随输入结束退出。
+func TestMainDispatchesMCP(t *testing.T) {
+	cfg := testCfg(t)
+	t.Setenv("DATA_DIR", cfg.DataDir)
+	t.Setenv("SESSION_SECRET", "test-session-secret")
+	dir := t.TempDir()
+	inPath, outPath := filepath.Join(dir, "in"), filepath.Join(dir, "out")
+	if err := os.WriteFile(inPath, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in, err := os.Open(inPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldArgs, oldIn, oldOut := os.Args, os.Stdin, os.Stdout
+	t.Cleanup(func() { os.Args, os.Stdin, os.Stdout = oldArgs, oldIn, oldOut; in.Close(); out.Close() })
+	os.Args, os.Stdin, os.Stdout = []string{"orangecast", "mcp"}, in, out
+	main()
+	os.Stdin, os.Stdout = oldIn, oldOut
+	got, _ := os.ReadFile(outPath)
+	if !strings.Contains(string(got), "search_library") {
+		t.Errorf("mcp 应返回工具列表: %s", got)
+	}
+}
+
+// TestRunMCP_ErrorsExit 验证 runMCP 在配置错误、数据库不存在时 log.Fatalf 退出（码 1）。
+func TestRunMCP_ErrorsExit(t *testing.T) {
+	if mode := os.Getenv("GO_WANT_HELPER_PROCESS"); mode != "" {
+		runMCP()
+		return
+	}
+	for name, env := range map[string][]string{
+		"config error": {"SESSION_SECRET=", "DATA_DIR=" + t.TempDir()},
+		"missing db":   {"SESSION_SECRET=test-session-secret", "DATA_DIR=" + t.TempDir()},
+	} {
+		cmd := exec.Command(os.Args[0], "-test.run=TestRunMCP_ErrorsExit")
+		cmd.Env = append(append(os.Environ(), "GO_WANT_HELPER_PROCESS=1"), env...)
+		err := cmd.Run()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Errorf("%s: 应退出码 1，实际 %v", name, err)
+		}
 	}
 }

@@ -94,6 +94,24 @@
 
 直接启动二进制也会读取当前目录 `.env`（已有进程环境变量优先）。`POD_*` 必须三项同时填写；已有月预算时，需要在内容工作台的模型价格表中登记 `pod` Provider 对应模型的价格。
 
+### MCP：让 AI 客户端读取你的资料库（只读）
+
+`orangecast mcp` 在 stdin/stdout 上提供 MCP 服务，工具均为只读，且不调用任何外部模型：
+
+| 工具 | 作用 |
+|---|---|
+| `search_library` | 全文检索资料库，返回命中的原文片段、所属来源与可跳转链接 |
+| `get_source` | 读取一个来源的知识卡片（摘要、要点、金句、标签） |
+| `list_snips` | 列出你在收听时保存的片段 |
+
+以只读方式打开数据库，可与运行中的服务同时使用。以 Claude Desktop 为例，Docker 部署写入配置：
+
+```json
+{ "mcpServers": { "orangecast": { "command": "docker", "args": ["exec", "-i", "orangecast", "/app/orangecast", "mcp"] } } }
+```
+
+直接用二进制时，把 `command` 换成 `orangecast`、`args` 换成 `["mcp"]`，并设置与服务相同的 `DB_PATH_DIR`（或 `DATA_DIR`）与 `PUBLIC_URL`。
+
 ### 本地转录（可选，不依赖云端）
 
 转录走 OpenAI 兼容的 `POST {base}/audio/transcriptions`（`response_format=verbose_json`，需要返回带 `start`/`end`/`text` 的 `segments`）。
